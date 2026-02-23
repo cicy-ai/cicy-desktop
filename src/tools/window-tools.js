@@ -314,14 +314,15 @@ function registerTools(registerTool) {
         const start = (page - 1) * page_size;
         const end = start + page_size;
         const paginated = logs.slice(start, end);
-        const result = {
-          total: logs.length,
-          page: page,
-          page_size: page_size,
-          total_pages: logs.length > 0 ? Math.ceil(logs.length / page_size) : 0,
-          data: paginated,
-        };
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        
+        const header = `Console Logs (${logs.length} total, page ${page}/${Math.ceil(logs.length / page_size) || 1}):\n`;
+        const logLines = paginated.map(log => {
+          const time = new Date(log.timestamp).toLocaleTimeString('en-US', { hour12: false });
+          const source = log.source ? ` (${log.source}:${log.line})` : '';
+          return `#${log.index} [${time}] [${log.level}] ${log.message}${source}`;
+        }).join('\n');
+        
+        return { content: [{ type: "text", text: header + logLines }] };
       } catch (error) {
         return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
       }
@@ -758,6 +759,11 @@ function registerTools(registerTool) {
               mimeType: "image/png",
             });
           }
+        } else {
+          response.push({
+            type: "text",
+            text: "\nNote: Screenshot not included. Pass include_screenshot=true to get the screenshot image."
+          });
         }
 
         if (show_overlays) {
