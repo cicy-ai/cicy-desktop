@@ -335,6 +335,24 @@ if ! curl --noproxy "*" -s --connect-timeout 2 $ELECTRON_MCP_URL/rpc/tools/list 
   exit 1
 fi
 
+# File upload path: send file directly to /rpc/exec/:type
+if [ "${USE_UPLOAD:-0}" = "1" ]; then
+  RESPONSE=$(curl --noproxy "*" -s -w "\n%{http_code}" -X POST "$ELECTRON_MCP_URL/rpc/exec/$EXEC_TYPE" \
+    -H "Authorization: Bearer $TOKEN" \
+    --data-binary "@$UPLOAD_FILE" 2>&1)
+  HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+  BODY=$(echo "$RESPONSE" | sed '$d')
+  if [ "$HTTP_CODE" != "200" ]; then
+    echo "❌ Error: HTTP $HTTP_CODE"
+    echo "$BODY"
+    exit 1
+  fi
+  echo "----------------"
+  echo "$BODY" | jq -r '.result.content[] | .text' 2>/dev/null || echo "$BODY"
+  echo "----------------"
+  exit 0
+fi
+
 # 执行请求
 if [ "$DEBUG" = "1" ]; then
   echo "====== DEBUG REQUEST ======"
