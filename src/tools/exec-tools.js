@@ -2,6 +2,32 @@ const { z } = require("zod");
 const { exec } = require("child_process");
 const util = require("util");
 const execPromise = util.promisify(exec);
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
+
+const TMP = path.join(os.homedir(), "tmp");
+if (!fs.existsSync(TMP)) fs.mkdirSync(TMP, { recursive: true });
+
+function writeTemp(name, content) {
+  const p = path.join(TMP, name);
+  fs.writeFileSync(p, content, "utf-8");
+  return p;
+}
+
+function resolveFile(file, content, ext) {
+  if (content) return writeTemp(`_exec_${Date.now()}${ext}`, content);
+  const resolved = path.resolve(file);
+  if (!fs.existsSync(resolved)) throw new Error("File not found: " + resolved);
+  return resolved;
+}
+
+function result(stdout, stderr) {
+  return { content: [{ type: "text", text: JSON.stringify({ stdout: stdout || "", stderr: stderr || "", exitCode: 0 }, null, 2) }] };
+}
+function errorResult(error) {
+  return { content: [{ type: "text", text: JSON.stringify({ stdout: error.stdout || "", stderr: error.stderr || error.message, exitCode: error.code || 1 }, null, 2) }], isError: true };
+}
 
 function registerTools(registerTool) {
   registerTool(
@@ -13,37 +39,9 @@ function registerTools(registerTool) {
     }),
     async ({ command, cwd }) => {
       try {
-        const { stdout, stderr } = await execPromise(command, {
-          cwd: cwd || process.cwd(),
-          maxBuffer: 1024 * 1024 * 10,
-        });
-
-        const result = {
-          stdout: stdout || "",
-          stderr: stderr || "",
-          exitCode: 0,
-        };
-
-        if (!stdout && !stderr) {
-          result.message = "Command executed successfully but returned no output";
-        }
-
-        return {
-          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-        };
-      } catch (error) {
-        const result = {
-          stdout: error.stdout || "",
-          stderr: error.stderr || error.message || "Unknown error",
-          exitCode: error.code || 1,
-          error: error.message,
-        };
-
-        return {
-          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-          isError: true,
-        };
-      }
+        const { stdout, stderr } = await execPromise(command, { cwd: cwd || process.cwd(), maxBuffer: 1024 * 1024 * 10 });
+        return result(stdout, stderr);
+      } catch (e) { return errorResult(e); }
     },
     { tag: "Exec" }
   );
@@ -57,37 +55,10 @@ function registerTools(registerTool) {
     }),
     async ({ code, cwd }) => {
       try {
-        const { stdout, stderr } = await execPromise(`python3 -c ${JSON.stringify(code)}`, {
-          cwd: cwd || process.cwd(),
-          maxBuffer: 1024 * 1024 * 10,
-        });
-
-        const result = {
-          stdout: stdout || "",
-          stderr: stderr || "",
-          exitCode: 0,
-        };
-
-        if (!stdout && !stderr) {
-          result.message = "Python code executed successfully but returned no output";
-        }
-
-        return {
-          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-        };
-      } catch (error) {
-        const result = {
-          stdout: error.stdout || "",
-          stderr: error.stderr || error.message || "Python execution failed",
-          exitCode: error.code || 1,
-          error: error.message,
-        };
-
-        return {
-          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-          isError: true,
-        };
-      }
+        const py = process.platform === "win32" ? "python" : "python3";
+        const { stdout, stderr } = await execPromise(`${py} -c ${JSON.stringify(code)}`, { cwd: cwd || process.cwd(), maxBuffer: 1024 * 1024 * 10 });
+        return result(stdout, stderr);
+      } catch (e) { return errorResult(e); }
     },
     { tag: "Exec" }
   );
@@ -101,33 +72,65 @@ function registerTools(registerTool) {
     }),
     async ({ code, cwd }) => {
       try {
-        const { stdout, stderr } = await execPromise(`node -e '${code.replace(/'/g, "'\\''")}'`, {
-          cwd: cwd || process.cwd(),
-          maxBuffer: 1024 * 1024 * 10,
-        });
+        const { stdout, stderr } = await execPromise(`node -e ${JSON.stringify(code)}`, { cwd: cwd || process.cwd(), maxBuffer: 1024 * 1024 * 10 });
+        return result(stdout, stderr);
+      } catch (e) { return errorResult(e); }
+    },
+    { tag: "Exec" }
+  );
 
-        const result = {
-          stdout: stdout || "",
-          stderr: stderr || "",
-          exitCode: 0,
-        };
+  registerTool(
+    "exec_shell_file",
+    "Execute shell script. Provide file path or content (content will be saved to temp file and executed).",
+    z.object({
+      file: z.string().optional().describe("Path to shell script file"),
+      content: z.string().optional().describe("Shell script content (uploaded and executed)"),
+      cwd: z.string().optional().describe("Working directory"),
+    }),
+    async ({ file, content, cwd }) => {
+      try {
+        const resolved = resolveFile(file, content, ".bat");
+        const cmd = process.platform === "win32" ? `"${resolved}"` : `bash "${resolved}"`;
+        const { stdout, stderr } = await execPromise(cmd, { cwd: cwd || process.cwd(), maxBuffer: 1024 * 1024 * 10 });
+        return result(stdout, stderr);
+      } catch (e) { return errorResult(e); }
+    },
+    { tag: "Exec" }
+  );
 
-        return {
-          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-        };
-      } catch (error) {
-        const result = {
-          stdout: error.stdout || "",
-          stderr: error.stderr || error.message || "Node.js execution failed",
-          exitCode: error.code || 1,
-          error: error.message,
-        };
+  registerTool(
+    "exec_python_file",
+    "Execute Python script. Provide file path or content (content will be saved to temp file and executed).",
+    z.object({
+      file: z.string().optional().describe("Path to Python script file"),
+      content: z.string().optional().describe("Python script content (uploaded and executed)"),
+      cwd: z.string().optional().describe("Working directory"),
+    }),
+    async ({ file, content, cwd }) => {
+      try {
+        const resolved = resolveFile(file, content, ".py");
+        const py = process.platform === "win32" ? "python" : "python3";
+        const { stdout, stderr } = await execPromise(`${py} "${resolved}"`, { cwd: cwd || process.cwd(), maxBuffer: 1024 * 1024 * 10 });
+        return result(stdout, stderr);
+      } catch (e) { return errorResult(e); }
+    },
+    { tag: "Exec" }
+  );
 
-        return {
-          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-          isError: true,
-        };
-      }
+  registerTool(
+    "exec_node_file",
+    "Execute Node.js script. Provide file path or content (content will be saved to temp file and executed).",
+    z.object({
+      file: z.string().optional().describe("Path to Node.js script file"),
+      content: z.string().optional().describe("Node.js script content (uploaded and executed)"),
+      cwd: z.string().optional().describe("Working directory"),
+    }),
+    async ({ file, content, cwd }) => {
+      try {
+        const resolved = resolveFile(file, content, ".js");
+        const { stdout, stderr } = await execPromise(`node "${resolved}"`, { cwd: cwd || process.cwd(), maxBuffer: 1024 * 1024 * 10 });
+        return result(stdout, stderr);
+      } catch (e) { return errorResult(e); }
     },
     { tag: "Exec" }
   );

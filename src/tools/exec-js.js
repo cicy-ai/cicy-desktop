@@ -48,6 +48,46 @@ function registerTools(registerTool) {
   );
 
   registerTool(
+    "exec_js_file",
+    "Execute JS file in browser window. Provide file path or content.",
+    z.object({
+      win_id: z.number().optional().default(1).describe("窗口 ID"),
+      file: z.string().optional().describe("本地 JS 文件路径"),
+      content: z.string().optional().describe("JS content (saved to temp and executed)"),
+    }),
+    async ({ win_id, file, content: jsContent }) => {
+      try {
+        const fs = require("fs");
+        const path = require("path");
+        const os = require("os");
+        let code;
+        if (jsContent) {
+          const tmp = path.join(os.homedir(), "tmp", "_exec_js_" + Date.now() + ".js");
+          fs.mkdirSync(path.dirname(tmp), { recursive: true });
+          fs.writeFileSync(tmp, jsContent, "utf-8");
+          code = jsContent;
+        } else if (file) {
+          const resolved = path.resolve(file);
+          if (!fs.existsSync(resolved)) throw new Error("文件不存在: " + resolved);
+          code = fs.readFileSync(resolved, "utf-8");
+        } else {
+          throw new Error("需要 file 或 content 参数");
+        }
+        const win = BrowserWindow.fromId(win_id);
+        if (!win) throw new Error("未找到窗口 " + win_id);
+        const wrappedCode = "(async () => { " + code + " })()";
+        const result = await win.webContents.executeJavaScript(wrappedCode);
+        const text = result !== null && typeof result === "object" ? JSON.stringify(result, null, 2) : String(result);
+        return { content: [{ type: "text", text }, { type: "text", text: ">> exec_js_file ok" }] };
+      } catch (error) {
+        return { content: [{ type: "text", text: "Error: " + error.message }], isError: true };
+      }
+    },
+    { tag: "JavaScript" }
+  );
+
+
+  registerTool(
     "get_element_client_bound",
     "获取页面元素的位置和尺寸信息(getBoundingClientRect)。返回元素的 x, y, width, height, top, left, right, bottom 坐标。selector 必须唯一且不能为空",
     z.object({

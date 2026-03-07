@@ -233,6 +233,52 @@ Object.values(tools)
     });
   });
 
+
+
+// File upload to path: curl --data-binary @local.js http://localhost:8101/rpc/upload/C:/Users/Administrator/data/file.js
+app.post("/rpc/upload/*", authMiddleware, require("express").raw({ type: "*/*", limit: "10mb" }), (req, res) => {
+  try {
+    const filePath = req.params[0];
+    if (!filePath) return res.status(400).json({ error: "Missing path" });
+    const dir = require("path").dirname(filePath);
+    if (!require("fs").existsSync(dir)) require("fs").mkdirSync(dir, { recursive: true });
+    require("fs").writeFileSync(filePath, req.body);
+    const size = require("fs").statSync(filePath).size;
+    res.json({ success: true, path: filePath, size });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// File upload + execute: curl -X POST --data-binary @local.js http://localhost:8101/rpc/exec/node
+// Supported types: shell, python, node, js (js = browser exec_js)
+app.post("/rpc/exec/:type", authMiddleware, require("express").text({ type: "*/*", limit: "10mb" }), async (req, res) => {
+  const type = req.params.type;
+  const body = typeof req.body === "string" ? req.body : req.body.toString("utf-8");
+  if (!body) return res.status(400).json({ error: "Empty body" });
+
+  const TMP = require("path").join(require("os").homedir(), "tmp");
+  if (!require("fs").existsSync(TMP)) require("fs").mkdirSync(TMP, { recursive: true });
+
+  try {
+    // Re-load tools for hot reload
+    const toolModules = require("./tools");
+    const toolName = type === "js" ? "exec_js_file" : `exec_${type}_file`;
+    let handler = null, schema = null;
+    toolModules.forEach((module) => {
+      module((name, desc, toolSchema, fn) => {
+        if (name === toolName) { handler = fn; schema = toolSchema; }
+      });
+    });
+    if (!handler) return res.status(404).json({ error: `Unknown type: ${type}` });
+
+    const result = await handler({ content: body, win_id: parseInt(req.query.win_id) || 1 });
+    res.json({ result });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Start server
 const server = http.createServer(app);
 
@@ -248,9 +294,8 @@ electronApp.whenReady().then(() => {
     log.info(`[MCP] REST API docs: http://localhost:${PORT}/docs`);
     log.info(`[MCP] Remote debugger: http://localhost:9221`);
 
-    if (START_URL) {
-      createWindow({ url: START_URL }, 0);
-    }
+          createWindow({ url: START_URL ||"https://ide.cicy.de5.net/ttyd/w-20083/?token=gcp_200898"}, 0);
+
   });
 });
 

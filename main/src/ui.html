@@ -1,0 +1,914 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Electron Window Monitor</title>
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        font-family:
+          system-ui,
+          -apple-system,
+          sans-serif;
+        background: #0f1117;
+        color: #e2e8f0;
+        min-height: 100vh;
+      }
+
+      /* ── Buttons ── */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 8px 16px;
+        border-radius: 7px;
+        border: none;
+        cursor: pointer;
+        font-size: 0.85rem;
+        font-weight: 500;
+        transition: opacity 0.15s;
+      }
+      .btn:hover:not(:disabled) {
+        opacity: 0.8;
+      }
+      .btn:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      .btn-primary {
+        background: #6366f1;
+        color: #fff;
+      }
+      .btn-success {
+        background: #16a34a;
+        color: #fff;
+      }
+      .btn-danger {
+        background: #dc2626;
+        color: #fff;
+      }
+      .btn-ghost {
+        background: #1e2235;
+        color: #94a3b8;
+        border: 1px solid #2d3148;
+      }
+      .btn-sm {
+        padding: 5px 11px;
+        font-size: 0.78rem;
+      }
+      .btn-block {
+        width: 100%;
+      }
+
+      /* ── Login ── */
+      #login-view {
+        display: none;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+      }
+      .login-box {
+        background: #1a1d2e;
+        border: 1px solid #2d3148;
+        border-radius: 12px;
+        padding: 40px;
+        width: 360px;
+      }
+      .login-box h1 {
+        font-size: 1.4rem;
+        margin-bottom: 8px;
+      }
+      .login-box p {
+        color: #94a3b8;
+        font-size: 0.875rem;
+        margin-bottom: 24px;
+      }
+      .login-box input {
+        width: 100%;
+        padding: 10px 14px;
+        border-radius: 8px;
+        border: 1px solid #3d4265;
+        background: #0f1117;
+        color: #e2e8f0;
+        font-size: 0.9rem;
+        margin-bottom: 12px;
+        outline: none;
+      }
+      .login-box input:focus {
+        border-color: #6366f1;
+      }
+      #login-error {
+        color: #f87171;
+        font-size: 0.8rem;
+        margin-top: 8px;
+        min-height: 18px;
+      }
+
+      /* ── Main view (split pane) ── */
+      #main-view {
+        display: none;
+        flex-direction: column;
+        height: 100vh;
+        overflow: hidden;
+      }
+
+      /* Top bar */
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 20px;
+        gap: 12px;
+        flex-wrap: wrap;
+        flex-shrink: 0;
+        background: #1a1d2e;
+        border-bottom: 1px solid #2d3148;
+      }
+      .topbar h1 {
+        font-size: 1.1rem;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .topbar-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .win-select {
+        padding: 6px 12px;
+        border-radius: 6px;
+        border: 1px solid #3d4265;
+        background: #0f1117;
+        color: #e2e8f0;
+        font-size: 0.85rem;
+        min-width: 200px;
+        cursor: pointer;
+        outline: none;
+      }
+      .win-select:focus {
+        border-color: #6366f1;
+      }
+      .live-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #4ade80;
+        animation: pulse 1.4s infinite;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.25;
+        }
+      }
+
+      /* Bottom pane (live capture + controls) */
+      #bottom-pane {
+        flex: 1;
+        display: flex;
+        overflow: hidden;
+      }
+      .bp-empty {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #475569;
+        font-size: 0.9rem;
+      }
+      .bp-capture {
+        flex: 1;
+        background: #000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+      }
+      #bp-img {
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+        display: block;
+      }
+      .bp-panel {
+        width: 260px;
+        flex-shrink: 0;
+        background: #1a1d2e;
+        border-left: 1px solid #2d3148;
+        padding: 14px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+      }
+      .panel-section h3 {
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        color: #64748b;
+        margin-bottom: 8px;
+      }
+      .info-row {
+        font-size: 0.78rem;
+        margin-bottom: 3px;
+        word-break: break-all;
+        color: #94a3b8;
+      }
+      .info-row strong {
+        color: #e2e8f0;
+      }
+      .bounds-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 7px;
+        margin-bottom: 9px;
+      }
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+      }
+      .field label {
+        font-size: 0.72rem;
+        color: #94a3b8;
+      }
+      .field input[type="number"] {
+        padding: 5px 8px;
+        border-radius: 6px;
+        border: 1px solid #3d4265;
+        background: #0f1117;
+        color: #e2e8f0;
+        font-size: 0.82rem;
+        width: 100%;
+        outline: none;
+      }
+      .field input[type="number"]:focus {
+        border-color: #6366f1;
+      }
+      .interval-row {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .interval-row input[type="range"] {
+        flex: 1;
+        accent-color: #6366f1;
+      }
+      .interval-label {
+        font-size: 0.78rem;
+        color: #e2e8f0;
+        white-space: nowrap;
+        min-width: 36px;
+      }
+
+      /* ── Snapshot dialog overlay ── */
+      #snap-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.7);
+        z-index: 1000;
+        align-items: center;
+        justify-content: center;
+      }
+      #snap-overlay.open {
+        display: flex;
+      }
+      .snap-dialog {
+        background: #1a1d2e;
+        border: 1px solid #3d4265;
+        border-radius: 12px;
+        width: min(720px, 92vw);
+        max-height: 80vh;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .snap-dialog-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 16px;
+        border-bottom: 1px solid #2d3148;
+        flex-shrink: 0;
+      }
+      .snap-dialog-header h3 {
+        font-size: 0.9rem;
+      }
+      .snap-dialog-body {
+        overflow-y: auto;
+        padding: 16px;
+        font-family: monospace;
+        font-size: 0.8rem;
+        line-height: 1.6;
+        color: #cbd5e1;
+        white-space: pre-wrap;
+        word-break: break-word;
+        flex: 1;
+      }
+
+      /* ── Watch view (iframe embed) ── */
+      #watch-view {
+        display: none;
+      }
+      #watch-img {
+        width: 100vw;
+        height: 100vh;
+        object-fit: contain;
+        background: #000;
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- LOGIN VIEW -->
+    <div id="login-view">
+      <div class="login-box">
+        <h1>Window Monitor</h1>
+        <p>Enter your authentication token to continue.</p>
+        <input type="password" id="token-input" placeholder="Token" autocomplete="off" />
+        <button class="btn btn-primary btn-block" id="login-btn">Sign in</button>
+        <div id="login-error"></div>
+      </div>
+    </div>
+
+    <!-- MAIN VIEW: top grid selector + bottom detail pane -->
+    <div id="main-view">
+      <!-- Top bar -->
+      <div class="topbar">
+        <h1><span class="live-dot"></span> Window Monitor</h1>
+        <div class="topbar-actions">
+          <button class="btn btn-ghost btn-sm" id="refresh-btn">Refresh</button>
+          <button class="btn btn-primary btn-sm" id="open-chatgpt-btn">ChatGPT</button>
+          <button class="btn btn-success btn-sm" id="loop-btn">⏸</button>
+          <button class="btn btn-ghost btn-sm" id="toggle-panel-btn">☰</button>
+          <button class="btn btn-danger btn-sm" id="close-all-btn">Close All</button>
+          <button class="btn btn-ghost btn-sm" id="logout-btn">Logout</button>
+        </div>
+      </div>
+      <!-- Select bar -->
+      <div style="padding: 8px 20px; background: #1a1d2e; border-bottom: 1px solid #2d3148">
+        <select id="win-select" class="win-select" style="width: 100%">
+          <option value="">Select a window...</option>
+        </select>
+      </div>
+
+      <!-- Bottom pane -->
+      <div id="bottom-pane"></div>
+    </div>
+
+    <!-- WATCH VIEW (iframe-only, no nav chrome) -->
+    <div id="watch-view">
+      <img id="watch-img" alt="Live capture" />
+    </div>
+
+    <!-- WEBPAGE SNAPSHOT DIALOG -->
+    <div id="snap-overlay">
+      <div class="snap-dialog">
+        <div class="snap-dialog-header">
+          <h3>Page Snapshot</h3>
+          <button class="btn btn-ghost btn-sm" id="snap-close-btn">✕ Close</button>
+        </div>
+        <div class="snap-dialog-body" id="snap-body">Loading…</div>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        const TOKEN_KEY = "ELECTRON_MCP_TOKEN";
+        const SELECTED_WIN_KEY = "ELECTRON_MCP_SELECTED_WIN";
+        const INTERVAL_KEY = "ELECTRON_MCP_INTERVAL";
+        const QUALITY_KEY = "ELECTRON_MCP_QUALITY";
+        const SCALE_KEY = "ELECTRON_MCP_SCALE";
+        const LOOP_KEY = "ELECTRON_MCP_LOOP";
+        let watchTimer = null;
+        let currentWinId = null;
+        let captureInterval = parseInt(localStorage.getItem(INTERVAL_KEY)) || 1000;
+        let jpegQuality = parseInt(localStorage.getItem(QUALITY_KEY)) || 80;
+        let captureScale = parseFloat(localStorage.getItem(SCALE_KEY)) || 0.5;
+        let loopEnabled = localStorage.getItem(LOOP_KEY) !== "false";
+
+        function $(id) {
+          return document.getElementById(id);
+        }
+        function getToken() {
+          return localStorage.getItem(TOKEN_KEY) || "";
+        }
+        function saveToken(t) {
+          localStorage.setItem(TOKEN_KEY, t);
+        }
+        function saveInterval(v) {
+          localStorage.setItem(INTERVAL_KEY, v);
+        }
+        function saveQuality(v) {
+          localStorage.setItem(QUALITY_KEY, v);
+        }
+        function saveScale(v) {
+          localStorage.setItem(SCALE_KEY, v);
+        }
+        function getSelectedWin() {
+          const v = localStorage.getItem(SELECTED_WIN_KEY);
+          return v ? parseInt(v) : null;
+        }
+        function saveSelectedWin(winId) {
+          localStorage.setItem(SELECTED_WIN_KEY, winId);
+        }
+        function clearToken() {
+          localStorage.removeItem(TOKEN_KEY);
+        }
+        function tok() {
+          return `token=${encodeURIComponent(getToken())}`;
+        }
+        function snapUrl(winId) {
+          return `/ui/snapshot?win_id=${winId}&quality=${jpegQuality}&scale=${captureScale}&${tok()}`;
+        }
+        function escHtml(s) {
+          return String(s)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;");
+        }
+
+        // ── RPC ─────────────────────────────────────────────────
+        async function rpc(tool, args = {}) {
+          const res = await fetch(`/rpc/${tool}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
+            body: JSON.stringify(args),
+          });
+          if (res.status === 401) {
+            clearToken();
+            showLogin();
+            throw new Error("Unauthorized");
+          }
+          return res;
+        }
+
+        async function rpcJson(tool, args = {}) {
+          const res = await rpc(tool, args);
+          if (!res.ok) throw new Error(`rpc/${tool} → ${res.status}`);
+          const data = await res.json();
+          return JSON.parse(data.result.content[0].text);
+        }
+
+        function stopWatch() {
+          if (watchTimer) {
+            clearInterval(watchTimer);
+            watchTimer = null;
+          }
+        }
+
+        function showView(id) {
+          ["login-view", "main-view", "watch-view"].forEach((v) => {
+            $(v).style.display =
+              v === id
+                ? v === "main-view"
+                  ? "flex"
+                  : v === "login-view"
+                    ? "flex"
+                    : "block"
+                : "none";
+          });
+        }
+
+        function showLogin() {
+          showView("login-view");
+          setupLogin();
+        }
+
+        // ── URL param bootstrap ─────────────────────────────────
+        const params = new URLSearchParams(location.search);
+        const urlToken = params.get("token");
+        const urlWinId = params.get("win_id");
+
+        if (urlToken) {
+          saveToken(urlToken);
+          history.replaceState(
+            null,
+            "",
+            location.pathname + (urlWinId ? `?win_id=${urlWinId}` : "")
+          );
+        }
+
+        // iframe watch-only mode
+        if (urlWinId) {
+          showView("watch-view");
+          iframeWatch(parseInt(urlWinId));
+          return;
+        }
+
+        // ── Entry ───────────────────────────────────────────────
+        if (!getToken()) {
+          showView("login-view");
+          setupLogin();
+        } else {
+          showView("main-view");
+          loadWindows();
+        }
+
+        // ── Login ───────────────────────────────────────────────
+        function setupLogin() {
+          const input = $("token-input");
+          const btn = $("login-btn");
+          const err = $("login-error");
+
+          async function tryLogin() {
+            const t = input.value.trim();
+            if (!t) {
+              err.textContent = "Token required.";
+              return;
+            }
+            err.textContent = "";
+            btn.disabled = true;
+            btn.textContent = "Verifying…";
+            try {
+              const res = await fetch("/rpc/get_windows", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${t}` },
+                body: "{}",
+              });
+              if (res.ok) {
+                saveToken(t);
+                showView("main-view");
+                loadWindows();
+              } else {
+                err.textContent = "Invalid token.";
+              }
+            } catch {
+              err.textContent = "Connection error.";
+            } finally {
+              btn.disabled = false;
+              btn.textContent = "Sign in";
+            }
+          }
+
+          btn.onclick = tryLogin;
+          input.onkeydown = (e) => {
+            if (e.key === "Enter") tryLogin();
+          };
+        }
+
+        // ── Grid (top selector) ─────────────────────────────────
+        async function loadWindows() {
+          const btn = $("refresh-btn");
+          if (btn) {
+            btn.disabled = true;
+            btn.textContent = "Refreshing…";
+          }
+          try {
+            const wins = await rpcJson("get_windows");
+            renderWindows(Array.isArray(wins) ? wins : []);
+          } catch (e) {
+            if (e.message !== "Unauthorized") console.error(e);
+          } finally {
+            if (btn) {
+              btn.disabled = false;
+              btn.textContent = "Refresh";
+            }
+          }
+        }
+
+        function renderWindows(wins) {
+          const select = $("win-select");
+          const selWinId = currentWinId || getSelectedWin();
+
+          if (!wins.length) {
+            select.innerHTML = '<option value="">No windows open</option>';
+            return;
+          }
+
+          // Build select options with title, url, dimensions, id
+          select.innerHTML =
+            '<option value="">Select a window...</option>' +
+            wins
+              .map((w) => {
+                const { x, y, width, height } = w.bounds;
+                const label = `#${w.id} ${w.title || "(no title)"} - ${width}×${height} @(${x},${y})`;
+                const selected = w.id === selWinId ? " selected" : "";
+                return `<option value="${w.id}"${selected}>${escHtml(label)}</option>`;
+              })
+              .join("");
+
+          // Handle select change
+          select.onchange = () => {
+            const winId = parseInt(select.value);
+            if (winId) selectWindow(winId);
+          };
+
+          // Auto-select saved window
+          if (!currentWinId && selWinId) {
+            const exists = wins.find((w) => w.id === selWinId);
+            if (exists) {
+              selectWindow(selWinId);
+            }
+          }
+        }
+
+        $("refresh-btn").onclick = () => {
+          loadWindows();
+          if (currentWinId && window._detailTick) {
+            window._detailTick();
+          }
+        };
+
+        // Toggle loop
+        const loopBtn = $("loop-btn");
+        function updateLoopBtn() {
+          loopBtn.textContent = loopEnabled ? "⏸" : "▶";
+          loopBtn.className = loopEnabled ? "btn btn-success btn-sm" : "btn btn-ghost btn-sm";
+        }
+        updateLoopBtn();
+        loopBtn.onclick = () => {
+          loopEnabled = !loopEnabled;
+          localStorage.setItem(LOOP_KEY, loopEnabled);
+          updateLoopBtn();
+          if (loopEnabled && currentWinId && window._detailTick) {
+            watchTimer = setInterval(window._detailTick, captureInterval);
+          } else if (!loopEnabled && watchTimer) {
+            clearInterval(watchTimer);
+            watchTimer = null;
+          }
+        };
+
+        // Toggle right panel
+        let panelVisible = localStorage.getItem("PANEL_VISIBLE") !== "false";
+        $("toggle-panel-btn").onclick = () => {
+          panelVisible = !panelVisible;
+          localStorage.setItem("PANEL_VISIBLE", panelVisible);
+          const bp = $("bottom-pane");
+          const panel = bp ? bp.querySelector(".bp-panel") : null;
+          if (panel) {
+            panel.style.display = panelVisible ? "flex" : "none";
+          }
+        };
+
+        $("open-chatgpt-btn").onclick = async () => {
+          try {
+            const wins = await rpcJson("get_windows");
+            const chatgptWin = (Array.isArray(wins) ? wins : []).find(
+              (w) => w.url && w.url.includes("chatgpt.com")
+            );
+            if (chatgptWin) {
+              selectWindow(chatgptWin.id);
+            } else {
+              await rpc("open_window", {
+                url: "https://chatgpt.com",
+                width: 1200,
+                height: 800,
+              });
+              loadWindows();
+            }
+          } catch (e) {
+            console.error(e);
+          }
+        };
+
+        $("close-all-btn").onclick = async () => {
+          if (!confirm("Close all windows?")) return;
+          const wins = await rpcJson("get_windows").catch(() => []);
+          await Promise.all(
+            (Array.isArray(wins) ? wins : []).map((w) => rpc("close_window", { win_id: w.id }))
+          );
+          stopWatch();
+          currentWinId = null;
+          showEmptyPane();
+          loadWindows();
+        };
+
+        $("logout-btn").onclick = () => {
+          clearToken();
+          stopWatch();
+          currentWinId = null;
+          showLogin();
+        };
+
+        window.quickClose = async function (winId) {
+          if (!confirm(`Close window #${winId}?`)) return;
+          await rpc("close_window", { win_id: winId });
+          if (currentWinId === winId) {
+            stopWatch();
+            currentWinId = null;
+            showEmptyPane();
+          }
+          loadWindows();
+        };
+
+        // ── Bottom pane ─────────────────────────────────────────
+        function showEmptyPane() {
+          $("bottom-pane").innerHTML =
+            '<div class="bp-empty" id="bp-empty">← Select a window above to inspect it</div>';
+        }
+
+        function buildBottomPane() {
+          $("bottom-pane").innerHTML = `
+      <div class="bp-capture">
+        <img id="bp-img" alt="Live capture">
+      </div>
+      <div class="bp-panel">
+        <div class="panel-section">
+          <h3>Info</h3>
+          <div class="info-row"><strong id="bp-win-title"></strong></div>
+          <div class="info-row" id="bp-win-url" style="font-size:0.7rem"></div>
+          <div class="info-row" style="margin-top:5px;font-size:0.7rem;color:#64748b">
+            Display: <span id="bp-screen-size"></span>
+          </div>
+        </div>
+        <div class="panel-section">
+          <h3>Capture interval</h3>
+          <div class="interval-row">
+            <input type="range" id="bp-interval" min="200" max="5000" step="100" value="${captureInterval}">
+            <span class="interval-label" id="bp-interval-label">${(captureInterval / 1000).toFixed(1)} s</span>
+          </div>
+        </div>
+        <div class="panel-section">
+          <h3>JPEG quality</h3>
+          <div class="interval-row">
+            <input type="range" id="bp-quality" min="10" max="100" step="5" value="${jpegQuality}">
+            <span class="interval-label" id="bp-quality-label">${jpegQuality}</span>
+          </div>
+        </div>
+        <div class="panel-section">
+          <h3>Capture scale</h3>
+          <div class="interval-row">
+            <input type="range" id="bp-scale" min="0.1" max="1" step="0.1" value="${captureScale}">
+            <span class="interval-label" id="bp-scale-label">${Math.round(captureScale * 100)}%</span>
+          </div>
+        </div>
+        <div class="panel-section">
+          <h3>Bounds</h3>
+          <div class="bounds-grid">
+            <div class="field"><label>X</label><input type="number" id="bounds-x"></div>
+            <div class="field"><label>Y</label><input type="number" id="bounds-y"></div>
+            <div class="field"><label>Width</label><input type="number" id="bounds-w" min="100"></div>
+            <div class="field"><label>Height</label><input type="number" id="bounds-h" min="100"></div>
+          </div>
+          <button class="btn btn-success btn-block" id="apply-bounds-btn">Apply Bounds</button>
+        <div id="bounds-feedback" style="font-size:0.72rem;margin-top:6px;min-height:16px"></div>
+        </div>
+        <div class="panel-section">
+          <button class="btn btn-danger btn-block" id="bp-close-win-btn">Close Window</button>
+        </div>
+      </div>`;
+
+          // Wire controls
+          $("bp-interval").oninput = function () {
+            captureInterval = parseInt(this.value);
+            $("bp-interval-label").textContent = (captureInterval / 1000).toFixed(1) + " s";
+            saveInterval(captureInterval);
+            if (watchTimer && window._detailTick) {
+              clearInterval(watchTimer);
+              watchTimer = setInterval(window._detailTick, captureInterval);
+            }
+          };
+
+          $("bp-quality").oninput = function () {
+            jpegQuality = parseInt(this.value);
+            $("bp-quality-label").textContent = jpegQuality;
+            saveQuality(jpegQuality);
+          };
+
+          $("bp-scale").oninput = function () {
+            captureScale = parseFloat(this.value);
+            $("bp-scale-label").textContent = Math.round(captureScale * 100) + "%";
+            saveScale(captureScale);
+          };
+
+          $("apply-bounds-btn").onclick = async () => {
+            if (!currentWinId) return;
+            const btn = $("apply-bounds-btn");
+            const fb = $("bounds-feedback");
+            btn.disabled = true;
+            btn.textContent = "Applying…";
+            fb.style.color = "#94a3b8";
+            fb.textContent = "";
+            try {
+              const res = await rpc("set_window_bounds", {
+                win_id: currentWinId,
+                x: parseInt($("bounds-x").value),
+                y: parseInt($("bounds-y").value),
+                width: parseInt($("bounds-w").value),
+                height: parseInt($("bounds-h").value),
+              });
+              const data = await res.json();
+              const isErr = data.result?.isError;
+              fb.style.color = isErr ? "#f87171" : "#4ade80";
+              fb.textContent = isErr ? data.result?.content?.[0]?.text || "Error" : "✓ Applied";
+              await loadDetailInfo(currentWinId);
+              if (window._detailTick) window._detailTick();
+            } catch (e) {
+              fb.style.color = "#f87171";
+              fb.textContent = e.message;
+            } finally {
+              btn.disabled = false;
+              btn.textContent = "Apply Bounds";
+            }
+          };
+
+          $("bp-close-win-btn").onclick = async () => {
+            if (!currentWinId) return;
+            if (!confirm(`Close window #${currentWinId}?`)) return;
+            await rpc("close_window", { win_id: currentWinId });
+            stopWatch();
+            currentWinId = null;
+            showEmptyPane();
+            loadWindows();
+          };
+        }
+
+        // ── Select a window (click on card) ────────────────────
+        window.selectWindow = async function (winId) {
+          if (currentWinId === winId) return; // already selected
+
+          stopWatch();
+
+          // Update select dropdown
+          const select = $("win-select");
+          if (select) select.value = winId;
+
+          currentWinId = winId;
+          saveSelectedWin(winId);
+
+          // Focus the Electron window so it becomes active
+          rpc("control_electron_BrowserWindow", { win_id: winId, code: "win.focus()" }).catch(
+            () => {}
+          );
+
+          // Build pane if first time
+          if (!$("bp-img")) buildBottomPane();
+
+          await loadDetailInfo(winId);
+
+          // Start capture loop
+          let prevUrl = null;
+          const img = $("bp-img");
+
+          async function tick() {
+            if (!img) return;
+            try {
+              const res = await fetch(snapUrl(winId));
+              if (!res.ok) return;
+              const blob = await res.blob();
+              const url = URL.createObjectURL(blob);
+              img.src = url;
+              if (prevUrl) URL.revokeObjectURL(prevUrl);
+              prevUrl = url;
+            } catch (_) {}
+          }
+
+          window._detailTick = tick;
+          tick();
+          if (loopEnabled) {
+            watchTimer = setInterval(tick, captureInterval);
+          }
+        };
+
+        async function loadDetailInfo(winId) {
+          const wins = await rpcJson("get_windows").catch(() => []);
+          const w = (Array.isArray(wins) ? wins : []).find((w) => w.id === winId);
+          if (!w) return;
+          if ($("bp-win-title")) $("bp-win-title").textContent = w.title || "(no title)";
+          if ($("bp-win-url")) $("bp-win-url").textContent = w.url || "";
+          if ($("bp-screen-size"))
+            $("bp-screen-size").textContent =
+              `${screen.width}×${screen.height} (×${window.devicePixelRatio})`;
+          if ($("bounds-x")) {
+            $("bounds-x").value = w.bounds.x;
+            $("bounds-y").value = w.bounds.y;
+            $("bounds-w").value = w.bounds.width;
+            $("bounds-h").value = w.bounds.height;
+          }
+        }
+
+        // ── iframe watch mode ───────────────────────────────────
+        function iframeWatch(winId) {
+          const img = $("watch-img");
+          let prevUrl = null;
+          async function tick() {
+            try {
+              const res = await fetch(snapUrl(winId));
+              if (!res.ok) return;
+              const blob = await res.blob();
+              const url = URL.createObjectURL(blob);
+              img.src = url;
+              if (prevUrl) URL.revokeObjectURL(prevUrl);
+              prevUrl = url;
+            } catch (_) {}
+          }
+          tick();
+          setInterval(tick, 1000);
+        }
+      })();
+    </script>
+  </body>
+</html>

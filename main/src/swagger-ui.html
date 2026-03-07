@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Electron MCP API</title>
+  <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+  <style>
+    .swagger-ui .topbar { display: none }
+  </style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script>
+    window.onload = function() {
+      SwaggerUIBundle({
+        url: "/openapi.json",
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        presets: [
+          SwaggerUIBundle.presets.apis,
+          SwaggerUIBundle.SwaggerUIStandalonePreset
+        ],
+        requestInterceptor: function(request) {
+          // 移除默认的 accept 头，只保留 application/yaml
+          delete request.headers['accept'];
+          request.headers['Accept'] = 'application/yaml';
+          
+          // 从 localStorage 读取 token 并添加到请求
+          const token = localStorage.getItem('MCP_TOKEN');
+          if (token) {
+            request.headers['Authorization'] = 'Bearer ' + token;
+          }
+          
+          return request;
+        }
+      });
+    };
+  </script>
+</body>
+</html>

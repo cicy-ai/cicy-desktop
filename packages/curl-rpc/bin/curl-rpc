@@ -24,13 +24,6 @@ curl-rpc - 轻量级 Electron MCP RPC 命令行工具
   tools <tool_name>             查看工具详情
   <tool_name> [key=value ...]   调用工具
 
-文件上传执行 (@file):
-  exec_js_file @local.js        上传JS文件在浏览器页面中执行
-  exec_node_file @local.js      上传JS文件用Node.js执行
-  exec_python_file @local.py    上传Python文件执行
-  exec_shell_file @local.bat    上传Shell脚本执行
-  file_write @local.js path=<remote_path>  上传文件到指定路径
-
 选项:
   --json, -j                    使用 JSON 格式
   --help, -h                    显示帮助
@@ -45,10 +38,9 @@ curl-rpc - 轻量级 Electron MCP RPC 命令行工具
 示例:
   curl-rpc init                 初始化配置
   curl-rpc tools                列出所有工具
+  curl-rpc tools ping           查看 ping 工具详情
   curl-rpc ping                 测试连接
   curl-rpc open_window url=https://example.com
-  curl-rpc exec_node_file @script.js
-  ELECTRON_MCP_NODE=1 curl-rpc exec_js_file @inject.js
 
 详细文档: https://github.com/cicy-dev/electron-mcp/blob/main/packages/curl-rpc/README.md
 EOF
@@ -223,34 +215,6 @@ else
   TOOL_NAME="$1"
   shift
   METHOD="tools/call"
-  UPLOAD_FILE=""
-  
-  # Check for @file upload syntax: curl-rpc exec_node_file @local.js
-  for arg in "$@"; do
-    if [[ "$arg" =~ ^@(.+)$ ]]; then
-      UPLOAD_FILE="${BASH_REMATCH[1]}"
-      if [ ! -f "$UPLOAD_FILE" ]; then
-        echo "❌ Error: File not found: $UPLOAD_FILE"
-        exit 1
-      fi
-    fi
-  done
-  
-  # If upload file detected, use /rpc/exec/:type endpoint
-  if [ -n "$UPLOAD_FILE" ]; then
-    # Map tool name to exec type
-    case "$TOOL_NAME" in
-      exec_shell_file) EXEC_TYPE="shell" ;;
-      exec_python_file) EXEC_TYPE="python" ;;
-      exec_node_file) EXEC_TYPE="node" ;;
-      exec_js_file) EXEC_TYPE="js" ;;
-      file_write) EXEC_TYPE="__upload__" ;;
-      *) echo "❌ Error: @file upload only supported for exec_*_file and file_write tools"; exit 1 ;;
-    esac
-    USE_UPLOAD=1
-  else
-    USE_UPLOAD=0
-  fi
   
   # 构建 YAML 参数
   YAML_PARAMS="name: $TOOL_NAME"
@@ -259,15 +223,13 @@ else
   if [ $# -gt 0 ]; then
     YAML_PARAMS="${YAML_PARAMS}\narguments:"
     for arg in "$@"; do
-      if [[ "$arg" =~ ^@ ]]; then
-        continue  # skip @file arg
-      elif [[ "$arg" =~ ^([a-zA-Z_][a-zA-Z0-9_]*)=(.+)$ ]]; then
+      if [[ "$arg" =~ ^([a-zA-Z_][a-zA-Z0-9_]*)=(.+)$ ]]; then
         key="${BASH_REMATCH[1]}"
         value="${BASH_REMATCH[2]}"
         YAML_PARAMS="${YAML_PARAMS}\n  ${key}: ${value}"
       else
         echo "❌ Error: Invalid argument format: $arg"
-        echo "Expected: key=value or @filepath"
+        echo "Expected: key=value"
         exit 1
       fi
     done
@@ -342,41 +304,6 @@ if ! curl --noproxy "*" -s --connect-timeout 2 $ELECTRON_MCP_URL/rpc/tools/list 
   echo "❌ Error: Cannot connect to MCP server at $ELECTRON_MCP_URL"
   echo "Please check if the server is running: ./service.sh status"
   exit 1
-fi
-
-# File upload path: send file directly to /rpc/exec/:type or /rpc/upload/:path
-if [ "${USE_UPLOAD:-0}" = "1" ]; then
-  if [ "$EXEC_TYPE" = "__upload__" ]; then
-    # file_write: need path= param
-    REMOTE_PATH=""
-    for arg in "$@"; do
-      if [[ "$arg" =~ ^path=(.+)$ ]]; then
-        REMOTE_PATH="${BASH_REMATCH[1]}"
-      fi
-    done
-    if [ -z "$REMOTE_PATH" ]; then
-      echo "❌ Error: file_write @file requires path= parameter"
-      exit 1
-    fi
-    RESPONSE=$(curl --noproxy "*" -s -w "\n%{http_code}" -X POST "$ELECTRON_MCP_URL/rpc/upload/$REMOTE_PATH" \
-      -H "Authorization: Bearer $TOKEN" \
-      --data-binary "@$UPLOAD_FILE" 2>&1)
-  else
-    RESPONSE=$(curl --noproxy "*" -s -w "\n%{http_code}" -X POST "$ELECTRON_MCP_URL/rpc/exec/$EXEC_TYPE" \
-      -H "Authorization: Bearer $TOKEN" \
-      --data-binary "@$UPLOAD_FILE" 2>&1)
-  fi
-  HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-  BODY=$(echo "$RESPONSE" | sed '$d')
-  if [ "$HTTP_CODE" != "200" ]; then
-    echo "❌ Error: HTTP $HTTP_CODE"
-    echo "$BODY"
-    exit 1
-  fi
-  echo "----------------"
-  echo "$BODY" | jq -r '.result.content[] | .text' 2>/dev/null || echo "$BODY"
-  echo "----------------"
-  exit 0
 fi
 
 # 执行请求

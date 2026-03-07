@@ -16,6 +16,11 @@ function setupWindowHandlers(win) {
   // 初始化窗口监控（在 dom-ready 之前调用）
   initWindowMonitoring(win);
 
+  // 🔥 确保窗口可以正常关闭 + 添加日志
+  win.on('close', () => {
+    console.log(`[Window ${win.id}] Close event triggered: ${win.getTitle()}`);
+  });
+
   // 🔥 全局下载处理 - 自动保存到 ~/Downloads/electron/
   const ses = win.webContents.session;
   if (!ses._autoDownloadEnabled) {
@@ -153,6 +158,7 @@ function createWindow(options = {}, accountIdx = 0, forceNew = false) {
     x: posX,
     y: posY,
     webPreferences: {
+      webviewTag:true,
       offscreen: false, // 确保不是离屏渲染
       nodeIntegration: false,
       contextIsolation: true,

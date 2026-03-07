@@ -8,7 +8,8 @@ module.exports = (registerTool) => {
     async () => {
       let count = 0;
       Object.keys(require.cache).forEach((key) => {
-        if (key.includes("/tools/") || key.includes("/utils/")) {
+        const k = key.replace(/\\/g, "/");
+        if (k.includes("/tools/") || k.includes("/utils/")) {
           delete require.cache[key];
           count++;
         }
