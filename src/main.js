@@ -7,6 +7,7 @@ if (process.platform === "linux") {
   electronApp.commandLine.appendSwitch("log-level", "3");
   electronApp.commandLine.appendSwitch("disable-notifications");
   electronApp.commandLine.appendSwitch("proxy-server", "127.0.0.1:8888");
+  electronApp.commandLine.appendSwitch("ignore-certificate-errors");
   electronApp.commandLine.appendSwitch("disable-http-cache");
   electronApp.commandLine.appendSwitch("disable-application-cache");
   electronApp.commandLine.appendSwitch("disable-geolocation");
