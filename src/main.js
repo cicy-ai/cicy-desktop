@@ -12,7 +12,8 @@ if (process.platform === "linux") {
   electronApp.commandLine.appendSwitch("disable-application-cache");
   electronApp.commandLine.appendSwitch("disable-geolocation");
   electronApp.commandLine.appendSwitch("disable-dev-shm-usage");
-  electronApp.commandLine.appendSwitch("use-gl", "swiftshader");
+  electronApp.commandLine.appendSwitch("use-gl", "angle");
+  electronApp.commandLine.appendSwitch("use-angle", "swiftshader");
 }
 
 const http = require("http");
