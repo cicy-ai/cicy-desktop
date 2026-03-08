@@ -1,6 +1,7 @@
 const { app: electronApp } = require("electron");
 
 // Setup Electron flags IMMEDIATELY after require
+electronApp.commandLine.appendSwitch("ignore-certificate-errors");
 if (process.platform === "linux") {
   process.env["ELECTRON_DISABLE_SECURITY_WARNINGS"] = "true";
   // electronApp.commandLine.appendSwitch("disable-setuid-sandbox");
@@ -293,6 +294,19 @@ electronApp.commandLine.appendSwitch("remote-debugging-port", "9221");
 log.info("[MCP] Remote debugging enabled on port 9221");
 
 electronApp.whenReady().then(() => {
+
+  // 为 webview partition 设置代理
+  if (config.proxy) {
+    const { session } = require("electron");
+    const mainSession = session.fromPartition("persist:main");
+    mainSession.setProxy({
+      proxyRules: config.proxy
+    }).then(() => {
+      log.info(`[Proxy] persist:main partition 已设置代理: ${config.proxy}`);
+    }).catch(err => {
+      log.error("[Proxy] persist:main partition 设置代理失败:", err);
+    });
+  }
   server.listen(PORT, () => {
     log.info(`[MCP] Log file: ${config.logFilePath}`);
     log.info(`[MCP] Server listening on http://localhost:${PORT}`);
@@ -316,3 +330,16 @@ function cleanup() {
 }
 
 process.on("SIGTERM", cleanup);
+
+// 为所有 session（包括 webview partition）设置代理
+electronApp.on('session-created', (session) => {
+  if (config.proxy) {
+    session.setProxy({
+      proxyRules: config.proxy
+    }).then(() => {
+      log.info(`[Proxy] Session ${session.partition || 'default'} 已设置代理: ${config.proxy}`);
+    }).catch(err => {
+      log.error(`[Proxy] Session ${session.partition || 'default'} 设置代理失败:`, err);
+    });
+  }
+});

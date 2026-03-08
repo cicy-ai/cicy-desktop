@@ -177,7 +177,7 @@ function createWindow(options = {}, accountIdx = 0, forceNew = false) {
   if (config.proxy) {
     const proxyConfig = {
       proxyRules: config.proxy,
-      proxyBypassRules: '<local>' // 本地地址不走代理
+      // proxyBypassRules removed
     };
     ses.setProxy(proxyConfig).then(() => {
       console.log(`[Proxy] Account ${accountIdx} 已设置代理: ${config.proxy}`);
