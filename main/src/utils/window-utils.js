@@ -168,13 +168,13 @@ function createWindow(options = {}, accountIdx = 0, forceNew = false) {
   // ✅ 核心修正：获取当前窗口真正使用的那个 session
   const ses = win.webContents.session;
 
-  // 设置代理（如果配置了）
-  const { config } = require('../config');
-  if (config.proxy) {
-    ses.setProxy({ proxyRules: config.proxy }).then(() => {
-      console.log(`[Proxy] 已设置代理: ${config.proxy}`);
+  // 设置代理（优先使用窗口级别的 proxy 参数，其次使用全局配置）
+  const proxyToUse = proxy || config.proxy;
+  if (proxyToUse) {
+    ses.setProxy({ proxyRules: proxyToUse }).then(() => {
+      console.log(`[Proxy] Window ${win.id} 已设置代理: ${proxyToUse}`);
     }).catch(err => {
-      console.error(`[Proxy] 设置代理失败:`, err);
+      console.error(`[Proxy] Window ${win.id} 设置代理失败:`, err);
     });
   }
 
