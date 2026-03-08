@@ -92,7 +92,7 @@ function setupWindowHandlers(win) {
 }
 
 function createWindow(options = {}, accountIdx = 0, forceNew = false) {
-  const { width = 1200, height = 800, url, webPreferences = {}, x, y, proxy } = options;
+  const { width = 1200, height = 800, url, webPreferences = {}, x, y, proxy, isolateSession = false } = options;
 
   // Check if oneWindow mode is enabled - execute before coordinate logic
   if (config.oneWindow && !forceNew) {
@@ -157,7 +157,7 @@ function createWindow(options = {}, accountIdx = 0, forceNew = false) {
       nodeIntegration: false,
       contextIsolation: true,
       webviewTag: true,
-      partition: `persist:sandbox-${accountIdx}`,
+      partition: isolateSession ? `persist:isolated-${Date.now()}` : `persist:sandbox-${accountIdx}`,
       ...webPreferences,
     },
   });
