@@ -6,7 +6,6 @@ if (process.platform === "linux") {
   // electronApp.commandLine.appendSwitch("disable-setuid-sandbox");
   electronApp.commandLine.appendSwitch("log-level", "3");
   electronApp.commandLine.appendSwitch("disable-notifications");
-  electronApp.commandLine.appendSwitch("proxy-server", "127.0.0.1:8888");
   electronApp.commandLine.appendSwitch("ignore-certificate-errors");
   electronApp.commandLine.appendSwitch("disable-http-cache");
   electronApp.commandLine.appendSwitch("disable-application-cache");
@@ -36,6 +35,10 @@ setupErrorHandlers();
 // Parse arguments
 const { PORT, START_URL, PROXY, oneWindow } = parseArgs();
 config.port = PORT;
+if (PROXY) {
+  config.proxy = PROXY;
+  log.info(`[MCP] Global proxy enabled: ${PROXY}`);
+}
 if (oneWindow) {
   config.oneWindow = true;
   log.info("[MCP] Single window mode enabled");
