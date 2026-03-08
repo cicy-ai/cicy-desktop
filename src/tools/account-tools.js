@@ -148,4 +148,47 @@ module.exports = (registerTool) => {
     },
     { tag: "Account" }
   );
-};
+
+  // 设置账户代理
+  registerTool(
+    "set_account_proxy",
+    "为指定账户设置代理，该账户下所有窗口都会使用此代理",
+    z.object({
+      accountIdx: z.number().describe("账户索引"),
+      proxy: z.string().optional().describe("代理地址，如 http://127.0.0.1:8888，留空则清除代理"),
+    }),
+    async ({ accountIdx, proxy }) => {
+      try {
+        const { session } = require("electron");
+        const ses = session.fromPartition(`persist:sandbox-${accountIdx}`);
+
+        if (proxy) {
+          await ses.setProxy({ proxyRules: proxy });
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({ success: true, accountIdx, proxy }, null, 2),
+              },
+            ],
+          };
+        } else {
+          await ses.setProxy({ proxyRules: "" });
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({ success: true, accountIdx, proxy: "cleared" }, null, 2),
+              },
+            ],
+          };
+        }
+      } catch (error) {
+        return {
+          content: [{ type: "text", text: `Error: ${error.message}` }],
+          isError: true,
+        };
+      }
+    },
+    { tag: "Account" }
+  );};
