@@ -168,6 +168,16 @@ function createWindow(options = {}, accountIdx = 0, forceNew = false) {
   // ✅ 核心修正：获取当前窗口真正使用的那个 session
   const ses = win.webContents.session;
 
+  // 设置代理（如果配置了）
+  const { config } = require('../config');
+  if (config.proxy) {
+    ses.setProxy({ proxyRules: config.proxy }).then(() => {
+      console.log(`[Proxy] 已设置代理: ${config.proxy}`);
+    }).catch(err => {
+      console.error(`[Proxy] 设置代理失败:`, err);
+    });
+  }
+
   ses.setPermissionRequestHandler((webContents, permission, callback) => {
     // 允许麦克风权限（语音输入需要）
     if (permission === "media") {
