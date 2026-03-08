@@ -175,7 +175,11 @@ function createWindow(options = {}, accountIdx = 0, forceNew = false) {
 
   // 设置代理（如果全局配置了）
   if (config.proxy) {
-    ses.setProxy({ proxyRules: config.proxy }).then(() => {
+    const proxyConfig = {
+      proxyRules: config.proxy,
+      proxyBypassRules: '<local>' // 本地地址不走代理
+    };
+    ses.setProxy(proxyConfig).then(() => {
       console.log(`[Proxy] Account ${accountIdx} 已设置代理: ${config.proxy}`);
     }).catch(err => {
       console.error(`[Proxy] Account ${accountIdx} 设置代理失败:`, err);
