@@ -1,7 +1,8 @@
-const { app, BrowserWindow } = require("electron");
+const { app, BrowserWindow, Menu } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
+const log = require("electron-log");
 const { config } = require("../config");
 const { initWindowMonitoring } = require("./window-monitor");
 const { loadWindowState, watchWindowState } = require("./window-state");
@@ -17,8 +18,8 @@ function setupWindowHandlers(win) {
   initWindowMonitoring(win);
 
   // 🔥 确保窗口可以正常关闭 + 添加日志
-  win.on('close', () => {
-    console.log(`[Window ${win.id}] Close event triggered: ${win.getTitle()}`);
+  win.on("close", () => {
+    log.info(`[Window ${win.id}] Close event triggered: ${win.getTitle()}`);
   });
 
   // 🔥 全局下载处理 - 自动保存到 ~/Downloads/electron/
@@ -33,13 +34,35 @@ function setupWindowHandlers(win) {
           const savePath = path.join(app.getPath("home"), "Downloads", "electron", filename);
           fs.mkdirSync(path.dirname(savePath), { recursive: true });
           item.setSavePath(savePath);
-          console.log(`[Auto Download] ${filename} -> ${savePath}`);
+          log.info(`[Auto Download] ${filename} -> ${savePath}`);
         }
       }, 0);
     });
   }
 
   win.webContents.on("dom-ready", async () => {
+    // Auto-inject electronRPC for trusted URLs
+    const pageUrl = win.webContents.getURL();
+    try {
+      const u = new URL(pageUrl);
+      if (u.hostname === "localhost" || u.hostname.endsWith(".de5.net")) {
+        const rpcCode = `
+          if (!window.electronRPC) {
+            try {
+              const { ipcRenderer } = require('electron');
+              window.electronRPC = (tool, args) => ipcRenderer.invoke('rpc', tool, args || {});
+              console.log('[RPC] electronRPC ready');
+            } catch(e) {}
+          }
+        `;
+        if (win.webContents.debugger.isAttached()) {
+          await win.webContents.debugger.sendCommand("Runtime.evaluate", { expression: rpcCode });
+        } else {
+          await win.webContents.executeJavaScript(rpcCode);
+        }
+      }
+    } catch(e) { log.error("[RPC inject]", e.message); }
+
     try {
       // 1. 获取当前页面的根域名
       const currentURL = win.webContents.getURL();
@@ -74,7 +97,7 @@ function setupWindowHandlers(win) {
         const defaultInjectPath = path.join(__dirname, "..", "extension", "inject.js");
         domainCode = fs.readFileSync(defaultInjectPath, "utf-8");
         fs.writeFileSync(injectFile, domainCode, "utf-8");
-        console.log(`[DomReady] Created inject script for ${domain}`);
+        log.info(`[DomReady] Created inject script for ${domain}`);
       } else {
         domainCode = fs.readFileSync(injectFile, "utf-8");
       }
@@ -85,26 +108,35 @@ function setupWindowHandlers(win) {
           try {
             ${domainCode}
           } catch(e) {
-            console.error('Domain inject error:', e);
+            log.error('Domain inject error:', e);
           }
         })()
       `);
-      console.log(`[DomReady] Injected script for ${domain}`);
+      log.info(`[DomReady] Injected script for ${domain}`);
     } catch (error) {
-      console.error("[DomReady] Error:", error);
+      log.error("[DomReady] Error:", error);
     }
   });
 }
 
+function isTrustedUrl(url) {
+  if (!url) return false;
+  try {
+    const u = new URL(url);
+    return u.hostname === "localhost" || u.hostname.endsWith(".de5.net");
+  } catch { return false; }
+}
+
 function createWindow(options = {}, accountIdx = 0, forceNew = false) {
   const { width = 1200, height = 800, url, webPreferences = {}, x, y } = options;
+  console.log("[createWindow] url:", url, "isTrusted:", isTrustedUrl(url));
 
   // Check if oneWindow mode is enabled - execute before coordinate logic
   if (config.oneWindow && !forceNew) {
     const allWindows = BrowserWindow.getAllWindows();
     if (allWindows.length > 0) {
       const existingWin = allWindows[0];
-      console.log(
+      log.info(
         `[WindowUtils] Single window mode enabled. Reusing existing window ${existingWin.id}`
       );
 
@@ -114,7 +146,7 @@ function createWindow(options = {}, accountIdx = 0, forceNew = false) {
       if (url) {
         const currentUrl = existingWin.webContents.getURL();
         if (currentUrl === url) {
-          console.log(`[WindowUtils] Same URL detected, reloading page`);
+          log.info(`[WindowUtils] Same URL detected, reloading page`);
           existingWin.webContents.reload();
         } else {
           existingWin.loadURL(url);
@@ -137,7 +169,7 @@ function createWindow(options = {}, accountIdx = 0, forceNew = false) {
   if (x === undefined && y === undefined && savedState) {
     posX = savedState.x;
     posY = savedState.y;
-    console.log(`[WindowState] Restored position for ${url}: ${posX},${posY}`);
+    log.info(`[WindowState] Restored position for ${url}: ${posX},${posY}`);
   } else if (posX === undefined || posY === undefined) {
     const allWindows = BrowserWindow.getAllWindows();
     const offset = allWindows.length * 30; // 每个窗口偏移30px
@@ -149,7 +181,7 @@ function createWindow(options = {}, accountIdx = 0, forceNew = false) {
   if (width === 1200 && height === 800 && savedState) {
     winWidth = savedState.width;
     winHeight = savedState.height;
-    console.log(`[WindowState] Restored size for ${url}: ${winWidth}x${winHeight}`);
+    log.info(`[WindowState] Restored size for ${url}: ${winWidth}x${winHeight}`);
   }
 
   const win = new BrowserWindow({
@@ -158,11 +190,15 @@ function createWindow(options = {}, accountIdx = 0, forceNew = false) {
     x: posX,
     y: posY,
     webPreferences: {
-      webviewTag:true,
+      webviewTag: true,
       offscreen: false, // 确保不是离屏渲染
-      nodeIntegration: false,
-      contextIsolation: true,
+      nodeIntegration: isTrustedUrl(url),
+      contextIsolation: !isTrustedUrl(url),
       partition: `persist:sandbox-${accountIdx}`,
+      // 启用剪贴板权限
+      enableClipboard: true,
+      // 允许 webview 访问剪贴板
+      webSecurity: false, // 在开发环境中可以考虑禁用，生产环境需要谨慎
       ...webPreferences,
     },
   });
@@ -179,25 +215,35 @@ function createWindow(options = {}, accountIdx = 0, forceNew = false) {
       proxyRules: config.proxy,
       // proxyBypassRules removed
     };
-    ses.setProxy(proxyConfig).then(() => {
-      console.log(`[Proxy] Account ${accountIdx} 已设置代理: ${config.proxy}`);
-    }).catch(err => {
-      console.error(`[Proxy] Account ${accountIdx} 设置代理失败:`, err);
-    });
+    ses
+      .setProxy(proxyConfig)
+      .then(() => {
+        log.info(`[Proxy] Account ${accountIdx} 已设置代理: ${config.proxy}`);
+      })
+      .catch((err) => {
+        log.error(`[Proxy] Account ${accountIdx} 设置代理失败:`, err);
+      });
   }
   ses.setPermissionRequestHandler((webContents, permission, callback) => {
     // 允许麦克风权限（语音输入需要）
     if (permission === "media") {
-      console.log(`[Permission] 已自动允许: ${permission}`);
+      log.info(`[Permission] 已自动允许: ${permission}`);
       return callback(true);
     }
-    console.log(`[Permission] 已自动拒绝: ${permission}`);
+    // 允许剪贴板权限
+    if (permission === "clipboard-read" || permission === "clipboard-write") {
+      log.info(`[Permission] 已自动允许剪贴板权限: ${permission}`);
+      return callback(true);
+    }
+    log.info(`[Permission] 已自动拒绝: ${permission}`);
     return callback(false);
   });
 
   // 💡 额外保险：处理权限检查（某些新版 Electron 需要这个）
   ses.setPermissionCheckHandler((webContents, permission, originatingOrigin) => {
     if (permission === "media") return true;
+    // 允许剪贴板权限检查
+    if (permission === "clipboard-read" || permission === "clipboard-write") return true;
     return false;
   });
 

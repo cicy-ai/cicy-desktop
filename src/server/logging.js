@@ -12,8 +12,8 @@ function setupLogging(config) {
   config.logFilePath = path.join(logsDir, `electron-mcp-${config.port}.log`);
 
   log.transports.file.resolvePathFn = () => config.logFilePath;
-  log.transports.file.format = "[{y}-{m}-{d} {h}:{i}:{s}.{ms}] [{level}] {text}";
-  log.transports.console.format = "[{y}-{m}-{d} {h}:{i}:{s}.{ms}] [{level}] {text}";
+  log.transports.file.format = "{y}-{m}-{d} {h}:{i}:{s}.{ms} [{level}] {text}";
+  log.transports.console.format = "{y}-{m}-{d} {h}:{i}:{s}.{ms} [{level}] {text}";
 }
 
 function getCallerInfo() {
@@ -36,22 +36,22 @@ function wrapLogger() {
 
   log.info = (...args) => {
     const caller = getCallerInfo();
-    originalInfo(` ${args.join(" ")} (${caller})`);
+    originalInfo(args.join(" ") + (caller ? ` (${caller})` : ""));
   };
 
   log.error = (...args) => {
     const caller = getCallerInfo();
-    originalError(` ${args.join(" ")} (${caller})`);
+    originalError(args.join(" ") + (caller ? ` (${caller})` : ""));
   };
 
   log.warn = (...args) => {
     const caller = getCallerInfo();
-    originalWarn(` ${args.join(" ")} (${caller})`);
+    originalWarn(args.join(" ") + (caller ? ` (${caller})` : ""));
   };
 
   log.debug = (...args) => {
     const caller = getCallerInfo();
-    originalDebug(` ${args.join(" ")} (${caller})`);
+    originalDebug(args.join(" ") + (caller ? ` (${caller})` : ""));
   };
 }
 

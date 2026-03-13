@@ -227,17 +227,17 @@ function registerTools(registerTool) {
         win.webContents.sendInputEvent({
           type: "keyDown",
           keyCode: "V",
-          modifiers: ["control"],
+          modifiers: [process.platform==="darwin"?"meta":"control"],
         });
         win.webContents.sendInputEvent({
           type: "char",
           keyCode: "V",
-          modifiers: ["control"],
+          modifiers: [process.platform==="darwin"?"meta":"control"],
         });
         win.webContents.sendInputEvent({
           type: "keyUp",
           keyCode: "V",
-          modifiers: ["control"],
+          modifiers: [process.platform==="darwin"?"meta":"control"],
         });
 
         // Wait for upload
@@ -308,9 +308,9 @@ function registerTools(registerTool) {
         `);
 
         // Paste image
-        win.webContents.sendInputEvent({ type: "keyDown", keyCode: "V", modifiers: ["control"] });
-        win.webContents.sendInputEvent({ type: "char", keyCode: "V", modifiers: ["control"] });
-        win.webContents.sendInputEvent({ type: "keyUp", keyCode: "V", modifiers: ["control"] });
+        win.webContents.sendInputEvent({ type: "keyDown", keyCode: "V", modifiers: [process.platform==="darwin"?"meta":"control"] });
+        win.webContents.sendInputEvent({ type: "char", keyCode: "V", modifiers: [process.platform==="darwin"?"meta":"control"] });
+        win.webContents.sendInputEvent({ type: "keyUp", keyCode: "V", modifiers: [process.platform==="darwin"?"meta":"control"] });
 
         // Wait for upload
         var startTime = Date.now();
@@ -376,6 +376,79 @@ function registerTools(registerTool) {
     },
     { tag: "Gemini" }
   );
+  // Gemini Vision - 识图工具 (调用现有 gemini-web RPC tools)
+  registerTool(
+    "gemini_vision",
+    "Use Gemini to analyze image",
+    z.object({
+      image: z.string().describe("Image URL or base64 data:image/png;base64,..."),
+      prompt: z.string().optional().default("Describe this image in detail").describe("Question about the image"),
+      win_id: z.number().optional().default(2).describe("Gemini window ID"),
+    }),
+    async ({ image, prompt, win_id }) => {
+      const fs = require('fs');
+      const https = require('https');
+      const http = require('http');
+      const { callTool } = require('../utils/tool-utils');
+      
+      try {
+        // 1. Save image to temp file
+        const tmpPath = `/tmp/vision-${Date.now()}.png`;
+        if (image.startsWith('data:')) {
+          const base64 = image.split(',')[1];
+          fs.writeFileSync(tmpPath, Buffer.from(base64, 'base64'));
+        } else if (image.startsWith('http')) {
+          await new Promise((resolve, reject) => {
+            const client = image.startsWith('https') ? https : http;
+            client.get(image, (res) => {
+              const stream = fs.createWriteStream(tmpPath);
+              res.pipe(stream);
+              stream.on('finish', () => { stream.close(); resolve(); });
+            }).on('error', reject);
+          });
+        } else {
+          throw new Error('Invalid image format');
+        }
+
+        // 2. Copy to clipboard
+        await callTool('file_to_clipboard', { path: tmpPath });
+
+        // 3. Paste to Gemini
+        await callTool('gemini_paste_image', { win_id });
+
+        // 4. Set prompt
+        await callTool('gemini_web_set_prompt', { win_id, text: prompt });
+
+        // 5. Send
+        await callTool('gemini_web_click_send', { win_id });
+
+        // 6. Wait for reply (poll every 2s, max 30s)
+        let reply = null;
+        for (let i = 0; i < 15; i++) {
+          await new Promise(r => setTimeout(r, 2000));
+          const result = await callTool('gemini_web_get_last_reply', { win_id });
+          const text = result?.content?.[0]?.text || '';
+          if (text.length > 10) {
+            reply = text;
+            break;
+          }
+        }
+
+        // Cleanup
+        fs.unlinkSync(tmpPath);
+
+        if (!reply) throw new Error('Timeout waiting for Gemini reply');
+
+        return {
+          content: [{ type: "text", text: JSON.stringify({ success: true, result: reply }, null, 2) }],
+        };
+      } catch (error) {
+        return { content: [{ type: "text", text: JSON.stringify({ success: false, error: error.message }, null, 2) }], isError: true };
+      }
+    },
+    { tag: "Gemini" }
+  );
+
 }
 
 module.exports = registerTools;

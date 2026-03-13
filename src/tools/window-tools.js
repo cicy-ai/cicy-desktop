@@ -1,4 +1,5 @@
 const { BrowserWindow } = require("electron");
+const log = require("electron-log");
 const { z } = require("zod");
 const {
   initWindowMonitoring,
@@ -311,17 +312,24 @@ function registerTools(registerTool) {
           logs = logs.filter((log) => log.level === level);
         }
 
+        // 按时间倒序排列（最新的在前）
+        logs = [...logs].sort((a, b) => b.timestamp - a.timestamp);
+
         const start = (page - 1) * page_size;
         const end = start + page_size;
         const paginated = logs.slice(start, end);
-        
+
         const header = `Console Logs (${logs.length} total, page ${page}/${Math.ceil(logs.length / page_size) || 1}):\n`;
-        const logLines = paginated.map(log => {
-          const time = new Date(log.timestamp).toLocaleTimeString('en-US', { hour12: false });
-          const source = log.source ? ` (${log.source}:${log.line})` : '';
-          return `#${log.index} [${time}] [${log.level}] ${log.message}${source}`;
-        }).join('\n');
-        
+        const logLines = paginated
+          .map((log) => {
+            const time = new Date(log.timestamp).toISOString().replace("T", " ").substring(0, 23);
+            const source = log.source ? ` (${log.source.split("/").pop()}:${log.line})` : "";
+            const level = log.level.toUpperCase().padEnd(7);
+            const msg = log.message.replace(/\n/g, " ").substring(0, 200);
+            return `${time} ${level} ${msg}${source}`;
+          })
+          .join("\n");
+
         return { content: [{ type: "text", text: header + logLines }] };
       } catch (error) {
         return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
@@ -562,7 +570,7 @@ function registerTools(registerTool) {
               item.on("updated", (event, state) => {
                 const received = item.getReceivedBytes();
                 const total = item.getTotalBytes();
-                console.log(`Downloading: ${received} / ${total} bytes`);
+                log.info(`Downloading: ${received} / ${total} bytes`);
               });
 
               item.once("done", (event, state) => {

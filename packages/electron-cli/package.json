@@ -1,0 +1,33 @@
+{
+  "name": "electron-cli",
+  "version": "1.0.3",
+  "description": "Lightweight MCP RPC CLI tool with YAML/JSON support",
+  "bin": {
+    "electron-cli": "./bin/electron-cli"
+  },
+  "scripts": {
+    "test": "echo \"No tests yet\""
+  },
+  "keywords": [
+    "mcp",
+    "rpc",
+    "cli",
+    "yaml",
+    "electron-mcp"
+  ],
+  "author": "cicybot",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cicy-dev/electron-mcp.git",
+    "directory": "packages/electron-cli"
+  },
+  "homepage": "https://github.com/cicy-dev/electron-mcp#readme",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "preferGlobal": true,
+  "dependencies": {
+    "local": "^0.3.3"
+  }
+}

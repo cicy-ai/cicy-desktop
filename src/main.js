@@ -1,4 +1,41 @@
 const { app: electronApp } = require("electron");
+const { default: contextMenu } = require("electron-context-menu");
+
+  // 🎯 添加右键上下文菜单
+  contextMenu({
+    showLookUpSelection: true,
+    showSearchWithGoogle: true,
+    showCopyImage: true,
+    showCopyImageAddress: true,
+    showSaveImageAs: true,
+    showCopyVideoAddress: true,
+    showSaveVideoAs: true,
+    showCopyLink: true,
+    showSaveLinkAs: true,
+    showInspectElement: true,
+    showServices: true,
+    labels: {
+      cut: '剪切',
+      copy: '复制',
+      paste: '粘贴',
+      selectAll: '全选',
+      reload: '重新加载',
+      forceReload: '强制重新加载',
+      toggleDevTools: '切换开发者工具',
+      inspectElement: '检查元素',
+      services: '服务',
+      lookUpSelection: '查找选中内容',
+      searchWithGoogle: '用 Google 搜索',
+      copyImage: '复制图片',
+      copyImageAddress: '复制图片地址',
+      saveImage: '保存图片',
+      copyVideoAddress: '复制视频地址',
+      saveVideo: '保存视频',
+      copyLink: '复制链接',
+      saveLinkAs: '链接另存为...'
+    }
+  });
+
 
 // Setup Electron flags IMMEDIATELY after require
 electronApp.commandLine.appendSwitch("ignore-certificate-errors");
@@ -293,6 +330,27 @@ const server = http.createServer(app);
 electronApp.commandLine.appendSwitch("remote-debugging-port", "9221");
 log.info("[MCP] Remote debugging enabled on port 9221");
 
+// IPC Bridge: expose all RPC tools to renderer via ipcMain.handle
+const { ipcMain } = require("electron");
+ipcMain.handle("rpc", async (event, toolName, args) => {
+  console.log("[IPC Bridge] called:", toolName, JSON.stringify(args));
+  try {
+  const toolModules = require("./tools");
+  let handler = null, schema = null;
+  toolModules.forEach((module) => {
+    module((name, desc, toolSchema, fn) => {
+      if (name === toolName) { handler = fn; schema = toolSchema; }
+    });
+  });
+  if (!handler) throw new Error("Tool '" + toolName + "' not found");
+  const validatedArgs = schema.parse(args || {});
+  const result = await handler(validatedArgs);
+  console.log("[IPC Bridge] success:", toolName);
+  return result;
+  } catch(e) { console.error("[IPC Bridge] error:", toolName, e.message); throw e; }
+});
+console.log("[IPC Bridge] All RPC tools available via ipcRenderer.invoke('rpc', toolName, args)");
+
 electronApp.whenReady().then(() => {
 
   // 为 webview partition 设置代理
@@ -314,7 +372,7 @@ electronApp.whenReady().then(() => {
     log.info(`[MCP] REST API docs: http://localhost:${PORT}/docs`);
     log.info(`[MCP] Remote debugger: http://localhost:9221`);
 
-          createWindow({ url: START_URL ||"https://ide.cicy.de5.net/ttyd/w-20083/?token=gcp_200898"}, 0);
+      createWindow({ url: START_URL ||"https://ide.cicy.de5.net"}, 0);
 
   });
 });

@@ -1,13 +1,12 @@
 {
-  "name": "electron-rcp",
-  "version": "1.0.2",
-  "description": "Electron-based MCP server for browser automation and system control",
+  "name": "cicy",
+  "version": "1.0.4",
+  "description": "CiCy - AI-powered operating system browser",
   "main": "src/main.js",
   "bin": {
-    "electron-rpc": "./bin/electron-rpc"
+    "cicy": "./bin/cicy"
   },
   "scripts": {
-    "preinstall": "bash bin/preinstall.sh",
     "start": "electron .",
     "format": "prettier --write \"src/**/*.js\" \"tests/**/*.js\"",
     "format:check": "prettier --check \"src/**/*.js\" \"tests/**/*.js\"",
@@ -41,19 +40,20 @@
     }
   },
   "keywords": [
+    "cicy",
+    "ai",
+    "browser",
     "electron",
-    "mcp",
-    "web-scraping",
-    "capture",
-    "cdp"
+    "mcp"
   ],
-  "author": "AI Clone Generator",
+  "author": "cicybot",
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.3",
     "chrome-remote-interface": "^0.33.0",
     "cors": "^2.8.5",
-    "curl-rpc": "^1.0.3",
+    "electron-cli": "^1.0.3",
+    "electron-context-menu": "^4.0.4",
     "electron-log": "^5.2.4",
     "express": "^4.18.2",
     "js-beautify": "^1.15.4",

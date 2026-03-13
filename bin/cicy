@@ -5,8 +5,8 @@ const fs = require('fs');
 const os = require('os');
 
 const HOME = os.homedir();
-const PID_FILE = path.join(HOME, '.electron-mcp.pid');
-const LOG_FILE = path.join(HOME, 'logs', 'electron-mcp.log');
+const PID_FILE = path.join(HOME, '.cicy.pid');
+const LOG_FILE = path.join(HOME, 'logs', 'cicy.log');
 const PACKAGE_ROOT = path.join(__dirname, '..');
 
 const command = process.argv[2];
@@ -32,7 +32,7 @@ function isRunning(pid) {
 function start() {
   const pid = getPid();
   if (pid && isRunning(pid)) {
-    console.log(`✅ electron-mcp is already running (PID: ${pid})`);
+    console.log(`✅ cicy is already running (PID: ${pid})`);
     return;
   }
 
@@ -47,14 +47,14 @@ function start() {
   child.unref();
   fs.writeFileSync(PID_FILE, child.pid.toString());
   
-  console.log(`✅ electron-mcp started (PID: ${child.pid})`);
+  console.log(`✅ cicy started (PID: ${child.pid})`);
   console.log(`📝 Logs: ${LOG_FILE}`);
 }
 
 function stop() {
   const pid = getPid();
   if (!pid || !isRunning(pid)) {
-    console.log('❌ electron-mcp is not running');
+    console.log('❌ cicy is not running');
     fs.existsSync(PID_FILE) && fs.unlinkSync(PID_FILE);
     return;
   }
@@ -62,7 +62,7 @@ function stop() {
   try {
     process.kill(pid, 'SIGTERM');
     fs.unlinkSync(PID_FILE);
-    console.log(`✅ electron-mcp stopped (PID: ${pid})`);
+    console.log(`✅ cicy stopped (PID: ${pid})`);
   } catch (err) {
     console.error(`❌ Failed to stop: ${err.message}`);
   }
@@ -71,10 +71,10 @@ function stop() {
 function status() {
   const pid = getPid();
   if (pid && isRunning(pid)) {
-    console.log(`✅ electron-mcp is running (PID: ${pid})`);
+    console.log(`✅ cicy is running (PID: ${pid})`);
     console.log(`📝 Logs: ${LOG_FILE}`);
   } else {
-    console.log('❌ electron-mcp is not running');
+    console.log('❌ cicy is not running');
     fs.existsSync(PID_FILE) && fs.unlinkSync(PID_FILE);
   }
 }
@@ -99,6 +99,6 @@ switch (command) {
   case 'restart': restart(); break;
   case 'logs': logs(); break;
   default:
-    console.log('Usage: electron-rpc <start|stop|status|restart|logs>');
+    console.log('Usage: cicy <start|stop|status|restart|logs>');
     process.exit(1);
 }

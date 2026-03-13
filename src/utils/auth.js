@@ -10,8 +10,8 @@ const log = require("electron-log");
 class AuthManager {
   constructor() {
     this.authToken = this.getOrGenerateToken();
-    console.log("[MCP] Auth token enabled");
-    console.log("[MCP] Token saved to ~/data/electron/token.txt");
+    log.info("[MCP] Auth token enabled");
+    log.info("[MCP] Token saved to ~/data/electron/token.txt");
   }
 
   /**
@@ -26,7 +26,7 @@ class AuthManager {
       if (fs.existsSync(tokenPath)) {
         const token = fs.readFileSync(tokenPath, "utf8").trim();
         if (token) {
-          console.log("[MCP] Using existing token from", tokenPath);
+          log.info("[MCP] Using existing token from", tokenPath);
           return token;
         }
       }
@@ -35,10 +35,10 @@ class AuthManager {
       const newToken = crypto.randomBytes(32).toString("hex");
       fs.mkdirSync(path.dirname(tokenPath), { recursive: true });
       fs.writeFileSync(tokenPath, newToken);
-      console.log("[MCP] Generated new token and saved to", tokenPath);
+      log.info("[MCP] Generated new token and saved to", tokenPath);
       return newToken;
     } catch (error) {
-      console.error("[MCP] Token management error:", error);
+      log.error("[MCP] Token management error:", error);
       return crypto.randomBytes(32).toString("hex"); // fallback
     }
   }

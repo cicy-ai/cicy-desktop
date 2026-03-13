@@ -23,12 +23,10 @@ function setupElectronFlags() {
 function setupErrorHandlers() {
   process.on("uncaughtException", (error) => {
     log.error("[Uncaught Exception]", error);
-    console.error("[Uncaught Exception]", error);
   });
 
   process.on("unhandledRejection", (reason, promise) => {
     log.error("[Unhandled Rejection]", reason);
-    console.error("[Unhandled Rejection]", reason);
   });
 }
 

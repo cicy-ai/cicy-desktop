@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const crypto = require("crypto");
+const log = require("electron-log");
 
 const STATE_DIR = path.join(os.homedir(), "data", "electron", "state");
 
@@ -36,11 +37,11 @@ function loadWindowState(accountIdx, url) {
     const statePath = getStatePath(accountIdx, urlHash);
     if (fs.existsSync(statePath)) {
       const state = JSON.parse(fs.readFileSync(statePath, "utf8"));
-      console.log(`[WindowState] Loaded state for ${accountIdx}-${urlHash} (${url})`);
+      log.info(`[WindowState] Loaded state for ${accountIdx}-${urlHash} (${url})`);
       return state;
     }
   } catch (error) {
-    console.error(`[WindowState] Failed to load state:`, error);
+    log.error(`[WindowState] Failed to load state:`, error);
   }
   return null;
 }
@@ -53,9 +54,9 @@ function saveWindowState(accountIdx, url, state) {
     const statePath = getStatePath(accountIdx, urlHash);
     const stateWithUrl = { ...state, url, domain: new URL(url).hostname };
     fs.writeFileSync(statePath, JSON.stringify(stateWithUrl, null, 2), "utf8");
-    console.log(`[WindowState] Saved state for ${accountIdx}-${urlHash}`);
+    log.info(`[WindowState] Saved state for ${accountIdx}-${urlHash}`);
   } catch (error) {
-    console.error(`[WindowState] Failed to save state:`, error);
+    log.error(`[WindowState] Failed to save state:`, error);
   }
 }
 
@@ -66,10 +67,10 @@ function removeWindowState(accountIdx, url) {
     const statePath = getStatePath(accountIdx, urlHash);
     if (fs.existsSync(statePath)) {
       fs.unlinkSync(statePath);
-      console.log(`[WindowState] Removed state for ${accountIdx}-${urlHash}`);
+      log.info(`[WindowState] Removed state for ${accountIdx}-${urlHash}`);
     }
   } catch (error) {
-    console.error(`[WindowState] Failed to remove state:`, error);
+    log.error(`[WindowState] Failed to remove state:`, error);
   }
 }
 

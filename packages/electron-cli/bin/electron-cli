@@ -1,0 +1,375 @@
+#!/bin/bash
+# electron-cli - 轻量级 MCP RPC 调用工具，默认 YAML 格式
+
+set -o pipefail
+
+VERSION="1.0.3"
+
+# 默认配置
+ELECTRON_MCP_URL="${ELECTRON_MCP_URL:-http://localhost:8101}"
+
+# 显示帮助信息
+show_help() {
+  cat << 'EOF'
+electron-cli - 轻量级 Electron MCP RPC 命令行工具
+
+安装:
+  npm install -g electron-cli
+
+用法: electron-cli <command> [options]
+
+命令:
+  init                          初始化配置
+  tools [--full]                列出所有工具
+  tools <tool_name>             查看工具详情
+  <tool_name> [key=value ...]   调用工具
+
+选项:
+  --json, -j                    使用 JSON 格式
+  --help, -h                    显示帮助
+  --version, -v                 显示版本
+
+环境变量:
+  ELECTRON_MCP_NODE=0           选择节点 (0, 1, 2, ...)
+  DEBUG=1                       输出调试信息 (curl -v)
+
+配置: ~/data/electron/electron-cli.json
+
+示例:
+  electron-cli init                 初始化配置
+  electron-cli tools                列出所有工具
+  electron-cli tools ping           查看 ping 工具详情
+  electron-cli ping                 测试连接
+  electron-cli open_window url=https://example.com
+
+详细文档: https://github.com/cicy-dev/electron-mcp/blob/main/packages/electron-cli/README.md
+EOF
+  exit 0
+}
+if [ -z "$1" ]; then
+  echo "❌ Error: Missing arguments"
+  echo ""
+  show_help
+  exit 1
+fi
+
+# 显示帮助
+if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+  show_help
+  exit 0
+fi
+
+# 检查版本参数
+if [ "$1" = "--version" ] || [ "$1" = "-v" ]; then
+  echo "electron-cli version $VERSION"
+  exit 0
+fi
+
+# init 命令 - 初始化配置
+if [ "$1" = "init" ]; then
+  CONFIG_FILE=~/data/electron/electron-cli.json
+  
+  if [ ! -f "$CONFIG_FILE" ]; then
+    echo "ℹ️  Creating new electron-cli.json with default configuration..."
+    mkdir -p ~/data/electron
+    cat > "$CONFIG_FILE" << EOF
+[
+  {
+    "api_token": "",
+    "base_url": "$ELECTRON_MCP_URL"
+  }
+]
+EOF
+    echo "✅ Created: $CONFIG_FILE"
+    echo "📋 Configuration: [{\"api_token\": \"***\", \"base_url\": \"$ELECTRON_MCP_URL\"}]"
+    echo "🔧 Set ELECTRON_MCP_NODE=0 to use this configuration"
+    echo "📝 Please edit $CONFIG_FILE to add your api_token"
+    exit 0
+  fi
+
+  # 读取配置
+  CONFIG=$(cat "$CONFIG_FILE")
+  TOTAL_NODES=$(echo "$CONFIG" | jq length)
+
+  # 检查 ELECTRON_MCP_NODE 环境变量
+  if [ -n "$ELECTRON_MCP_NODE" ]; then
+    NODE_INDEX=$ELECTRON_MCP_NODE
+    if [ "$NODE_INDEX" -ge "$TOTAL_NODES" ]; then
+      echo "❌ Error: ELECTRON_MCP_NODE=$NODE_INDEX out of range (0-$((TOTAL_NODES-1)))"
+      exit 1
+    fi
+  else
+    NODE_INDEX=0
+  fi
+
+  # 获取指定节点配置
+  NODE_CONFIG=$(echo "$CONFIG" | jq -r --argjson idx "$NODE_INDEX" '.[$idx]')
+  API_TOKEN=$(echo "$NODE_CONFIG" | jq -r '.api_token')
+  BASE_URL=$(echo "$NODE_CONFIG" | jq -r '.base_url')
+
+  # 输出配置信息
+  if [ -n "$API_TOKEN" ] && [ "$API_TOKEN" != "null" ]; then
+    MASKED_TOKEN="${API_TOKEN:0:4}***...${API_TOKEN: -4}"
+  else
+    MASKED_TOKEN="(empty)"
+  fi
+  
+  echo "📋 Configuration: [{\"api_token\": \"$MASKED_TOKEN\", \"base_url\": \"$BASE_URL\"}]"
+  echo "🗂  Total nodes: $TOTAL_NODES"
+  echo "🔑 Token: $MASKED_TOKEN"
+  echo "🌐 URL: $BASE_URL"
+  echo "📁 Config Path: $CONFIG_FILE"
+  exit 0
+fi
+
+# tools 命令 - 列出所有工具
+if [ "$1" = "tools" ]; then
+  CONFIG_FILE=~/data/electron/electron-cli.json
+  TOKEN=$(jq -r '.[0].api_token' "$CONFIG_FILE")
+  BASE_URL=$(jq -r '.[0].base_url' "$CONFIG_FILE")
+  
+  RESPONSE=$(curl --noproxy "*" -s -X GET "$BASE_URL/rpc/tools" \
+    -H "Accept: application/json" \
+    -H "Authorization: Bearer $TOKEN")
+  
+  # 查看单个工具详情
+  if [ -n "$2" ] && [ "$2" != "--full" ]; then
+    TOOL_NAME="$2"
+    TOOL_INFO=$(echo "$RESPONSE" | jq -r ".tools[] | select(.name == \"$TOOL_NAME\")")
+    if [ "$TOOL_INFO" = "null" ] || [ -z "$TOOL_INFO" ]; then
+      echo "Error: Tool '$TOOL_NAME' not found"
+      exit 1
+    fi
+    
+    NAME=$(echo "$TOOL_INFO" | jq -r '.name')
+    DESC=$(echo "$TOOL_INFO" | jq -r '.description')
+    echo "$NAME - $DESC"
+    
+    PROPS=$(echo "$TOOL_INFO" | jq -r 'if .inputSchema.properties == null then "{}" else .inputSchema.properties end')
+    REQUIRED=$(echo "$TOOL_INFO" | jq -r 'if .inputSchema.required == null then "" else [.inputSchema.required[]] | join(",") end')
+    
+    if [ "$PROPS" != "{}" ] && [ -n "$PROPS" ]; then
+      for key in $(echo "$PROPS" | jq -r 'keys[]'); do
+        PTYPE=$(echo "$PROPS" | jq -r ".$key.type")
+        PDEFAULT=$(echo "$PROPS" | jq -r ".$key.default // \"\"")
+        PDESC=$(echo "$PROPS" | jq -r ".$key.description // \"\"")
+        if echo ",$REQUIRED," | grep -q ",$key,"; then
+          echo "  - $key* ($PTYPE): $PDESC"
+        else
+          echo "  - $key? ($PTYPE): $PDESC"
+        fi
+        if [ -n "$PDEFAULT" ]; then
+          echo "    default: $PDEFAULT"
+        fi
+      done
+    fi
+    exit 0
+  fi
+  
+  # 检查是否有 --full 参数
+  if [ "$2" = "--full" ]; then
+    # 完整格式: name - desc\n  - param: desc
+    for tool in $(echo "$RESPONSE" | jq -r '.tools[] | @base64'); do
+      NAME=$(echo "$tool" | base64 -d | jq -r '.name')
+      DESC=$(echo "$tool" | base64 -d | jq -r '.description')
+      echo "$NAME - $DESC"
+      
+      PROPS=$(echo "$tool" | base64 -d | jq -r 'if .inputSchema.properties == null then "{}" else .inputSchema.properties end')
+      REQUIRED=$(echo "$tool" | base64 -d | jq -r 'if .inputSchema.required == null then "" else [.inputSchema.required[]] | join(",") end')
+      
+      if [ "$PROPS" != "{}" ] && [ -n "$PROPS" ]; then
+        for key in $(echo "$PROPS" | jq -r 'keys[]'); do
+          PTYPE=$(echo "$PROPS" | jq -r ".$key.type")
+          PDESC=$(echo "$PROPS" | jq -r ".$key.description // \"\"")
+          if echo ",$REQUIRED," | grep -q ",$key,"; then
+            echo "  - $key* ($PTYPE): $PDESC"
+          else
+            echo "  - $key? ($PTYPE): $PDESC"
+          fi
+        done
+      fi
+    done
+  else
+    # 简短格式: name - description
+    echo "$RESPONSE" | jq -r '.tools[] | .name + " - " + .description'
+  fi
+  exit 0
+fi
+
+
+USE_JSON=0
+
+# 检查是否是完整 method 格式 (xxx/yyy)
+if [[ "$1" =~ ^[a-z_]+/[a-z_]+ ]]; then
+  METHOD="$1"
+  shift
+  if [ "$1" = "--json" ] || [ "$1" = "-j" ]; then
+    USE_JSON=1
+    shift
+    PARAMS="$@"
+  else
+    PARAMS_INPUT="$@"
+  fi
+# 简化格式：工具名 + key=value 参数
+else
+  TOOL_NAME="$1"
+  shift
+  METHOD="tools/call"
+  
+  # 构建 YAML 参数
+  YAML_PARAMS="name: $TOOL_NAME"
+  
+  # 解析 key=value 参数
+  if [ $# -gt 0 ]; then
+    YAML_PARAMS="${YAML_PARAMS}\narguments:"
+    for arg in "$@"; do
+      if [[ "$arg" =~ ^([a-zA-Z_][a-zA-Z0-9_]*)=(.+)$ ]]; then
+        key="${BASH_REMATCH[1]}"
+        value="${BASH_REMATCH[2]}"
+        YAML_PARAMS="${YAML_PARAMS}\n  ${key}: ${value}"
+      else
+        echo "❌ Error: Invalid argument format: $arg"
+        echo "Expected: key=value"
+        exit 1
+      fi
+    done
+  fi
+  
+  PARAMS_INPUT=$(echo -e "$YAML_PARAMS")
+fi
+
+# 检查 electron-cli.json 配置文件
+CONFIG_FILE=~/data/electron/electron-cli.json
+if [ ! -f "$CONFIG_FILE" ]; then
+  echo "❌ Error: $CONFIG_FILE not found"
+  echo "Run 'electron-cli init' to initialize configuration"
+  exit 1
+fi
+
+# 读取配置
+CONFIG=$(cat "$CONFIG_FILE")
+TOTAL_NODES=$(echo "$CONFIG" | jq length)
+
+# 检查 ELECTRON_MCP_NODE 环境变量
+if [ -n "$ELECTRON_MCP_NODE" ]; then
+  NODE_INDEX=$ELECTRON_MCP_NODE
+  if [ "$NODE_INDEX" -ge "$TOTAL_NODES" ]; then
+    echo "❌ Error: ELECTRON_MCP_NODE=$NODE_INDEX out of range (0-$((TOTAL_NODES-1)))"
+    exit 1
+  fi
+else
+  NODE_INDEX=0
+fi
+
+# 获取指定节点配置
+NODE_CONFIG=$(echo "$CONFIG" | jq -r --argjson idx "$NODE_INDEX" '.[$idx]')
+TOKEN=$(echo "$NODE_CONFIG" | jq -r '.api_token')
+ELECTRON_MCP_URL=$(echo "$NODE_CONFIG" | jq -r '.base_url')
+
+if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+  echo "❌ Error: api_token is empty in $CONFIG_FILE"
+  echo "Please edit $CONFIG_FILE to add your api_token"
+  exit 1
+fi
+
+# 默认 YAML，转换为 JSON
+if [ "$USE_JSON" = "0" ]; then
+  # 检查是否安装了 yq
+  if ! command -v yq &> /dev/null; then
+    echo "❌ Error: yq not found. Install with: pip install yq --break-system-packages"
+    exit 1
+  fi
+  
+  # 转换 YAML 到 JSON，捕获错误
+  PARAMS=$(echo "$PARAMS_INPUT" | yq -c . 2>&1)
+  if [ $? -ne 0 ]; then
+    echo "❌ Error: Invalid YAML format"
+    echo "$PARAMS"
+    exit 1
+  fi
+  ACCEPT_HEADER="application/yaml"
+else
+  # 验证 JSON 格式
+  if ! echo "$PARAMS" | jq empty 2>/dev/null; then
+    echo "❌ Error: Invalid JSON format"
+    echo "$PARAMS"
+    exit 1
+  fi
+  ACCEPT_HEADER="application/json"
+fi
+
+# 检查服务是否运行
+if ! curl --noproxy "*" -s --connect-timeout 2 $ELECTRON_MCP_URL/rpc/tools/list \
+  -H "Authorization: Bearer $TOKEN" > /dev/null 2>&1; then
+  echo "❌ Error: Cannot connect to MCP server at $ELECTRON_MCP_URL"
+  echo "Please check if the server is running: ./service.sh status"
+  exit 1
+fi
+
+# 执行请求
+if [ "$DEBUG" = "1" ]; then
+  echo "====== DEBUG REQUEST ======"
+  echo "URL: $ELECTRON_MCP_URL/rpc/$METHOD"
+  echo "Headers:"
+  echo "  Content-Type: application/json"
+  echo "  Accept: $ACCEPT_HEADER"
+  echo "  Authorization: Bearer ${TOKEN:0:8}...${TOKEN: -8}"
+  echo "Body: $PARAMS"
+  echo "============================"
+  
+  curl --noproxy "*" -v -X POST $ELECTRON_MCP_URL/rpc/$METHOD \
+    -H "Content-Type: application/json" \
+    -H "Accept: $ACCEPT_HEADER" \
+    -H "Authorization: Bearer $TOKEN" \
+    -d "$PARAMS" 2>&1
+  exit 0
+else
+  RESPONSE=$(curl --noproxy "*" -s -w "\n%{http_code}" -X POST $ELECTRON_MCP_URL/rpc/$METHOD \
+    -H "Content-Type: application/json" \
+    -H "Accept: $ACCEPT_HEADER" \
+    -H "Authorization: Bearer $TOKEN" \
+    -d "$PARAMS" 2>&1)
+fi
+
+if [ $? -ne 0 ]; then
+  echo "❌ Error: curl command failed"
+  echo "$RESPONSE"
+  exit 1
+fi
+
+# 分离响应体和状态码
+HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+BODY=$(echo "$RESPONSE" | sed '$d')
+
+# 检查 HTTP 状态码
+if [ "$HTTP_CODE" != "200" ]; then
+  echo "❌ Error: HTTP $HTTP_CODE"
+  echo "$BODY"
+  exit 1
+fi
+
+# 检查是否有错误
+if echo "$BODY" | jq -e '.error' > /dev/null 2>&1; then
+  echo "❌ Error from server:"
+  echo "$BODY" | jq -r '.error'
+  exit 1
+fi
+
+# 输出结果
+echo "----------------"
+if [ "$USE_JSON" = "0" ]; then
+  echo "$BODY" | yq -r '.result.content[] | if .type == "text" then .text elif .type == "image" then "Image (\(.mimeType)): \(.data[:100])..." else . end' 2>&1
+  if [ $? -ne 0 ]; then
+    echo "❌ Error: Failed to parse response"
+    echo "$BODY"
+    exit 1
+  fi
+else
+  echo "$BODY" | jq -r '.result.content[] | if .type == "text" then .text elif .type == "image" then "Image (\(.mimeType)): \(.data[:100])..." else . end' 2>&1
+  if [ $? -ne 0 ]; then
+    echo "❌ Error: Failed to parse response"
+    echo "$BODY"
+    exit 1
+  fi
+fi
+echo "----------------"

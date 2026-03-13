@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const beautify = require("js-beautify");
+const log = require("electron-log");
 
 // 存储每个窗口的日志和请求
 const windowLogs = new Map();
@@ -202,7 +203,7 @@ function saveDataToFile(winId, url, content, type, contentType, isBinary, dataSi
     };
   } catch (error) {
     // 文件保存失败，返回错误信息
-    console.error(`[Window ${winId}] Failed to save file for ${url}:`, error.message);
+    log.error(`[Window ${winId}] Failed to save file for ${url}:`, error.message);
     return {
       __error: error.message,
       __url: url,
@@ -235,7 +236,7 @@ function saveRequestsToFile(winId) {
       fs.writeFileSync(queueFile, JSON.stringify(urls, null, 2));
       fs.writeFileSync(mapFile, JSON.stringify(Object.fromEntries(detailsMap), null, 2));
     } catch (e) {
-      console.error(`Failed to save requests for window ${winId}:`, e.message);
+      log.error(`Failed to save requests for window ${winId}:`, e.message);
     }
   }, 1000); // 1秒后保存
 }
@@ -310,9 +311,9 @@ function initWindowMonitoring(win) {
   // 立即启用网络监控（在任何请求之前）
   try {
     win.webContents.debugger.sendCommand("Network.enable");
-    console.log(`[Window ${winId}] Network monitoring enabled`);
+    log.info(`[Window ${winId}] Network monitoring enabled`);
   } catch (e) {
-    console.error(`[Window ${winId}] Failed to enable Network:`, e);
+    log.error(`[Window ${winId}] Failed to enable Network:`, e);
   }
 
   // 监听控制台日志
@@ -320,7 +321,7 @@ function initWindowMonitoring(win) {
     const logs = windowLogs.get(winId);
 
     const counters = windowIndexCounters.get(winId);
-    console.log(
+    log.info(
       `[${JSON.stringify({
         timestamp: Date.now(),
         level: ["verbose", "info", "warning", "error"][level] || "log",
@@ -433,11 +434,11 @@ function initWindowMonitoring(win) {
 
         // 打印包含 __vid 的请求
         if (params.request.url.includes("__vid")) {
-          console.log("\n=== REQUEST WITH __vid DETECTED ===");
-          console.log("URL:", params.request.url);
-          console.log("Method:", params.request.method);
-          console.log("Type:", params.type);
-          console.log("===================================\n");
+          log.info("\n=== REQUEST WITH __vid DETECTED ===");
+          log.info("URL:", params.request.url);
+          log.info("Method:", params.request.method);
+          log.info("Type:", params.type);
+          log.info("===================================\n");
         }
 
         requests.push({
