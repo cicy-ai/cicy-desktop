@@ -9,10 +9,10 @@
 bash skills/electron-mcp-service/electron-mcp-service.sh start
 
 # 验证服务
-curl-rpc "name: ping"
+cicy-rpc "name: ping"
 
 # 使用工具
-curl-rpc "
+cicy-rpc "
 name: open_window
 arguments:
   url: https://google.com

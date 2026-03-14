@@ -7,14 +7,14 @@
 - 使用 electron-mcp 服务器打开/加载 URL
 - 捕获包含 `__vid` 的视频真实地址
 - 使用 `session_download_url` 下载到 `~/Desktop/video`
-- 通过 `./skills/curl-rpc` 调用所有 RPC API
+- 通过 `./skills/cicy-rpc` 调用所有 RPC API
 - 在 `skills/download-douyin-video/` 中编写测试
 - 提供详细使用文档和技能描述
 
 ## 实现方案
 
 ### 技术路径
-1. 使用 `curl-rpc` 调用 electron-mcp 的 MCP 工具
+1. 使用 `cicy-rpc` 调用 electron-mcp 的 MCP 工具
 2. 打开抖音视频页面，等待加载完成
 3. 使用 `get_requests` 或 `filter_requests` 捕获包含 `__vid` 的视频 URL
 4. 调用 `session_download_url` 下载视频
@@ -66,7 +66,7 @@ skills/
 
 - [x] 功能正常工作：能成功下载抖音视频
 - [x] 所有测试通过：`bash skills/download-douyin-video/tests/test-download.sh`
-- [x] 代码符合规范：使用 curl-rpc，遵循项目风格
+- [x] 代码符合规范：使用 cicy-rpc，遵循项目风格
 - [x] 文档已更新：README 和详细文档完整
 - [x] 错误处理完善：网络失败、视频不存在等情况
 
@@ -81,7 +81,7 @@ skills/
 - ✅ 编写测试脚本 tests/test-download.sh
 - ✅ 创建 README.md 快速使用指南
 - ✅ 创建 download-douyin-video.md 详细文档
-- ✅ 修正 curl-rpc 路径问题
+- ✅ 修正 cicy-rpc 路径问题
 - ✅ 所有基础测试通过
 - ✅ 更新 SKILLS-LIST.md
 - ✅ 提交代码到远程仓库

@@ -9,7 +9,7 @@
 - **系统层**：跨应用窗口管理，不限于浏览器
 
 ### 🚀 开发体验极致优化
-- **简化语法**：`curl-rpc tool_name key=value`，告别冗长 JSON
+- **简化语法**：`cicy-rpc tool_name key=value`，告别冗长 JSON
 - **热重载**：修改代码无需重启，秒级生效
 - **YAML 优先**：比 JSON 节省 30% token，AI 友好
 
@@ -25,15 +25,15 @@
 
 ## ✨ 核心特性
 
-- 🚀 **简化语法** - `curl-rpc tool_name key=value`，最简洁
+- 🚀 **简化语法** - `cicy-rpc tool_name key=value`，最简洁
 - 📝 **YAML 优先** - 默认 YAML 格式，节省 30% token
-- 🔥 **手动热重载** - `curl-rpc r-reset` 清除缓存，无需重启
+- 🔥 **手动热重载** - `cicy-rpc r-reset` 清除缓存，无需重启
 - 🪟 **双层窗口管理** - 浏览器窗口 + 系统窗口全覆盖
 - 👤 **多账户隔离** - Cookie/Storage 完全隔离
 - 🎯 **CDP 完整控制** - 鼠标、键盘、页面、网络
 - 📸 **智能截图** - 全屏/窗口截图，自动清理
 - 🖥️ **系统监控** - CPU、内存、磁盘、网络、IP
-- 🔧 **轻量工具** - curl-rpc 命令行工具
+- 🔧 **轻量工具** - cicy-rpc 命令行工具
 - 🧩 **模块化架构** - 清晰的代码组织，易于维护
 - ⚡ **执行工具** - Shell/Python/Node.js 命令执行
 - 📋 **剪贴板操作** - 文本和图片的读写
@@ -155,7 +155,7 @@ npm install
 bash skills/electron-mcp-service/service.sh start
 
 # 验证服务
-curl-rpc "name: ping"
+cicy-rpc "name: ping"
 ```
 
 ### 使用技能
@@ -174,7 +174,7 @@ bash skills/download-douyin-video/download-douyin-video.sh <url>
 | **electron-mcp-service** | 浏览器自动化服务 | [README](./skills/electron-mcp-service/README.md) |
 | **download-douyin-video** | 下载抖音视频 | [README](./skills/download-douyin-video/README.md) |
 | **aistudio** | AI Studio 自动化 | [README](./skills/aistudio/README.md) |
-| **curl-rpc** | RPC 命令行工具 | [README](./skills/curl-rpc/README.md) |
+| **cicy-rpc** | RPC 命令行工具 | [README](./skills/cicy-rpc/README.md) |
 
 ### 创建新技能
 
@@ -285,14 +285,14 @@ kiro-cli mcp add --name electron-mcp --url http://localhost:8101/mcp --force
 
 ## 使用示例
 
-### 命令行工具 (curl-rpc)
+### 命令行工具 (cicy-rpc)
 
 快速调用 MCP 工具的轻量级命令行工具，**支持简化语法和 YAML/JSON 双格式**：
 
 ```bash
 # 安装到 ~/.local/bin
-curl -o ~/.local/bin/curl-rpc https://raw.githubusercontent.com/cicy-dev/electron-mcp/main/bin/curl-rpc
-chmod +x ~/.local/bin/curl-rpc
+curl -o ~/.local/bin/cicy-rpc https://raw.githubusercontent.com/cicy-dev/electron-mcp/main/bin/cicy-rpc
+chmod +x ~/.local/bin/cicy-rpc
 
 # 安装依赖（YAML 支持）
 pip install yq --break-system-packages
@@ -301,16 +301,16 @@ pip install yq --break-system-packages
 echo "your-token-here" > ~/data/electron/token.txt
 
 # 简化语法（推荐）
-curl-rpc ping
-curl-rpc open_window url=https://google.com
-curl-rpc get_window_info win_id=1
-curl-rpc set_window_bounds win_id=1 x=100 y=100 width=1280 height=720
-curl-rpc cdp_click win_id=1 x=500 y=300
-curl-rpc cdp_type_text win_id=1 text="Hello World"
-curl-rpc close_window win_id=1
+cicy-rpc ping
+cicy-rpc open_window url=https://google.com
+cicy-rpc get_window_info win_id=1
+cicy-rpc set_window_bounds win_id=1 x=100 y=100 width=1280 height=720
+cicy-rpc cdp_click win_id=1 x=500 y=300
+cicy-rpc cdp_type_text win_id=1 text="Hello World"
+cicy-rpc close_window win_id=1
 
 # YAML 格式（完整语法）
-curl-rpc "
+cicy-rpc "
 name: open_window
 arguments:
   url: https://google.com
@@ -318,19 +318,19 @@ arguments:
 "
 
 # JSON 格式
-curl-rpc --json '{"name":"get_window_info","arguments":{"win_id":1}}'
+cicy-rpc --json '{"name":"get_window_info","arguments":{"win_id":1}}'
 ```
 
 **三种格式对比：**
 
 简化语法（最简洁）：
 ```bash
-curl-rpc open_window url=https://google.com
+cicy-rpc open_window url=https://google.com
 ```
 
 YAML 格式（推荐，复杂参数）：
 ```bash
-curl-rpc "
+cicy-rpc "
 name: open_window
 arguments:
   url: https://google.com
@@ -600,7 +600,7 @@ electron-mcp/
 ├── changelog/               # 变更日志
 ├── task/                    # 任务文档
 ├── bin/                     # 命令行工具
-│   └── curl-rpc            # YAML/JSON RPC 客户端
+│   └── cicy-rpc            # YAML/JSON RPC 客户端
 └── package.json
 ```
 
@@ -616,10 +616,10 @@ bash skills/electron-mcp-service/service.sh start
 vim src/tools/ping.js
 
 # 清除缓存
-curl-rpc r-reset
+cicy-rpc r-reset
 
 # 测试新代码
-curl-rpc ping
+cicy-rpc ping
 ```
 
 **工作原理：**

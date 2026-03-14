@@ -1,6 +1,6 @@
 {
   "name": "cicy-rpc",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Lightweight MCP RPC CLI tool with YAML/JSON support",
   "bin": {
     "electron-cli": "./bin/cicy-rpc"

@@ -60,23 +60,23 @@ bash skills/chatgpt-web/chatgpt-web.sh is-logged
 
 ## MCP 工具
 
-直接使用 curl-rpc:
+直接使用 cicy-rpc:
 
 ```bash
 # 状态
-curl-rpc chatgpt_web_status
+cicy-rpc chatgpt_web_status
 
 # 对话列表
-curl-rpc get_chatgpt_web_conversations limit=5
+cicy-rpc get_chatgpt_web_conversations limit=5
 
 # 当前消息
-curl-rpc get_chatgpt_web_current_messages
+cicy-rpc get_chatgpt_web_current_messages
 
 # 提问 (自动发送+等待回复)
-curl-rpc chatgpt_web_ask text="你好"
+cicy-rpc chatgpt_web_ask text="你好"
 
 # 打开对话
-curl-rpc open_chatgpt_web_chat_by_id conversation_id=xxx
+cicy-rpc open_chatgpt_web_chat_by_id conversation_id=xxx
 ```
 
 ## 依赖

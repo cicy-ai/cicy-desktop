@@ -41,19 +41,19 @@ docker logs electron-rcp
 docker exec electron-rcp tail -f /home/electron/logs/electron-mcp.log
 ```
 
-### Use curl-rpc from host
+### Use cicy-rpc from host
 ```bash
 # Set token on host
 echo "your-token-here" > ~/data/electron/token.txt
 
 # Test connection
-curl-rpc ping
+cicy-rpc ping
 
 # Open window
-curl-rpc open_window url=https://google.com
+cicy-rpc open_window url=https://google.com
 
 # Take screenshot
-curl-rpc webpage_snapshot win_id=1
+cicy-rpc webpage_snapshot win_id=1
 ```
 
 ### Extract screenshot to host
@@ -68,7 +68,7 @@ curl -s http://localhost:8101/rpc/tools/call \
 
 ### Execute shell commands
 ```bash
-curl-rpc exec_shell command="pip3 install package-name --break-system-packages"
+cicy-rpc exec_shell command="pip3 install package-name --break-system-packages"
 ```
 
 ## Environment Variables

@@ -53,8 +53,8 @@ open_account() {
 EOF
     fi
     
-    # 使用 curl-rpc 直接调用
-    local result=$(curl-rpc open_window url="$url" accountIdx=$account_idx reuseWindow=false 2>&1)
+    # 使用 cicy-rpc 直接调用
+    local result=$(cicy-rpc open_window url="$url" accountIdx=$account_idx reuseWindow=false 2>&1)
     
     if echo "$result" | grep -q "Opened window"; then
         # 提取窗口 ID
@@ -81,7 +81,7 @@ EOF
 # 列出所有窗口
 list_windows() {
     echo -e "${GREEN}📋 Listing all windows...${NC}"
-    curl-rpc get_windows
+    cicy-rpc get_windows
 }
 
 # 关闭窗口
@@ -90,7 +90,7 @@ close_window() {
     
     echo -e "${YELLOW}🗑️  Closing window $win_id...${NC}"
     
-    local result=$(curl-rpc close_window win_id=$win_id 2>&1)
+    local result=$(cicy-rpc close_window win_id=$win_id 2>&1)
     
     if echo "$result" | grep -q "closed"; then
         echo -e "${GREEN}✅ Window closed${NC}"

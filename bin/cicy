@@ -32,7 +32,7 @@ for (let i = 0; i < args.length; i++) {
 if (useCNMirror) {
   try {
     execSync('npm config set registry https://registry.npmmirror.com', { stdio: 'inherit' });
-    console.log('📦 Using CN npm mirror');
+    console.log('📦 Using CN npm mirror: https://registry.npmmirror.com');
   } catch (err) {
     console.error('❌ Failed to set npm mirror:', err.message);
   }

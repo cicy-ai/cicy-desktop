@@ -23,8 +23,8 @@
 ## 依赖
 
 ```bash
-# 安装 curl-rpc
-npm install -g curl-rpc
+# 安装 cicy-rpc
+npm install -g cicy-rpc
 
 # 启动 electron-mcp 服务
 bash skills/electron-mcp-service/service.sh start
@@ -35,13 +35,13 @@ bash skills/electron-mcp-service/service.sh start
 1. **open_chat**: 三种方式打开聊天，推荐 `location.hash`
    ```bash
    # 推荐: location.hash（最简单稳定）
-   curl-rpc exec_js win_id=6 code='location.hash="#@BotFather"'
+   cicy-rpc exec_js win_id=6 code='location.hash="#@BotFather"'
    
    # 方式2: openUsername (内部API)
-   curl-rpc exec_js win_id=6 code='window.appImManager.openUsername({userName:"BotFather"})'
+   cicy-rpc exec_js win_id=6 code='window.appImManager.openUsername({userName:"BotFather"})'
    
    # 方式3: setInnerPeer (需要 peerId)
-   curl-rpc exec_js win_id=6 code='window.appImManager.setInnerPeer({peerId:93372553})'
+   cicy-rpc exec_js win_id=6 code='window.appImManager.setInnerPeer({peerId:93372553})'
    ```
 
 2. **messages store**: IndexedDB only caches loaded messages
@@ -205,10 +205,10 @@ window.tg_myCustomFunction = async () => {
 
 ```bash
 # 在脚本中调用
-curl-rpc exec_js win_id=1 code="window.tg_myCustomFunction()"
+cicy-rpc exec_js win_id=1 code="window.tg_myCustomFunction()"
 
 # 或在 telegram-web.sh 中
-result=$(curl-rpc exec_js win_id="$WIN_ID" code="window.tg_myCustomFunction()" 2>&1 | sed -n '/^---/,/^---/p' | sed '1d;$d')
+result=$(cicy-rpc exec_js win_id="$WIN_ID" code="window.tg_myCustomFunction()" 2>&1 | sed -n '/^---/,/^---/p' | sed '1d;$d')
 ```
 
 **注意：** 修改后需要刷新页面才能生效。
@@ -285,7 +285,7 @@ console.log(messages); // [{id, message, date, fromId}, ...]
 
 **方法 1: 直接调用（简单）**
 ```bash
-curl-rpc exec_js win_id=1 code="window.tg_getChats(5).then(c => c.map(x => x.name).join(','))"
+cicy-rpc exec_js win_id=1 code="window.tg_getChats(5).then(c => c.map(x => x.name).join(','))"
 ```
 
 **方法 2: 在 shell 脚本中使用**
@@ -294,7 +294,7 @@ curl-rpc exec_js win_id=1 code="window.tg_getChats(5).then(c => c.map(x => x.nam
 WIN_ID=1
 
 # 获取聊天列表
-chats=$(curl-rpc exec_js win_id="$WIN_ID" code="window.tg_getChats(10).then(c => JSON.stringify(c, null, 2))" 2>&1 | sed -n '/^---/,/^---/p' | sed '1d;$d')
+chats=$(cicy-rpc exec_js win_id="$WIN_ID" code="window.tg_getChats(10).then(c => JSON.stringify(c, null, 2))" 2>&1 | sed -n '/^---/,/^---/p' | sed '1d;$d')
 
 echo "$chats"
 ```
@@ -309,7 +309,7 @@ window.tg_myFunction = async () => {
 };
 
 # 使用
-curl-rpc exec_js win_id=1 code="window.tg_myFunction().then(r => JSON.stringify(r))"
+cicy-rpc exec_js win_id=1 code="window.tg_myFunction().then(r => JSON.stringify(r))"
 ```
 
 ## IndexedDB 数据结构
@@ -470,10 +470,10 @@ bash skills/telegram-web/telegram-web.sh read "Saved Messages"
 
 ## 故障排除
 
-### 错误：curl-rpc not found
+### 错误：cicy-rpc not found
 
 ```bash
-npm install -g curl-rpc
+npm install -g cicy-rpc
 ```
 
 ### 错误：electron-mcp service not running
@@ -524,5 +524,5 @@ done
 ## 相关文档
 
 - [electron-mcp README](../README.md)
-- [curl-rpc 文档](https://github.com/cicy-dev/electron-mcp/blob/main/packages/curl-rpc/README.md)
+- [cicy-rpc 文档](https://github.com/cicy-dev/electron-mcp/blob/main/packages/cicy-rpc/README.md)
 - [Telegram Web](https://web.telegram.org/k/)

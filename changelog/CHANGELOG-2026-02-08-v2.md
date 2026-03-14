@@ -21,7 +21,7 @@
 ### 3. YAML 响应支持
 - `/rpc/tools/call` 端点支持 YAML 格式响应
 - 根据 `Accept: application/yaml` header 自动返回 YAML
-- 与 curl-rpc 工具完美配合
+- 与 cicy-rpc 工具完美配合
 
 ### 4. service.sh 增强
 - 支持自定义 DISPLAY 参数
@@ -29,7 +29,7 @@
 - 用法：`./service.sh start [port] [display]`
 - 示例：`./service.sh start 8102 :1`
 
-### 5. curl-rpc 工具修复
+### 5. cicy-rpc 工具修复
 - 修复端点路径为 `/rpc/tools/call`
 - 支持 YAML 输入和 YAML 输出
 - 自动解析响应内容
@@ -53,7 +53,7 @@
 - 新增：`src/server/` 目录及所有模块
 - 修改：`src/main.js` - 简化为 130 行
 - 修改：`service.sh` - 添加 DISPLAY 参数
-- 修改：`bin/curl-rpc` - 修复端点和 YAML 支持
+- 修改：`bin/cicy-rpc` - 修复端点和 YAML 支持
 - 更新：`README.md` - 完善文档
 
 ## 🚀 下一步计划

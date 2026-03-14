@@ -63,6 +63,6 @@ bash multi-account.sh close 2
 
 ## 技术实现
 
-- 使用 curl-rpc 调用 electron-mcp API
+- 使用 cicy-rpc 调用 electron-mcp API
 - 每个账户使用独立的 userData 目录
 - 完全隔离的浏览器环境

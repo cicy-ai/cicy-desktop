@@ -61,21 +61,21 @@ result:
 {"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"Pong"}]}}
 ```
 
-## curl-rpc 工具
+## cicy-rpc 工具
 
 ### 默认行为
 
-`curl-rpc` 默认使用 YAML 格式：
+`cicy-rpc` 默认使用 YAML 格式：
 
 ```bash
 # YAML（默认，无需标志）
-curl-rpc "
+cicy-rpc "
 name: ping
 arguments: {}
 "
 
 # JSON（需要 --json 或 -j）
-curl-rpc --json '{"name":"ping","arguments":{}}'
+cicy-rpc --json '{"name":"ping","arguments":{}}'
 ```
 
 ### 自动处理
@@ -113,7 +113,7 @@ pip install yq --break-system-packages
 ### 打开窗口
 
 ```bash
-curl-rpc "
+cicy-rpc "
 name: open_window
 arguments:
   url: https://gemini.google.com
@@ -123,7 +123,7 @@ arguments:
 ### 设置窗口位置
 
 ```bash
-curl-rpc "
+cicy-rpc "
 name: set_window_bounds
 arguments:
   win_id: 1
@@ -137,7 +137,7 @@ arguments:
 ### 执行 JavaScript
 
 ```bash
-curl-rpc "
+cicy-rpc "
 name: exec_js
 arguments:
   win_id: 1
@@ -148,7 +148,7 @@ arguments:
 ### 复杂参数
 
 ```bash
-curl-rpc "
+cicy-rpc "
 name: open_window
 arguments:
   url: https://example.com
@@ -204,7 +204,7 @@ pip install yq --break-system-packages
 如果服务器版本较旧，使用 JSON 格式：
 
 ```bash
-curl-rpc --json '{"name":"ping","arguments":{}}'
+cicy-rpc --json '{"name":"ping","arguments":{}}'
 ```
 
 ## 技术实现

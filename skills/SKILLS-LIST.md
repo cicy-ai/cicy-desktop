@@ -15,13 +15,13 @@ bash skills/electron-mcp-service/service.sh restart  # 重启服务
 **验证服务:**
 
 ```bash
-curl-rpc ping  # 应返回 "Pong"
+cicy-rpc ping  # 应返回 "Pong"
 ```
 
-**安装 curl-rpc:**
+**安装 cicy-rpc:**
 
 ```bash
-npm install -g curl-rpc
+npm install -g cicy-rpc
 ```
 
 ---
@@ -35,52 +35,52 @@ npm install -g curl-rpc
 
 ```bash
 bash skills/electron-mcp-service/service.sh start
-curl-rpc ping
+cicy-rpc ping
 ```
 
 [文档](./electron-mcp-service/README.md)
 
 ---
 
-### curl-rpc
+### cicy-rpc
 
-**位置:** `../packages/curl-rpc`  
+**位置:** `../packages/cicy-rpc`  
 **类型:** npm 包  
 **功能:** 轻量级 Electron MCP RPC 命令行工具
 
 ```bash
 # 安装
-npm install -g curl-rpc
+npm install -g cicy-rpc
 
 # 测试连接
-curl-rpc ping
+cicy-rpc ping
 
 # 查看Tools <<important>>
-curl-rpc tools
-curl-rpc tools <tool_name>
-curl-rpc tools --full    # 显示所有工具+参数
+cicy-rpc tools
+cicy-rpc tools <tool_name>
+cicy-rpc tools --full    # 显示所有工具+参数
 
 # 示例
-curl-rpc init                 # 初始化配置
-curl-rpc tools ping          # 查看 ping 工具详情
-curl-rpc open_window url=https://example.com
+cicy-rpc init                 # 初始化配置
+cicy-rpc tools ping          # 查看 ping 工具详情
+cicy-rpc open_window url=https://example.com
 
 环境变量:
   ELECTRON_MCP_NODE=0         选择节点 (0, 1, 2, ...)
   DEBUG=1                     输出调试信息 (curl -v)
 
-配置: ~/data/electron/curl-rpc.json
+配置: ~/data/electron/cicy-rpc.json
 ```
 
 **特性:**
 
-- 🚀 简化语法：`curl-rpc tool_name key=value`
-- 📋 工具列表：`curl-rpc tools`
-- 📖 工具详情：`curl-rpc tools <tool_name>`
+- 🚀 简化语法：`cicy-rpc tool_name key=value`
+- 📋 工具列表：`cicy-rpc tools`
+- 📖 工具详情：`cicy-rpc tools <tool_name>`
 - 🔒 自动Token认证
 - 📖 详细文档
 
-[完整文档](../packages/curl-rpc/README.md)
+[完整文档](../packages/cicy-rpc/README.md)
 
 ---
 
@@ -129,20 +129,20 @@ bash skills/download-douyin-video/download-douyin-video.sh <url>
 
 ```bash
 # 查看状态
-curl-rpc gemini_web_status
+cicy-rpc gemini_web_status
 
 # 检查登录
-curl-rpc is_gemini_logged
+cicy-rpc is_gemini_logged
 
 # 粘贴图片到输入框
-curl-rpc gemini_paste_image
+cicy-rpc gemini_paste_image
 
 # 设置问题并发送
-curl-rpc gemini_web_set_prompt text="问题"
-curl-rpc gemini_web_click_send
+cicy-rpc gemini_web_set_prompt text="问题"
+cicy-rpc gemini_web_click_send
 
 # 发送消息并等待回复
-curl-rpc gemini_web_ask text="你好"
+cicy-rpc gemini_web_ask text="你好"
 ```
 
 [文档](./gemini-web/README.md)
