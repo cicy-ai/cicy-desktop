@@ -8,7 +8,7 @@ const { killPort, isPortOpen } = require("../../src/utils/process-utils");
 const PORT = 18102;
 const initUrl = "http://www.google.com";
 
-let electronProcess;
+let desktopProcess;
 let sessionId;
 let sseReq;
 let authToken;
@@ -38,21 +38,21 @@ async function startTestServer() {
   process.env.NODE_ENV = "test";
   await new Promise((resolve) => setTimeout(resolve, 1000));
 
-  const electronArgs = [".", `--port=${PORT}`, `--url=${initUrl}`];
+  const desktopArgs = [".", `--port=${PORT}`, `--url=${initUrl}`];
 
-  electronProcess = spawn("electron", electronArgs, {
+  desktopProcess = spawn("electron", desktopArgs, {
     stdio: "pipe",
     detached: false,
     cwd: path.join(__dirname, "../.."),
     env: { ...process.env, TEST: "TRUE" },
   });
 
-  electronProcess.stdout.on("data", (data) => {
+  desktopProcess.stdout.on("data", (data) => {
     const output = data.toString();
     process.stdout.write(`[MCP-${PORT}] ${output}`);
   });
 
-  electronProcess.stderr.on("data", (data) => {
+  desktopProcess.stderr.on("data", (data) => {
     const output = data.toString();
     process.stderr.write(`[MCP-${PORT}-ERR] ${output}`);
   });
@@ -69,8 +69,8 @@ async function startTestServer() {
       }
     };
 
-    electronProcess.stdout.on("data", checkOutput);
-    electronProcess.stderr.on("data", checkOutput);
+    desktopProcess.stdout.on("data", checkOutput);
+    desktopProcess.stderr.on("data", checkOutput);
   });
 
   await new Promise((resolve) => setTimeout(resolve, 3000));
@@ -144,8 +144,8 @@ async function stopTestServer() {
     sseReq.destroy();
   }
 
-  if (electronProcess) {
-    electronProcess.kill("SIGTERM");
+  if (desktopProcess) {
+    desktopProcess.kill("SIGTERM");
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
 }

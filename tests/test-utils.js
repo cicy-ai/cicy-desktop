@@ -54,7 +54,7 @@ function setInitUrl(url) {
   initUrl = url;
 }
 
-let electronProcess;
+let desktopProcess;
 let sessionId;
 let sseReq;
 let sseResponses = {};
@@ -81,36 +81,36 @@ async function setupTest() {
 
   log("DEBUG", `Spawning CiCy Desktop server...`);
   log("DEBUG", `  Command: electron . --port=${PORT} --url=${initUrl} --no-sandbox`);
-  const electronArgs = [".", `--port=${PORT}`, `--url=${initUrl}`];
+  const desktopArgs = [".", `--port=${PORT}`, `--url=${initUrl}`];
 
   // CI 环境中禁用沙箱
   if (process.env.CI || process.env.ELECTRON_DISABLE_SANDBOX) {
-    // electronArgs.push("--no-sandbox");
-    // electronArgs.push("--disable-setuid-sandbox");
+    // desktopArgs.push("--no-sandbox");
+    // desktopArgs.push("--disable-setuid-sandbox");
     // log("DEBUG", "  Running in CI mode with sandbox disabled");
   }
 
-  electronProcess = spawn("electron", electronArgs, {
+  desktopProcess = spawn("electron", desktopArgs, {
     stdio: "pipe",
     detached: false,
     env: { ...process.env, TEST: "TRUE" },
   });
 
-  electronProcess.stdout.on("data", (data) => {
+  desktopProcess.stdout.on("data", (data) => {
     const output = data.toString();
     process.stdout.write(`[ELECTRON] ${output}`);
   });
 
-  electronProcess.stderr.on("data", (data) => {
+  desktopProcess.stderr.on("data", (data) => {
     const output = data.toString();
     process.stderr.write(`[ELECTRON-ERR] ${output}`);
   });
 
-  electronProcess.on("error", (err) => {
+  desktopProcess.on("error", (err) => {
     log("ERROR", `Failed to start Electron: ${err.message}`);
   });
 
-  electronProcess.on("exit", (code) => {
+  desktopProcess.on("exit", (code) => {
     log("DEBUG", `Electron process exited with code ${code}`);
   });
 
@@ -118,7 +118,7 @@ async function setupTest() {
   await new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error("服务器启动超时")), 20000);
 
-    electronProcess.stdout.on("data", (data) => {
+    desktopProcess.stdout.on("data", (data) => {
       const output = data.toString();
       if (output.includes("Server listening on")) {
         clearTimeout(timeout);
@@ -232,10 +232,10 @@ async function teardownTest(nokill) {
     sseReq.destroy();
   }
   console.log("TEST_ALL", process.env.TEST_ALL);
-  if (electronProcess && nokill) {
-    console.log("kill current electron process", electronProcess.pid);
-    log("DEBUG", `Killing Electron process (PID: ${electronProcess.pid})...`);
-    electronProcess.kill("SIGTERM");
+  if (desktopProcess && nokill) {
+    console.log("kill current electron process", desktopProcess.pid);
+    log("DEBUG", `Killing desktop process (PID: ${desktopProcess.pid})...`);
+    desktopProcess.kill("SIGTERM");
     await new Promise((resolve) => setTimeout(resolve, 1000));
     log("DEBUG", `Electron process killed`);
   }

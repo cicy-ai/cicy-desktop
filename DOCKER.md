@@ -1,6 +1,6 @@
-# Electron RCP Docker
+# CiCy Desktop Docker
 
-Docker image for electron-rcp with browser automation capabilities.
+Docker image for cicy-desktop with browser automation capabilities.
 
 ## Features
 
@@ -13,32 +13,32 @@ Docker image for electron-rcp with browser automation capabilities.
 ## Build
 
 ```bash
-docker build -t electron-rcp .
+docker build -t cicy-desktop .
 ```
 
 ## Run
 
 ```bash
 docker run -d \
-  --name electron-rcp \
+  --name cicy-desktop \
   -p 8101:8101 \
   -e TOKEN=your-token-here \
   --cap-add=SYS_ADMIN \
-  electron-rcp
+  cicy-desktop
 ```
 
 ## Usage
 
 ### Check status
 ```bash
-docker exec electron-rcp electron-rpc status
+docker exec cicy-desktop electron-rpc status
 ```
 
 ### View logs
 ```bash
-docker logs electron-rcp
+docker logs cicy-desktop
 # or
-docker exec electron-rcp tail -f /home/electron/logs/cicy-desktop.log
+docker exec cicy-desktop tail -f /home/electron/logs/cicy-desktop.log
 ```
 
 ### Use cicy-rpc from host
@@ -79,7 +79,7 @@ cicy-rpc exec_shell command="pip3 install package-name --break-system-packages"
 ## Stop and Remove
 
 ```bash
-docker stop electron-rcp
-docker rm electron-rcp
+docker stop cicy-desktop
+docker rm cicy-desktop
 ```
 
