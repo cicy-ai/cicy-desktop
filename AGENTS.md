@@ -41,7 +41,7 @@ npm run build
 - Jest runs with `--runInBand` (serial execution) due to Electron's single-process nature
 - Tests use supertest for HTTP API testing
 - Tests spawn actual Electron processes on dynamic ports
-- Auth token loaded from `~/data/electron/token.txt`
+- Auth token loaded from `~/global.json`
 - Test utilities in `tests/test-utils.js`
 
 ## Code Style Guidelines
@@ -236,7 +236,7 @@ log.error("[MCP] Error:", error);
 - Never log secrets or API keys
 - Validate all inputs with Zod schemas
 - Return structured errors without internal details
-- Auth token loaded from `~/data/electron/token.txt`
+- Auth token loaded from `~/global.json`
 
 ### Electron Best Practices
 

@@ -40,7 +40,7 @@ list_methods() {
     echo "  cicy-rpc exec_js win_id=$WIN_ID code=\"window._g.tg_getChats(5)\""
     echo ""
     echo "📖 Documentation:"
-    echo "  ~/data/electron/extension/inject/telegram.org.js"
+    echo "  ~/cicy-desktop/extension/inject/telegram.org.js"
 }
 
 # 显示帮助
@@ -87,11 +87,11 @@ Telegram Web 自动化工具
 
 📖 详细文档：
   cat $SCRIPT_DIR/README.md
-  或访问：https://github.com/cicy-dev/electron-mcp/blob/main/skills/telegram-web/README.md
+  或访问：https://github.com/cicy-ai/cicy-desktop/blob/main/skills/telegram-web/README.md
 
 依赖：
   - cicy-rpc (npm install -g cicy-rpc)
-  - electron-mcp 服务运行中
+  - cicy-desktop 服务运行中
 EOF
 }
 
@@ -104,8 +104,8 @@ check_deps() {
     fi
     
     if ! cicy-rpc ping &> /dev/null; then
-        echo "❌ Error: electron-mcp service not running"
-        echo "Start: bash skills/electron-mcp-service/service.sh start"
+        echo "❌ Error: cicy-desktop service not running"
+        echo "Start: bash skills/cicy-desktop-service/service.sh start"
         exit 1
     fi
 }

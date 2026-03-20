@@ -2,7 +2,7 @@
 
 ## Overview
 
-Electron MCP now provides REST API endpoints for each tool. Each tool can be called via:
+CiCy Desktop now provides REST API endpoints for each tool. Each tool can be called via:
 
 ```
 POST /rpc/{toolName}
@@ -24,7 +24,7 @@ All endpoints (except `/ping`) require Bearer token authentication:
 Authorization: Bearer <your-token>
 ```
 
-Token location: `~/data/electron/token.txt`
+Token location: `~/global.json`
 
 ## Available Endpoints
 
@@ -36,7 +36,7 @@ GET /rpc/tools
 
 **Example:**
 ```bash
-curl -H "Authorization: Bearer $(cat ~/data/electron/token.txt)" \
+curl -H "Authorization: Bearer $(jq -r .api_token ~/global.json)" \
   http://localhost:8101/rpc/tools
 ```
 
@@ -54,7 +54,7 @@ Content-Type: application/json
 ```bash
 curl -X POST http://localhost:8101/rpc/ping \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(cat ~/data/electron/token.txt)" \
+  -H "Authorization: Bearer $(jq -r .api_token ~/global.json)" \
   -d '{}'
 ```
 
@@ -75,7 +75,7 @@ curl -X POST http://localhost:8101/rpc/ping \
 ```bash
 curl -X POST http://localhost:8101/rpc/get_windows \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(cat ~/data/electron/token.txt)" \
+  -H "Authorization: Bearer $(jq -r .api_token ~/global.json)" \
   -d '{}'
 ```
 
@@ -96,7 +96,7 @@ curl -X POST http://localhost:8101/rpc/get_windows \
 ```bash
 curl -X POST http://localhost:8101/rpc/open_window \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(cat ~/data/electron/token.txt)" \
+  -H "Authorization: Bearer $(jq -r .api_token ~/global.json)" \
   -d '{
     "url": "https://example.com",
     "accountIdx": 0
@@ -120,7 +120,7 @@ curl -X POST http://localhost:8101/rpc/open_window \
 ```bash
 curl -X POST http://localhost:8101/rpc/close_window \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(cat ~/data/electron/token.txt)" \
+  -H "Authorization: Bearer $(jq -r .api_token ~/global.json)" \
   -d '{
     "win_id": 1
   }'
@@ -143,7 +143,7 @@ curl -X POST http://localhost:8101/rpc/close_window \
 ```bash
 curl -X POST http://localhost:8101/rpc/exec_js \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(cat ~/data/electron/token.txt)" \
+  -H "Authorization: Bearer $(jq -r .api_token ~/global.json)" \
   -d '{
     "win_id": 1,
     "code": "document.title"
@@ -155,7 +155,7 @@ curl -X POST http://localhost:8101/rpc/exec_js \
 ```bash
 curl -X POST http://localhost:8101/rpc/cdp_click \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(cat ~/data/electron/token.txt)" \
+  -H "Authorization: Bearer $(jq -r .api_token ~/global.json)" \
   -d '{
     "win_id": 1,
     "selector": "button.submit"
@@ -167,7 +167,7 @@ curl -X POST http://localhost:8101/rpc/cdp_click \
 ```bash
 curl -X POST http://localhost:8101/rpc/cdp_screenshot \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(cat ~/data/electron/token.txt)" \
+  -H "Authorization: Bearer $(jq -r .api_token ~/global.json)" \
   -d '{
     "win_id": 1
   }'
@@ -251,7 +251,7 @@ npm test rest-api.test.js
 const axios = require('axios');
 const fs = require('fs');
 
-const token = fs.readFileSync(process.env.HOME + '/data/electron/token.txt', 'utf8').trim();
+const token = JSON.parse(fs.readFileSync(process.env.HOME + '/global.json', 'utf8')).api_token;
 
 async function callTool(toolName, args) {
   const response = await axios.post(
@@ -278,7 +278,7 @@ console.log(result);
 import requests
 import os
 
-token = open(os.path.expanduser('~/data/electron/token.txt')).read().strip()
+token = open(os.path.expanduser('~/global.json')).read().strip()
 
 def call_tool(tool_name, args={}):
     response = requests.post(
@@ -301,7 +301,7 @@ print(result)
 Get the full list dynamically:
 
 ```bash
-curl -H "Authorization: Bearer $(cat ~/data/electron/token.txt)" \
+curl -H "Authorization: Bearer $(jq -r .api_token ~/global.json)" \
   http://localhost:8101/rpc/tools | jq '.tools[].name'
 ```
 

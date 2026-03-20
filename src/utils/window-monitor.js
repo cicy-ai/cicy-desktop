@@ -466,7 +466,7 @@ function initWindowMonitoring(win) {
 
         // 如果 postData 太大，保存到文件
         if (postData && postDataSize > MAX_INLINE_SIZE) {
-          const tmpDir = path.join(os.tmpdir(), "electron-mcp", `win-${winId}`);
+          const tmpDir = path.join(os.tmpdir(), "cicy-desktop", `win-${winId}`);
           if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
           const postDataFile = path.join(tmpDir, `post-${params.requestId}.dat`);
           fs.writeFileSync(postDataFile, postData);
@@ -516,7 +516,7 @@ function initWindowMonitoring(win) {
   // 窗口关闭时清理
   win.on("closed", () => {
     // 清理临时文件
-    const tmpDir = path.join(os.tmpdir(), "electron-mcp", `win-${winId}`);
+    const tmpDir = path.join(os.tmpdir(), "cicy-desktop", `win-${winId}`);
     if (fs.existsSync(tmpDir)) {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

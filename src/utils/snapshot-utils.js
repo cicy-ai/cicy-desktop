@@ -1,5 +1,5 @@
 // snapshot-utils.js
-// Snapshot utilities for Electron MCP server
+// Snapshot utilities for CiCy Desktop server
 // Provides page snapshot capture with screenshots and element references
 const { clipboard, nativeImage } = require("electron");
 

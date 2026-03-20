@@ -1,8 +1,8 @@
 const { execSync } = require("child_process");
 
-describe("electron-cli tool tests", () => {
+describe("cicy-rpc tool tests", () => {
   const electronCli = (toolName, args = "") => {
-    const cmd = args ? `electron-cli ${toolName} ${args}` : `electron-cli ${toolName}`;
+    const cmd = args ? `cicy-rpc ${toolName} ${args}` : `cicy-rpc ${toolName}`;
     return execSync(cmd, { encoding: "utf8" });
   };
 

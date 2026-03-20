@@ -62,7 +62,7 @@ pkill electron
 **start-mcp.js** - Server launcher with:
 - Port management and conflict resolution
 - Background process spawning
-- Logging system (~/logs/electron-mcp.log)
+- Logging system (~/logs/cicy-desktop.log)
 - Process lifecycle management
 
 **snapshot-utils.js** - Screenshot utilities:
@@ -82,7 +82,7 @@ pkill electron
 
 ### Authentication System
 
-- Auto-generates authentication tokens stored in `~/data/electron/token.txt`
+- Auto-generates authentication tokens stored in `~/global.json`
 - All HTTP requests require `Authorization: Bearer <token>` header
 - Token validation in `validateAuth()` method
 

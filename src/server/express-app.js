@@ -40,9 +40,9 @@ function createExpressApp(authMiddleware, tools = {}) {
     const openapi = {
       openapi: "3.0.0",
       info: {
-        title: "Electron MCP REST API",
+        title: "CiCy Desktop REST API",
         version: "1.0.0",
-        description: `REST API for Electron MCP tools - ${allTools.length} tools available`,
+        description: `REST API for CiCy Desktop tools - ${allTools.length} tools available`,
       },
       servers: [
         {

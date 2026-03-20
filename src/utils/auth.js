@@ -9,38 +9,62 @@ const log = require("electron-log");
  */
 class AuthManager {
   constructor() {
+    this.globalJsonPath = path.join(os.homedir(), "global.json");
+    this.legacyTokenPath = path.join(os.homedir(), "data", "electron", "token.txt");
     this.authToken = this.getOrGenerateToken();
     log.info("[MCP] Auth token enabled");
-    log.info("[MCP] Token saved to ~/data/electron/token.txt");
+    log.info("[MCP] Token stored in ~/global.json");
   }
 
   /**
    * 获取或生成认证令牌
+   * 优先读取 ~/global.json，兼容旧版 ~/data/electron/token.txt（自动迁移）
    * @returns {string} 认证令牌
    */
   getOrGenerateToken() {
-    const tokenPath = path.join(os.homedir(), "data", "electron", "token.txt");
-
     try {
-      // 检查是否已存在令牌
-      if (fs.existsSync(tokenPath)) {
-        const token = fs.readFileSync(tokenPath, "utf8").trim();
+      // 1. Try ~/global.json first
+      if (fs.existsSync(this.globalJsonPath)) {
+        const config = JSON.parse(fs.readFileSync(this.globalJsonPath, "utf8"));
+        if (config.api_token) {
+          log.info("[MCP] Using token from ~/global.json");
+          return config.api_token;
+        }
+      }
+
+      // 2. Migrate from legacy token.txt
+      if (fs.existsSync(this.legacyTokenPath)) {
+        const token = fs.readFileSync(this.legacyTokenPath, "utf8").trim();
         if (token) {
-          log.info("[MCP] Using existing token from", tokenPath);
+          log.info("[MCP] Migrating token from legacy token.txt → ~/global.json");
+          this._saveToGlobalJson(token);
           return token;
         }
       }
 
-      // 生成新令牌
+      // 3. Generate new token
       const newToken = crypto.randomBytes(32).toString("hex");
-      fs.mkdirSync(path.dirname(tokenPath), { recursive: true });
-      fs.writeFileSync(tokenPath, newToken);
-      log.info("[MCP] Generated new token and saved to", tokenPath);
+      this._saveToGlobalJson(newToken);
+      log.info("[MCP] Generated new token → ~/global.json");
       return newToken;
     } catch (error) {
       log.error("[MCP] Token management error:", error);
-      return crypto.randomBytes(32).toString("hex"); // fallback
+      return crypto.randomBytes(32).toString("hex");
     }
+  }
+
+  /**
+   * 将 token 写入 ~/global.json（保留已有字段）
+   */
+  _saveToGlobalJson(token) {
+    let config = {};
+    try {
+      if (fs.existsSync(this.globalJsonPath)) {
+        config = JSON.parse(fs.readFileSync(this.globalJsonPath, "utf8"));
+      }
+    } catch (_) {}
+    config.api_token = token;
+    fs.writeFileSync(this.globalJsonPath, JSON.stringify(config, null, 2) + "\n");
   }
 
   /**

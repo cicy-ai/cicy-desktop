@@ -31,7 +31,7 @@ USER electron
 WORKDIR /home/electron
 
 # Create token file
-RUN echo "your-token-here" > /home/electron/electron-mcp-token.txt
+RUN echo '{"api_token":"your-token-here"}' > /home/electron/global.json
 
 # Set display
 ENV DISPLAY=:99
@@ -43,4 +43,4 @@ EXPOSE 8101
 CMD Xvfb :99 -screen 0 1024x768x24 & \
     sleep 3 && \
     electron-rpc start && \
-    tail -f /home/electron/logs/electron-mcp.log
+    tail -f /home/electron/logs/cicy-desktop.log

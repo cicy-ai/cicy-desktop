@@ -4,7 +4,7 @@
 
 创建一个技能脚本，实现抖音视频自动下载功能：
 - 接收抖音视频 URL（如 `https://www.douyin.com/video/7594434780347813155`）
-- 使用 electron-mcp 服务器打开/加载 URL
+- 使用 cicy-desktop 服务器打开/加载 URL
 - 捕获包含 `__vid` 的视频真实地址
 - 使用 `session_download_url` 下载到 `~/Desktop/video`
 - 通过 `./skills/cicy-rpc` 调用所有 RPC API
@@ -14,7 +14,7 @@
 ## 实现方案
 
 ### 技术路径
-1. 使用 `cicy-rpc` 调用 electron-mcp 的 MCP 工具
+1. 使用 `cicy-rpc` 调用 cicy-desktop 的 MCP 工具
 2. 打开抖音视频页面，等待加载完成
 3. 使用 `get_requests` 或 `filter_requests` 捕获包含 `__vid` 的视频 URL
 4. 调用 `session_download_url` 下载视频
@@ -33,7 +33,7 @@ skills/
 
 ### 核心实现步骤
 1. 参数解析和验证
-2. 检查 electron-mcp 服务状态
+2. 检查 cicy-desktop 服务状态
 3. 打开抖音视频页面
 4. 等待页面加载（5-10秒）
 5. 捕获包含 `__vid` 的视频 URL
@@ -48,7 +48,7 @@ skills/
 - [x] 创建 skills/download-douyin-video 目录结构
 - [x] 实现主脚本 download-douyin-video.sh
   - [x] 参数解析（抖音 URL）
-  - [x] 验证 electron-mcp 服务状态
+  - [x] 验证 cicy-desktop 服务状态
   - [x] 调用 open_window 打开页面
   - [x] 等待页面加载完成
   - [x] 捕获视频 URL（包含 __vid）
@@ -60,7 +60,7 @@ skills/
 - [x] 运行测试验证功能
 - [x] 更新 SKILLS-LIST.md
 - [x] 提交代码并创建 PR
-- [x] PR 已创建：https://github.com/cicy-dev/electron-mcp/pull/10
+- [x] PR 已创建：https://github.com/cicy-ai/cicy-desktop/pull/10
 
 ## 验收标准
 

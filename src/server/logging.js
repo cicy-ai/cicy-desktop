@@ -9,7 +9,7 @@ function setupLogging(config) {
   }
 
   config.logsDir = logsDir;
-  config.logFilePath = path.join(logsDir, `electron-mcp-${config.port}.log`);
+  config.logFilePath = path.join(logsDir, `cicy-desktop-${config.port}.log`);
 
   log.transports.file.resolvePathFn = () => config.logFilePath;
   log.transports.file.format = "{y}-{m}-{d} {h}:{i}:{s}.{ms} [{level}] {text}";

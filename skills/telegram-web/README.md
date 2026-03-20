@@ -18,7 +18,7 @@
 - `README.md` - 本文档
 
 **注入文件（自动管理）：**
-- `~/data/electron/extension/inject/telegram.org.js` - 全局注入的工具函数（由 electron-mcp 自动注入）
+- `~/cicy-desktop/extension/inject/telegram.org.js` - 全局注入的工具函数（由 cicy-desktop 自动注入）
 
 ## 依赖
 
@@ -26,8 +26,8 @@
 # 安装 cicy-rpc
 npm install -g cicy-rpc
 
-# 启动 electron-mcp 服务
-bash skills/electron-mcp-service/service.sh start
+# 启动 cicy-desktop 服务
+bash skills/cicy-desktop-service/service.sh start
 ```
 
 ## ⚠️ Known Limitations
@@ -185,13 +185,13 @@ bash skills/telegram-web/telegram-web.sh --help
 
 ## 自动注入的全局工具
 
-所有工具函数通过 electron-mcp 的 dom-ready 机制自动注入到 `*.telegram.org` 页面。
+所有工具函数通过 cicy-desktop 的 dom-ready 机制自动注入到 `*.telegram.org` 页面。
 
-注入文件位置：`~/data/electron/extension/inject/telegram.org.js`
+注入文件位置：`~/cicy-desktop/extension/inject/telegram.org.js`
 
 ### 自定义全局工具函数
 
-你可以编辑 `~/data/electron/extension/inject/telegram.org.js` 来添加自己的工具函数：
+你可以编辑 `~/cicy-desktop/extension/inject/telegram.org.js` 来添加自己的工具函数：
 
 ```javascript
 // 添加你的自定义函数
@@ -301,7 +301,7 @@ echo "$chats"
 
 **方法 3: 创建自定义函数**
 ```bash
-# 编辑 ~/data/electron/extension/inject/telegram.org.js
+# 编辑 ~/cicy-desktop/extension/inject/telegram.org.js
 window.tg_myFunction = async () => {
   const chats = await window.tg_getChats(5);
   const users = await window.tg_getUsers(5);
@@ -476,10 +476,10 @@ bash skills/telegram-web/telegram-web.sh read "Saved Messages"
 npm install -g cicy-rpc
 ```
 
-### 错误：electron-mcp service not running
+### 错误：cicy-desktop service not running
 
 ```bash
-bash skills/electron-mcp-service/service.sh start
+bash skills/cicy-desktop-service/service.sh start
 ```
 
 ### 错误：Telegram Web not opened
@@ -523,6 +523,6 @@ done
 
 ## 相关文档
 
-- [electron-mcp README](../README.md)
-- [cicy-rpc 文档](https://github.com/cicy-dev/electron-mcp/blob/main/packages/cicy-rpc/README.md)
+- [cicy-desktop README](../README.md)
+- [cicy-rpc 文档](https://github.com/cicy-ai/cicy-desktop/blob/main/packages/cicy-rpc/README.md)
 - [Telegram Web](https://web.telegram.org/k/)

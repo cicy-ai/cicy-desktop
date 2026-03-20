@@ -3,8 +3,8 @@
 echo "🔄 更新桌面启动脚本..."
 
 # 设置路径
-DESKTOP_FILE="$HOME/Desktop/electron-mcp.command"
-SOURCE_FILE="./electron-mcp-simple.command"
+DESKTOP_FILE="$HOME/Desktop/cicy-desktop.command"
+SOURCE_FILE="./cicy-desktop-simple.command"
 
 # 备份现有文件
 if [ -f "$DESKTOP_FILE" ]; then
@@ -26,7 +26,7 @@ if [ -f "$DESKTOP_FILE" ] && [ -x "$DESKTOP_FILE" ]; then
     echo "📁 文件: $DESKTOP_FILE"
     echo "🔐 权限: $(ls -l "$DESKTOP_FILE" | cut -d' ' -f1)"
     echo ""
-    echo "现在可以双击桌面上的 electron-mcp.command 启动服务了！"
+    echo "现在可以双击桌面上的 cicy-desktop.command 启动服务了！"
 else
     echo "❌ 更新失败"
     exit 1

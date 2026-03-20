@@ -1,10 +1,10 @@
 {
-  "name": "cicy",
+  "name": "cicy-desktop",
   "version": "1.0.8",
   "description": "CiCy - AI-powered operating system browser",
   "main": "src/main.js",
   "bin": {
-    "cicy": "./bin/cicy"
+    "cicy-desktop": "./bin/cicy-desktop"
   },
   "scripts": {
     "start": "electron .",
@@ -17,8 +17,8 @@
     "build:linux": "electron-builder --linux --publish never"
   },
   "build": {
-    "appId": "com.electron.mcp",
-    "productName": "Electron MCP",
+    "appId": "com.cicy.desktop",
+    "productName": "CiCy Desktop",
     "directories": {
       "output": "dist"
     },

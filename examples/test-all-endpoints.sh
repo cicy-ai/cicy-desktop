@@ -2,7 +2,7 @@
 
 # 快速测试所有 REST API 端点
 
-TOKEN=$(cat ~/data/electron/token.txt)
+TOKEN=$(jq -r .api_token ~/global.json)
 BASE_URL="http://localhost:8101"
 
 echo "=== Testing All REST API Endpoints ==="

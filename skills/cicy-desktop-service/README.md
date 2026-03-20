@@ -1,4 +1,4 @@
-# Electron MCP Service
+# CiCy Desktop Service
 
 浏览器自动化服务，提供窗口管理、CDP 操作、JavaScript 执行等功能。
 
@@ -6,7 +6,7 @@
 
 ```bash
 # 启动服务
-bash skills/electron-mcp-service/electron-mcp-service.sh start
+bash skills/cicy-desktop-service/cicy-desktop-service.sh start
 
 # 验证服务
 cicy-rpc "name: ping"
@@ -22,11 +22,11 @@ arguments:
 ## 服务管理
 
 ```bash
-bash skills/electron-mcp-service/electron-mcp-service.sh start    # 启动
-bash skills/electron-mcp-service/electron-mcp-service.sh stop     # 停止
-bash skills/electron-mcp-service/electron-mcp-service.sh status   # 状态
-bash skills/electron-mcp-service/electron-mcp-service.sh logs     # 日志
-bash skills/electron-mcp-service/electron-mcp-service.sh restart  # 重启
+bash skills/cicy-desktop-service/cicy-desktop-service.sh start    # 启动
+bash skills/cicy-desktop-service/cicy-desktop-service.sh stop     # 停止
+bash skills/cicy-desktop-service/cicy-desktop-service.sh status   # 状态
+bash skills/cicy-desktop-service/cicy-desktop-service.sh logs     # 日志
+bash skills/cicy-desktop-service/cicy-desktop-service.sh restart  # 重启
 ```
 
 ## 配置

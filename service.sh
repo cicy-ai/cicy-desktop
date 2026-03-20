@@ -1,18 +1,18 @@
 #!/bin/bash
 
-# Electron MCP 服务管理脚本
+# CiCy Desktop 服务管理脚本
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$SCRIPT_DIR"
-PID_FILE="$PROJECT_DIR/.electron-mcp.pid"
-LOG_FILE="$HOME/logs/electron-mcp-service.log"
+PID_FILE="$PROJECT_DIR/.cicy-desktop.pid"
+LOG_FILE="$HOME/logs/cicy-desktop-service.log"
 
 # 创建日志目录
 mkdir -p "$(dirname "$LOG_FILE")"
 
 # 显示帮助信息
 show_help() {
-    echo "Electron MCP 服务管理"
+    echo "CiCy Desktop 服务管理"
     echo ""
     echo "用法: $0 {start|stop|restart|status|logs}"
     echo ""
@@ -37,7 +37,7 @@ start_service() {
         fi
     fi
 
-    echo "🚀 正在启动 Electron MCP 服务..."
+    echo "🚀 正在启动 CiCy Desktop 服务..."
     
     cd "$PROJECT_DIR"
     

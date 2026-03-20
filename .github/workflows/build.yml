@@ -23,7 +23,7 @@ jobs:
         shell: bash
         run: |
           if [ "${{ github.ref_type }}" == "branch" ]; then
-            mv "dist/Electron MCP Setup 1.0.0.exe" "dist/Electron.MCP.Setup.alpha.exe"
+            mv "dist/CiCy Desktop Setup 1.0.0.exe" "dist/CiCy.Desktop.Setup.alpha.exe"
             # 删除其他文件，只保留 exe
             find dist -type f ! -name "*.exe" -delete
           fi
@@ -66,7 +66,7 @@ jobs:
             
             最新的 alpha 分支自动构建
             
-            **文件:** Electron.MCP.Setup.alpha.exe
+            **文件:** CiCy.Desktop.Setup.alpha.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           

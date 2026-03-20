@@ -1,6 +1,6 @@
 # cicy-rpc
 
-轻量级 MCP RPC 调用工具，用于调用 Electron MCP 服务器。
+轻量级 MCP RPC 调用工具，用于调用 CiCy Desktop 服务器。
 
 ## 特性
 
@@ -66,7 +66,7 @@ get_downloads
   获取所有下载记录
   用法: cicy-rpc get_downloads
 
-💡 详细文档: https://github.com/cicy-dev/electron-mcp
+💡 详细文档: https://github.com/cicy-ai/cicy-desktop
 ```
 
 ### 2. 简化语法（推荐）
@@ -89,7 +89,7 @@ cicy-rpc cdp_type_text win_id=1 text="Hello World"
 
 每个工具的详细用法、参数说明、返回值示例，请查看：
 
-**📖 完整文档**: https://github.com/cicy-dev/electron-mcp
+**📖 完整文档**: https://github.com/cicy-ai/cicy-desktop
 
 ## 完整工具参考
 
@@ -417,7 +417,7 @@ cicy-rpc clear_requests win_id=1
 cicy-rpc init
 ```
 
-配置文件位置：`~/data/electron/cicy-rpc.json`
+配置文件位置：`~/global.json`
 
 配置格式：
 
@@ -441,7 +441,7 @@ cicy-rpc init
 cicy-rpc ping
 
 # 使用节点 1
-ELECTRON_MCP_NODE=1 cicy-rpc ping
+CICY_NODE=1 cicy-rpc ping
 ```
 
 ### 调试模式
@@ -455,10 +455,10 @@ DEBUG=1 cicy-rpc ping
 
 ```bash
 # 自定义服务器地址
-export ELECTRON_MCP_URL=http://localhost:8101
+export CICY_URL=http://localhost:8101
 
 # 选择节点 (0, 1, 2, ...)
-export ELECTRON_MCP_NODE=0
+export CICY_NODE=0
 
 # 调试模式
 export DEBUG=1
@@ -469,7 +469,7 @@ export DEBUG=1
 ### 配置文件未找到
 
 ```bash
-❌ Error: ~/data/electron/cicy-rpc.json not found
+❌ Error: ~/global.json not found
 
 # 解决：初始化配置
 cicy-rpc init
@@ -478,10 +478,10 @@ cicy-rpc init
 ### Token 未设置
 
 ```bash
-❌ Error: api_token is empty in ~/data/electron/cicy-rpc.json
+❌ Error: api_token is empty in ~/global.json
 
 # 解决：编辑配置文件添加 token
-vim ~/data/electron/cicy-rpc.json
+vim ~/global.json
 ```
 
 ### 服务器未运行
@@ -490,8 +490,8 @@ vim ~/data/electron/cicy-rpc.json
 ❌ Error: Cannot connect to MCP server
 
 # 解决：启动服务
-cd /home/w3c_offical/projects/electron-mcp/main
-bash skills/electron-mcp-service/service.sh start
+cd /home/w3c_offical/projects/cicy-desktop/main
+bash skills/cicy-desktop-service/service.sh start
 ```
 
 ### 工具不存在
@@ -505,9 +505,9 @@ cicy-rpc list
 
 ## 完整文档
 
-- **工具列表和详细用法**: https://github.com/cicy-dev/electron-mcp
-- **API 文档**: https://github.com/cicy-dev/electron-mcp/blob/main/docs/REST-API.md
-- **技能列表**: https://github.com/cicy-dev/electron-mcp/blob/main/skills/SKILLS-LIST.md
+- **工具列表和详细用法**: https://github.com/cicy-ai/cicy-desktop
+- **API 文档**: https://github.com/cicy-ai/cicy-desktop/blob/main/docs/REST-API.md
+- **技能列表**: https://github.com/cicy-ai/cicy-desktop/blob/main/skills/SKILLS-LIST.md
 
 ## 使用技巧
 

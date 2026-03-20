@@ -29,9 +29,16 @@ module.exports = (registerTool) => {
       const path = require("path");
 
       const newToken = crypto.randomBytes(32).toString("hex");
-      const tokenPath = path.join(os.homedir(), "data/electron/token.txt");
+      const tokenPath = path.join(os.homedir(), "global.json");
 
-      fs.writeFileSync(tokenPath, newToken);
+      let config = {};
+      try {
+        if (fs.existsSync(tokenPath)) {
+          config = JSON.parse(fs.readFileSync(tokenPath, "utf8"));
+        }
+      } catch (_) {}
+      config.api_token = newToken;
+      fs.writeFileSync(tokenPath, JSON.stringify(config, null, 2) + "\n");
 
       // Update global auth manager
       if (global.authManager) {

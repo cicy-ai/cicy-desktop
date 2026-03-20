@@ -2,10 +2,10 @@
 
 # 生成所有 RPC 工具的 REST API 调用示例
 
-TOKEN=$(cat ~/data/electron/token.txt)
+TOKEN=$(jq -r .api_token ~/global.json)
 BASE_URL="http://localhost:8101"
 
-echo "# Electron MCP REST API - All Tools"
+echo "# CiCy Desktop REST API - All Tools"
 echo ""
 echo "## Available Tools"
 echo ""
@@ -20,7 +20,7 @@ for tool in $TOOLS; do
     echo '```bash'
     echo "curl -X POST $BASE_URL/rpc/$tool \\"
     echo "  -H \"Content-Type: application/json\" \\"
-    echo "  -H \"Authorization: Bearer \$(cat ~/data/electron/token.txt)\" \\"
+    echo "  -H \"Authorization: Bearer \$(jq -r .api_token ~/global.json)\" \\"
     echo "  -d '{}'"
     echo '```'
     echo ""
@@ -35,7 +35,7 @@ cat << 'EOF'
 ```bash
 curl -X POST http://localhost:8101/rpc/open_window \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(cat ~/data/electron/token.txt)" \
+  -H "Authorization: Bearer $(jq -r .api_token ~/global.json)" \
   -d '{"url":"https://example.com","accountIdx":0}'
 ```
 
@@ -43,7 +43,7 @@ curl -X POST http://localhost:8101/rpc/open_window \
 ```bash
 curl -X POST http://localhost:8101/rpc/close_window \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(cat ~/data/electron/token.txt)" \
+  -H "Authorization: Bearer $(jq -r .api_token ~/global.json)" \
   -d '{"win_id":1}'
 ```
 
@@ -51,7 +51,7 @@ curl -X POST http://localhost:8101/rpc/close_window \
 ```bash
 curl -X POST http://localhost:8101/rpc/exec_js \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(cat ~/data/electron/token.txt)" \
+  -H "Authorization: Bearer $(jq -r .api_token ~/global.json)" \
   -d '{"win_id":1,"code":"document.title"}'
 ```
 
@@ -59,7 +59,7 @@ curl -X POST http://localhost:8101/rpc/exec_js \
 ```bash
 curl -X POST http://localhost:8101/rpc/cdp_click \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(cat ~/data/electron/token.txt)" \
+  -H "Authorization: Bearer $(jq -r .api_token ~/global.json)" \
   -d '{"win_id":1,"selector":"button.submit"}'
 ```
 
@@ -67,7 +67,7 @@ curl -X POST http://localhost:8101/rpc/cdp_click \
 ```bash
 curl -X POST http://localhost:8101/rpc/cdp_type_text \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(cat ~/data/electron/token.txt)" \
+  -H "Authorization: Bearer $(jq -r .api_token ~/global.json)" \
   -d '{"win_id":1,"selector":"input[name=username]","text":"myuser"}'
 ```
 
@@ -75,7 +75,7 @@ curl -X POST http://localhost:8101/rpc/cdp_type_text \
 ```bash
 curl -X POST http://localhost:8101/rpc/load_url \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(cat ~/data/electron/token.txt)" \
+  -H "Authorization: Bearer $(jq -r .api_token ~/global.json)" \
   -d '{"win_id":1,"url":"https://google.com"}'
 ```
 
@@ -83,7 +83,7 @@ curl -X POST http://localhost:8101/rpc/load_url \
 ```bash
 curl -X POST http://localhost:8101/rpc/get_window_info \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(cat ~/data/electron/token.txt)" \
+  -H "Authorization: Bearer $(jq -r .api_token ~/global.json)" \
   -d '{"win_id":1}'
 ```
 
@@ -91,7 +91,7 @@ curl -X POST http://localhost:8101/rpc/get_window_info \
 ```bash
 curl -X POST http://localhost:8101/rpc/cdp_scroll \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(cat ~/data/electron/token.txt)" \
+  -H "Authorization: Bearer $(jq -r .api_token ~/global.json)" \
   -d '{"win_id":1,"x":0,"y":500}'
 ```
 
@@ -99,7 +99,7 @@ curl -X POST http://localhost:8101/rpc/cdp_scroll \
 ```bash
 curl -X POST http://localhost:8101/rpc/get_console_logs \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(cat ~/data/electron/token.txt)" \
+  -H "Authorization: Bearer $(jq -r .api_token ~/global.json)" \
   -d '{"win_id":1}'
 ```
 
@@ -107,7 +107,7 @@ curl -X POST http://localhost:8101/rpc/get_console_logs \
 ```bash
 curl -X POST http://localhost:8101/rpc/get_requests \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(cat ~/data/electron/token.txt)" \
+  -H "Authorization: Bearer $(jq -r .api_token ~/global.json)" \
   -d '{"win_id":1}'
 ```
 EOF

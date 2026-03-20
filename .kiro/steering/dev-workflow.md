@@ -41,9 +41,9 @@ inclusion: always
 # - Bug修复：fix-MMDD-问题简述
 
 # 1. 直接在工作目录克隆并创建分支
-mkdir -p ~/projects/electron-mcp/branches/
-git clone -b origin/main git@github.com:cicy-dev/electron-mcp.git ~/projects/electron-mcp/branches/<branch-name>
-sudo ln -s /<branch-name> ~/projects/electron-mcp/branches/<branch-name>
+mkdir -p ~/projects/cicy-desktop/branches/
+git clone -b origin/main git@github.com:cicy-ai/cicy-desktop.git ~/projects/cicy-desktop/branches/<branch-name>
+sudo ln -s /<branch-name> ~/projects/cicy-desktop/branches/<branch-name>
 cd /<branch-name>
 git fetch origin
 git checkout -b <branch-name> origin/main
@@ -144,8 +144,8 @@ gh pr create --base main --head <branch-name> --title "标题" --body "详细描
 ```
 ~/
 ├── projects/
-│   └── electron-mcp/main             # 主仓库
-└── projects/electron-mcp/branches/
+│   └── cicy-desktop/main             # 主仓库
+└── projects/cicy-desktop/branches/
     ├── feat-0206-feature1/
     ├── fix-0206-bug1/
     └── feat-0206-feature2/
@@ -163,4 +163,4 @@ gh pr create --base main --head <branch-name> --title "标题" --body "详细描
 
 ---
 **制定时间：2026-02-06**
-**适用项目：electron-mcp**
+**适用项目：cicy-desktop**

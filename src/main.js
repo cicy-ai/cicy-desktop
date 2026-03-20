@@ -95,7 +95,7 @@ const authManager = new AuthManager();
 global.authManager = authManager; // Make it globally accessible
 const authMiddleware = (req, res, next) => {
   if (!authManager.validateAuth(req)) {
-    res.setHeader("WWW-Authenticate", 'Basic realm="Electron MCP"');
+    res.setHeader("WWW-Authenticate", 'Basic realm="CiCy Desktop"');
     return res.status(401).json({ error: "Unauthorized" });
   }
   next();
@@ -200,7 +200,7 @@ app.get("/rpc/tools", authMiddleware, (req, res) => {
 const fs = require("fs");
 const path = require("path");
 const serveIndex = require("serve-index");
-const FILES_DIR = path.join(require("os").homedir(), "electron-mcp-files");
+const FILES_DIR = path.join(require("os").homedir(), "cicy-files");
 if (!fs.existsSync(FILES_DIR)) {
   fs.mkdirSync(FILES_DIR, { recursive: true });
 }

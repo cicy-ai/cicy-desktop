@@ -71,13 +71,13 @@ bash examples/rest-api-demo.sh
 # Ping
 curl -X POST http://localhost:8101/rpc/ping \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(cat ~/data/electron/token.txt)" \
+  -H "Authorization: Bearer $(jq -r .api_token ~/global.json)" \
   -d '{}'
 
 # Open window
 curl -X POST http://localhost:8101/rpc/open_window \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(cat ~/data/electron/token.txt)" \
+  -H "Authorization: Bearer $(jq -r .api_token ~/global.json)" \
   -d '{"url":"https://example.com","accountIdx":0}'
 ```
 

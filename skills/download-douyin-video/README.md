@@ -42,7 +42,7 @@ echo "✅ 下载完成: /tmp/douyin-*.mp4"
 
 ```bash
 # 实时查看下载日志
-tail -f /tmp/electron-mcp-8101.log | grep -i download
+tail -f /tmp/cicy-desktop-8101.log | grep -i download
 
 # 查看所有下载记录
 cicy-rpc get_downloads
@@ -77,7 +77,7 @@ done
 **Q: 下载失败怎么办？**
 - 增加等待时间到15秒
 - 检查视频URL是否过期（重新获取）
-- 查看下载日志：`tail -f /tmp/electron-mcp-8101.log`
+- 查看下载日志：`tail -f /tmp/cicy-desktop-8101.log`
 
 **Q: 如何获取视频标题？**
 ```bash

@@ -1,14 +1,14 @@
 # 任务：AI Studio 技能模块
 
 ## 需求描述
-创建一个新的 Electron MCP 技能模块 `aistudio`，位于 `./skills/aistudio` 目录。
-该模块通过 HTTP 调用 electron-mcp 服务，实现 AI Studio 相关的自动化操作。
+创建一个新的 CiCy Desktop 技能模块 `aistudio`，位于 `./skills/aistudio` 目录。
+该模块通过 HTTP 调用 cicy-desktop 服务，实现 AI Studio 相关的自动化操作。
 
 ## 实现方案
 
 ### 技术架构
-- **MCP 客户端封装**：使用 axios 调用 electron-mcp HTTP API
-- **端口可配置**：支持自定义 electron-mcp 服务端口（默认 8101）
+- **MCP 客户端封装**：使用 axios 调用 cicy-desktop HTTP API
+- **端口可配置**：支持自定义 cicy-desktop 服务端口（默认 8101）
 - **工具封装**：封装常用的 AI Studio 操作
 
 ### 目录结构
@@ -25,7 +25,7 @@ skills/aistudio/
 ```
 
 ### 核心功能
-1. **MCP 客户端**：封装与 electron-mcp 服务的通信
+1. **MCP 客户端**：封装与 cicy-desktop 服务的通信
 2. **打开窗口**：调用 open_window 工具打开 AI Studio
 3. **配置管理**：支持端口等配置项
 
@@ -41,7 +41,7 @@ skills/aistudio/
 - [ ] 提交代码
 
 ## 验收标准
-- [x] 成功连接到 electron-mcp 服务
+- [x] 成功连接到 cicy-desktop 服务
 - [x] 成功打开 AI Studio 窗口
 - [x] 端口可通过配置文件自定义
 - [x] 返回窗口 ID 供后续操作

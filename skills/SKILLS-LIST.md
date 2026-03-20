@@ -2,14 +2,14 @@
 
 ## 服务管理
 
-### electron-mcp server
+### cicy-desktop server
 
 ```bash
-bash skills/electron-mcp-service/service.sh start    # 启动服务
-bash skills/electron-mcp-service/service.sh stop     # 停止服务
-bash skills/electron-mcp-service/service.sh status   # 查看状态
-bash skills/electron-mcp-service/service.sh logs     # 查看日志
-bash skills/electron-mcp-service/service.sh restart  # 重启服务
+bash skills/cicy-desktop-service/service.sh start    # 启动服务
+bash skills/cicy-desktop-service/service.sh stop     # 停止服务
+bash skills/cicy-desktop-service/service.sh status   # 查看状态
+bash skills/cicy-desktop-service/service.sh logs     # 查看日志
+bash skills/cicy-desktop-service/service.sh restart  # 重启服务
 ```
 
 **验证服务:**
@@ -28,17 +28,17 @@ npm install -g cicy-rpc
 
 ## 可用技能
 
-### electron-mcp-service
+### cicy-desktop-service
 
-**位置:** `./electron-mcp-service`  
+**位置:** `./cicy-desktop-service`  
 **功能:** 浏览器自动化服务
 
 ```bash
-bash skills/electron-mcp-service/service.sh start
+bash skills/cicy-desktop-service/service.sh start
 cicy-rpc ping
 ```
 
-[文档](./electron-mcp-service/README.md)
+[文档](./cicy-desktop-service/README.md)
 
 ---
 
@@ -46,7 +46,7 @@ cicy-rpc ping
 
 **位置:** `../packages/cicy-rpc`  
 **类型:** npm 包  
-**功能:** 轻量级 Electron MCP RPC 命令行工具
+**功能:** 轻量级 CiCy Desktop RPC 命令行工具
 
 ```bash
 # 安装
@@ -66,10 +66,10 @@ cicy-rpc tools ping          # 查看 ping 工具详情
 cicy-rpc open_window url=https://example.com
 
 环境变量:
-  ELECTRON_MCP_NODE=0         选择节点 (0, 1, 2, ...)
+  CICY_NODE=0         选择节点 (0, 1, 2, ...)
   DEBUG=1                     输出调试信息 (curl -v)
 
-配置: ~/data/electron/cicy-rpc.json
+配置: ~/global.json
 ```
 
 **特性:**
@@ -116,7 +116,7 @@ bash skills/telegram-web/telegram-web.sh send "Saved Messages" "Hello"
 bash skills/download-douyin-video/download-douyin-video.sh <url>
 ```
 
-**依赖:** electron-mcp 服务 + jq
+**依赖:** cicy-desktop 服务 + jq
 
 [文档](./download-douyin-video/README.md)
 

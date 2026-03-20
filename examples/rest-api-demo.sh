@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# REST API Examples for Electron MCP
+# REST API Examples for CiCy Desktop
 
-TOKEN=$(cat ~/data/electron/token.txt)
+TOKEN=$(jq -r .api_token ~/global.json)
 BASE_URL="http://localhost:8101"
 
-echo "=== Electron MCP REST API Examples ==="
+echo "=== CiCy Desktop REST API Examples ==="
 echo ""
 
 # 1. Ping

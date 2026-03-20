@@ -6,7 +6,7 @@ const transports = new Map();
 
 function createMcpServer() {
   return new McpServer({
-    name: "electron-mcp",
+    name: "cicy-desktop",
     version: "1.0.0",
   });
 }

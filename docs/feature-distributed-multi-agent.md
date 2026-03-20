@@ -2,7 +2,7 @@
 
 ## 概述
 
-将 Electron MCP Server 升级为分布式 Multi-Agent 集群系统，支持大规模并行自动化任务。
+将 CiCy Desktop Server 升级为分布式 Multi-Agent 集群系统，支持大规模并行自动化任务。
 
 ## 目标
 
@@ -353,20 +353,20 @@ services:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: electron-mcp-master
+  name: cicy-desktop-master
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: electron-mcp-master
+      app: cicy-desktop-master
   template:
     metadata:
       labels:
-        app: electron-mcp-master
+        app: cicy-desktop-master
     spec:
       containers:
       - name: master
-        image: electron-mcp:latest
+        image: cicy-desktop:latest
         command: ["npm", "run", "start:master"]
         ports:
         - containerPort: 8100
@@ -379,20 +379,20 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: electron-mcp-worker
+  name: cicy-desktop-worker
 spec:
   replicas: 5
   selector:
     matchLabels:
-      app: electron-mcp-worker
+      app: cicy-desktop-worker
   template:
     metadata:
       labels:
-        app: electron-mcp-worker
+        app: cicy-desktop-worker
     spec:
       containers:
       - name: worker
-        image: electron-mcp:latest
+        image: cicy-desktop:latest
         command: ["npm", "run", "start:worker"]
         env:
         - name: MASTER_URL
@@ -440,10 +440,10 @@ app.get('/metrics', async (req, res) => {
 ```yaml
 # alerts.yml
 groups:
-  - name: electron-mcp
+  - name: cicy-desktop
     rules:
       - alert: WorkerDown
-        expr: up{job="electron-mcp-worker"} == 0
+        expr: up{job="cicy-desktop-worker"} == 0
         for: 1m
         annotations:
           summary: "Worker {{ $labels.instance }} is down"

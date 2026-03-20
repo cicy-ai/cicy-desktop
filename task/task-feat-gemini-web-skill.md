@@ -2,7 +2,7 @@
 
 ## 需求描述
 
-创建一个新的 Electron MCP 技能模块 `hook-gemini`，类似于现有的 `hook-chatgpt.js`，用于自动化操作 Gemini Web (gemini.google.com)。
+创建一个新的 CiCy Desktop 技能模块 `hook-gemini`，类似于现有的 `hook-chatgpt.js`，用于自动化操作 Gemini Web (gemini.google.com)。
 
 ## 实现方案
 

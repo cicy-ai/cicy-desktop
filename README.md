@@ -1,4 +1,4 @@
-# Electron MCP Server
+# CiCy Desktop Server
 
 基于 Electron 的 MCP 服务器，提供**浏览器自动化 + 系统级控制**的完整解决方案。支持多账户隔离、会话管理、丰富的 CDP 操作，以及 **YAML/JSON 双格式支持**。
 
@@ -143,8 +143,8 @@
 ### 安装依赖
 
 ```bash
-git clone git@github.com:cicy-dev/electron-mcp.git
-cd electron-mcp
+git clone git@github.com:cicy-ai/cicy-desktop.git
+cd cicy-desktop
 npm install
 ```
 
@@ -152,7 +152,7 @@ npm install
 
 ```bash
 # 启动服务
-bash skills/electron-mcp-service/service.sh start
+bash skills/cicy-desktop-service/service.sh start
 
 # 验证服务
 cicy-rpc "name: ping"
@@ -171,7 +171,7 @@ bash skills/download-douyin-video/download-douyin-video.sh <url>
 
 | 技能 | 说明 | 文档 |
 |------|------|------|
-| **electron-mcp-service** | 浏览器自动化服务 | [README](./skills/electron-mcp-service/README.md) |
+| **cicy-desktop-service** | 浏览器自动化服务 | [README](./skills/cicy-desktop-service/README.md) |
 | **download-douyin-video** | 下载抖音视频 | [README](./skills/download-douyin-video/README.md) |
 | **aistudio** | AI Studio 自动化 | [README](./skills/aistudio/README.md) |
 | **cicy-rpc** | RPC 命令行工具 | [README](./skills/cicy-rpc/README.md) |
@@ -187,11 +187,11 @@ bash skills/create-skill.sh my-skill
 ## 服务管理
 
 ```bash
-bash skills/electron-mcp-service/service.sh start    # 启动
-bash skills/electron-mcp-service/service.sh stop     # 停止
-bash skills/electron-mcp-service/service.sh status   # 状态
-bash skills/electron-mcp-service/service.sh logs     # 日志
-bash skills/electron-mcp-service/service.sh restart  # 重启
+bash skills/cicy-desktop-service/service.sh start    # 启动
+bash skills/cicy-desktop-service/service.sh stop     # 停止
+bash skills/cicy-desktop-service/service.sh status   # 状态
+bash skills/cicy-desktop-service/service.sh logs     # 日志
+bash skills/cicy-desktop-service/service.sh restart  # 重启
 ```
 
 ## 启动参数
@@ -268,7 +268,7 @@ npm test -- api.cdp-tools.test.js
 
 ```bash
 # 添加 MCP 服务器
-kiro-cli mcp add --name electron-mcp --url http://localhost:8101/mcp --force
+kiro-cli mcp add --name cicy-desktop --url http://localhost:8101/mcp --force
 ```
 
 或手动配置 `~/.kiro/settings/mcp.json`：
@@ -276,7 +276,7 @@ kiro-cli mcp add --name electron-mcp --url http://localhost:8101/mcp --force
 ```json
 {
   "mcpServers": {
-    "electron-mcp": {
+    "cicy-desktop": {
       "url": "http://localhost:8101/mcp"
     }
   }
@@ -291,14 +291,14 @@ kiro-cli mcp add --name electron-mcp --url http://localhost:8101/mcp --force
 
 ```bash
 # 安装到 ~/.local/bin
-curl -o ~/.local/bin/cicy-rpc https://raw.githubusercontent.com/cicy-dev/electron-mcp/main/bin/cicy-rpc
+curl -o ~/.local/bin/cicy-rpc https://raw.githubusercontent.com/cicy-ai/cicy-desktop/main/bin/cicy-rpc
 chmod +x ~/.local/bin/cicy-rpc
 
 # 安装依赖（YAML 支持）
 pip install yq --break-system-packages
 
 # 设置 token（首次使用）
-echo "your-token-here" > ~/data/electron/token.txt
+echo '{"api_token":"your-token-here"}' > ~/global.json
 
 # 简化语法（推荐）
 cicy-rpc ping
@@ -459,7 +459,7 @@ PORT=8080 npm start
 
 ### 日志文件
 
-日志写入 `~/logs/electron-mcp-{port}.log`，格式：
+日志写入 `~/logs/cicy-desktop-{port}.log`，格式：
 
 ```
 [2026-02-06 15:30:33.994] [info] Server listening on http://localhost:1234
@@ -493,7 +493,7 @@ npm start -- --port=8102 &
 A: 查看日志文件：
 
 ```bash
-tail -f ~/logs/electron-mcp-8101.log
+tail -f ~/logs/cicy-desktop-8101.log
 ```
 
 ### Q: 多账户窗口之间如何隔离？
@@ -567,7 +567,7 @@ npm test -- api.exec-js.test.js
 ### 项目结构
 
 ```
-electron-mcp/
+cicy-desktop/
 ├── src/
 │   ├── main.js              # 主入口（模块化）
 │   ├── config.js            # 配置文件
@@ -610,7 +610,7 @@ electron-mcp/
 
 ```bash
 # 启动服务
-bash skills/electron-mcp-service/service.sh start
+bash skills/cicy-desktop-service/service.sh start
 
 # 修改工具代码
 vim src/tools/ping.js

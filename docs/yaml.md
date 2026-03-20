@@ -2,7 +2,7 @@
 
 ## 概述
 
-Electron MCP Server 支持 YAML 和 JSON 双格式，**默认使用 YAML** 以节省 token 消耗。
+CiCy Desktop Server 支持 YAML 和 JSON 双格式，**默认使用 YAML** 以节省 token 消耗。
 
 ## 为什么选择 YAML？
 

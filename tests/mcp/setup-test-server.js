@@ -75,9 +75,10 @@ async function startTestServer() {
 
   await new Promise((resolve) => setTimeout(resolve, 3000));
 
-  const tokenPath = path.join(os.homedir(), "data/electron/token.txt");
+  const tokenPath = path.join(os.homedir(), "global.json");
   if (fs.existsSync(tokenPath)) {
-    authToken = fs.readFileSync(tokenPath, "utf8").trim();
+    const config = JSON.parse(fs.readFileSync(tokenPath, "utf8"));
+    authToken = config.api_token || "";
   }
 
   await new Promise((resolve, reject) => {

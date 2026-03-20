@@ -2,7 +2,7 @@
 
 ## 概述
 
-Electron MCP 自动化系统提供完整的浏览器自动化能力，支持窗口管理、页面导航、元素操作、JavaScript执行等功能。
+CiCy Desktop 自动化系统提供完整的浏览器自动化能力，支持窗口管理、页面导航、元素操作、JavaScript执行等功能。
 
 **服务端口**: 8101  
 **基础URL**: `http://localhost:8101`
@@ -337,6 +337,6 @@ curl -X POST http://localhost:8101/rpc/electron_screenshot \
 
 ## 技术支持
 
-- 项目地址: `/home/w3c_offical/projects/electron-mcp`
+- 项目地址: `/home/w3c_offical/projects/cicy-desktop`
 - 端口: 8101
 - 协议: HTTP REST API + MCP

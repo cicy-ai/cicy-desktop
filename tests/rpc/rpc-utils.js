@@ -5,11 +5,14 @@ const path = require("path");
 
 const PORT = 18102; // 与 setup-test-server.js 一致
 const BASE_URL = `http://localhost:${PORT}`;
-const TOKEN_FILE = path.join(os.homedir(), "data/electron/token.txt");
+const TOKEN_FILE = path.join(os.homedir(), "global.json");
 
 function getAuthToken() {
   if (fs.existsSync(TOKEN_FILE)) {
-    return fs.readFileSync(TOKEN_FILE, "utf-8").trim();
+    try {
+      const config = JSON.parse(fs.readFileSync(TOKEN_FILE, "utf-8"));
+      return config.api_token || "";
+    } catch (_) { return ""; }
   }
   return "";
 }

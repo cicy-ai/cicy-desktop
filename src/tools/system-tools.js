@@ -53,7 +53,7 @@ function registerTools(registerTool) {
             if (detail) {
               // 生成缩略图 URL
               const baseUrl =
-                process.env.ELECTRON_MCP_BASE_URL || `http://localhost:${process.env.PORT || 8101}`;
+                process.env.CICY_BASE_URL || `http://localhost:${process.env.PORT || 8101}`;
               const thumbUrl = `${baseUrl}/files/screenshot/sys_win_${winId.replace(/^0x/, "")}.jpeg`;
 
               return {
@@ -103,7 +103,7 @@ function registerTools(registerTool) {
         // 清理不在列表中的截图文件
         const screenshotDir = path.join(
           require("os").homedir(),
-          "electron-mcp-files",
+          "cicy-files",
           "screenshot"
         );
         if (fs.existsSync(screenshotDir)) {
@@ -313,7 +313,7 @@ function registerTools(registerTool) {
         // 创建目录
         const screenshotDir = path.join(
           require("os").homedir(),
-          "electron-mcp-files",
+          "cicy-files",
           "screenshot"
         );
         if (!fs.existsSync(screenshotDir)) {
@@ -350,7 +350,7 @@ function registerTools(registerTool) {
 
         // 返回 URL
         const baseUrl =
-          process.env.ELECTRON_MCP_BASE_URL || `http://localhost:${process.env.PORT || 8101}`;
+          process.env.CICY_BASE_URL || `http://localhost:${process.env.PORT || 8101}`;
         const url = `${baseUrl}/files/screenshot/system.jpeg`;
 
         return {
@@ -400,7 +400,7 @@ function registerTools(registerTool) {
         // 创建目录
         const screenshotDir = path.join(
           require("os").homedir(),
-          "electron-mcp-files",
+          "cicy-files",
           "screenshot"
         );
         if (!fs.existsSync(screenshotDir)) {
@@ -438,7 +438,7 @@ function registerTools(registerTool) {
 
         // 返回 URL
         const baseUrl =
-          process.env.ELECTRON_MCP_BASE_URL || `http://localhost:${process.env.PORT || 8101}`;
+          process.env.CICY_BASE_URL || `http://localhost:${process.env.PORT || 8101}`;
         const url = `${baseUrl}/files/screenshot/${filename}`;
 
         return {

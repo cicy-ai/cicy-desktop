@@ -7,7 +7,7 @@ SKILLS_DIR="$(dirname "$SCRIPT_DIR")"
 check_service() {
     if ! cicy-rpc ping >/dev/null 2>&1; then
         echo "服务未运行，正在启动..."
-        bash "$SKILLS_DIR/electron-mcp-service/service.sh" start
+        bash "$SKILLS_DIR/cicy-desktop-service/service.sh" start
         sleep 5
     fi
 }

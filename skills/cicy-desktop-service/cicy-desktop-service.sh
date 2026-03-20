@@ -1,12 +1,12 @@
 #!/bin/bash
-# Electron MCP 后台启动脚本
+# CiCy Desktop 后台启动脚本
 
 COMMAND=${1:-start}
 PORT=${2:-8101}
 DISPLAY_NUM=${3:-:1}
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_FILE="/tmp/electron-mcp-${PORT}.log"
-PID_FILE="/tmp/electron-mcp-${PORT}.pid"
+LOG_FILE="/tmp/cicy-desktop-${PORT}.log"
+PID_FILE="/tmp/cicy-desktop-${PORT}.pid"
 
 start() {
     if [ -f "$PID_FILE" ]; then

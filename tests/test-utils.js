@@ -79,7 +79,7 @@ async function setupTest() {
   await new Promise((resolve) => setTimeout(resolve, 1000));
   log("DEBUG", `Port ${PORT} cleared`);
 
-  log("DEBUG", `Spawning Electron MCP server...`);
+  log("DEBUG", `Spawning CiCy Desktop server...`);
   log("DEBUG", `  Command: electron . --port=${PORT} --url=${initUrl} --no-sandbox`);
   const electronArgs = [".", `--port=${PORT}`, `--url=${initUrl}`];
 
@@ -131,10 +131,11 @@ async function setupTest() {
   await new Promise((resolve) => setTimeout(resolve, 3000));
   log("DEBUG", `Waited 3s for server to stabilize`);
 
-  const tokenPath = path.join(os.homedir(), "data/electron/token.txt");
+  const tokenPath = path.join(os.homedir(), "global.json");
   log("DEBUG", `Checking for auth token at: ${tokenPath}`);
   if (fs.existsSync(tokenPath)) {
-    authToken = fs.readFileSync(tokenPath, "utf8").trim();
+    const config = JSON.parse(fs.readFileSync(tokenPath, "utf8"));
+    authToken = config.api_token || "";
     log("DEBUG", `Auth token loaded, length: ${authToken.length}`);
   } else {
     log("WARN", `Auth token file not found`);

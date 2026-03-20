@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Electron MCP 启动脚本 - 修复版本
-# 用于在 macOS 上双击启动 Electron MCP 服务
+# CiCy Desktop 启动脚本 - 修复版本
+# 用于在 macOS 上双击启动 CiCy Desktop 服务
 
 # 设置错误处理
 set -e
@@ -12,19 +12,19 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # 检查是否在项目目录中
 if [ -f "$SCRIPT_DIR/package.json" ]; then
     PROJECT_DIR="$SCRIPT_DIR"
-elif [ -f "$SCRIPT_DIR/electron-mcp/package.json" ]; then
-    PROJECT_DIR="$SCRIPT_DIR/electron-mcp"
+elif [ -f "$SCRIPT_DIR/cicy-desktop/package.json" ]; then
+    PROJECT_DIR="$SCRIPT_DIR/cicy-desktop"
 else
     # 如果脚本在桌面，尝试找到项目目录
-    if [ -f "/Users/ton/Desktop/electron-mcp/package.json" ]; then
-        PROJECT_DIR="/Users/ton/Desktop/electron-mcp"
-    elif [ -f "$HOME/Desktop/electron-mcp/package.json" ]; then
-        PROJECT_DIR="$HOME/Desktop/electron-mcp"
+    if [ -f "/Users/ton/Desktop/cicy-desktop/package.json" ]; then
+        PROJECT_DIR="/Users/ton/Desktop/cicy-desktop"
+    elif [ -f "$HOME/Desktop/cicy-desktop/package.json" ]; then
+        PROJECT_DIR="$HOME/Desktop/cicy-desktop"
     else
-        echo "❌ 错误: 找不到 electron-mcp 项目目录"
+        echo "❌ 错误: 找不到 cicy-desktop 项目目录"
         echo "请确保项目在以下位置之一："
-        echo "- $SCRIPT_DIR/electron-mcp/"
-        echo "- $HOME/Desktop/electron-mcp/"
+        echo "- $SCRIPT_DIR/cicy-desktop/"
+        echo "- $HOME/Desktop/cicy-desktop/"
         echo ""
         echo "按任意键退出..."
         read -n 1
@@ -35,7 +35,7 @@ fi
 # 输出启动信息
 clear
 echo "========================================="
-echo "  🚀 Electron MCP 启动脚本"
+echo "  🚀 CiCy Desktop 启动脚本"
 echo "  📁 项目目录: $PROJECT_DIR"
 echo "  📅 时间: $(date '+%Y-%m-%d %H:%M:%S')"
 echo "========================================="
@@ -103,7 +103,7 @@ export NODE_ENV=development
 # 显示启动信息
 echo ""
 echo "========================================="
-echo "🚀 正在启动 Electron MCP 服务..."
+echo "🚀 正在启动 CiCy Desktop 服务..."
 echo "📋 端口: 8101"
 echo "📋 调试端口: 9221"
 echo ""

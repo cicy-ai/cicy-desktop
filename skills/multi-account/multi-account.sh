@@ -32,7 +32,7 @@ open_account() {
     echo -e "${YELLOW}🌐 URL: $url${NC}"
     
     # 创建账户配置目录
-    local account_dir="$HOME/data/electron"
+    local account_dir="$HOME/cicy-desktop"
     local account_file="$account_dir/account-${account_idx}.json"
     
     mkdir -p "$account_dir"

@@ -7,8 +7,9 @@ const yaml = require('js-yaml');
 // 从服务器获取工具列表和 schemas
 async function getToolsWithSchemas() {
   const http = require('http');
-  const tokenPath = path.join(require('os').homedir(), 'data/electron/token.txt');
-  const token = fs.readFileSync(tokenPath, 'utf8').trim();
+  const tokenPath = path.join(require('os').homedir(), 'global.json');
+  const config = JSON.parse(fs.readFileSync(tokenPath, 'utf8'));
+  const token = config.api_token || '';
   
   // 获取工具列表
   const tools = await new Promise((resolve, reject) => {
@@ -44,9 +45,9 @@ async function generateOpenAPI() {
   const openapi = {
     openapi: '3.0.0',
     info: {
-      title: 'Electron MCP REST API',
+      title: 'CiCy Desktop REST API',
       version: '1.0.0',
-      description: `REST API for Electron MCP tools - ${tools.length} tools available`,
+      description: `REST API for CiCy Desktop tools - ${tools.length} tools available`,
     },
     servers: [
       {

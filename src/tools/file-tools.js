@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 
-const FILES_DIR = path.join(require("os").homedir(), "electron-mcp-files");
+const FILES_DIR = path.join(require("os").homedir(), "cicy-files");
 
 function registerTools(registerTool) {
   // 文本文件工具（默认 UTF-8）
@@ -117,7 +117,7 @@ function registerTools(registerTool) {
         const stats = fs.statSync(filePath);
 
         const baseUrl =
-          process.env.ELECTRON_MCP_BASE_URL || `http://localhost:${process.env.PORT || 8101}`;
+          process.env.CICY_BASE_URL || `http://localhost:${process.env.PORT || 8101}`;
         const url = `${baseUrl}/files/${uniqueFilename}`;
 
         return {
@@ -176,7 +176,7 @@ function registerTools(registerTool) {
         fs.copyFileSync(filePath, destPath);
 
         const baseUrl =
-          process.env.ELECTRON_MCP_BASE_URL || `http://localhost:${process.env.PORT || 8101}`;
+          process.env.CICY_BASE_URL || `http://localhost:${process.env.PORT || 8101}`;
         const url = `${baseUrl}/files/${uniqueFilename}`;
 
         return {

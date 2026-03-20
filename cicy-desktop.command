@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Electron MCP 启动脚本
-# 用于在 macOS 上双击启动 Electron MCP 服务
+# CiCy Desktop 启动脚本
+# 用于在 macOS 上双击启动 CiCy Desktop 服务
 
 # 设置脚本目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -9,14 +9,14 @@ PROJECT_DIR="$SCRIPT_DIR"
 
 # 输出启动信息
 echo "========================================="
-echo "  Electron MCP 启动脚本"
+echo "  CiCy Desktop 启动脚本"
 echo "  项目目录: $PROJECT_DIR"
 echo "========================================="
 
 # 检查是否在正确的项目目录
 if [ ! -f "$PROJECT_DIR/package.json" ]; then
     echo "❌ 错误: 未找到 package.json 文件"
-    echo "请确保脚本在 electron-mcp 项目根目录中"
+    echo "请确保脚本在 cicy-desktop 项目根目录中"
     read -p "按任意键退出..."
     exit 1
 fi
@@ -67,7 +67,7 @@ fi
 export NODE_ENV=development
 
 # 启动服务
-echo "🚀 正在启动 Electron MCP 服务..."
+echo "🚀 正在启动 CiCy Desktop 服务..."
 echo "端口: 8101"
 echo "调试端口: 9221"
 echo ""

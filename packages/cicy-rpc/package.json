@@ -3,7 +3,7 @@
   "version": "1.0.4",
   "description": "Lightweight MCP RPC CLI tool with YAML/JSON support",
   "bin": {
-    "electron-cli": "./bin/cicy-rpc"
+    "cicy-rpc": "./bin/cicy-rpc"
   },
   "scripts": {
     "test": "echo \"No tests yet\""
@@ -13,16 +13,16 @@
     "rpc",
     "cli",
     "yaml",
-    "electron-mcp"
+    "cicy-desktop"
   ],
   "author": "cicybot",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/cicy-dev/electron-mcp.git",
-    "directory": "packages/electron-cli"
+    "url": "https://github.com/cicy-ai/cicy-desktop.git",
+    "directory": "packages/cicy-rpc"
   },
-  "homepage": "https://github.com/cicy-dev/electron-mcp#readme",
+  "homepage": "https://github.com/cicy-ai/cicy-desktop#readme",
   "engines": {
     "node": ">=14.0.0"
   },

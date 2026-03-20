@@ -1,22 +1,22 @@
 #!/bin/bash
 
-# 简化版 Electron MCP 启动脚本
+# 简化版 CiCy Desktop 启动脚本
 # 避免复杂的路径检测，直接使用固定路径
 
 # 强制保持终端打开
 exec 2>&1
 
 echo "========================================="
-echo "  🚀 Electron MCP 启动脚本 (简化版)"
+echo "  🚀 CiCy Desktop 启动脚本 (简化版)"
 echo "  📅 $(date '+%Y-%m-%d %H:%M:%S')"
 echo "========================================="
 
 # 尝试多个可能的项目路径
 PROJECT_PATHS=(
-    "/Users/ton/Desktop/electron-mcp"
-    "$HOME/Desktop/electron-mcp"
-    "$HOME/Documents/electron-mcp"
-    "$HOME/Projects/electron-mcp"
+    "/Users/ton/Desktop/cicy-desktop"
+    "$HOME/Desktop/cicy-desktop"
+    "$HOME/Documents/cicy-desktop"
+    "$HOME/Projects/cicy-desktop"
 )
 
 PROJECT_DIR=""
@@ -34,7 +34,7 @@ done
 
 if [ -z "$PROJECT_DIR" ]; then
     echo ""
-    echo "❌ 错误: 找不到 electron-mcp 项目"
+    echo "❌ 错误: 找不到 cicy-desktop 项目"
     echo ""
     echo "请确保项目在以下位置之一："
     for path in "${PROJECT_PATHS[@]}"; do
@@ -110,7 +110,7 @@ fi
 # 启动服务
 echo ""
 echo "========================================="
-echo "🚀 启动 Electron MCP 服务"
+echo "🚀 启动 CiCy Desktop 服务"
 echo "📋 端口: 8101"
 echo "📋 API: http://localhost:8101/docs"
 echo ""

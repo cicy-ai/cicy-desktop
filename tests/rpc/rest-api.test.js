@@ -6,8 +6,8 @@ const path = require("path");
 const PORT = 18102;
 const BASE_URL = `http://localhost:${PORT}`;
 
-const tokenPath = path.join(os.homedir(), "data/electron/token.txt");
-const authToken = fs.existsSync(tokenPath) ? fs.readFileSync(tokenPath, "utf8").trim() : "";
+const tokenPath = path.join(os.homedir(), "global.json");
+const authToken = fs.existsSync(tokenPath) ? (JSON.parse(fs.readFileSync(tokenPath, "utf8")).api_token || "") : "";
 
 describe("REST API", () => {
   test("should get tools list", async () => {

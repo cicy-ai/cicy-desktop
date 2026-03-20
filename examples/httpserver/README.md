@@ -1,6 +1,6 @@
 # HTTP Server Examples
 
-This directory contains HTML examples for testing with Electron MCP.
+This directory contains HTML examples for testing with CiCy Desktop.
 
 ## Files
 

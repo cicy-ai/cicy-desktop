@@ -6,7 +6,7 @@ ChatGPT Web 自动化工具，通过 IndexedDB 读取对话、发送消息、获
 
 启动时自动检测:
 
-1. 检查 electron-mcp 服务，如未运行则启动
+1. 检查 cicy-desktop 服务，如未运行则启动
 2. 检查 ChatGPT 窗口，如不存在则打开
 3. 检查登录状态，未登录提示手动登录
 
@@ -81,5 +81,5 @@ cicy-rpc open_chatgpt_web_chat_by_id conversation_id=xxx
 
 ## 依赖
 
-- electron-mcp 服务
+- cicy-desktop 服务
 - 登录 ChatGPT Web

@@ -2,7 +2,7 @@
 # Electron 自动化 API 测试脚本
 
 BASE_URL="http://localhost:8101"
-TOKEN="${ELECTRON_MCP_TOKEN:-test-token}"
+TOKEN="${CICY_TOKEN:-test-token}"
 
 echo "🧪 Electron 自动化 API 测试"
 echo "================================"
@@ -105,5 +105,5 @@ echo ""
 echo "✅ 测试完成！"
 echo ""
 echo "💡 提示："
-echo "  - 设置TOKEN: export ELECTRON_MCP_TOKEN=your-token"
+echo "  - 设置TOKEN: export CICY_TOKEN=your-token"
 echo "  - 查看文档: cat docs/AUTOMATION-API.md"

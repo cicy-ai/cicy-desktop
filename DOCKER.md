@@ -38,13 +38,13 @@ docker exec electron-rcp electron-rpc status
 ```bash
 docker logs electron-rcp
 # or
-docker exec electron-rcp tail -f /home/electron/logs/electron-mcp.log
+docker exec electron-rcp tail -f /home/electron/logs/cicy-desktop.log
 ```
 
 ### Use cicy-rpc from host
 ```bash
 # Set token on host
-echo "your-token-here" > ~/data/electron/token.txt
+echo '{"api_token":"your-token-here"}' > ~/global.json
 
 # Test connection
 cicy-rpc ping
@@ -59,7 +59,7 @@ cicy-rpc webpage_snapshot win_id=1
 ### Extract screenshot to host
 ```bash
 curl -s http://localhost:8101/rpc/tools/call \
-  -H "Authorization: Bearer $(cat ~/data/electron/token.txt)" \
+  -H "Authorization: Bearer $(jq -r .api_token ~/global.json)" \
   -H "Content-Type: application/json" \
   -d '{"name":"webpage_snapshot","arguments":{"win_id":1}}' | \
   jq -r '.result.content[] | select(.type=="image") | .data' | \

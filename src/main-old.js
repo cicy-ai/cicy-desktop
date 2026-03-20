@@ -80,7 +80,7 @@ if (!fs.existsSync(logsDir)) {
   fs.mkdirSync(logsDir, { recursive: true });
 }
 config.logsDir = logsDir;
-config.logFilePath = path.join(logsDir, `electron-mcp-${config.port}.log`);
+config.logFilePath = path.join(logsDir, `cicy-desktop-${config.port}.log`);
 
 log.transports.file.resolvePathFn = () => config.logFilePath;
 
@@ -233,9 +233,9 @@ app.get("/openapi.json", (req, res) => {
   const openapi = {
     openapi: "3.0.0",
     info: {
-      title: "Electron MCP REST API",
+      title: "CiCy Desktop REST API",
       version: "1.0.0",
-      description: `REST API for Electron MCP tools - ${tools.length} tools available`,
+      description: `REST API for CiCy Desktop tools - ${tools.length} tools available`,
     },
     servers: [
       {
@@ -360,9 +360,9 @@ function authMiddleware(req, res, next) {
 }
 
 const mcpServer = new McpServer({
-  name: "electron-mcp",
+  name: "cicy-desktop",
   version: "1.0.0",
-  description: "Electron MCP Server with browser automation tools",
+  description: "CiCy Desktop Server with browser automation tools",
 });
 
 // 保存工具处理函数
@@ -776,9 +776,9 @@ electronApp.whenReady().then(() => {
   const swaggerSpec = {
     openapi: "3.0.0",
     info: {
-      title: "Electron MCP REST API",
+      title: "CiCy Desktop REST API",
       version: "1.0.0",
-      description: `REST API for Electron MCP tools - ${tools.length} tools available`,
+      description: `REST API for CiCy Desktop tools - ${tools.length} tools available`,
     },
     servers: [
       {

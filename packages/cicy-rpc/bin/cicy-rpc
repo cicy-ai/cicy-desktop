@@ -4,13 +4,13 @@
 set -o pipefail
 
 VERSION="1.0.5"
-CONFIG_FILE=~/data/electron/cicy-rpc.json
+CONFIG_FILE=~/global.json
 
 # 从配置读取节点
 load_node() {
   local config node_name node_config
   config=$(cat "$CONFIG_FILE" 2>/dev/null) || { echo "❌ Error: $CONFIG_FILE not found"; echo "Run 'cicy-rpc init' to initialize"; exit 1; }
-  node_name="${ELECTRON_MCP_NODE:-$(echo "$config" | jq -r '.default // "local"')}"
+  node_name="${CICY_NODE:-$(echo "$config" | jq -r '.default // "local"')}"
   node_config=$(echo "$config" | jq -r ".nodes[\"$node_name\"] // empty")
   if [ -z "$node_config" ]; then
     echo "❌ Error: node '$node_name' not found in config"
@@ -18,12 +18,12 @@ load_node() {
     exit 1
   fi
   TOKEN=$(echo "$node_config" | jq -r '.api_token')
-  ELECTRON_MCP_URL=$(echo "$node_config" | jq -r '.base_url')
+  CICY_URL=$(echo "$node_config" | jq -r '.base_url')
 }
 
 show_help() {
   cat << 'EOF'
-cicy-rpc - Electron MCP RPC CLI
+cicy-rpc - CiCy Desktop RPC CLI
 
 Usage: cicy-rpc <command> [options]
 
@@ -39,14 +39,14 @@ Options:
   --version, -v                 Show version
 
 Environment:
-  ELECTRON_MCP_NODE=<name>      Select node (default: from config)
+  CICY_NODE=<name>      Select node (default: from config)
   DEBUG=1                       Debug output
 
-Config: ~/data/electron/cicy-rpc.json
+Config: ~/global.json
 
 Examples:
   cicy-rpc ping
-  ELECTRON_MCP_NODE=mac cicy-rpc ping
+  CICY_NODE=mac cicy-rpc ping
   cicy-rpc open_window url=https://example.com
 EOF
   exit 0
@@ -59,7 +59,7 @@ if [ "$1" = "--version" ] || [ "$1" = "-v" ]; then echo "cicy-rpc version $VERSI
 # init 命令
 if [ "$1" = "init" ]; then
   if [ ! -f "$CONFIG_FILE" ]; then
-    mkdir -p ~/data/electron
+    # config stored in ~/global.json
     cat > "$CONFIG_FILE" << 'INITEOF'
 {
     "default": "local",
@@ -87,7 +87,7 @@ fi
 # tools 命令
 if [ "$1" = "tools" ]; then
   load_node
-  RESPONSE=$(curl --noproxy "*" -s -X GET "$ELECTRON_MCP_URL/rpc/tools" \
+  RESPONSE=$(curl --noproxy "*" -s -X GET "$CICY_URL/rpc/tools" \
     -H "Accept: application/json" \
     -H "Authorization: Bearer $TOKEN")
 
@@ -166,25 +166,25 @@ else
   ACCEPT_HEADER="application/json"
 fi
 
-if ! curl --noproxy "*" -s --connect-timeout 2 $ELECTRON_MCP_URL/rpc/tools/list \
+if ! curl --noproxy "*" -s --connect-timeout 2 $CICY_URL/rpc/tools/list \
   -H "Authorization: Bearer $TOKEN" > /dev/null 2>&1; then
-  echo "❌ Error: Cannot connect to $ELECTRON_MCP_URL"
+  echo "❌ Error: Cannot connect to $CICY_URL"
   exit 1
 fi
 
 if [ "$DEBUG" = "1" ]; then
   echo "====== DEBUG ======"
-  echo "Node: ${ELECTRON_MCP_NODE:-$(jq -r .default "$CONFIG_FILE")}"
-  echo "URL: $ELECTRON_MCP_URL/rpc/$METHOD"
+  echo "Node: ${CICY_NODE:-$(jq -r .default "$CONFIG_FILE")}"
+  echo "URL: $CICY_URL/rpc/$METHOD"
   echo "Body: $PARAMS"
   echo "==================="
-  curl --noproxy "*" -v -X POST $ELECTRON_MCP_URL/rpc/$METHOD \
+  curl --noproxy "*" -v -X POST $CICY_URL/rpc/$METHOD \
     -H "Content-Type: application/json" -H "Accept: $ACCEPT_HEADER" \
     -H "Authorization: Bearer $TOKEN" -d "$PARAMS" 2>&1
   exit 0
 fi
 
-RESPONSE=$(curl --noproxy "*" -s -w "\n%{http_code}" -X POST $ELECTRON_MCP_URL/rpc/$METHOD \
+RESPONSE=$(curl --noproxy "*" -s -w "\n%{http_code}" -X POST $CICY_URL/rpc/$METHOD \
   -H "Content-Type: application/json" -H "Accept: $ACCEPT_HEADER" \
   -H "Authorization: Bearer $TOKEN" -d "$PARAMS" 2>&1)
 

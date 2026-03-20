@@ -66,5 +66,5 @@ cicy-rpc gemini_paste_image win_id=2
 
 ## 依赖
 
-- electron-mcp 服务
+- cicy-desktop 服务
 - 登录 Gemini Web
