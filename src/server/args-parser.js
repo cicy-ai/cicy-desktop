@@ -13,7 +13,7 @@ function parseArgs() {
   }
   PORT = parseInt(PORT) || 8101;
 
-  let START_URL = args.find((arg) => arg.startsWith("--url="))?.split("=")[1];
+  let START_URL = args.find((arg) => arg.startsWith("--url="))?.split("=").slice(1).join("=");
   if (!START_URL) {
     const urlIndex = args.indexOf("--url");
     if (urlIndex !== -1 && args[urlIndex + 1]) {

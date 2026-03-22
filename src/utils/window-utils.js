@@ -132,7 +132,7 @@ function isTrustedUrl(url) {
   if (!url) return false;
   try {
     const u = new URL(url);
-    return u.hostname === "localhost" || u.hostname.endsWith(".de5.net");
+    return u.hostname === "localhost" || u.hostname === "127.0.0.1" || u.hostname.endsWith(".de5.net");
   } catch { return false; }
 }
 
