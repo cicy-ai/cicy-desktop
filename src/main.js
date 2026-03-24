@@ -1,41 +1,40 @@
 const { app: electronApp } = require("electron");
 const { default: contextMenu } = require("electron-context-menu");
 
-  // 🎯 添加右键上下文菜单
-  contextMenu({
-    showLookUpSelection: true,
-    showSearchWithGoogle: true,
-    showCopyImage: true,
-    showCopyImageAddress: true,
-    showSaveImageAs: true,
-    showCopyVideoAddress: true,
-    showSaveVideoAs: true,
-    showCopyLink: true,
-    showSaveLinkAs: true,
-    showInspectElement: true,
-    showServices: true,
-    labels: {
-      cut: '剪切',
-      copy: '复制',
-      paste: '粘贴',
-      selectAll: '全选',
-      reload: '重新加载',
-      forceReload: '强制重新加载',
-      toggleDevTools: '切换开发者工具',
-      inspectElement: '检查元素',
-      services: '服务',
-      lookUpSelection: '查找选中内容',
-      searchWithGoogle: '用 Google 搜索',
-      copyImage: '复制图片',
-      copyImageAddress: '复制图片地址',
-      saveImage: '保存图片',
-      copyVideoAddress: '复制视频地址',
-      saveVideo: '保存视频',
-      copyLink: '复制链接',
-      saveLinkAs: '链接另存为...'
-    }
-  });
-
+// 🎯 添加右键上下文菜单
+contextMenu({
+  showLookUpSelection: true,
+  showSearchWithGoogle: true,
+  showCopyImage: true,
+  showCopyImageAddress: true,
+  showSaveImageAs: true,
+  showCopyVideoAddress: true,
+  showSaveVideoAs: true,
+  showCopyLink: true,
+  showSaveLinkAs: true,
+  showInspectElement: true,
+  showServices: true,
+  labels: {
+    cut: "剪切",
+    copy: "复制",
+    paste: "粘贴",
+    selectAll: "全选",
+    reload: "重新加载",
+    forceReload: "强制重新加载",
+    toggleDevTools: "切换开发者工具",
+    inspectElement: "检查元素",
+    services: "服务",
+    lookUpSelection: "查找选中内容",
+    searchWithGoogle: "用 Google 搜索",
+    copyImage: "复制图片",
+    copyImageAddress: "复制图片地址",
+    saveImage: "保存图片",
+    copyVideoAddress: "复制视频地址",
+    saveVideo: "保存视频",
+    copyLink: "复制链接",
+    saveLinkAs: "链接另存为...",
+  },
+});
 
 // Setup Electron flags IMMEDIATELY after require
 electronApp.commandLine.appendSwitch("ignore-certificate-errors");
@@ -73,7 +72,7 @@ const { registerTool } = require("./server/tool-registry");
 setupErrorHandlers();
 
 // Parse arguments
-const { PORT, START_URL, PROXY, oneWindow } = parseArgs();
+const { PORT, START_URL, PROXY, oneWindow, ACCOUNT } = parseArgs();
 config.port = PORT;
 if (PROXY) {
   config.proxy = PROXY;
@@ -277,51 +276,63 @@ Object.values(tools)
     });
   });
 
-
-
 // File upload to path: curl --data-binary @local.js http://localhost:8101/rpc/upload/C:/Users/Administrator/data/file.js
-app.post("/rpc/upload/*", authMiddleware, require("express").raw({ type: "*/*", limit: "10mb" }), (req, res) => {
-  try {
-    const filePath = req.params[0];
-    if (!filePath) return res.status(400).json({ error: "Missing path" });
-    const dir = require("path").dirname(filePath);
-    if (!require("fs").existsSync(dir)) require("fs").mkdirSync(dir, { recursive: true });
-    require("fs").writeFileSync(filePath, req.body);
-    const size = require("fs").statSync(filePath).size;
-    res.json({ success: true, path: filePath, size });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+app.post(
+  "/rpc/upload/*",
+  authMiddleware,
+  require("express").raw({ type: "*/*", limit: "10mb" }),
+  (req, res) => {
+    try {
+      const filePath = req.params[0];
+      if (!filePath) return res.status(400).json({ error: "Missing path" });
+      const dir = require("path").dirname(filePath);
+      if (!require("fs").existsSync(dir)) require("fs").mkdirSync(dir, { recursive: true });
+      require("fs").writeFileSync(filePath, req.body);
+      const size = require("fs").statSync(filePath).size;
+      res.json({ success: true, path: filePath, size });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
   }
-});
+);
 
 // File upload + execute: curl -X POST --data-binary @local.js http://localhost:8101/rpc/exec/node
 // Supported types: shell, python, node, js (js = browser exec_js)
-app.post("/rpc/exec/:type", authMiddleware, require("express").text({ type: "*/*", limit: "10mb" }), async (req, res) => {
-  const type = req.params.type;
-  const body = typeof req.body === "string" ? req.body : req.body.toString("utf-8");
-  if (!body) return res.status(400).json({ error: "Empty body" });
+app.post(
+  "/rpc/exec/:type",
+  authMiddleware,
+  require("express").text({ type: "*/*", limit: "10mb" }),
+  async (req, res) => {
+    const type = req.params.type;
+    const body = typeof req.body === "string" ? req.body : req.body.toString("utf-8");
+    if (!body) return res.status(400).json({ error: "Empty body" });
 
-  const TMP = require("path").join(require("os").homedir(), "tmp");
-  if (!require("fs").existsSync(TMP)) require("fs").mkdirSync(TMP, { recursive: true });
+    const TMP = require("path").join(require("os").homedir(), "tmp");
+    if (!require("fs").existsSync(TMP)) require("fs").mkdirSync(TMP, { recursive: true });
 
-  try {
-    // Re-load tools for hot reload
-    const toolModules = require("./tools");
-    const toolName = type === "js" ? "exec_js_file" : `exec_${type}_file`;
-    let handler = null, schema = null;
-    toolModules.forEach((module) => {
-      module((name, desc, toolSchema, fn) => {
-        if (name === toolName) { handler = fn; schema = toolSchema; }
+    try {
+      // Re-load tools for hot reload
+      const toolModules = require("./tools");
+      const toolName = type === "js" ? "exec_js_file" : `exec_${type}_file`;
+      let handler = null,
+        schema = null;
+      toolModules.forEach((module) => {
+        module((name, desc, toolSchema, fn) => {
+          if (name === toolName) {
+            handler = fn;
+            schema = toolSchema;
+          }
+        });
       });
-    });
-    if (!handler) return res.status(404).json({ error: `Unknown type: ${type}` });
+      if (!handler) return res.status(404).json({ error: `Unknown type: ${type}` });
 
-    const result = await handler({ content: body, win_id: parseInt(req.query.win_id) || 1 });
-    res.json({ result });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+      const result = await handler({ content: body, win_id: parseInt(req.query.win_id) || 1 });
+      res.json({ result });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
   }
-});
+);
 
 // Start server
 const server = http.createServer(app);
@@ -335,35 +346,44 @@ const { ipcMain } = require("electron");
 ipcMain.handle("rpc", async (event, toolName, args) => {
   console.log("[IPC Bridge] called:", toolName, JSON.stringify(args));
   try {
-  const toolModules = require("./tools");
-  let handler = null, schema = null;
-  toolModules.forEach((module) => {
-    module((name, desc, toolSchema, fn) => {
-      if (name === toolName) { handler = fn; schema = toolSchema; }
+    const toolModules = require("./tools");
+    let handler = null,
+      schema = null;
+    toolModules.forEach((module) => {
+      module((name, desc, toolSchema, fn) => {
+        if (name === toolName) {
+          handler = fn;
+          schema = toolSchema;
+        }
+      });
     });
-  });
-  if (!handler) throw new Error("Tool '" + toolName + "' not found");
-  const validatedArgs = schema.parse(args || {});
-  const result = await handler(validatedArgs);
-  console.log("[IPC Bridge] success:", toolName);
-  return result;
-  } catch(e) { console.error("[IPC Bridge] error:", toolName, e.message); throw e; }
+    if (!handler) throw new Error("Tool '" + toolName + "' not found");
+    const validatedArgs = schema.parse(args || {});
+    const result = await handler(validatedArgs);
+    console.log("[IPC Bridge] success:", toolName);
+    return result;
+  } catch (e) {
+    console.error("[IPC Bridge] error:", toolName, e.message);
+    throw e;
+  }
 });
 console.log("[IPC Bridge] All RPC tools available via ipcRenderer.invoke('rpc', toolName, args)");
 
 electronApp.whenReady().then(() => {
-
   // 为 webview partition 设置代理
   if (config.proxy) {
     const { session } = require("electron");
     const mainSession = session.fromPartition("persist:main");
-    mainSession.setProxy({
-      proxyRules: config.proxy
-    }).then(() => {
-      log.info(`[Proxy] persist:main partition 已设置代理: ${config.proxy}`);
-    }).catch(err => {
-      log.error("[Proxy] persist:main partition 设置代理失败:", err);
-    });
+    mainSession
+      .setProxy({
+        proxyRules: config.proxy,
+      })
+      .then(() => {
+        log.info(`[Proxy] persist:main partition 已设置代理: ${config.proxy}`);
+      })
+      .catch((err) => {
+        log.error("[Proxy] persist:main partition 设置代理失败:", err);
+      });
   }
   server.listen(PORT, () => {
     log.info(`[MCP] Log file: ${config.logFilePath}`);
@@ -371,9 +391,9 @@ electronApp.whenReady().then(() => {
     log.info(`[MCP] SSE endpoint: http://localhost:${PORT}/mcp`);
     log.info(`[MCP] REST API docs: http://localhost:${PORT}/docs`);
     log.info(`[MCP] Remote debugger: http://localhost:9221`);
-
-      createWindow({ url: START_URL ||"https://ide.cicy.de5.net"}, 0);
-
+    if (START_URL) {
+      createWindow({ url: START_URL }, ACCOUNT);
+    }
   });
 });
 
@@ -390,14 +410,17 @@ function cleanup() {
 process.on("SIGTERM", cleanup);
 
 // 为所有 session（包括 webview partition）设置代理
-electronApp.on('session-created', (session) => {
+electronApp.on("session-created", (session) => {
   if (config.proxy) {
-    session.setProxy({
-      proxyRules: config.proxy
-    }).then(() => {
-      log.info(`[Proxy] Session ${session.partition || 'default'} 已设置代理: ${config.proxy}`);
-    }).catch(err => {
-      log.error(`[Proxy] Session ${session.partition || 'default'} 设置代理失败:`, err);
-    });
+    session
+      .setProxy({
+        proxyRules: config.proxy,
+      })
+      .then(() => {
+        log.info(`[Proxy] Session ${session.partition || "default"} 已设置代理: ${config.proxy}`);
+      })
+      .catch((err) => {
+        log.error(`[Proxy] Session ${session.partition || "default"} 设置代理失败:`, err);
+      });
   }
 });

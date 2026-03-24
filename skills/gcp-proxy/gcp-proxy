@@ -1,0 +1,110 @@
+#!/bin/bash
+# GCP SOCKS5 代理管理（多节点）
+# 用法: gcp-proxy [start|stop|status|list] [hk|us|all]
+
+ACTION=${1:-status}
+NODE=${2:-hk}
+
+get_host() {
+  case $1 in
+    hk) echo "gcp-proxy" ;;
+    us) echo "gcp-proxy-us" ;;
+  esac
+}
+
+get_port() {
+  case $1 in
+    hk) echo "1080" ;;
+    us) echo "1081" ;;
+  esac
+}
+
+start_node() {
+  local host=$(get_host $1) port=$(get_port $1)
+  if pgrep -f "ssh -N.*$host" > /dev/null; then
+    echo "[$1] 已在运行，SOCKS5: 127.0.0.1:$port"
+  else
+    ssh -N -f -D $port $host
+    echo "[$1] 已启动，SOCKS5: 127.0.0.1:$port"
+  fi
+}
+
+stop_node() {
+  local host=$(get_host $1) port=$(get_port $1)
+  pkill -f "ssh -N.*$host" && echo "[$1] 已停止" || echo "[$1] 未在运行"
+}
+
+status_node() {
+  local host=$(get_host $1) port=$(get_port $1)
+  if pgrep -f "ssh -N.*$host" > /dev/null; then
+    local ip=$(curl -s --socks5 127.0.0.1:$port --connect-timeout 5 https://ipinfo.io/ip 2>/dev/null)
+    echo "✅ [$1] 运行中  SOCKS5: 127.0.0.1:$port  出口IP: ${ip:-测试失败}"
+  else
+    echo "❌ [$1] 未运行"
+  fi
+}
+
+case "$ACTION" in
+  list)
+    echo "可用节点："
+    echo "  hk → gcp-proxy      (port 1080) tn.cicy-ai.com"
+    echo "  us → gcp-proxy-us   (port 1081) 34.57.163.22"
+    ;;
+  start)
+    [ "$NODE" = "all" ] && { start_node hk; start_node us; } || start_node $NODE
+    ;;
+  stop)
+    [ "$NODE" = "all" ] && { stop_node hk; stop_node us; } || stop_node $NODE
+    ;;
+  status)
+    if [ "$NODE" = "all" ]; then
+      status_node hk
+      status_node us
+    else
+      status_node $NODE
+      local port=$(get_port $NODE)
+      echo ""
+      echo "── 使用方式 ──"
+      echo "  export https_proxy=socks5://127.0.0.1:$port"
+      echo "  export http_proxy=socks5://127.0.0.1:$port"
+      echo ""
+      echo "  # 测试"
+      echo "  curl --socks5 127.0.0.1:$port https://ipinfo.io"
+      echo ""
+      echo "  # Chrome"
+      echo "  open -a 'Google Chrome' --args --proxy-server='socks5://127.0.0.1:$port'"
+    fi
+    ;;
+  test)
+    for node in hk us; do
+      port=$(get_port $node)
+      ip=$(curl -s --socks5 127.0.0.1:$port --connect-timeout 5 https://ipinfo.io/ip 2>/dev/null)
+      if [ -n "$ip" ]; then
+        echo "✅ [$node] 出口IP: $ip"
+      else
+        echo "❌ [$node] 连接失败（代理未启动或网络异常）"
+      fi
+    done
+    ;;
+  help|*)
+    echo "用法: gcp-proxy <命令> [节点]"
+    echo ""
+    echo "命令："
+    echo "  start  [hk|us|all]   启动代理"
+    echo "  stop   [hk|us|all]   停止代理"
+    echo "  status [hk|us|all]   查看状态 + 出口IP"
+    echo "  test                 测试所有节点连通性"
+    echo "  list                 查看节点配置"
+    echo ""
+    echo "节点："
+    echo "  hk   香港 tn.cicy-ai.com  → SOCKS5 127.0.0.1:1080"
+    echo "  us   美国 34.57.163.22    → SOCKS5 127.0.0.1:1081"
+    echo "  all  两个节点同时操作"
+    echo ""
+    echo "示例："
+    echo "  gcp-proxy start hk"
+    echo "  gcp-proxy start all"
+    echo "  gcp-proxy status all"
+    echo "  gcp-proxy stop us"
+    ;;
+esac

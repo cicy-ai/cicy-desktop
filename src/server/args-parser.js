@@ -13,7 +13,11 @@ function parseArgs() {
   }
   PORT = parseInt(PORT) || 8101;
 
-  let START_URL = args.find((arg) => arg.startsWith("--url="))?.split("=").slice(1).join("=");
+  let START_URL = args
+    .find((arg) => arg.startsWith("--url="))
+    ?.split("=")
+    .slice(1)
+    .join("=");
   if (!START_URL) {
     const urlIndex = args.indexOf("--url");
     if (urlIndex !== -1 && args[urlIndex + 1]) {
@@ -31,7 +35,16 @@ function parseArgs() {
 
   const oneWindow = args.includes("--one-window");
 
-  return { PORT, START_URL, PROXY, oneWindow };
+  let ACCOUNT = args.find((arg) => arg.startsWith("--account="))?.split("=")[1];
+  if (!ACCOUNT) {
+    const accountIndex = args.indexOf("--account");
+    if (accountIndex !== -1 && args[accountIndex + 1]) {
+      ACCOUNT = args[accountIndex + 1];
+    }
+  }
+  ACCOUNT = parseInt(ACCOUNT) || 0;
+
+  return { PORT, START_URL, PROXY, oneWindow, ACCOUNT };
 }
 
 module.exports = { parseArgs };

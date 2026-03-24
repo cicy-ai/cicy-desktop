@@ -1,0 +1,28 @@
+#!/bin/bash
+# Chrome CDP 启动脚本
+# 用法: chrome-cdp.sh [account] [port] [url]
+#   account: 0,1,2... (默认 0，对应 Profile 0, Profile 1...)
+#   port: 调试端口 (默认 9220)
+#   url: 启动页面 (可选)
+
+ACCOUNT=${1:-0}
+PORT=${2:-9220}
+URL=${3:-}
+
+# account 0 用 Default，其他用 Profile N
+if [ "$ACCOUNT" = "0" ]; then
+  PROFILE="Default"
+else
+  PROFILE="Profile $ACCOUNT"
+fi
+
+nohup /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+  --user-data-dir="$HOME/ChromeCDP" \
+  --profile-directory="$PROFILE" \
+  --remote-debugging-port=$PORT \
+  --remote-allow-origins=* \
+  --no-first-run \
+  --no-default-browser-check \
+  ${URL:+"$URL"} > /dev/null 2>&1 &
+
+echo "Chrome CDP account=$ACCOUNT profile=$PROFILE 已启动，连接地址：http://localhost:$PORT"

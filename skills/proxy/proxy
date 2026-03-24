@@ -1,0 +1,49 @@
+#!/bin/bash
+ACTION=${1:-status}
+NODE=${2:-hk}
+IFACE="Wi-Fi"
+_get_port() { case $1 in us) echo "1081" ;; *) echo "1080" ;; esac }
+
+case "$ACTION" in
+  on)
+    PORT=$(_get_port $NODE)
+    export https_proxy=socks5://127.0.0.1:$PORT
+    export http_proxy=socks5://127.0.0.1:$PORT
+    export all_proxy=socks5://127.0.0.1:$PORT
+    echo "✅ [$NODE] 终端代理已设置 socks5://127.0.0.1:$PORT"
+    echo ""
+    echo "export https_proxy=socks5://127.0.0.1:$PORT"
+    echo "export http_proxy=socks5://127.0.0.1:$PORT"
+    echo "export all_proxy=socks5://127.0.0.1:$PORT"
+    ;;
+  off)
+    unset https_proxy http_proxy all_proxy
+    echo "⛔ 终端代理已清除"
+    ;;
+  status)
+    if [ -n "$https_proxy" ]; then
+      echo "✅ 终端代理：$https_proxy"
+      info=$(curl -s --connect-timeout 5 https://ipinfo.io 2>/dev/null)
+      ip=$(echo "$info" | grep '"ip"' | awk -F'"' '{print $4}')
+      country=$(echo "$info" | grep '"country"' | awk -F'"' '{print $4}')
+      echo "   出口IP: ${ip:-测试失败} [${country}]"
+    else
+      echo "⛔ 终端代理：未设置"
+    fi
+    ;;
+  test)
+    echo "── 直连 ──"
+    curl -s --connect-timeout 5 https://ipinfo.io/ip && echo ""
+    for node in hk us; do
+      port=$(_get_port $node)
+      ip=$(curl -s --socks5 127.0.0.1:$port --connect-timeout 5 https://ipinfo.io/ip 2>/dev/null)
+      [ -n "$ip" ] && echo "✅ [$node] $ip" || echo "❌ [$node] 未连接"
+    done
+    ;;
+  version)
+    echo "proxy v1.0.0"
+    ;;
+  *)
+    echo "用法: proxy [on|off|status|test|version] [hk|us]"
+    ;;
+esac

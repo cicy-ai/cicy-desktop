@@ -1,0 +1,36 @@
+#!/bin/bash
+# chrome-worker - 从 master profile 复制启动独立 worker Chrome
+# 用法: chrome-worker <account> <port> [url]
+
+ACCOUNT=${1:-0}
+PORT=${2:-9300}
+URL=${3:-}
+
+MASTER=~/ChromeCDP
+WORKER=~/ChromeCDP-worker-$PORT
+
+if [ "$ACCOUNT" = "0" ]; then
+  PROFILE="Default"
+else
+  PROFILE="Profile $ACCOUNT"
+fi
+
+rm -rf "$WORKER"
+mkdir -p "$WORKER"
+
+echo "Copying $PROFILE → $WORKER/Default ..."
+mkdir -p "$WORKER/Default"
+for f in Cookies "Local Storage" Preferences "Secure Preferences" "Login Data" "Web Data"; do
+  cp -r "$MASTER/$PROFILE/$f" "$WORKER/Default/" 2>/dev/null
+done
+cp "$MASTER/Local State" "$WORKER/" 2>/dev/null
+
+nohup /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+  --user-data-dir="$WORKER" \
+  --remote-debugging-port=$PORT \
+  --remote-allow-origins=* \
+  --no-first-run \
+  --no-default-browser-check \
+  ${URL:+"$URL"} > /dev/null 2>&1 &
+
+echo "Chrome worker account=$ACCOUNT port=$PORT 已启动：http://localhost:$PORT"
