@@ -3,30 +3,73 @@ const { spawn, execSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const yaml = require('js-yaml');
+const { MasterTokenManager } = require('../src/master/master-main');
+const { version: CLI_VERSION } = require('../package.json');
 
 const HOME = os.homedir();
-const PID_FILE = path.join(HOME, '.cicy.pid');
-const LOG_FILE = path.join(HOME, 'logs', 'cicy.log');
+const DESKTOP_DIR = path.join(HOME, 'Desktop');
+const GLOBAL_CONFIG_FILE = path.join(HOME, 'global.json');
+const STATE_FILE = path.join(HOME, '.cicy-cluster.json');
+const LOGS_DIR = path.join(HOME, 'logs');
 const PACKAGE_ROOT = path.join(__dirname, '..');
+const MASTER_ENTRY = path.join(PACKAGE_ROOT, 'src', 'master', 'master-main.js');
+const PROJECT_COMMAND_FILE = path.join(PACKAGE_ROOT, 'cicy-dektop.command');
+const DESKTOP_COMMAND_FILE = path.join(DESKTOP_DIR, 'cicy-dektop.command');
+const DEFAULT_MASTER_PORT = 8100;
+const DEFAULT_WORKER_PORT = 8101;
+const READY_TIMEOUT_MS = 15000;
+const SHUTDOWN_TIMEOUT_MS = 5000;
 
 const args = process.argv.slice(2);
 
 let command = 'start';
 let useCNMirror = false;
 let runUpdate = false;
+let showVersion = false;
+let rpcUseJson = false;
+let masterPort = Number(process.env.MASTER_PORT || DEFAULT_MASTER_PORT);
+let workerPort = Number(process.env.PORT || DEFAULT_WORKER_PORT);
 
 for (let i = 0; i < args.length; i++) {
   const arg = args[i];
   if (arg === '-h' || arg === '--help') {
     showHelp();
     process.exit(0);
+  } else if (arg === '-v' || arg === '--version') {
+    showVersion = true;
+  } else if (arg === '-j' || arg === '--json') {
+    rpcUseJson = true;
   } else if (arg === '-cn' || arg === '--cn') {
     useCNMirror = true;
   } else if (arg === '-u' || arg === '--update') {
     runUpdate = true;
+  } else if (arg === '--master-port' && args[i + 1]) {
+    masterPort = Number(args[++i]);
+  } else if (arg.startsWith('--master-port=')) {
+    masterPort = Number(arg.split('=')[1]);
+  } else if (arg === '--port' && args[i + 1]) {
+    workerPort = Number(args[++i]);
+  } else if (arg.startsWith('--port=')) {
+    workerPort = Number(arg.split('=')[1]);
   } else if (!arg.startsWith('-')) {
     command = arg;
   }
+}
+
+if (!Number.isFinite(masterPort) || masterPort <= 0) {
+  console.error('❌ Invalid --master-port value');
+  process.exit(1);
+}
+
+if (!Number.isFinite(workerPort) || workerPort <= 0) {
+  console.error('❌ Invalid --port value');
+  process.exit(1);
+}
+
+if (showVersion) {
+  console.log(`cicy version ${CLI_VERSION}`);
+  process.exit(0);
 }
 
 if (useCNMirror) {
@@ -40,6 +83,8 @@ if (useCNMirror) {
 
 if (runUpdate) {
   update();
+} else if (isRpcCommand(command)) {
+  handleRpcCommand(command);
 } else {
   executeCommand(command);
 }
@@ -49,23 +94,40 @@ function showHelp() {
 
 Usage: cicy [command] [options]
 
-Commands:
-  start     Start cicy (default)
-  stop      Stop cicy
-  status    Check cicy status
-  restart   Restart cicy
-  logs      View logs (tail -f)
+Cluster commands:
+  start                    Start cicy master + worker together in foreground (default)
+  stop                     Stop the running cicy master + worker cluster
+  status                   Show cicy master + worker cluster status
+  restart                  Restart the cicy master + worker cluster
+  logs                     Follow cluster logs
+
+RPC commands:
+  init                     Initialize RPC node config in ~/global.json
+  tools [--full]           List all tools
+  tools <tool_name>        View tool details
+  <tool_name> [key=value]  Call a worker tool directly
 
 Options:
-  -h, --help     Show this help message
-  -cn            Use CN npm mirror
-  -u, --update   Update cicy to latest version
+  -h, --help               Show this help message
+  -v, --version            Show version
+  -j, --json               Use raw JSON output for RPC calls
+  -cn                      Use CN npm mirror
+  -u, --update             Update cicy to latest version
+  --master-port <port>     Master port for cluster mode (default: 8100)
+  --port <port>            Worker port for cluster mode / local RPC (default: 8101)
+
+Environment:
+  CICY_NODE=<name>         Select RPC node from ~/global.json
+  DEBUG=1                  Show RPC request details
 
 Examples:
-  cicy start
-  cicy -cn start
-  cicy -u
-  cicy -cn -u`);
+  cicy
+  cicy status
+  cicy tools
+  cicy tools get_windows
+  cicy open_window url=https://example.com
+  cicy -j get_windows
+  cicy --master-port 8200 --port 8201`);
 }
 
 function update() {
@@ -80,12 +142,359 @@ function update() {
   }
 }
 
+function initRpcConfig() {
+  if (!fs.existsSync(GLOBAL_CONFIG_FILE)) {
+    const initialConfig = {
+      default: 'local',
+      nodes: {
+        local: {
+          api_token: '',
+          base_url: `http://localhost:${workerPort}`,
+        },
+      },
+    };
+    fs.writeFileSync(GLOBAL_CONFIG_FILE, `${JSON.stringify(initialConfig, null, 2)}\n`);
+    console.log(`✅ Created: ${GLOBAL_CONFIG_FILE}`);
+    console.log(`📝 Edit ${GLOBAL_CONFIG_FILE} to add your api_token`);
+    return;
+  }
+
+  const config = JSON.parse(fs.readFileSync(GLOBAL_CONFIG_FILE, 'utf8'));
+  const defaultNode = config.default || 'local';
+  console.log(`📁 Config: ${GLOBAL_CONFIG_FILE}`);
+  console.log(`🔧 Default node: ${defaultNode}`);
+  console.log('📋 Nodes:');
+  Object.entries(config.nodes || {}).forEach(([name, node]) => {
+    console.log(`  ${name}: ${node.base_url}`);
+  });
+}
+
+function loadRpcNode() {
+  let config = null;
+  try {
+    config = JSON.parse(fs.readFileSync(GLOBAL_CONFIG_FILE, 'utf8'));
+  } catch {
+    throw new Error(`${GLOBAL_CONFIG_FILE} not found. Run 'cicy init' first`);
+  }
+
+  const nodeName = process.env.CICY_NODE || config.default || 'local';
+  const node = config.nodes?.[nodeName];
+  if (!node) {
+    const available = Object.keys(config.nodes || {}).join(', ');
+    throw new Error(`node '${nodeName}' not found in config${available ? ` (available: ${available})` : ''}`);
+  }
+
+  return {
+    nodeName,
+    token: node.api_token || '',
+    baseUrl: node.base_url || `http://localhost:${workerPort}`,
+  };
+}
+
+function parseRpcValue(value) {
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  if (value === 'null') return null;
+  if (value !== '' && !Number.isNaN(Number(value))) return Number(value);
+  if ((value.startsWith('{') && value.endsWith('}')) || (value.startsWith('[') && value.endsWith(']'))) {
+    try {
+      return JSON.parse(value);
+    } catch {}
+  }
+  return value;
+}
+
+function parseRpcArgs(argv) {
+  const parsed = {};
+  for (const arg of argv) {
+    const match = arg.match(/^([a-zA-Z_][a-zA-Z0-9_]*)=(.+)$/);
+    if (!match) {
+      throw new Error(`Invalid argument format: ${arg}`);
+    }
+    parsed[match[1]] = parseRpcValue(match[2]);
+  }
+  return parsed;
+}
+
+async function rpcRequest(node, method, body, { accept = 'application/json' } = {}) {
+  const response = await fetch(`${node.baseUrl}/rpc/${method}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: accept,
+      Authorization: `Bearer ${node.token}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${text}`);
+  }
+
+  const contentType = response.headers.get('content-type') || '';
+  if (contentType.includes('yaml')) {
+    return yaml.load(text);
+  }
+  return JSON.parse(text);
+}
+
+async function listTools(detailName, showFull) {
+  const node = loadRpcNode();
+  const response = await fetch(`${node.baseUrl}/rpc/tools`, {
+    method: 'GET',
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${node.token}`,
+    },
+  });
+
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${text}`);
+  }
+
+  const data = JSON.parse(text);
+  const tools = data.tools || [];
+
+  if (detailName) {
+    const tool = tools.find((item) => item.name === detailName);
+    if (!tool) {
+      throw new Error(`Tool '${detailName}' not found`);
+    }
+    console.log(`${tool.name} - ${tool.description}`);
+    const props = tool.inputSchema?.properties || {};
+    const required = new Set(tool.inputSchema?.required || []);
+    Object.entries(props).forEach(([key, schema]) => {
+      const mark = required.has(key) ? '*' : '?';
+      console.log(`  - ${key}${mark} (${schema.type || 'any'}): ${schema.description || ''}`);
+      if (schema.default !== undefined) {
+        console.log(`    default: ${schema.default}`);
+      }
+    });
+    return;
+  }
+
+  for (const tool of tools) {
+    console.log(`${tool.name} - ${tool.description}`);
+    if (!showFull) continue;
+    const props = tool.inputSchema?.properties || {};
+    const required = new Set(tool.inputSchema?.required || []);
+    Object.entries(props).forEach(([key, schema]) => {
+      const mark = required.has(key) ? '*' : '?';
+      console.log(`  - ${key}${mark} (${schema.type || 'any'}): ${schema.description || ''}`);
+    });
+  }
+}
+
+function renderRpcResult(result, rawJson) {
+  if (rawJson) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  const content = result?.result?.content;
+  if (!Array.isArray(content) || !content.length) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  console.log('----------------');
+  for (const item of content) {
+    if (item.type === 'text') {
+      console.log(item.text);
+    } else if (item.type === 'image') {
+      console.log(`Image (${item.mimeType}): ${(item.data || '').slice(0, 100)}...`);
+    } else {
+      console.log(JSON.stringify(item, null, 2));
+    }
+  }
+  console.log('----------------');
+}
+
+async function callRpcTool(toolName, argv) {
+  const node = loadRpcNode();
+  const argumentsPayload = parseRpcArgs(argv);
+
+  if (process.env.DEBUG === '1') {
+    console.log('====== DEBUG ======');
+    console.log(`Node: ${node.nodeName}`);
+    console.log(`URL: ${node.baseUrl}/rpc/tools/call`);
+    console.log(`Body: ${JSON.stringify({ name: toolName, arguments: argumentsPayload })}`);
+    console.log('===================');
+  }
+
+  const result = await rpcRequest(node, 'tools/call', {
+    name: toolName,
+    arguments: argumentsPayload,
+  });
+
+  if (result?.error) {
+    throw new Error(result.error);
+  }
+
+  renderRpcResult(result, rpcUseJson);
+}
+
+function isRpcCommand(cmd) {
+  return cmd === 'init' || cmd === 'tools' || !['start', 'stop', 'status', 'restart', 'logs'].includes(cmd);
+}
+
+function handleRpcCommand(cmd) {
+  if (cmd === 'init') {
+    initRpcConfig();
+    return true;
+  }
+
+  if (cmd === 'tools') {
+    const detailName = args.find((arg, index) => index > 0 && !arg.startsWith('-') && arg !== 'tools');
+    const showFull = args.includes('--full');
+    listTools(detailName, showFull).catch((error) => {
+      console.error(`❌ ${error.message}`);
+      process.exit(1);
+    });
+    return true;
+  }
+
+  callRpcTool(cmd, args.slice(1).filter((arg) => !['-j', '--json'].includes(arg))).catch((error) => {
+    console.error(`❌ ${error.message}`);
+    process.exit(1);
+  });
+  return true;
+}
+
+function parsePid(value) {
+  const pid = Number(value);
+  return Number.isInteger(pid) && pid > 0 ? pid : null;
+}
+
+function findPidByPort(port) {
+  try {
+    const output = execSync(`lsof -tiTCP:${port} -sTCP:LISTEN`, { stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString()
+      .trim()
+      .split(/\r?\n/)
+      .find(Boolean);
+    return parsePid(output);
+  } catch {
+    return null;
+  }
+}
+
+function readClusterState() {
+  try {
+    const raw = fs.readFileSync(STATE_FILE, 'utf8');
+    const state = JSON.parse(raw);
+    return {
+      masterPid: parsePid(state.masterPid),
+      workerPid: parsePid(state.workerPid),
+      masterPort: Number(state.masterPort) || DEFAULT_MASTER_PORT,
+      workerPort: Number(state.workerPort) || DEFAULT_WORKER_PORT,
+      tokenPath: state.tokenPath || null,
+      startedAt: state.startedAt || null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeClusterState(state) {
+  fs.writeFileSync(STATE_FILE, JSON.stringify({
+    ...state,
+    updatedAt: new Date().toISOString(),
+  }, null, 2));
+}
+
+function clearClusterState() {
+  if (fs.existsSync(STATE_FILE)) {
+    fs.unlinkSync(STATE_FILE);
+  }
+}
+
+function getRunningClusterState() {
+  const state = readClusterState();
+  const masterPortFromState = state?.masterPort || masterPort;
+  const workerPortFromState = state?.workerPort || workerPort;
+  const masterPid = state?.masterPid || findPidByPort(masterPortFromState);
+  const workerPid = state?.workerPid || findPidByPort(workerPortFromState);
+  const masterRunning = isRunning(masterPid);
+  const workerRunning = isRunning(workerPid);
+
+  if (!masterRunning && !workerRunning) {
+    clearClusterState();
+    return null;
+  }
+
+  const nextState = {
+    masterPid: masterRunning ? masterPid : null,
+    workerPid: workerRunning ? workerPid : null,
+    masterPort: masterPortFromState,
+    workerPort: workerPortFromState,
+    tokenPath: state?.tokenPath || null,
+    startedAt: state?.startedAt || null,
+    masterRunning,
+    workerRunning,
+  };
+
+  writeClusterState(nextState);
+  return nextState;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function stopPid(pid, label) {
+  if (!pid || !isRunning(pid)) {
+    return false;
+  }
+
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch (error) {
+    console.error(`❌ Failed to stop ${label}: ${error.message}`);
+    return false;
+  }
+
+  for (let i = 0; i < 20; i++) {
+    if (!isRunning(pid)) {
+      return true;
+    }
+    await sleep(200);
+  }
+
+  try {
+    process.kill(pid, 'SIGKILL');
+    return true;
+  } catch (error) {
+    console.error(`❌ Failed to force stop ${label}: ${error.message}`);
+    return false;
+  }
+}
+
+function startForegroundCluster() {
+  ensureDesktopCommandFile();
+  startMasterCluster({ masterPort, workerPort }).catch((error) => {
+    console.error(`❌ Failed to start master + worker: ${error.message}`);
+    process.exit(1);
+  });
+}
+
 function executeCommand(cmd) {
   switch (cmd) {
-    case 'start': start(); break;
-    case 'stop': stop(); break;
-    case 'status': status(); break;
-    case 'restart': restart(); break;
+    case 'start': startForegroundCluster(); break;
+    case 'stop': stop().catch((error) => {
+      console.error(`❌ Failed to stop cicy cluster: ${error.message}`);
+      process.exit(1);
+    }); break;
+    case 'status': status().catch((error) => {
+      console.error(`❌ Failed to get cicy cluster status: ${error.message}`);
+      process.exit(1);
+    }); break;
+    case 'restart': restart().catch((error) => {
+      console.error(`❌ Failed to restart cicy cluster: ${error.message}`);
+      process.exit(1);
+    }); break;
     case 'logs': logs(); break;
     default:
       console.log(`Unknown command: ${cmd}`);
@@ -94,12 +503,317 @@ function executeCommand(cmd) {
   }
 }
 
-function getPid() {
-  try {
-    return fs.readFileSync(PID_FILE, 'utf8').trim();
-  } catch {
-    return null;
+function ensureDesktopCommandFile() {
+  if (!fs.existsSync(PROJECT_COMMAND_FILE)) {
+    return;
   }
+
+  fs.copyFileSync(PROJECT_COMMAND_FILE, DESKTOP_COMMAND_FILE);
+  fs.chmodSync(DESKTOP_COMMAND_FILE, 0o755);
+  console.log(`📎 Synced launcher to ${DESKTOP_COMMAND_FILE}`);
+}
+
+function prefixLines(prefix, text) {
+  return text
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => `${prefix} ${line}`)
+    .join('\n');
+}
+
+function pipeOutput(stream, prefix, onChunk) {
+  if (!stream) return;
+  stream.on('data', (chunk) => {
+    const text = chunk.toString();
+    const output = prefixLines(prefix, text);
+    if (output) console.log(output);
+    if (onChunk) onChunk(text);
+  });
+}
+
+function waitForMasterReady(child, port) {
+  return new Promise((resolve, reject) => {
+    const expected = `[Master] listening on http://localhost:${port}`;
+    let settled = false;
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error(`Master did not become ready within ${READY_TIMEOUT_MS}ms`));
+    }, READY_TIMEOUT_MS);
+
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve();
+    };
+
+    const onChunk = (text) => {
+      if (text.includes(expected)) {
+        finish();
+      }
+    };
+
+    pipeOutput(child.stdout, '[master]', onChunk);
+    pipeOutput(child.stderr, '[master]', onChunk);
+
+    child.once('exit', (code, signal) => {
+      finish(new Error(`Master exited before ready (code=${code}, signal=${signal})`));
+    });
+  });
+}
+
+function terminateChild(child, signal) {
+  if (!child || child.exitCode !== null || child.killed) {
+    return;
+  }
+  try {
+    child.kill(signal);
+  } catch {}
+}
+
+function waitForExit(child) {
+  return new Promise((resolve) => {
+    if (!child || child.exitCode !== null) {
+      resolve();
+      return;
+    }
+    child.once('exit', () => resolve());
+  });
+}
+
+async function shutdownChildren(workerChild, masterChild) {
+  terminateChild(workerChild, 'SIGTERM');
+  terminateChild(masterChild, 'SIGTERM');
+
+  await Promise.race([
+    Promise.all([waitForExit(workerChild), waitForExit(masterChild)]),
+    new Promise((resolve) => setTimeout(resolve, SHUTDOWN_TIMEOUT_MS)),
+  ]);
+
+  terminateChild(workerChild, 'SIGKILL');
+  terminateChild(masterChild, 'SIGKILL');
+}
+
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, options);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || `Request failed: ${response.status}`);
+  }
+  return data;
+}
+
+async function checkMaster(masterBaseUrl) {
+  try {
+    await fetchJson(`${masterBaseUrl}/api/ping`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function getWorkers(masterBaseUrl) {
+  try {
+    const data = await fetchJson(`${masterBaseUrl}/api/workers`);
+    return data.workers || [];
+  } catch {
+    return [];
+  }
+}
+
+async function findReusableWorker(masterBaseUrl, workerPort, timeoutMs = 8000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const worker = selectWorker(await getWorkers(masterBaseUrl), workerPort);
+    if (worker && await checkWorker(worker)) {
+      return worker;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  return null;
+}
+
+function selectWorker(workers, workerPort) {
+  const ranked = workers.filter((worker) => worker?.baseUrl && worker?.authToken);
+  if (!ranked.length) return null;
+
+  const exact = ranked.find((worker) => worker.baseUrl.endsWith(`:${workerPort}`));
+  if (exact) return exact;
+
+  const online = ranked.find((worker) => worker.status === 'online' || worker.healthStatus === 'online');
+  return online || ranked[0];
+}
+
+async function checkWorker(worker) {
+  if (!worker?.baseUrl) return false;
+  try {
+    await fetchJson(`${worker.baseUrl}/observability/healthz`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function callWorkerTool(worker, toolName, payload = {}) {
+  return fetchJson(`${worker.baseUrl}/rpc/${toolName}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${worker.authToken}`,
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+function parseToolText(response) {
+  const text = response?.result?.content?.find((item) => item.type === 'text')?.text;
+  if (!text) return null;
+  return text;
+}
+
+async function focusExistingWorker(worker, masterBaseUrl, masterUiUrl) {
+  const windowsResponse = await callWorkerTool(worker, 'get_windows', {});
+  const text = parseToolText(windowsResponse);
+  const windows = text ? JSON.parse(text) : [];
+  const targetWindow = windows.find((win) => (win.url || '').startsWith(masterBaseUrl)) || windows[0] || null;
+
+  if (targetWindow) {
+    if (!String(targetWindow.url || '').startsWith(masterBaseUrl)) {
+      await callWorkerTool(worker, 'load_url', { win_id: targetWindow.id, url: masterUiUrl });
+    }
+
+    await callWorkerTool(worker, 'control_electron_BrowserWindow', {
+      win_id: targetWindow.id,
+      code: '(() => { win.show(); if (win.isMinimized()) win.restore(); win.focus(); return true; })()',
+    });
+    return { reused: true, winId: targetWindow.id };
+  }
+
+  await callWorkerTool(worker, 'open_window', { url: masterUiUrl, reuseWindow: true, accountIdx: 0 });
+  return { reused: true, winId: null };
+}
+
+async function startWorker({ workerPort, masterBaseUrl, token, masterUiUrl }) {
+  const workerChild = spawn('electron', [PACKAGE_ROOT, '--port', String(workerPort), '--url', masterUiUrl], {
+    cwd: PACKAGE_ROOT,
+    env: {
+      ...process.env,
+      PORT: String(workerPort),
+      CICY_MASTER_URL: masterBaseUrl,
+      CICY_MASTER_TOKEN: token,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  pipeOutput(workerChild.stdout, '[worker]');
+  pipeOutput(workerChild.stderr, '[worker]');
+  return workerChild;
+}
+
+async function startMasterCluster({ masterPort, workerPort }) {
+  const tokenManager = new MasterTokenManager();
+  const token = tokenManager.getToken();
+  const masterBaseUrl = `http://localhost:${masterPort}`;
+  const masterUiUrl = `${masterBaseUrl}/master?token=${token}`;
+
+  writeClusterState({
+    masterPid: null,
+    workerPid: null,
+    masterPort,
+    workerPort,
+    tokenPath: tokenManager.getConfigPath(),
+    startedAt: new Date().toISOString(),
+  });
+
+  console.log(`🚀 Target master ${masterBaseUrl}`);
+  console.log(`🚀 Target worker http://localhost:${workerPort}`);
+  console.log(`🔗 Target page ${masterUiUrl}`);
+  console.log(`📄 Token file: ${tokenManager.getConfigPath()}`);
+
+  const masterRunning = await checkMaster(masterBaseUrl);
+  if (masterRunning) {
+    const worker = await findReusableWorker(masterBaseUrl, workerPort);
+    if (worker) {
+      await focusExistingWorker(worker, masterBaseUrl, masterUiUrl);
+      console.log('✅ Reused existing master and worker, focused Electron window');
+      return;
+    }
+  }
+
+  console.log('🛑 Press Ctrl+C to stop processes started by this command');
+
+  let masterChild = null;
+  if (!masterRunning) {
+    console.log(`🚀 Starting master on ${masterBaseUrl}`);
+    masterChild = spawn(process.execPath, [MASTER_ENTRY], {
+      cwd: PACKAGE_ROOT,
+      env: {
+        ...process.env,
+        MASTER_PORT: String(masterPort),
+        CICY_MASTER_TOKEN: token,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    writeClusterState({
+      masterPid: masterChild.pid,
+      workerPid: null,
+      masterPort,
+      workerPort,
+      tokenPath: tokenManager.getConfigPath(),
+      startedAt: new Date().toISOString(),
+    });
+
+    await waitForMasterReady(masterChild, masterPort);
+  } else {
+    console.log('♻️ Reusing existing master');
+  }
+
+  console.log(`🚀 Starting worker on http://localhost:${workerPort}`);
+  const workerChild = await startWorker({ workerPort, masterBaseUrl, token, masterUiUrl });
+
+  writeClusterState({
+    masterPid: masterChild?.pid || null,
+    workerPid: workerChild.pid,
+    masterPort,
+    workerPort,
+    tokenPath: tokenManager.getConfigPath(),
+    startedAt: new Date().toISOString(),
+  });
+
+  let shuttingDown = false;
+
+  const handleShutdown = async (exitCode) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    await shutdownChildren(workerChild, masterChild);
+    clearClusterState();
+    process.exit(exitCode);
+  };
+
+  process.on('SIGINT', () => {
+    handleShutdown(0);
+  });
+  process.on('SIGTERM', () => {
+    handleShutdown(0);
+  });
+
+  if (masterChild) {
+    masterChild.once('exit', async (code, signal) => {
+      if (shuttingDown) return;
+      console.error(`❌ Master exited (code=${code}, signal=${signal})`);
+      await handleShutdown(code || 1);
+    });
+  }
+
+  workerChild.once('exit', async (code, signal) => {
+    if (shuttingDown) return;
+    console.error(`❌ Worker exited (code=${code}, signal=${signal})`);
+    await handleShutdown(code || 1);
+  });
 }
 
 function isRunning(pid) {
@@ -112,65 +826,75 @@ function isRunning(pid) {
   }
 }
 
-function start() {
-  const pid = getPid();
-  if (pid && isRunning(pid)) {
-    console.log(`✅ cicy is already running (PID: ${pid})`);
+function getClusterLogFiles(workerPort) {
+  return [
+    path.join(LOGS_DIR, `cicy-desktop-${workerPort}.log`),
+    path.join(LOGS_DIR, `cicy-desktop-${DEFAULT_WORKER_PORT}.log`),
+  ].filter((filePath, index, list) => list.indexOf(filePath) === index);
+}
+
+async function stop() {
+  const state = getRunningClusterState();
+  if (!state) {
+    console.log('❌ cicy cluster is not running');
+    clearClusterState();
     return;
   }
 
-  fs.mkdirSync(path.dirname(LOG_FILE), { recursive: true });
-  
-  const child = spawn('electron', [PACKAGE_ROOT], {
-    detached: true,
-    stdio: ['ignore', fs.openSync(LOG_FILE, 'a'), fs.openSync(LOG_FILE, 'a')],
-    env: { ...process.env, PORT: process.env.PORT || '8101' }
-  });
+  const stoppedWorker = await stopPid(state.workerPid, 'worker');
+  const stoppedMaster = await stopPid(state.masterPid, 'master');
+  clearClusterState();
 
-  child.unref();
-  fs.writeFileSync(PID_FILE, child.pid.toString());
-  
-  console.log(`✅ cicy started (PID: ${child.pid})`);
-  console.log(`📝 Logs: ${LOG_FILE}`);
-}
-
-function stop() {
-  const pid = getPid();
-  if (!pid || !isRunning(pid)) {
-    console.log('❌ cicy is not running');
-    fs.existsSync(PID_FILE) && fs.unlinkSync(PID_FILE);
-    return;
-  }
-
-  try {
-    process.kill(pid, 'SIGTERM');
-    fs.unlinkSync(PID_FILE);
-    console.log(`✅ cicy stopped (PID: ${pid})`);
-  } catch (err) {
-    console.error(`❌ Failed to stop: ${err.message}`);
-  }
-}
-
-function status() {
-  const pid = getPid();
-  if (pid && isRunning(pid)) {
-    console.log(`✅ cicy is running (PID: ${pid})`);
-    console.log(`📝 Logs: ${LOG_FILE}`);
+  if (stoppedMaster || stoppedWorker) {
+    console.log(`✅ cicy cluster stopped (master:${state.masterPid || '-'} worker:${state.workerPid || '-'})`);
   } else {
-    console.log('❌ cicy is not running');
-    fs.existsSync(PID_FILE) && fs.unlinkSync(PID_FILE);
+    console.log('❌ cicy cluster is not running');
   }
 }
 
-function restart() {
-  stop();
-  setTimeout(start, 1000);
+async function status() {
+  const state = getRunningClusterState();
+  if (!state) {
+    console.log('❌ cicy cluster is not running');
+    return;
+  }
+
+  console.log('✅ cicy cluster is running');
+  console.log(`- master pid: ${state.masterPid || 'reused external'} (${state.masterRunning ? 'running' : 'stopped'})`);
+  console.log(`- worker pid: ${state.workerPid || 'reused external'} (${state.workerRunning ? 'running' : 'stopped'})`);
+  console.log(`- master url: http://localhost:${state.masterPort}`);
+  console.log(`- worker url: http://localhost:${state.workerPort}`);
+  if (state.tokenPath) {
+    console.log(`- token file: ${state.tokenPath}`);
+  }
+}
+
+async function restart() {
+  await stop();
+  startForegroundCluster();
 }
 
 function logs() {
-  if (!fs.existsSync(LOG_FILE)) {
-    console.log('❌ No logs found');
+  const state = getRunningClusterState();
+  const workerPortForLogs = state?.workerPort || workerPort;
+  const logFiles = getClusterLogFiles(workerPortForLogs).filter((filePath) => fs.existsSync(filePath));
+
+  if (!logFiles.length) {
+    console.log('❌ No cluster logs found');
+    console.log(`- logs dir: ${LOGS_DIR}`);
+    console.log(`- expected worker log: ${path.join(LOGS_DIR, `cicy-desktop-${workerPortForLogs}.log`)}`);
     return;
   }
-  execSync(`tail -f ${LOG_FILE}`, { stdio: 'inherit' });
+
+  if (state) {
+    console.log('✅ Following cicy cluster logs');
+    console.log(`- master url: http://localhost:${state.masterPort}`);
+    console.log(`- worker url: http://localhost:${state.workerPort}`);
+  } else {
+    console.log('⚠️  Cluster is not currently running, showing latest available logs');
+  }
+  logFiles.forEach((filePath) => console.log(`- ${filePath}`));
+
+  const quotedFiles = logFiles.map((filePath) => `"${filePath}"`).join(' ');
+  execSync(`tail -f ${quotedFiles}`, { stdio: 'inherit' });
 }

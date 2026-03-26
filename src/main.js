@@ -1,5 +1,8 @@
 const { app: electronApp } = require("electron");
 const { default: contextMenu } = require("electron-context-menu");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
 
 // 🎯 添加右键上下文菜单
 contextMenu({
@@ -56,7 +59,6 @@ if (process.platform === "linux") {
 
 const http = require("http");
 const log = require("electron-log");
-const { z } = require("zod");
 const { config } = require("./config");
 const { createWindow } = require("./utils/window-utils");
 const { AuthManager } = require("./utils/auth");
@@ -64,8 +66,15 @@ const { setupElectronFlags, setupErrorHandlers } = require("./server/electron-se
 const { parseArgs } = require("./server/args-parser");
 const { setupLogging, wrapLogger } = require("./server/logging");
 const { createExpressApp } = require("./server/express-app");
+const { createWorkerObservabilityRoutes } = require("./server/worker-observability-routes");
 const { createMcpServer, setupMcpRoutes } = require("./server/mcp-server");
 const { registerTool } = require("./server/tool-registry");
+const { loadToolCatalog } = require("./server/tool-catalog");
+const { executeTool } = require("./server/tool-executor");
+const { getWorkerIdentity } = require("./cluster/worker-identity");
+const { listLocalAgents } = require("./cluster/local-agent-registry");
+const { listArtifacts } = require("./cluster/artifact-registry");
+const { WorkerClient } = require("./cluster/worker-client");
 
 // Setup
 // setupElectronFlags(); // Already done above
@@ -102,35 +111,141 @@ const authMiddleware = (req, res, next) => {
 
 // Create servers
 const mcpServer = createMcpServer();
+const toolCatalog = loadToolCatalog();
 const tools = {};
 const app = createExpressApp(authMiddleware, tools);
 
 // Register tools
-const toolModules = require("./tools");
-
-toolModules.forEach((module) => {
-  module((title, description, schema, handler, options) => {
-    registerTool(mcpServer, tools, title, description, schema, handler, options);
-  });
+Array.from(toolCatalog.toolsByName.values()).forEach((tool) => {
+  registerTool(
+    mcpServer,
+    tools,
+    tool.name,
+    tool.description,
+    tool.schema,
+    tool.handler,
+    tool.options
+  );
 });
 
 // Setup MCP routes
 setupMcpRoutes(app, mcpServer, authMiddleware);
 
+function parseYamlBody(req) {
+  return new Promise((resolve, reject) => {
+    let data = "";
+    req.on("data", (chunk) => (data += chunk));
+    req.on("end", () => {
+      try {
+        const yaml = require("js-yaml");
+        resolve(yaml.load(data) || {});
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
+}
+
+function buildRequestContext(req, extra = {}) {
+  return {
+    transport: extra.transport || "rest",
+    requestId: req.headers["x-request-id"] || null,
+    controlSessionId:
+      req.headers["x-session-id"] || req.query.sessionId || req.body?.sessionId || null,
+    agentId: req.headers["x-agent-id"] || req.query.agentId || req.body?.agentId || null,
+    runtimeSessionId:
+      req.headers["x-runtime-session-id"] ||
+      req.query.runtimeSessionId ||
+      req.body?.runtimeSessionId ||
+      null,
+    windowRef: req.body?.windowRef || null,
+    accountIdx: req.body?.accountIdx,
+    worker: getWorkerIdentity(),
+    ...extra,
+  };
+}
+
+function sendToolResponse(req, res, result) {
+  const accept = req.headers.accept || "application/json";
+  if (accept.includes("application/yaml") || accept.includes("text/yaml")) {
+    const yaml = require("js-yaml");
+    res.type("yaml").send(yaml.dump({ result }));
+  } else {
+    res.json({ result });
+  }
+}
+
+function sendExecutionError(res, error) {
+  if (error.name === "ZodError") {
+    const errorMsg = error.errors.map((e) => e.message).join(", ");
+    return res.json({
+      result: {
+        content: [{ type: "text", text: errorMsg }],
+        isError: true,
+      },
+    });
+  }
+
+  res.status(500).json({ error: error.message });
+}
+
+function getWorkerSnapshot(authManager) {
+  return {
+    baseUrl: `http://127.0.0.1:${config.port}`,
+    authToken: authManager.getToken(),
+    capabilities: Object.values(tools)
+      .flat()
+      .map((tool) => tool.name),
+    agents: listLocalAgents(),
+    artifacts: listArtifacts(),
+    resources: {
+      pid: process.pid,
+      memory: process.memoryUsage(),
+      uptime: process.uptime(),
+    },
+  };
+}
+
+app.use(
+  "/observability",
+  createWorkerObservabilityRoutes({
+    getWorkerIdentity,
+    getWorkerSnapshot: () => getWorkerSnapshot(authManager),
+  })
+);
+
+function maybeCreateWorkerClient(authManager) {
+  const masterUrl = process.env.CICY_MASTER_URL;
+  const workerToken = process.env.CICY_MASTER_TOKEN;
+  if (!masterUrl || !workerToken) return null;
+
+  return new WorkerClient({
+    masterUrl,
+    workerToken,
+    workerIdentity: getWorkerIdentity(),
+    getStatusSnapshot: () => getWorkerSnapshot(authManager),
+  });
+}
+
+app.get("/api/worker", authMiddleware, (req, res) => {
+  res.json({ worker: getWorkerIdentity() });
+});
+
+app.get("/api/agents", authMiddleware, (req, res) => {
+  res.json({ agents: listLocalAgents() });
+});
+
+app.get("/api/artifacts", authMiddleware, (req, res) => {
+  res.json({ artifacts: listArtifacts() });
+});
+
 // RPC endpoint with hot reload
 app.post("/rpc/tools/call", authMiddleware, async (req, res) => {
   let body = req.body;
 
-  // Parse YAML if Content-Type is application/yaml
   if (req.get("Content-Type")?.includes("application/yaml")) {
     try {
-      const yaml = require("js-yaml");
-      const rawBody = await new Promise((resolve) => {
-        let data = "";
-        req.on("data", (chunk) => (data += chunk));
-        req.on("end", () => resolve(data));
-      });
-      body = yaml.load(rawBody);
+      body = await parseYamlBody(req);
     } catch (error) {
       return res.status(400).json({ error: `Invalid YAML: ${error.message}` });
     }
@@ -138,48 +253,14 @@ app.post("/rpc/tools/call", authMiddleware, async (req, res) => {
 
   const { name, arguments: args } = body;
   try {
-    // Re-load tool modules
-    const toolModules = require("./tools");
-
-    let handler = null;
-    let schema = null;
-
-    toolModules.forEach((module) => {
-      module((title, description, toolSchema, toolHandler, options) => {
-        if (title === name) {
-          handler = toolHandler;
-          schema = toolSchema;
-        }
-      });
-    });
-
-    if (!handler) {
-      throw new Error(`Tool '${name}' not found`);
-    }
-
-    const validatedArgs = schema.parse(args || {});
-    const result = await handler(validatedArgs);
-
-    // Support YAML response
-    const accept = req.headers.accept || "application/json";
-    if (accept.includes("application/yaml") || accept.includes("text/yaml")) {
-      const yaml = require("js-yaml");
-      res.type("yaml").send(yaml.dump({ result }));
-    } else {
-      res.json({ result });
-    }
+    const result = await executeTool(
+      name,
+      args || {},
+      buildRequestContext(req, { transport: "rest-tools-call" })
+    );
+    sendToolResponse(req, res, result);
   } catch (error) {
-    // Handle Zod validation errors
-    if (error.name === "ZodError") {
-      const errorMsg = error.errors.map((e) => e.message).join(", ");
-      return res.json({
-        result: {
-          content: [{ type: "text", text: errorMsg }],
-          isError: true,
-        },
-      });
-    }
-    res.status(500).json({ error: error.message });
+    sendExecutionError(res, error);
   }
 });
 
@@ -196,10 +277,8 @@ app.get("/rpc/tools", authMiddleware, (req, res) => {
 });
 
 // Static file server for uploads/downloads
-const fs = require("fs");
-const path = require("path");
 const serveIndex = require("serve-index");
-const FILES_DIR = path.join(require("os").homedir(), "cicy-files");
+const FILES_DIR = path.join(os.homedir(), "cicy-files");
 if (!fs.existsSync(FILES_DIR)) {
   fs.mkdirSync(FILES_DIR, { recursive: true });
 }
@@ -215,63 +294,23 @@ Object.values(tools)
     app.post(`/rpc/${tool.name}`, authMiddleware, async (req, res) => {
       let body = req.body;
 
-      // Parse YAML if Content-Type is application/yaml
       if (req.get("Content-Type")?.includes("application/yaml")) {
         try {
-          const yaml = require("js-yaml");
-          const rawBody = await new Promise((resolve) => {
-            let data = "";
-            req.on("data", (chunk) => (data += chunk));
-            req.on("end", () => resolve(data));
-          });
-          body = yaml.load(rawBody) || {};
+          body = await parseYamlBody(req);
         } catch (error) {
           return res.status(400).json({ error: `Invalid YAML: ${error.message}` });
         }
       }
 
       try {
-        // Re-load tool modules
-        const toolModules = require("./tools");
-
-        let handler = null;
-        let schema = null;
-
-        toolModules.forEach((module) => {
-          module((name, desc, inputSchema, fn) => {
-            if (name === tool.name) {
-              handler = fn;
-              schema = inputSchema;
-            }
-          });
-        });
-
-        if (!handler) {
-          throw new Error(`Tool '${tool.name}' not found`);
-        }
-
-        const validatedArgs = schema.parse(body || {});
-        const result = await handler(validatedArgs);
-
-        // Support YAML response
-        const accept = req.headers.accept || "application/json";
-        if (accept.includes("application/yaml") || accept.includes("text/yaml")) {
-          const yaml = require("js-yaml");
-          res.type("yaml").send(yaml.dump({ result }));
-        } else {
-          res.json({ result });
-        }
+        const result = await executeTool(
+          tool.name,
+          body || {},
+          buildRequestContext(req, { transport: "rest-tool-endpoint", toolName: tool.name })
+        );
+        sendToolResponse(req, res, result);
       } catch (error) {
-        if (error.name === "ZodError") {
-          const errorMsg = error.errors.map((e) => e.message).join(", ");
-          return res.json({
-            result: {
-              content: [{ type: "text", text: errorMsg }],
-              isError: true,
-            },
-          });
-        }
-        res.status(500).json({ error: error.message });
+        sendExecutionError(res, error);
       }
     });
   });
@@ -311,22 +350,15 @@ app.post(
     if (!require("fs").existsSync(TMP)) require("fs").mkdirSync(TMP, { recursive: true });
 
     try {
-      // Re-load tools for hot reload
-      const toolModules = require("./tools");
       const toolName = type === "js" ? "exec_js_file" : `exec_${type}_file`;
-      let handler = null,
-        schema = null;
-      toolModules.forEach((module) => {
-        module((name, desc, toolSchema, fn) => {
-          if (name === toolName) {
-            handler = fn;
-            schema = toolSchema;
-          }
-        });
-      });
-      if (!handler) return res.status(404).json({ error: `Unknown type: ${type}` });
-
-      const result = await handler({ content: body, win_id: parseInt(req.query.win_id) || 1 });
+      const result = await executeTool(
+        toolName,
+        { content: body, win_id: parseInt(req.query.win_id) || 1 },
+        buildRequestContext(req, {
+          transport: "rest-exec",
+          toolName,
+        })
+      );
       res.json({ result });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -346,20 +378,17 @@ const { ipcMain } = require("electron");
 ipcMain.handle("rpc", async (event, toolName, args) => {
   console.log("[IPC Bridge] called:", toolName, JSON.stringify(args));
   try {
-    const toolModules = require("./tools");
-    let handler = null,
-      schema = null;
-    toolModules.forEach((module) => {
-      module((name, desc, toolSchema, fn) => {
-        if (name === toolName) {
-          handler = fn;
-          schema = toolSchema;
-        }
-      });
+    const result = await executeTool(toolName, args || {}, {
+      transport: "ipc",
+      toolName,
+      controlSessionId: args?.controlSessionId || null,
+      agentId: args?.agentId || null,
+      runtimeSessionId: args?.runtimeSessionId || null,
+      windowRef: args?.windowRef || null,
+      accountIdx: args?.accountIdx,
+      worker: getWorkerIdentity(),
+      webContentsId: event.sender.id,
     });
-    if (!handler) throw new Error("Tool '" + toolName + "' not found");
-    const validatedArgs = schema.parse(args || {});
-    const result = await handler(validatedArgs);
     console.log("[IPC Bridge] success:", toolName);
     return result;
   } catch (e) {
@@ -369,7 +398,71 @@ ipcMain.handle("rpc", async (event, toolName, args) => {
 });
 console.log("[IPC Bridge] All RPC tools available via ipcRenderer.invoke('rpc', toolName, args)");
 
+const workerClient = maybeCreateWorkerClient(authManager);
+
+const PROJECT_ROOT = path.join(__dirname, "..");
+const DESKTOP_DIR = path.join(os.homedir(), "Desktop");
+const MAC_LAUNCHER_SOURCE = path.join(PROJECT_ROOT, "cicy-dektop.command");
+const MAC_LAUNCHER_TARGET = path.join(DESKTOP_DIR, "cicy-dektop.command");
+const WINDOWS_LAUNCHER_TARGET = path.join(DESKTOP_DIR, "cicy-desktop.cmd");
+
+function ensureDesktopLauncher() {
+  try {
+    if (process.platform === "darwin") {
+      ensureMacDesktopLauncher();
+      return;
+    }
+
+    if (process.platform === "win32") {
+      ensureWindowsDesktopLauncher();
+    }
+  } catch (error) {
+    log.warn(`[Launcher] Failed to ensure desktop launcher: ${error.message}`);
+  }
+}
+
+function ensureMacDesktopLauncher() {
+  if (fs.existsSync(MAC_LAUNCHER_TARGET) || !fs.existsSync(MAC_LAUNCHER_SOURCE)) {
+    return;
+  }
+
+  fs.copyFileSync(MAC_LAUNCHER_SOURCE, MAC_LAUNCHER_TARGET);
+  fs.chmodSync(MAC_LAUNCHER_TARGET, 0o755);
+  log.info(`[Launcher] Created desktop launcher at ${MAC_LAUNCHER_TARGET}`);
+}
+
+function ensureWindowsDesktopLauncher() {
+  if (fs.existsSync(WINDOWS_LAUNCHER_TARGET)) {
+    return;
+  }
+
+  const launcherContent = [
+    "@echo off",
+    "setlocal",
+    `cd /d \"${PROJECT_ROOT}\"`,
+    'if not exist package.json (',
+    '  echo [ERROR] package.json not found in project directory',
+    '  pause',
+    '  exit /b 1',
+    ')',
+    'echo =========================================',
+    'echo   CiCy Desktop Master + Worker',
+    'echo   Project: %CD%',
+    'echo =========================================',
+    'npm start',
+    'if errorlevel 1 (',
+    '  echo.',
+    '  echo [ERROR] Startup failed',
+    '  pause',
+    ')',
+  ].join("\r\n");
+
+  fs.writeFileSync(WINDOWS_LAUNCHER_TARGET, `${launcherContent}\r\n`, "utf8");
+  log.info(`[Launcher] Created desktop launcher at ${WINDOWS_LAUNCHER_TARGET}`);
+}
+
 electronApp.whenReady().then(() => {
+  ensureDesktopLauncher();
   // 为 webview partition 设置代理
   if (config.proxy) {
     const { session } = require("electron");
@@ -385,7 +478,7 @@ electronApp.whenReady().then(() => {
         log.error("[Proxy] persist:main partition 设置代理失败:", err);
       });
   }
-  server.listen(PORT, () => {
+  server.listen(PORT, async () => {
     log.info(`[MCP] Log file: ${config.logFilePath}`);
     log.info(`[MCP] Server listening on http://localhost:${PORT}`);
     log.info(`[MCP] SSE endpoint: http://localhost:${PORT}/mcp`);
@@ -393,6 +486,14 @@ electronApp.whenReady().then(() => {
     log.info(`[MCP] Remote debugger: http://localhost:9221`);
     if (START_URL) {
       createWindow({ url: START_URL }, ACCOUNT);
+    }
+    if (workerClient) {
+      try {
+        await workerClient.start();
+        log.info(`[Cluster] Worker registered to ${process.env.CICY_MASTER_URL}`);
+      } catch (error) {
+        log.error(`[Cluster] Worker registration failed: ${error.message}`);
+      }
     }
   });
 });
@@ -403,11 +504,15 @@ electronApp.on("window-all-closed", () => {
 
 function cleanup() {
   log.info("[MCP] Server shutting down");
+  if (workerClient) {
+    workerClient.stop();
+  }
   server.close();
   electronApp.quit();
 }
 
 process.on("SIGTERM", cleanup);
+process.on("SIGINT", cleanup);
 
 // 为所有 session（包括 webview partition）设置代理
 electronApp.on("session-created", (session) => {

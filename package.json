@@ -4,10 +4,13 @@
   "description": "CiCy - AI-powered operating system browser",
   "main": "src/main.js",
   "bin": {
-    "cicy-desktop": "./bin/cicy-desktop"
+    "cicy-desktop": "./bin/cicy-desktop",
+    "cicy": "./bin/cicy-desktop",
+    "cicy-rpc": "./bin/cicy-desktop"
   },
   "scripts": {
-    "start": "electron .",
+    "start": "node ./bin/cicy-desktop",
+    "start:master": "node src/master/master-main.js",
     "format": "prettier --write \"src/**/*.js\" \"tests/**/*.js\"",
     "format:check": "prettier --check \"src/**/*.js\" \"tests/**/*.js\"",
     "test": "jest",
