@@ -697,7 +697,7 @@ async function focusExistingWorker(worker, masterBaseUrl, masterUiUrl) {
 }
 
 async function startWorker({ workerPort, masterBaseUrl, token, masterUiUrl }) {
-  const workerChild = spawn('electron', [PACKAGE_ROOT, '--port', String(workerPort), '--url', masterUiUrl], {
+  const workerChild = spawn('npx', ['electron', PACKAGE_ROOT, '--port', String(workerPort), '--url', masterUiUrl], {
     cwd: PACKAGE_ROOT,
     env: {
       ...process.env,
