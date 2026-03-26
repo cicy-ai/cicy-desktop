@@ -37,7 +37,7 @@ stop_node() {
 status_node() {
   local host=$(get_host $1) port=$(get_port $1)
   if pgrep -f "ssh -N.*$host" > /dev/null; then
-    local ip=$(curl -s --socks5 127.0.0.1:$port --connect-timeout 5 https://ipinfo.io/ip 2>/dev/null)
+    local ip=$(curl -s --socks5h 127.0.0.1:$port --connect-timeout 5 https://ipinfo.io/ip 2>/dev/null)
     echo "✅ [$1] 运行中  SOCKS5: 127.0.0.1:$port  出口IP: ${ip:-测试失败}"
   else
     echo "❌ [$1] 未运行"
@@ -78,7 +78,7 @@ case "$ACTION" in
   test)
     for node in hk us; do
       port=$(get_port $node)
-      ip=$(curl -s --socks5 127.0.0.1:$port --connect-timeout 5 https://ipinfo.io/ip 2>/dev/null)
+      ip=$(curl -s --socks5h 127.0.0.1:$port --connect-timeout 5 https://ipinfo.io/ip 2>/dev/null)
       if [ -n "$ip" ]; then
         echo "✅ [$node] 出口IP: $ip"
       else

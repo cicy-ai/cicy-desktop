@@ -245,3 +245,31 @@ log.error("[MCP] Error:", error);
 - Enable remote debugging with `--remote-debugging-port`
 - Use `nodeIntegration: false` and `contextIsolation: true`
 - Multi-account support via `partition: persist:sandbox-{accountIdx}`
+
+## Master/Worker Cluster Commands
+
+```bash
+# Start Master server (port 8100)
+npm run start:master
+
+# Start Worker registered to Master
+MASTER_TOKEN=$(jq -r '.master_token' ~/.cicy-master.json)
+PORT=8101 CICY_MASTER_URL="http://127.0.0.1:8100" CICY_MASTER_TOKEN="$MASTER_TOKEN" npm start
+
+# Master API endpoints
+curl http://127.0.0.1:8100/api/ping
+curl http://127.0.0.1:8100/api/workers
+curl http://127.0.0.1:8100/api/agents
+
+# Worker direct API (requires auth token from ~/global.json)
+curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8101/rpc/tools
+curl -H "Authorization: Bearer $TOKEN" -X POST http://127.0.0.1:8101/rpc/tools/call \
+  -H "Content-Type: application/json" \
+  -d '{"name":"ping","arguments":{}}'
+```
+
+### Master Token
+
+- Token stored in `~/.cicy-master.json`
+- Token file created automatically on first Master start
+- Token passed to workers via `CICY_MASTER_TOKEN` env var
