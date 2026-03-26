@@ -3,6 +3,7 @@ const { spawn, execSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const isWindows = process.platform === 'win32';
 const yaml = require('js-yaml');
 const { MasterTokenManager } = require('../src/master/master-main');
 const { version: CLI_VERSION } = require('../package.json');
@@ -697,8 +698,9 @@ async function focusExistingWorker(worker, masterBaseUrl, masterUiUrl) {
 }
 
 async function startWorker({ workerPort, masterBaseUrl, token, masterUiUrl }) {
-  const workerChild = spawn('npx', ['electron', PACKAGE_ROOT, '--port', String(workerPort), '--url', masterUiUrl], {
+  const workerChild = spawn(isWindows ? 'npx.cmd' : 'npx', ['electron', PACKAGE_ROOT, '--port', String(workerPort), '--url', masterUiUrl], {
     cwd: PACKAGE_ROOT,
+    shell: isWindows,
     env: {
       ...process.env,
       PORT: String(workerPort),
