@@ -495,6 +495,13 @@ electronApp.whenReady().then(() => {
         log.error(`[Cluster] Worker registration failed: ${error.message}`);
       }
     }
+  }).on("error", (err) => {
+    if (err.code === "EADDRINUSE") {
+      log.error(`[MCP] Port ${PORT} is already in use`);
+    } else {
+      log.error("[MCP] Server error:", err);
+    }
+    electronApp.quit();
   });
 });
 
