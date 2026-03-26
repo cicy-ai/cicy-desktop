@@ -9,9 +9,9 @@
 - **系统层**：跨应用窗口管理，不限于浏览器
 
 ### 🚀 开发体验极致优化
-- **简化语法**：`cicy-rpc tool_name key=value`，告别冗长 JSON
+- **简化语法**：`cicy tool_name key=value`，告别冗长 JSON
 - **热重载**：修改代码无需重启，秒级生效
-- **YAML 优先**：比 JSON 节省 30% token，AI 友好
+- **统一入口**：`npm start` / `cicy` 默认启动 master + worker
 
 ### 🔒 企业级特性
 - **多账户隔离**：Cookie/Storage 完全隔离，支持多账号场景
@@ -25,15 +25,15 @@
 
 ## ✨ 核心特性
 
-- 🚀 **简化语法** - `cicy-rpc tool_name key=value`，最简洁
-- 📝 **YAML 优先** - 默认 YAML 格式，节省 30% token
-- 🔥 **手动热重载** - `cicy-rpc r-reset` 清除缓存，无需重启
+- 🚀 **简化语法** - `cicy tool_name key=value`，最简洁
+- 📝 **JSON 直出** - `cicy -j <tool>` 便于脚本消费
+- 🔥 **统一入口** - `npm start` / `cicy` 默认启动 master + worker
 - 🪟 **双层窗口管理** - 浏览器窗口 + 系统窗口全覆盖
 - 👤 **多账户隔离** - Cookie/Storage 完全隔离
 - 🎯 **CDP 完整控制** - 鼠标、键盘、页面、网络
 - 📸 **智能截图** - 全屏/窗口截图，自动清理
 - 🖥️ **系统监控** - CPU、内存、磁盘、网络、IP
-- 🔧 **轻量工具** - cicy-rpc 命令行工具
+- 🔧 **轻量工具** - `cicy` 命令行工具
 - 🧩 **模块化架构** - 清晰的代码组织，易于维护
 - ⚡ **执行工具** - Shell/Python/Node.js 命令执行
 - 📋 **剪贴板操作** - 文本和图片的读写
@@ -285,68 +285,49 @@ kiro-cli mcp add --name cicy-desktop --url http://localhost:8101/mcp --force
 
 ## 使用示例
 
-### 命令行工具 (cicy-rpc)
+### 命令行工具 (`cicy`)
 
-快速调用 MCP 工具的轻量级命令行工具，**支持简化语法和 YAML/JSON 双格式**：
+统一入口命令行工具，既可以管理本地 master + worker 启动，也可以直接调用 worker RPC 工具。
 
 ```bash
-# 安装到 ~/.local/bin
-curl -o ~/.local/bin/cicy-rpc https://raw.githubusercontent.com/cicy-ai/cicy-desktop/main/bin/cicy-rpc
-chmod +x ~/.local/bin/cicy-rpc
+# 启动本地 master + worker（默认）
+npm start
+# 或
+cicy
 
-# 安装依赖（YAML 支持）
-pip install yq --break-system-packages
+# 查看集群状态
+cicy status
 
-# 设置 token（首次使用）
-echo '{"api_token":"your-token-here"}' > ~/global.json
+# 设置 token / 节点配置（首次使用远程 RPC 时）
+cicy init
 
-# 简化语法（推荐）
-cicy-rpc ping
-cicy-rpc open_window url=https://google.com
-cicy-rpc get_window_info win_id=1
-cicy-rpc set_window_bounds win_id=1 x=100 y=100 width=1280 height=720
-cicy-rpc cdp_click win_id=1 x=500 y=300
-cicy-rpc cdp_type_text win_id=1 text="Hello World"
-cicy-rpc close_window win_id=1
+# 查看可用工具
+cicy tools
+cicy tools open_window
 
-# YAML 格式（完整语法）
-cicy-rpc "
-name: open_window
-arguments:
-  url: https://google.com
-  reuseWindow: false
-"
+# 直接调用工具
+cicy ping
+cicy open_window url=https://google.com
+cicy get_window_info win_id=1
+cicy set_window_bounds win_id=1 x=100 y=100 width=1280 height=720
+cicy cdp_click win_id=1 x=500 y=300
+cicy cdp_type_text win_id=1 text="Hello World"
+cicy close_window win_id=1
 
-# JSON 格式
-cicy-rpc --json '{"name":"get_window_info","arguments":{"win_id":1}}'
+# JSON 输出（便于脚本消费）
+cicy -j get_window_info win_id=1
 ```
 
-**三种格式对比：**
+多节点场景可通过 `~/global.json` + `CICY_NODE` 选择目标节点：
 
-简化语法（最简洁）：
 ```bash
-cicy-rpc open_window url=https://google.com
-```
-
-YAML 格式（推荐，复杂参数）：
-```bash
-cicy-rpc "
-name: open_window
-arguments:
-  url: https://google.com
-  reuseWindow: false
-"
-```
-
-JSON 格式（标准）：
-```json
-{"name":"open_window","arguments":{"url":"https://google.com","reuseWindow":false}}
+CICY_NODE=windows cicy get_windows
 ```
 
 **最佳实践：**
-- 简单参数 → 简化语法
-- 复杂参数/JS 代码 → YAML 格式
-- YAML 比 JSON 省约 30% token
+- 本地启动 → `npm start` / `cicy`
+- 简单工具调用 → `cicy tool_name key=value`
+- 脚本消费结果 → `cicy -j ...`
 
 ### 窗口管理
 
