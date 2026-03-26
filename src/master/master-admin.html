@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CiCy Master Admin</title>
+    <style>
+      body {
+        margin: 0;
+        font-family:
+          system-ui,
+          -apple-system,
+          sans-serif;
+        background: #0f1117;
+        color: #e2e8f0;
+      }
+      .wrap {
+        padding: 20px;
+        display: grid;
+        gap: 20px;
+      }
+      .card {
+        background: #1a1d2e;
+        border: 1px solid #2d3148;
+        border-radius: 12px;
+        padding: 16px;
+      }
+      h1,
+      h2 {
+        margin: 0 0 12px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 12px;
+      }
+      .metric {
+        background: #0f1117;
+        border: 1px solid #2d3148;
+        border-radius: 10px;
+        padding: 12px;
+      }
+      .metric .label {
+        color: #94a3b8;
+        font-size: 12px;
+        margin-bottom: 6px;
+      }
+      .metric .value {
+        font-size: 24px;
+        font-weight: 700;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+      th,
+      td {
+        padding: 8px;
+        border-bottom: 1px solid #2d3148;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        color: #94a3b8;
+        font-weight: 600;
+      }
+      input,
+      button {
+        padding: 8px 12px;
+        border-radius: 8px;
+        border: 1px solid #3d4265;
+        background: #0f1117;
+        color: #e2e8f0;
+      }
+      button {
+        cursor: pointer;
+        background: #6366f1;
+        border: none;
+      }
+      .toolbar {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-bottom: 16px;
+      }
+      .muted {
+        color: #94a3b8;
+        font-size: 12px;
+      }
+      .status-online {
+        color: #4ade80;
+      }
+      .status-stale {
+        color: #fbbf24;
+      }
+      .status-offline {
+        color: #f87171;
+      }
+      #login {
+        max-width: 420px;
+        margin: 40px auto;
+      }
+      #app {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="login" class="card">
+      <h1>CiCy Master Admin</h1>
+      <p class="muted">Enter master bearer token</p>
+      <div class="toolbar">
+        <input id="token" type="password" placeholder="Bearer token" style="flex: 1" />
+        <button id="login-btn">Login</button>
+      </div>
+      <div id="login-error" class="muted"></div>
+    </div>
+
+    <div id="app" class="wrap">
+      <div class="toolbar">
+        <button id="refresh-btn">Refresh</button>
+        <span id="last-updated" class="muted"></span>
+      </div>
+
+      <div class="card">
+        <h2>Cluster Summary</h2>
+        <div id="summary" class="grid"></div>
+      </div>
+
+      <div class="card">
+        <h2>Workers</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Worker</th>
+              <th>Status</th>
+              <th>Heartbeat</th>
+              <th>Agents</th>
+              <th>Capabilities</th>
+              <th>Memory RSS</th>
+            </tr>
+          </thead>
+          <tbody id="workers-body"></tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2>Agents</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Agent</th>
+              <th>Worker</th>
+              <th>Status</th>
+              <th>Runtime Session</th>
+              <th>Account</th>
+            </tr>
+          </thead>
+          <tbody id="agents-body"></tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2>Recent Tasks</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Task</th>
+              <th>Tool</th>
+              <th>Status</th>
+              <th>Worker</th>
+              <th>Agent</th>
+              <th>Updated</th>
+            </tr>
+          </thead>
+          <tbody id="tasks-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <script>
+      const loginBox = document.getElementById("login");
+      const app = document.getElementById("app");
+      const tokenInput = document.getElementById("token");
+      const loginBtn = document.getElementById("login-btn");
+      const loginError = document.getElementById("login-error");
+      const refreshBtn = document.getElementById("refresh-btn");
+      const lastUpdated = document.getElementById("last-updated");
+
+      function getToken() {
+        return localStorage.getItem("cicy-master-token") || "";
+      }
+
+      function getTokenFromUrl() {
+        return new URLSearchParams(window.location.search).get("token") || "";
+      }
+
+      function setToken(token) {
+        localStorage.setItem("cicy-master-token", token);
+      }
+
+      async function api(path) {
+        const res = await fetch(path, {
+          headers: {
+            Authorization: `Bearer ${getToken()}`,
+          },
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || `Request failed: ${res.status}`);
+        }
+        return res.json();
+      }
+
+      function renderSummary(summary) {
+        const items = [
+          ["Workers Total", summary.workers.total],
+          ["Workers Online", summary.workers.online],
+          ["Workers Stale", summary.workers.stale],
+          ["Workers Offline", summary.workers.offline],
+          ["Agents Total", summary.agents.total],
+          ["Agents Busy", summary.agents.busy || 0],
+          ["Tasks Total", summary.tasks.total],
+          ["Tasks Running", summary.tasks.running || 0],
+        ];
+        document.getElementById("summary").innerHTML = items
+          .map(
+            ([label, value]) =>
+              `<div class="metric"><div class="label">${label}</div><div class="value">${value}</div></div>`
+          )
+          .join("");
+      }
+
+      function renderWorkers(workers) {
+        document.getElementById("workers-body").innerHTML = workers
+          .map(
+            (worker) => `
+          <tr>
+            <td>${worker.workerId}</td>
+            <td class="status-${worker.healthStatus}">${worker.healthStatus}</td>
+            <td>${worker.lastHeartbeatAt || "-"}</td>
+            <td>${worker.agents?.length || 0}</td>
+            <td>${worker.capabilities?.length || 0}</td>
+            <td>${worker.resources?.memory?.rss || 0}</td>
+          </tr>
+        `
+          )
+          .join("");
+      }
+
+      function renderAgents(agents) {
+        document.getElementById("agents-body").innerHTML = agents
+          .map(
+            (agent) => `
+          <tr>
+            <td>${agent.agentId}</td>
+            <td>${agent.workerId}</td>
+            <td>${agent.status}</td>
+            <td>${agent.runtimeSessionId || "-"}</td>
+            <td>${agent.accountIdx ?? "-"}</td>
+          </tr>
+        `
+          )
+          .join("");
+      }
+
+      function renderTasks(tasks) {
+        document.getElementById("tasks-body").innerHTML = tasks
+          .map(
+            (task) => `
+          <tr>
+            <td>${task.taskId}</td>
+            <td>${task.toolName}</td>
+            <td>${task.status}</td>
+            <td>${task.workerId || "-"}</td>
+            <td>${task.agentId || "-"}</td>
+            <td>${task.updatedAt || "-"}</td>
+          </tr>
+        `
+          )
+          .join("");
+      }
+
+      async function refresh() {
+        const [summary, workers, agents, tasks] = await Promise.all([
+          api("/admin/summary"),
+          api("/admin/workers"),
+          api("/admin/agents"),
+          api("/admin/tasks"),
+        ]);
+        renderSummary(summary);
+        renderWorkers(workers.workers);
+        renderAgents(agents.agents);
+        renderTasks(tasks.tasks);
+        lastUpdated.textContent = `Updated: ${new Date().toLocaleTimeString()}`;
+      }
+
+      loginBtn.onclick = async () => {
+        try {
+          setToken(tokenInput.value.trim());
+          await refresh();
+          loginBox.style.display = "none";
+          app.style.display = "grid";
+          loginError.textContent = "";
+        } catch (error) {
+          loginError.textContent = error.message;
+        }
+      };
+
+      refreshBtn.onclick = refresh;
+
+      async function tryAutoLogin() {
+        const token = getToken();
+        if (!token) return;
+
+        tokenInput.value = token;
+        try {
+          await refresh();
+          loginBox.style.display = "none";
+          app.style.display = "grid";
+          loginError.textContent = "";
+        } catch (error) {
+          loginError.textContent = error.message;
+          loginBox.style.display = "block";
+          app.style.display = "none";
+        }
+      }
+
+      const urlToken = getTokenFromUrl();
+      if (urlToken) {
+        setToken(urlToken);
+      }
+
+      if (getToken()) {
+        tokenInput.value = getToken();
+        tryAutoLogin();
+      }
+    </script>
+  </body>
+</html>

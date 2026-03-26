@@ -59,12 +59,16 @@ function registerTool(mcpServer, tools, title, description, schema, handler, opt
     name: title,
     description,
     inputSchema,
+    tag,
   });
 
   mcpServer.tool(title, description, inputSchema, async (args) => {
     try {
-      const validatedArgs = schema.parse(args);
-      return await handler(validatedArgs);
+      const { executeTool } = require("./tool-executor");
+      return await executeTool(title, args, {
+        transport: "mcp",
+        toolName: title,
+      });
     } catch (error) {
       return {
         content: [{ type: "text", text: `Error: ${error.message}` }],

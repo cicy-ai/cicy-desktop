@@ -6,11 +6,14 @@ const log = require("electron-log");
 const { config } = require("../config");
 const { initWindowMonitoring } = require("./window-monitor");
 const { loadWindowState, watchWindowState } = require("./window-state");
+const { getWorkerIdentity } = require("../cluster/worker-identity");
+const { createAgentId, createRuntimeSessionId, createWindowRef } = require("../cluster/types");
 
-app.name = "ElectronMCP";
+if (app) {
+  app.name = "ElectronMCP";
+}
 
 function setupWindowHandlers(win) {
-
   // Hook window.open to use createWindow with proper webPreferences (webviewTag etc)
   win.webContents.setWindowOpenHandler(({ url }) => {
     log.info(`[WindowOpen] Intercepted: ${url}`);
@@ -70,7 +73,9 @@ function setupWindowHandlers(win) {
           await win.webContents.executeJavaScript(rpcCode);
         }
       }
-    } catch(e) { log.error("[RPC inject]", e.message); }
+    } catch (e) {
+      log.error("[RPC inject]", e.message);
+    }
 
     try {
       // 1. 获取当前页面的根域名
@@ -132,8 +137,12 @@ function isTrustedUrl(url) {
   if (!url) return false;
   try {
     const u = new URL(url);
-    return u.hostname === "localhost" || u.hostname === "127.0.0.1" || u.hostname.endsWith(".de5.net");
-  } catch { return false; }
+    return (
+      u.hostname === "localhost" || u.hostname === "127.0.0.1" || u.hostname.endsWith(".de5.net")
+    );
+  } catch {
+    return false;
+  }
 }
 
 function createWindow(options = {}, accountIdx = 0, forceNew = false) {
@@ -284,8 +293,13 @@ function getWindowInfo(win) {
       ? parseInt(partition.replace("persist:sandbox-", ""), 10)
       : 0;
 
+    const { workerId } = getWorkerIdentity();
     return {
       id: win.id,
+      workerId,
+      agentId: createAgentId(workerId, win.id),
+      runtimeSessionId: createRuntimeSessionId(workerId, partition, accountIdx),
+      windowRef: createWindowRef(workerId, win.id),
       title: win.getTitle(),
       url: wc.getURL(),
       accountIdx,
@@ -307,26 +321,29 @@ function getWindowInfo(win) {
   }
 }
 
-app.on("browser-window-created", (event, win) => {
-  setupWindowHandlers(win);
-});
-
+if (app) {
+  app.on("browser-window-created", (event, win) => {
+    setupWindowHandlers(win);
+  });
+}
 
 function showOpenLinkDialog(parentWin, url) {
-  dialog.showMessageBox(parentWin, {
-    type: 'question',
-    buttons: ['Open in Browser', 'Open in App', 'Cancel'],
-    defaultId: 0,
-    title: 'Open Link',
-    message: 'How would you like to open this link?',
-    detail: url
-  }).then(({ response }) => {
-    if (response === 0) {
-      shell.openExternal(url);
-    } else if (response === 1) {
-      createWindow({ url }, 0, true);
-    }
-  });
+  dialog
+    .showMessageBox(parentWin, {
+      type: "question",
+      buttons: ["Open in Browser", "Open in App", "Cancel"],
+      defaultId: 0,
+      title: "Open Link",
+      message: "How would you like to open this link?",
+      detail: url,
+    })
+    .then(({ response }) => {
+      if (response === 0) {
+        shell.openExternal(url);
+      } else if (response === 1) {
+        createWindow({ url }, 0, true);
+      }
+    });
 }
 
 module.exports = {

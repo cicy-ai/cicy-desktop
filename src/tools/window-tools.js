@@ -15,6 +15,27 @@ const { captureSnapshot } = require("../utils/snapshot-utils");
 const { createWindow, getWindowInfo } = require("../utils/window-utils");
 const { config } = require("../config");
 
+function resolveWindowId(input = {}, context = {}) {
+  const requestedWinId = input.win_id;
+  if (requestedWinId !== undefined && requestedWinId !== null) {
+    return requestedWinId;
+  }
+
+  const contextWindowId = context.windowRef?.localWindowId;
+  if (contextWindowId !== undefined && contextWindowId !== null) {
+    return contextWindowId;
+  }
+
+  if (context.agentId) {
+    const match = context.agentId.match(/:agent:(\d+)$/);
+    if (match) {
+      return parseInt(match[1], 10);
+    }
+  }
+
+  return 1;
+}
+
 function registerTools(registerTool) {
   registerTool(
     "get_windows",
@@ -52,8 +73,9 @@ function registerTools(registerTool) {
     "get_window_info",
     "获取指定窗口的详细信息",
     z.object({ win_id: z.number().optional().default(1).describe("Window ID") }),
-    async ({ win_id }) => {
+    async (input, context = {}) => {
       try {
+        const win_id = resolveWindowId(input, context);
         const win = BrowserWindow.fromId(win_id);
         if (!win) throw new Error(`Window ${win_id} not found`);
         return { content: [{ type: "text", text: JSON.stringify(getWindowInfo(win), null, 2) }] };
@@ -144,9 +166,10 @@ function registerTools(registerTool) {
       url: z.string().describe("URL"),
       win_id: z.number().optional().describe("Window ID"),
     }),
-    async ({ url, win_id }) => {
+    async (input, context = {}) => {
       try {
-        const actualWinId = win_id || 1;
+        const { url } = input;
+        const actualWinId = resolveWindowId(input, context);
         const win = BrowserWindow.fromId(actualWinId);
         if (!win) throw new Error(`Window ${actualWinId} not found`);
         await win.loadURL(url);
@@ -658,9 +681,10 @@ function registerTools(registerTool) {
         .default(false)
         .describe("是否显示可点击元素遮罩(5秒后消失)"),
     }),
-    async ({ win_id, max_elements, show_overlays }) => {
+    async (input, context = {}) => {
       try {
-        const actualWinId = win_id || 1;
+        const { max_elements, show_overlays } = input;
+        const actualWinId = resolveWindowId(input, context);
         const win = BrowserWindow.fromId(actualWinId);
         if (!win) throw new Error(`Window ${actualWinId} not found`);
 
