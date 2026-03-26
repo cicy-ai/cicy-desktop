@@ -1,10 +1,13 @@
 {
   "name": "cicy-rpc",
   "version": "1.0.4",
-  "description": "Lightweight MCP RPC CLI tool with YAML/JSON support",
+  "description": "CiCy Desktop RPC CLI",
   "bin": {
     "cicy-rpc": "./bin/cicy-rpc"
   },
+  "files": [
+    "bin"
+  ],
   "scripts": {
     "test": "echo \"No tests yet\""
   },
@@ -12,7 +15,6 @@
     "mcp",
     "rpc",
     "cli",
-    "yaml",
     "cicy-desktop"
   ],
   "author": "cicybot",
@@ -24,10 +26,10 @@
   },
   "homepage": "https://github.com/cicy-ai/cicy-desktop#readme",
   "engines": {
-    "node": ">=14.0.0"
+    "node": ">=18.0.0"
   },
   "preferGlobal": true,
   "dependencies": {
-    "local": "^0.3.3"
+    "js-yaml": "^4.1.1"
   }
 }

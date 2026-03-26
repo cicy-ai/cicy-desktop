@@ -1,123 +1,45 @@
 # cicy-rpc
 
-轻量级 MCP RPC 调用工具，用于调用 CiCy Desktop 服务器。
+Node-based RPC CLI for CiCy Desktop workers.
 
-## 特性
-
-- 🚀 **简化语法** - 最简洁的调用方式：`cicy-rpc tool_name key=value`
-- 📋 **工具列表** - `cicy-rpc list` 查看所有可用工具
-- 📝 **YAML 优先** - 默认 YAML 格式，节省 30% token
-- 🔄 **JSON 支持** - 使用 `--json` 或 `-j` 标志切换到 JSON
-- ✅ **完善的错误处理** - 清晰的错误提示和建议
-- 🔒 **Token 认证** - 自动从配置读取
-- 🌐 **多节点支持** - 支持多个服务器配置
-- 🔧 **初始化配置** - `cicy-rpc init` 快速配置
-- 🐛 **调试模式** - `DEBUG=1` 输出详细信息
-
-## 安装
+## Commands
 
 ```bash
-# 全局安装（推荐）
-npm install -g cicy-rpc
-
-# 或者从项目安装
-cd ./packages/cicy-rpc
-sudo npm install -g .
-```
-
-## 快速开始
-
-```bash
-# 测试连接
+cicy-rpc init
+cicy-rpc tools
+cicy-rpc tools open_window
 cicy-rpc ping
-
-# 列出所有工具
-cicy-rpc list
-
-# 打开窗口
 cicy-rpc open_window url=https://google.com
-
-# 获取下载列表
-cicy-rpc get_downloads
+cicy-rpc --json get_windows
 ```
 
-## 使用方法
+## Config
 
-### 1. 列出所有工具
+Reads `~/global.json` using the project-standard format:
 
-```bash
-cicy-rpc list
+```json
+{
+  "api_token": "your-token",
+  "cicyDesktopNodes": {
+    "local": {
+      "api_token": "",
+      "base_url": "http://localhost:8101"
+    },
+    "windows": {
+      "api_token": "your-token",
+      "base_url": "http://windows-host:8101"
+    }
+  }
+}
 ```
 
-输出示例：
+Select a node with `CICY_NODE=<name>`.
 
-```
-📋 获取工具列表...
+## Notes
 
-ping
-  测试 MCP 服务器连接
-  用法: cicy-rpc ping
-
-open_window
-  打开新窗口或重用现有窗口
-  用法: cicy-rpc open_window url=<value>
-
-get_downloads
-  获取所有下载记录
-  用法: cicy-rpc get_downloads
-
-💡 详细文档: https://github.com/cicy-ai/cicy-desktop
-```
-
-### 2. 简化语法（推荐）
-
-```bash
-# 无参数工具
-cicy-rpc ping
-
-# 单参数
-cicy-rpc open_window url=https://google.com
-
-# 多参数
-cicy-rpc exec_js win_id=1 code='document.title'
-
-# 带引号的参数
-cicy-rpc cdp_type_text win_id=1 text="Hello World"
-```
-
-### 3. 查看工具详情
-
-每个工具的详细用法、参数说明、返回值示例，请查看：
-
-**📖 完整文档**: https://github.com/cicy-ai/cicy-desktop
-
-## 完整工具参考
-
-### 窗口管理
-
-#### ping - 测试连接
-
-```bash
-cicy-rpc ping
-```
-
-**响应:**
-
-```
-Pong v:2 2026-02-13 16:00:00
-```
-
-#### open_window - 打开窗口
-
-```bash
-# 基本用法
-cicy-rpc open_window url=https://google.com
-
-# 指定大小和位置
-cicy-rpc open_window url=https://google.com width=800 height=600 x=100 y=100
-```
-
-**响应:**
+- `cicy-rpc` is the only supported CLI for RPC/tool calls.
+- `cicy` / `cicy-desktop` only manage desktop and cluster lifecycle.
+- `skills/cicy-rpc/cicy-rpc` is now a thin wrapper around the Node CLI.
 
 ```json
 {

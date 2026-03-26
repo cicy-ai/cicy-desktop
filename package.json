@@ -6,7 +6,7 @@
   "bin": {
     "cicy-desktop": "./bin/cicy-desktop",
     "cicy": "./bin/cicy-desktop",
-    "cicy-rpc": "./bin/cicy-desktop"
+    "cicy-rpc": "./bin/cicy-rpc"
   },
   "scripts": {
     "start": "node ./bin/cicy-desktop",

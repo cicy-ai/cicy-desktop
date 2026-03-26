@@ -155,7 +155,7 @@ npm install
 bash skills/cicy-desktop-service/service.sh start
 
 # 验证服务
-cicy-rpc "name: ping"
+cicy-rpc ping
 ```
 
 ### 使用技能
@@ -285,9 +285,9 @@ kiro-cli mcp add --name cicy-desktop --url http://localhost:8101/mcp --force
 
 ## 使用示例
 
-### 命令行工具 (`cicy`)
+### 命令行工具
 
-统一入口命令行工具，既可以管理本地 master + worker 启动，也可以直接调用 worker RPC 工具。
+`cicy` / `cicy-desktop` 只负责本地 desktop / cluster 管理；RPC 调用统一使用 `cicy-rpc`。
 
 ```bash
 # 启动本地 master + worker（默认）
@@ -298,36 +298,26 @@ cicy
 # 查看集群状态
 cicy status
 
-# 设置 token / 节点配置（首次使用远程 RPC 时）
-cicy init
-
-# 查看可用工具
-cicy tools
-cicy tools open_window
-
-# 直接调用工具
-cicy ping
-cicy open_window url=https://google.com
-cicy get_window_info win_id=1
-cicy set_window_bounds win_id=1 x=100 y=100 width=1280 height=720
-cicy cdp_click win_id=1 x=500 y=300
-cicy cdp_type_text win_id=1 text="Hello World"
-cicy close_window win_id=1
-
-# JSON 输出（便于脚本消费）
-cicy -j get_window_info win_id=1
+# RPC 配置与工具调用改用 cicy-rpc
+cicy-rpc init
+cicy-rpc tools
+cicy-rpc tools open_window
+cicy-rpc ping
+cicy-rpc open_window url=https://google.com
+cicy-rpc get_window_info win_id=1
+cicy-rpc -j get_window_info win_id=1
 ```
 
 多节点场景可通过 `~/global.json` 的 `cicyDesktopNodes` + `CICY_NODE` 选择目标节点：
 
 ```bash
-CICY_NODE=windows cicy get_windows
+CICY_NODE=windows cicy-rpc get_windows
 ```
 
 **最佳实践：**
-- 本地启动 → `npm start` / `cicy`
-- 简单工具调用 → `cicy tool_name key=value`
-- 脚本消费结果 → `cicy -j ...`
+- 本地启动 / 集群管理 → `npm start` / `cicy` / `cicy-desktop`
+- RPC 工具调用 → `cicy-rpc tool_name key=value`
+- 脚本消费结果 → `cicy-rpc -j ...`
 
 ### 窗口管理
 

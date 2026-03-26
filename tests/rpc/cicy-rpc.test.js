@@ -1,50 +1,87 @@
-const { execSync } = require("child_process");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const { execFileSync, execSync } = require("child_process");
+const { getPort } = require("../mcp/setup-test-server");
 
-describe("cicy-rpc tool tests", () => {
-  const cicyRpc = (toolName, args = "") => {
-    const cmd = args ? `cicy-rpc ${toolName} ${args}` : `cicy-rpc ${toolName}`;
-    return execSync(cmd, { encoding: "utf8" });
-  };
+describe("cicy-rpc CLI", () => {
+  const repoRoot = path.join(__dirname, "../..");
+  const rpcBin = path.join(repoRoot, "bin", "cicy-rpc");
+  const desktopBin = path.join(repoRoot, "bin", "cicy-desktop");
+  const globalJsonPath = path.join(os.homedir(), "global.json");
+
+  beforeAll(() => {
+    const port = getPort();
+    let config = {};
+
+    if (fs.existsSync(globalJsonPath)) {
+      config = JSON.parse(fs.readFileSync(globalJsonPath, "utf8"));
+    }
+
+    config.cicyDesktopNodes = {
+      ...(config.cicyDesktopNodes || {}),
+      windows: {
+        api_token: config.api_token || "",
+        base_url: `http://localhost:${port}`,
+      },
+    };
+
+    fs.writeFileSync(globalJsonPath, `${JSON.stringify(config, null, 2)}\n`);
+  });
+
+  const runCli = (binPath, args = [], env = {}) =>
+    execFileSync("node", [binPath, ...args], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: { ...process.env, ...env },
+    });
 
   test("ping", () => {
-    const result = cicyRpc("ping");
+    const result = runCli(rpcBin, ["ping"], { CICY_NODE: "windows" });
     expect(result).toContain("Pong");
   });
 
-  test("r-reset", () => {
-    const result = cicyRpc("r-reset");
-    expect(result).toContain("Cleared");
-    expect(result).toContain("cached modules");
+  test("tools", () => {
+    const result = runCli(rpcBin, ["tools"], { CICY_NODE: "windows" });
+    expect(result).toContain("open_window");
   });
 
-  test("get_windows", () => {
-    const result = cicyRpc("get_windows");
-    expect(result).toMatch(/\[|\]/); // JSON array
+  test("tools <name>", () => {
+    const result = runCli(rpcBin, ["tools", "open_window"], { CICY_NODE: "windows" });
+    expect(result).toContain("open_window - ");
+    expect(result).toContain("url");
   });
 
   test("open_window", () => {
-    const result = cicyRpc("open_window", "url=https://example.com");
+    const result = runCli(rpcBin, ["open_window", "url=https://example.com"], {
+      CICY_NODE: "windows",
+    });
     expect(result).toContain("window");
   });
 
-  test("get_window_info", () => {
-    const result = cicyRpc("get_window_info", "win_id=1");
-    expect(result).toContain("id");
+  test("json output", () => {
+    const result = runCli(rpcBin, ["--json", "get_windows"], { CICY_NODE: "windows" });
+    expect(() => JSON.parse(result)).not.toThrow();
   });
 
-  test("exec_js", () => {
-    const result = cicyRpc("exec_js", 'win_id=1 code="1+1"');
-    expect(result).toContain("2");
+  test("cicy-desktop rejects rpc commands", () => {
+    try {
+      runCli(desktopBin, ["open_window", "url=https://example.com"], { CICY_NODE: "windows" });
+      throw new Error("Expected cicy-desktop to fail for RPC command");
+    } catch (error) {
+      const stderr = (error && error.stderr ? error.stderr.toString() : "") || "";
+      const stdout = (error && error.stdout ? error.stdout.toString() : "") || "";
+      expect(`${stdout}\n${stderr}`).toMatch(/Unknown command: open_window/);
+    }
   });
 
-  test("clipboard_write_text", () => {
-    const result = cicyRpc("clipboard_write_text", 'text="test"');
-    expect(result).toContain("clipboard");
-  });
-
-  test("clipboard_read_text", () => {
-    cicyRpc("clipboard_write_text", 'text="hello"');
-    const result = cicyRpc("clipboard_read_text");
-    expect(result).toContain("hello");
+  test("shell compatibility wrapper forwards to new cli", () => {
+    const wrapperPath = path.join(repoRoot, "skills", "cicy-rpc", "cicy-rpc");
+    const result = execSync(`bash "${wrapperPath}" ping`, {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: { ...process.env, CICY_NODE: "windows" },
+    });
+    expect(result).toContain("Pong");
   });
 });

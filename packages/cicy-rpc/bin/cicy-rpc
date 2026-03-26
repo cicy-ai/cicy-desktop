@@ -1,0 +1,13 @@
+#!/usr/bin/env node
+const { version } = require("../package.json");
+const { runRpcCli } = require("../lib/rpc");
+
+runRpcCli({
+  argv: process.argv.slice(2),
+  version,
+  workerPort: Number(process.env.PORT || 8101),
+  programName: "cicy-rpc",
+}).catch((error) => {
+  console.error(`❌ ${error.message}`);
+  process.exit(1);
+});

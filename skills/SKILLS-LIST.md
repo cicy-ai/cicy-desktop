@@ -42,6 +42,21 @@ cicy-rpc ping
 
 ---
 
+### cicy-cli
+
+**位置:** `./cicy-cli`
+**功能:** 详细说明 `cicy` / `cicy-desktop` 与 `cicy-rpc` 的职责划分和使用方法
+
+```bash
+cicy status
+cicy-rpc tools
+CICY_NODE=windows cicy-rpc open_window url=https://example.com
+```
+
+[文档](./cicy-cli/README.md)
+
+---
+
 ### cicy-rpc
 
 **位置:** `../packages/cicy-rpc`  

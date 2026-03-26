@@ -9,14 +9,10 @@
 bash skills/cicy-desktop-service/cicy-desktop-service.sh start
 
 # 验证服务
-cicy-rpc "name: ping"
+cicy-rpc ping
 
 # 使用工具
-cicy-rpc "
-name: open_window
-arguments:
-  url: https://google.com
-"
+cicy-rpc open_window url=https://google.com
 ```
 
 ## 服务管理
