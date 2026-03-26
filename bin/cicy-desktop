@@ -146,8 +146,8 @@ function update() {
 function initRpcConfig() {
   if (!fs.existsSync(GLOBAL_CONFIG_FILE)) {
     const initialConfig = {
-      default: 'local',
-      nodes: {
+      api_token: '',
+      cicyDesktopNodes: {
         local: {
           api_token: '',
           base_url: `http://localhost:${workerPort}`,
@@ -156,16 +156,14 @@ function initRpcConfig() {
     };
     fs.writeFileSync(GLOBAL_CONFIG_FILE, `${JSON.stringify(initialConfig, null, 2)}\n`);
     console.log(`✅ Created: ${GLOBAL_CONFIG_FILE}`);
-    console.log(`📝 Edit ${GLOBAL_CONFIG_FILE} to add your api_token`);
+    console.log(`📝 Edit ${GLOBAL_CONFIG_FILE} to add your api_token / cicyDesktopNodes`);
     return;
   }
 
   const config = JSON.parse(fs.readFileSync(GLOBAL_CONFIG_FILE, 'utf8'));
-  const defaultNode = config.default || 'local';
   console.log(`📁 Config: ${GLOBAL_CONFIG_FILE}`);
-  console.log(`🔧 Default node: ${defaultNode}`);
-  console.log('📋 Nodes:');
-  Object.entries(config.nodes || {}).forEach(([name, node]) => {
+  console.log('📋 cicyDesktopNodes:');
+  Object.entries(config.cicyDesktopNodes || {}).forEach(([name, node]) => {
     console.log(`  ${name}: ${node.base_url}`);
   });
 }
@@ -178,16 +176,17 @@ function loadRpcNode() {
     throw new Error(`${GLOBAL_CONFIG_FILE} not found. Run 'cicy init' first`);
   }
 
-  const nodeName = process.env.CICY_NODE || config.default || 'local';
-  const node = config.nodes?.[nodeName];
+  const nodes = config.cicyDesktopNodes || {};
+  const nodeName = process.env.CICY_NODE || 'local';
+  const node = nodes?.[nodeName];
   if (!node) {
-    const available = Object.keys(config.nodes || {}).join(', ');
-    throw new Error(`node '${nodeName}' not found in config${available ? ` (available: ${available})` : ''}`);
+    const available = Object.keys(nodes || {}).join(', ');
+    throw new Error(`node '${nodeName}' not found in cicyDesktopNodes${available ? ` (available: ${available})` : ''}`);
   }
 
   return {
     nodeName,
-    token: node.api_token || '',
+    token: node.api_token || config.api_token || '',
     baseUrl: node.base_url || `http://localhost:${workerPort}`,
   };
 }

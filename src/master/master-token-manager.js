@@ -5,7 +5,7 @@ const os = require("os");
 
 class MasterTokenManager {
   constructor() {
-    this.configPath = path.join(os.homedir(), ".cicy-master.json");
+    this.configPath = path.join(os.homedir(), "global.json");
     this.token = this.getOrCreateToken();
   }
 
@@ -13,8 +13,8 @@ class MasterTokenManager {
     try {
       if (fs.existsSync(this.configPath)) {
         const config = JSON.parse(fs.readFileSync(this.configPath, "utf8"));
-        if (config.master_token) {
-          return config.master_token;
+        if (config.api_token) {
+          return config.api_token;
         }
       }
 
@@ -34,7 +34,7 @@ class MasterTokenManager {
       }
     } catch (_) {}
 
-    config.master_token = token;
+    config.api_token = token;
     fs.writeFileSync(this.configPath, JSON.stringify(config, null, 2) + "\n");
   }
 

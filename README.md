@@ -318,7 +318,7 @@ cicy close_window win_id=1
 cicy -j get_window_info win_id=1
 ```
 
-多节点场景可通过 `~/global.json` + `CICY_NODE` 选择目标节点：
+多节点场景可通过 `~/global.json` 的 `cicyDesktopNodes` + `CICY_NODE` 选择目标节点：
 
 ```bash
 CICY_NODE=windows cicy get_windows

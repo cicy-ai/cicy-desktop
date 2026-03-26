@@ -253,7 +253,7 @@ log.error("[MCP] Error:", error);
 npm run start:master
 
 # Start Worker registered to Master
-MASTER_TOKEN=$(jq -r '.master_token' ~/.cicy-master.json)
+MASTER_TOKEN=$(jq -r '.api_token' ~/global.json)
 PORT=8101 CICY_MASTER_URL="http://127.0.0.1:8100" CICY_MASTER_TOKEN="$MASTER_TOKEN" npm start
 
 # Master API endpoints
@@ -270,6 +270,6 @@ curl -H "Authorization: Bearer $TOKEN" -X POST http://127.0.0.1:8101/rpc/tools/c
 
 ### Master Token
 
-- Token stored in `~/.cicy-master.json`
-- Token file created automatically on first Master start
+- Token stored in `~/global.json` as `api_token`
+- Token file created automatically on first startup if missing
 - Token passed to workers via `CICY_MASTER_TOKEN` env var

@@ -101,7 +101,7 @@ npm run start:master
 
 ### Worker Start
 ```bash
-MASTER_TOKEN=$(jq -r '.master_token' ~/.cicy-master.json)
+MASTER_TOKEN=$(jq -r '.api_token' ~/global.json)
 PORT=8101 CICY_MASTER_URL="http://127.0.0.1:8100" CICY_MASTER_TOKEN="$MASTER_TOKEN" npm start
 ```
 
