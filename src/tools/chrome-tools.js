@@ -14,12 +14,22 @@ const {
 } = require("../chrome/chrome-launcher");
 const { isPortOpen } = require("../utils/process-utils");
 const { getVersion, getTargets, activateTarget, callCdp } = require("../chrome/chrome-cdp-client");
+const { resolveChromeDebuggerPort } = require("../chrome/debugger-port-resolver");
 const { config } = require("../config");
 
 const PRIVATE_CHROME_JSON = path.join(os.homedir(), "Private", "chrome.json");
 const PRIVATE_CHROME_TMP_DIR = path.join(os.homedir(), "chrome", "_tmp");
 const PRIVATE_CHROME_ADD_TEMPLATE_DIR = path.join(os.homedir(), "chrome", "__tmp");
 const DEFAULT_ADD_ORG_PATH = "~/Library/Application Support/Google/Chrome/Profile 9";
+
+const injectedChromeProfileSchema = z.object({
+  gmail: z.string().optional(),
+  rpaDir: z.string().optional(),
+  port: z.number().optional(),
+  proxy: z.any().optional(),
+  platform: z.record(z.any()).optional(),
+  orgPath: z.string().nullable().optional(),
+});
 
 function expandHome(input) {
   if (typeof input !== "string" || input.length === 0) return input;
@@ -104,19 +114,47 @@ function normalizePrivateChromeEntry(profileKey, accountIdx, entry) {
   };
 }
 
-function ensureRpaProfileInitialized(privateEntry, userDataDirRoot) {
-  if (!privateEntry || fs.existsSync(userDataDirRoot)) return;
+function normalizeEffectiveChromeProfile(accountIdx, effectiveChromeProfile) {
+  const parsed = injectedChromeProfileSchema.parse(effectiveChromeProfile || {});
+  const gmail = typeof parsed.gmail === "string" ? parsed.gmail : "";
+  const rpaDir = typeof parsed.rpaDir === "string" ? parsed.rpaDir : null;
+  const orgPath = typeof parsed.orgPath === "string" ? parsed.orgPath : null;
+  const port = typeof parsed.port === "number" ? parsed.port : null;
+  const proxyUrl = normalizePrivateProxy(parsed.proxy);
+  const platform = parsed.platform && typeof parsed.platform === "object" ? parsed.platform : {};
 
-  if (fs.existsSync(PRIVATE_CHROME_TMP_DIR)) {
-    fs.cpSync(PRIVATE_CHROME_TMP_DIR, userDataDirRoot, { recursive: true });
+  return {
+    profileKey: `account_${accountIdx}`,
+    accountIdx,
+    gmail,
+    orgPath,
+    rpaDir,
+    port,
+    proxy: parsed.proxy,
+    proxyUrl,
+    platform,
+    expanded: {
+      orgPath: orgPath ? expandHome(orgPath) : null,
+      rpaDir: rpaDir ? expandHome(rpaDir) : null,
+    },
+  };
+}
+
+function ensureRpaProfileInitialized({ templateDir, orgPath, userDataDirRoot }) {
+  if (!userDataDirRoot || fs.existsSync(userDataDirRoot)) return;
+
+  const effectiveTemplateDir = templateDir || PRIVATE_CHROME_TMP_DIR;
+  if (effectiveTemplateDir && fs.existsSync(effectiveTemplateDir)) {
+    fs.cpSync(effectiveTemplateDir, userDataDirRoot, { recursive: true });
   } else {
     fs.mkdirSync(userDataDirRoot, { recursive: true });
   }
 
-  const orgPath = expandHome(privateEntry.orgPath);
   const defaultProfileDir = path.join(userDataDirRoot, "Default");
-  if (!fs.existsSync(defaultProfileDir) && orgPath && fs.existsSync(orgPath)) {
-    fs.cpSync(orgPath, defaultProfileDir, { recursive: true });
+  const expandedOrgPath = orgPath ? expandHome(orgPath) : null;
+  // Best-effort: only copy if the orgPath exists locally on this worker.
+  if (!fs.existsSync(defaultProfileDir) && expandedOrgPath && fs.existsSync(expandedOrgPath)) {
+    fs.cpSync(expandedOrgPath, defaultProfileDir, { recursive: true });
   }
 }
 
@@ -151,14 +189,30 @@ function toToolResult(obj, { isError = false } = {}) {
   };
 }
 
-async function launchOrActivateProfile({ accountIdx, url, activateIfRunning = true }) {
+async function launchOrActivateProfile({
+  accountIdx,
+  url,
+  activateIfRunning = true,
+  effectiveChromeProfile,
+}) {
   const registry = getChromeRuntimeRegistry();
-  const cfg = getPrivateChromeEntryByAccountIdx(accountIdx);
-  if (!cfg) {
-    throw new Error(`Missing chrome.json entry: account_${accountIdx}`);
-  }
+  const profileKey = `account_${accountIdx}`;
 
-  const normalized = normalizePrivateChromeEntry(cfg.profileKey, cfg.accountIdx, cfg.entry);
+  let normalized;
+  let profileSource;
+  if (effectiveChromeProfile) {
+    normalized = normalizeEffectiveChromeProfile(accountIdx, effectiveChromeProfile);
+    profileSource = "master";
+  } else {
+    const cfg = getPrivateChromeEntryByAccountIdx(accountIdx);
+    if (!cfg) {
+      throw new Error(
+        `Missing chrome profile for account_${accountIdx}. Use master dispatch or pass effectiveChromeProfile.`
+      );
+    }
+    normalized = normalizePrivateChromeEntry(cfg.profileKey, cfg.accountIdx, cfg.entry);
+    profileSource = "local";
+  }
 
   const effectivePort =
     normalized.port ?? getDefaultDebuggerPort(accountIdx, config.chromeDebuggerBasePort);
@@ -203,7 +257,8 @@ async function launchOrActivateProfile({ accountIdx, url, activateIfRunning = tr
     return {
       reused: true,
       activatedTargetId,
-      profileKey: cfg.profileKey,
+      profileKey,
+      profileSource,
       accountIdx,
       gmail: normalized.gmail,
       port: effectivePort,
@@ -218,8 +273,11 @@ async function launchOrActivateProfile({ accountIdx, url, activateIfRunning = tr
     };
   }
 
-  // Ensure user-data-dir initialized from _tmp and orgPath
-  ensureRpaProfileInitialized(cfg.entry, effectiveUserDataDirRoot);
+  ensureRpaProfileInitialized({
+    templateDir: PRIVATE_CHROME_TMP_DIR,
+    orgPath: normalized.orgPath,
+    userDataDirRoot: effectiveUserDataDirRoot,
+  });
 
   const existing = registry.get(accountIdx);
   if (existing?.pid) {
@@ -263,7 +321,8 @@ async function launchOrActivateProfile({ accountIdx, url, activateIfRunning = tr
 
   return {
     reused: false,
-    profileKey: cfg.profileKey,
+    profileKey,
+    profileSource,
     accountIdx,
     gmail: normalized.gmail,
     port: effectivePort,
@@ -425,13 +484,17 @@ module.exports = (registerTool) => {
         .boolean()
         .optional()
         .describe("若已运行则激活首个 page target（默认 true）"),
+      effectiveChromeProfile: injectedChromeProfileSchema
+        .optional()
+        .describe("可选：由 master 注入的 profile 配置；worker 本地无需 chrome.json"),
     }),
-    async ({ accountIdx, url, activateIfRunning } = {}) => {
+    async ({ accountIdx, url, activateIfRunning, effectiveChromeProfile } = {}) => {
       try {
         const result = await launchOrActivateProfile({
           accountIdx,
           url,
           activateIfRunning: activateIfRunning !== false,
+          effectiveChromeProfile,
         });
         return toToolResult(result);
       } catch (error) {
@@ -569,7 +632,10 @@ module.exports = (registerTool) => {
     async ({ accountIdx }) => {
       const registry = getChromeRuntimeRegistry();
       const cfg = getPrivateChromeEntryByAccountIdx(accountIdx);
-      const port = typeof cfg?.entry?.port === "number" ? cfg.entry.port : registry.get(accountIdx)?.debuggerPort;
+      const { debuggerPort: port } = resolveChromeDebuggerPort(accountIdx, {
+        registry,
+        chromeConfig: cfg ? { [`account_${accountIdx}`]: cfg.entry } : null,
+      });
 
       if (!port) {
         return toToolResult({ error: `Missing debuggerPort for accountIdx=${accountIdx}` }, { isError: true });
@@ -604,7 +670,10 @@ module.exports = (registerTool) => {
     async ({ accountIdx, method, params, target }) => {
       const registry = getChromeRuntimeRegistry();
       const cfg = getPrivateChromeEntryByAccountIdx(accountIdx);
-      const port = typeof cfg?.entry?.port === "number" ? cfg.entry.port : registry.get(accountIdx)?.debuggerPort;
+      const { debuggerPort: port } = resolveChromeDebuggerPort(accountIdx, {
+        registry,
+        chromeConfig: cfg ? { [`account_${accountIdx}`]: cfg.entry } : null,
+      });
 
       if (!port) {
         return toToolResult({ error: `Missing debuggerPort for accountIdx=${accountIdx}` }, { isError: true });

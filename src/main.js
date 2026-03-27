@@ -67,6 +67,7 @@ const { parseArgs } = require("./server/args-parser");
 const { setupLogging, wrapLogger } = require("./server/logging");
 const { createExpressApp } = require("./server/express-app");
 const { createWorkerObservabilityRoutes } = require("./server/worker-observability-routes");
+const { createChromeProxyRoutes } = require("./server/chrome-proxy-routes");
 const { createMcpServer, setupMcpRoutes } = require("./server/mcp-server");
 const { registerTool } = require("./server/tool-registry");
 const { loadToolCatalog } = require("./server/tool-catalog");
@@ -232,6 +233,15 @@ app.use(
   createWorkerObservabilityRoutes({
     getWorkerIdentity,
     getWorkerSnapshot: () => getWorkerSnapshot(authManager),
+  })
+);
+
+// Chrome profile debugger HTTP facade (no websocket proxy in v1)
+app.use(
+  "/chrome",
+  authMiddleware,
+  createChromeProxyRoutes({
+    registry: getChromeRuntimeRegistry(),
   })
 );
 
