@@ -75,14 +75,33 @@ const { getWorkerIdentity } = require("./cluster/worker-identity");
 const { listLocalAgents } = require("./cluster/local-agent-registry");
 const { listArtifacts } = require("./cluster/artifact-registry");
 const { WorkerClient } = require("./cluster/worker-client");
+const { getChromeRuntimeRegistry } = require("./chrome/runtime-registry");
 
 // Setup
 // setupElectronFlags(); // Already done above
 setupErrorHandlers();
 
 // Parse arguments
-const { PORT, START_URL, PROXY, oneWindow, ACCOUNT } = parseArgs();
+const {
+  PORT,
+  START_URL,
+  PROXY,
+  oneWindow,
+  ACCOUNT,
+  chromeBinary,
+  chromeUserDataRoot,
+  chromeDebuggerBasePort,
+} = parseArgs();
 config.port = PORT;
+if (chromeBinary) {
+  config.chromeBinary = chromeBinary;
+}
+if (chromeUserDataRoot) {
+  config.chromeUserDataRoot = chromeUserDataRoot;
+}
+if (chromeDebuggerBasePort) {
+  config.chromeDebuggerBasePort = chromeDebuggerBasePort;
+}
 if (PROXY) {
   config.proxy = PROXY;
   log.info(`[MCP] Global proxy enabled: ${PROXY}`);
@@ -190,6 +209,7 @@ function sendExecutionError(res, error) {
 }
 
 function getWorkerSnapshot(authManager) {
+  const chromeRuntimeRegistry = getChromeRuntimeRegistry();
   return {
     baseUrl: `http://127.0.0.1:${config.port}`,
     authToken: authManager.getToken(),
@@ -197,6 +217,7 @@ function getWorkerSnapshot(authManager) {
       .flat()
       .map((tool) => tool.name),
     agents: listLocalAgents(),
+    chromeProfiles: chromeRuntimeRegistry.list(),
     artifacts: listArtifacts(),
     resources: {
       pid: process.pid,

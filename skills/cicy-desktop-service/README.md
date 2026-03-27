@@ -1,41 +1,92 @@
 # CiCy Desktop Service
 
-浏览器自动化服务，提供窗口管理、CDP 操作、JavaScript 执行等功能。
+This skill is about running and checking the local CiCy Desktop service.
 
-## 使用方法
+Use `cicy` / `cicy-desktop` for service lifecycle.
+Use `cicy-rpc` for tool calls after the service is running.
+
+## Start the local service
 
 ```bash
-# 启动服务
-bash skills/cicy-desktop-service/cicy-desktop-service.sh start
+cicy start
+# or
+npm start
+```
 
-# 验证服务
+Equivalent alias:
+
+```bash
+cicy-desktop start
+```
+
+## Common service commands
+
+```bash
+cicy start
+cicy stop
+cicy status
+cicy restart
+cicy logs
+```
+
+## Verify the worker after startup
+
+```bash
 cicy-rpc ping
-
-# 使用工具
-cicy-rpc open_window url=https://google.com
+cicy-rpc tools
+cicy-rpc open_window url=https://example.com
 ```
 
-## 服务管理
+## Ports
+
+Current desktop lifecycle CLI options:
 
 ```bash
-bash skills/cicy-desktop-service/cicy-desktop-service.sh start    # 启动
-bash skills/cicy-desktop-service/cicy-desktop-service.sh stop     # 停止
-bash skills/cicy-desktop-service/cicy-desktop-service.sh status   # 状态
-bash skills/cicy-desktop-service/cicy-desktop-service.sh logs     # 日志
-bash skills/cicy-desktop-service/cicy-desktop-service.sh restart  # 重启
+cicy --master-port 8200 --port 8201
 ```
 
-## 配置
+Defaults:
+- master port: `8100`
+- worker port: `8101`
 
-**环境变量:**
-- `PORT` - 服务端口（默认 8101）
-- `DISPLAY` - X11 显示（默认 :2）
+## Notes
 
-**启动参数:**
+- `cicy --json` / `cicy -j` is not supported
+- RPC/tool commands moved to `cicy-rpc`
+- `cicy logs` follows cluster logs from `~/logs`
+
+## Troubleshooting
+
+### Service is not running
+
 ```bash
-npm start -- --port=8102 --url=https://example.com
+cicy status
 ```
 
-## 详细文档
+If needed, start or restart it:
 
-查看项目根目录 [README.md](../../README.md)
+```bash
+cicy start
+cicy restart
+```
+
+### RPC calls fail after startup
+
+First verify the service, then verify RPC:
+
+```bash
+cicy status
+cicy-rpc ping
+```
+
+### Need logs
+
+```bash
+cicy logs
+```
+
+## Related docs
+
+- [Root README](../../README.md)
+- [CLI split](../cicy-cli/README.md)
+- [RPC CLI README](../../packages/cicy-rpc/README.md)

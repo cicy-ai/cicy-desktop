@@ -1,198 +1,46 @@
-# REST API Documentation
+# REST API
 
-## Overview
+This document describes the current HTTP API exposed by the CiCy Desktop worker.
 
-CiCy Desktop now provides REST API endpoints for each tool. Each tool can be called via:
+Source of truth:
+- worker entry: `src/main.js`
+- OpenAPI/docs routes: `src/server/express-app.js`
 
-```
-POST /rpc/{toolName}
-```
+## Endpoint summary
 
-## Swagger UI
+### Public endpoints
 
-Interactive API documentation available at:
+These do **not** require auth:
 
-```
-http://localhost:8101/api-docs
-```
+- `GET /ping` — basic health check
+- `GET /docs` — Swagger-style API UI
+- `GET /openapi.json` — generated OpenAPI spec
+
+### Authenticated RPC endpoints
+
+These **do** require auth:
+
+- `GET /rpc/tools`
+- `POST /rpc/tools/call`
+- `POST /rpc/:toolName`
+- `POST /rpc/upload/*`
+- `POST /rpc/exec/:type`
+- `GET /files`
+- `GET /api/worker`
+- `GET /api/agents`
+- `GET /api/artifacts`
 
 ## Authentication
 
-All endpoints (except `/ping`) require Bearer token authentication:
+Authenticated routes expect:
 
-```bash
-Authorization: Bearer <your-token>
+```http
+Authorization: Bearer <token>
 ```
 
-Token location: `~/global.json`
+Tokens are usually stored in `~/global.json` and are the same tokens used by `cicy-rpc`.
 
-## Available Endpoints
-
-### List All Tools
-
-```bash
-GET /rpc/tools
-```
-
-**Example:**
-```bash
-curl -H "Authorization: Bearer $(jq -r .api_token ~/global.json)" \
-  http://localhost:8101/rpc/tools
-```
-
-### Call a Tool
-
-```bash
-POST /rpc/{toolName}
-Content-Type: application/json
-```
-
-## Examples
-
-### 1. Ping
-
-```bash
-curl -X POST http://localhost:8101/rpc/ping \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(jq -r .api_token ~/global.json)" \
-  -d '{}'
-```
-
-**Response:**
-```json
-{
-  "content": [
-    {
-      "type": "text",
-      "text": "Pong"
-    }
-  ]
-}
-```
-
-### 2. Get Windows
-
-```bash
-curl -X POST http://localhost:8101/rpc/get_windows \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(jq -r .api_token ~/global.json)" \
-  -d '{}'
-```
-
-**Response:**
-```json
-{
-  "content": [
-    {
-      "type": "text",
-      "text": "[{\"id\":1,\"url\":\"https://example.com\"}]"
-    }
-  ]
-}
-```
-
-### 3. Open Window
-
-```bash
-curl -X POST http://localhost:8101/rpc/open_window \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(jq -r .api_token ~/global.json)" \
-  -d '{
-    "url": "https://example.com",
-    "accountIdx": 0
-  }'
-```
-
-**Response:**
-```json
-{
-  "content": [
-    {
-      "type": "text",
-      "text": "Opened window with ID: 1, use tool: get_window_info and wait window webContents dom-ready"
-    }
-  ]
-}
-```
-
-### 4. Close Window
-
-```bash
-curl -X POST http://localhost:8101/rpc/close_window \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(jq -r .api_token ~/global.json)" \
-  -d '{
-    "win_id": 1
-  }'
-```
-
-**Response:**
-```json
-{
-  "content": [
-    {
-      "type": "text",
-      "text": "Closed window 1"
-    }
-  ]
-}
-```
-
-### 5. Execute JavaScript
-
-```bash
-curl -X POST http://localhost:8101/rpc/exec_js \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(jq -r .api_token ~/global.json)" \
-  -d '{
-    "win_id": 1,
-    "code": "document.title"
-  }'
-```
-
-### 6. CDP Click
-
-```bash
-curl -X POST http://localhost:8101/rpc/cdp_click \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(jq -r .api_token ~/global.json)" \
-  -d '{
-    "win_id": 1,
-    "selector": "button.submit"
-  }'
-```
-
-### 7. Take Screenshot
-
-```bash
-curl -X POST http://localhost:8101/rpc/cdp_screenshot \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(jq -r .api_token ~/global.json)" \
-  -d '{
-    "win_id": 1
-  }'
-```
-
-## Error Handling
-
-### Tool Not Found (404)
-
-```json
-{
-  "error": "Tool not found: unknown_tool",
-  "available": ["ping", "open_window", "get_windows", ...]
-}
-```
-
-### Execution Error (500)
-
-```json
-{
-  "error": "Window not found: 999"
-}
-```
-
-### Unauthorized (401)
+If auth fails, the worker responds with:
 
 ```json
 {
@@ -200,120 +48,229 @@ curl -X POST http://localhost:8101/rpc/cdp_screenshot \
 }
 ```
 
-## Comparison: RPC vs REST
+## Core RPC routes
 
-### JSON-RPC Style (Original)
+### `GET /rpc/tools`
+
+Returns the current tool catalog.
+
+Example:
 
 ```bash
-POST /rpc
+curl http://localhost:8101/rpc/tools \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+JSON response shape:
+
+```json
 {
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "tools/call",
-  "params": {
+  "tools": [
+    {
+      "name": "open_window",
+      "description": "...",
+      "inputSchema": {
+        "type": "object"
+      }
+    }
+  ]
+}
+```
+
+YAML is also supported by setting:
+
+```http
+Accept: application/yaml
+```
+
+### `POST /rpc/tools/call`
+
+Calls a tool by name using a generic wrapper endpoint.
+
+Example:
+
+```bash
+curl -X POST http://localhost:8101/rpc/tools/call \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
     "name": "open_window",
-    "arguments": {"url": "https://example.com", "accountIdx": 0}
+    "arguments": {
+      "url": "https://example.com"
+    }
+  }'
+```
+
+Request shape:
+
+```json
+{
+  "name": "tool_name",
+  "arguments": {
+    "key": "value"
   }
 }
 ```
 
-### REST Style (New)
+### `POST /rpc/:toolName`
+
+Calls a tool directly.
+
+Example:
 
 ```bash
-POST /rpc/open_window
+curl -X POST http://localhost:8101/rpc/open_window \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com",
+    "accountIdx": 0
+  }'
+```
+
+This is the simplest REST form when you already know the tool name.
+
+## Response format
+
+Successful tool responses are wrapped like this:
+
+```json
 {
-  "url": "https://example.com",
-  "accountIdx": 0
-}
-```
-
-**Benefits:**
-- ✅ Simpler URL structure
-- ✅ Direct tool invocation
-- ✅ Swagger documentation
-- ✅ Standard HTTP semantics
-- ✅ Easier to test with curl
-
-## Testing
-
-Run REST API tests:
-
-```bash
-cd tests/rpc
-npm test rest-api.test.js
-```
-
-## Integration
-
-### JavaScript/Node.js
-
-```javascript
-const axios = require('axios');
-const fs = require('fs');
-
-const token = JSON.parse(fs.readFileSync(process.env.HOME + '/global.json', 'utf8')).api_token;
-
-async function callTool(toolName, args) {
-  const response = await axios.post(
-    `http://localhost:8101/rpc/${toolName}`,
-    args,
-    {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "Pong"
       }
-    }
-  );
-  return response.data;
+    ]
+  }
 }
-
-// Usage
-const result = await callTool('ping', {});
-console.log(result);
 ```
 
-### Python
+Some tools return text content, some return structured JSON encoded in text, and some may return image content.
 
-```python
-import requests
-import os
+If the client sends:
 
-token = open(os.path.expanduser('~/global.json')).read().strip()
-
-def call_tool(tool_name, args={}):
-    response = requests.post(
-        f'http://localhost:8101/rpc/{tool_name}',
-        json=args,
-        headers={
-            'Authorization': f'Bearer {token}',
-            'Content-Type': 'application/json'
-        }
-    )
-    return response.json()
-
-# Usage
-result = call_tool('ping')
-print(result)
+```http
+Accept: application/yaml
 ```
 
-## Available Tools
+then tool responses are returned as YAML.
 
-Get the full list dynamically:
+## JSON and YAML support
+
+Current worker behavior:
+
+- `GET /rpc/tools` supports JSON and YAML output via `Accept`
+- `POST /rpc/tools/call` accepts JSON, and also accepts YAML when `Content-Type: application/yaml`
+- `POST /rpc/:toolName` accepts JSON, and also accepts YAML when `Content-Type: application/yaml`
+- tool responses can be returned as YAML when `Accept: application/yaml`
+
+Example YAML tool call:
 
 ```bash
-curl -H "Authorization: Bearer $(jq -r .api_token ~/global.json)" \
-  http://localhost:8101/rpc/tools | jq '.tools[].name'
+curl -X POST http://localhost:8101/rpc/exec_js \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/yaml" \
+  -H "Accept: application/yaml" \
+  --data-binary $'win_id: 1\ncode: document.title\n'
 ```
 
-Common tools:
-- `ping` - Health check
-- `get_windows` - List all windows
-- `open_window` - Open new window
-- `close_window` - Close window
-- `get_window_info` - Get window details
-- `exec_js` - Execute JavaScript
-- `cdp_click` - Click element
-- `cdp_screenshot` - Take screenshot
-- `cdp_get_page_snapshot` - Get page HTML
+## Common examples
 
-See Swagger UI for complete list and schemas.
+### Health check
+
+```bash
+curl http://localhost:8101/ping
+```
+
+### Ping tool
+
+```bash
+curl -X POST http://localhost:8101/rpc/ping \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+### Get windows
+
+```bash
+curl -X POST http://localhost:8101/rpc/get_windows \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+### Open a window
+
+```bash
+curl -X POST http://localhost:8101/rpc/open_window \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com",
+    "accountIdx": 0,
+    "reuseWindow": true
+  }'
+```
+
+### Execute JavaScript
+
+```bash
+curl -X POST http://localhost:8101/rpc/exec_js \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "win_id": 1,
+    "code": "document.title"
+  }'
+```
+
+## OpenAPI and interactive docs
+
+The worker serves generated API docs directly:
+
+- `GET /docs`
+- `GET /openapi.json`
+
+Examples:
+
+```bash
+open http://localhost:8101/docs
+curl http://localhost:8101/openapi.json
+```
+
+## Errors
+
+### 401 Unauthorized
+
+```json
+{
+  "error": "Unauthorized"
+}
+```
+
+### 400 Invalid YAML
+
+```json
+{
+  "error": "Invalid YAML: ..."
+}
+```
+
+### 500 Tool execution error
+
+```json
+{
+  "error": "..."
+}
+```
+
+If a tool raises a Zod validation error, the worker returns a `result` payload with `isError: true` instead of a generic HTTP 500.
+
+## Related docs
+
+- [Root README](../README.md)
+- [CLI split](../skills/cicy-cli/README.md)
+- [RPC CLI README](../packages/cicy-rpc/README.md)

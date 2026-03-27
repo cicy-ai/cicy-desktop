@@ -5,6 +5,7 @@ const { selectExecutionTarget } = require("./task-scheduler");
 
 function createMasterRoutes({
   workerRegistry,
+  workerInventory,
   agentIndex,
   taskStore,
   sessionAffinityStore,
@@ -53,14 +54,20 @@ function createMasterRoutes({
     res.json({ worker: record });
   });
 
-  router.get("/workers", (req, res) => {
-    res.json({ workers: workerRegistry.list() });
+  router.get("/workers", async (req, res) => {
+    const inventory = workerInventory ? await workerInventory.list() : workerRegistry.list();
+    res.json({ workers: inventory });
   });
 
-  router.get("/workers/:workerId", (req, res) => {
-    const worker = workerRegistry.get(req.params.workerId);
+  router.get("/workers/:workerId", async (req, res) => {
+    const worker = workerInventory
+      ? await workerInventory.get(req.params.workerId)
+      : workerRegistry.get(req.params.workerId);
     if (!worker) return res.status(404).json({ error: "Worker not found" });
-    res.json({ worker, agents: agentIndex.listByWorker(req.params.workerId) });
+
+    // Agents are only meaningful for registered workers (workerId from runtime registry)
+    const agents = agentIndex.listByWorker(req.params.workerId);
+    res.json({ worker, agents });
   });
 
   router.get("/agents", (req, res) => {
@@ -77,9 +84,10 @@ function createMasterRoutes({
     res.json({ task });
   });
 
-  router.get("/stats", (req, res) => {
+  router.get("/stats", async (req, res) => {
+    const inventory = workerInventory ? await workerInventory.list() : workerRegistry.list();
     res.json({
-      workers: workerRegistry.list().length,
+      workers: inventory.length,
       agents: agentIndex.list().length,
       tasks: taskStore.list().length,
     });

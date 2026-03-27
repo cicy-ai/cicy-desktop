@@ -1,10 +1,10 @@
 function formatMemory(memory = {}) {
   return {
-    rss: memory.rss || 0,
-    heapTotal: memory.heapTotal || 0,
-    heapUsed: memory.heapUsed || 0,
-    external: memory.external || 0,
-    arrayBuffers: memory.arrayBuffers || 0,
+    rss: memory?.rss || 0,
+    heapTotal: memory?.heapTotal || 0,
+    heapUsed: memory?.heapUsed || 0,
+    external: memory?.external || 0,
+    arrayBuffers: memory?.arrayBuffers || 0,
   };
 }
 
@@ -24,21 +24,56 @@ function getWorkerHealthStatus(
   return "online";
 }
 
-function getClusterSummary({ workerRegistry, agentIndex, taskStore, sessionAffinityStore }) {
+function getWorkerAdminView({ workers = [] } = {}) {
   const now = Date.now();
-  const workers = workerRegistry.list();
+  return workers.map((worker) => ({
+    ...worker,
+    healthStatus: worker.registered
+      ? worker.healthStatus || getWorkerHealthStatus(worker, now)
+      : "offline",
+    resources: worker.resources
+      ? {
+          ...worker.resources,
+          memory: formatMemory(worker.resources.memory),
+        }
+      : null,
+  }));
+}
+
+async function getClusterSummary({
+  workerRegistry,
+  workerInventory,
+  agentIndex,
+  taskStore,
+  sessionAffinityStore,
+}) {
+  const workers = workerInventory ? await workerInventory.list() : workerRegistry.list();
   const agents = agentIndex.list();
   const tasks = taskStore.list();
   const sessions = sessionAffinityStore.list ? sessionAffinityStore.list() : [];
 
   const workerHealth = workers.reduce(
     (acc, worker) => {
-      const status = getWorkerHealthStatus(worker, now);
       acc.total += 1;
-      acc[status] += 1;
+      if (worker.registered) {
+        const status = worker.healthStatus || getWorkerHealthStatus(worker);
+        acc[status] += 1;
+        acc.registered += 1;
+      } else {
+        acc.configuredOnly += 1;
+        if (worker.reachable) acc.reachableConfiguredOnly += 1;
+      }
       return acc;
     },
-    { total: 0, online: 0, stale: 0, offline: 0 }
+    {
+      total: 0,
+      registered: 0,
+      configuredOnly: 0,
+      reachableConfiguredOnly: 0,
+      online: 0,
+      stale: 0,
+      offline: 0,
+    }
   );
 
   const agentHealth = agents.reduce(
@@ -71,7 +106,7 @@ function getClusterSummary({ workerRegistry, agentIndex, taskStore, sessionAffin
   );
 
   return {
-    generatedAt: new Date(now).toISOString(),
+    generatedAt: new Date().toISOString(),
     workers: workerHealth,
     agents: agentHealth,
     tasks: taskHealth,
@@ -81,21 +116,12 @@ function getClusterSummary({ workerRegistry, agentIndex, taskStore, sessionAffin
   };
 }
 
-function getWorkerAdminView(workerRegistry) {
-  const now = Date.now();
-  return workerRegistry.list().map((worker) => ({
-    ...worker,
-    healthStatus: getWorkerHealthStatus(worker, now),
-    resources: {
-      ...worker.resources,
-      memory: formatMemory(worker.resources?.memory),
-    },
-  }));
-}
-
 function renderPrometheusMetrics(summary) {
   return [
     `cicy_workers_total ${summary.workers.total}`,
+    `cicy_workers_registered ${summary.workers.registered || 0}`,
+    `cicy_workers_configured_only ${summary.workers.configuredOnly || 0}`,
+    `cicy_workers_configured_only_reachable ${summary.workers.reachableConfiguredOnly || 0}`,
     `cicy_workers_online ${summary.workers.online}`,
     `cicy_workers_stale ${summary.workers.stale}`,
     `cicy_workers_offline ${summary.workers.offline}`,

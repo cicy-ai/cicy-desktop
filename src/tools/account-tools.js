@@ -5,6 +5,27 @@ const { z } = require("zod");
 
 const ACCOUNT_DIR = path.join(os.homedir(), "data", "electron");
 
+function ensureAccountDir() {
+  if (!fs.existsSync(ACCOUNT_DIR)) {
+    fs.mkdirSync(ACCOUNT_DIR, { recursive: true });
+  }
+}
+
+function getAccountFile(accountIdx) {
+  return path.join(ACCOUNT_DIR, `account-${accountIdx}.json`);
+}
+
+function readAccount(accountIdx) {
+  const accountFile = getAccountFile(accountIdx);
+  if (!fs.existsSync(accountFile)) return null;
+  return JSON.parse(fs.readFileSync(accountFile, "utf-8"));
+}
+
+function writeAccount(accountData) {
+  ensureAccountDir();
+  fs.writeFileSync(getAccountFile(accountData.accountIdx), JSON.stringify(accountData, null, 2));
+}
+
 module.exports = (registerTool) => {
   // 获取账户信息
   registerTool(
@@ -15,7 +36,7 @@ module.exports = (registerTool) => {
     }),
     async ({ accountIdx }) => {
       try {
-        const accountFile = path.join(ACCOUNT_DIR, `account-${accountIdx}.json`);
+        const accountFile = getAccountFile(accountIdx);
 
         if (!fs.existsSync(accountFile)) {
           return {
@@ -29,7 +50,7 @@ module.exports = (registerTool) => {
           };
         }
 
-        const accountData = JSON.parse(fs.readFileSync(accountFile, "utf-8"));
+        const accountData = readAccount(accountIdx);
 
         return {
           content: [
@@ -59,25 +80,29 @@ module.exports = (registerTool) => {
         .object({
           description: z.string().optional().describe("账户描述"),
           tags: z.array(z.string()).optional().describe("标签"),
+          name: z.string().optional().describe("账户或 profile 名称"),
+        })
+        .optional(),
+      chrome: z
+        .object({
+          enabled: z.boolean().optional().describe("是否启用 Chrome profile runtime"),
+          debuggerPort: z.number().optional().describe("固定 CDP 调试端口"),
+          proxy: z.string().optional().describe("Chrome profile 启动代理"),
+          binaryPath: z.string().optional().describe("Chrome/Chromium 可执行文件路径"),
+          userDataDirRoot: z.string().optional().describe("Chrome user-data-dir 根目录"),
         })
         .optional(),
     }),
-    async ({ accountIdx, metadata }) => {
+    async ({ accountIdx, metadata, chrome }) => {
       try {
-        // 确保目录存在
-        if (!fs.existsSync(ACCOUNT_DIR)) {
-          fs.mkdirSync(ACCOUNT_DIR, { recursive: true });
-        }
+        let accountData = readAccount(accountIdx);
 
-        const accountFile = path.join(ACCOUNT_DIR, `account-${accountIdx}.json`);
-
-        let accountData;
-
-        if (fs.existsSync(accountFile)) {
-          // 更新现有账户
-          accountData = JSON.parse(fs.readFileSync(accountFile, "utf-8"));
+        if (accountData) {
           if (metadata) {
             accountData.metadata = { ...accountData.metadata, ...metadata };
+          }
+          if (chrome) {
+            accountData.chrome = { ...(accountData.chrome || {}), ...chrome };
           }
           accountData.updatedAt = new Date().toISOString();
         } else {
@@ -90,11 +115,12 @@ module.exports = (registerTool) => {
               description: `Account ${accountIdx}`,
               tags: [],
             },
+            chrome: chrome || undefined,
             updatedAt: new Date().toISOString(),
           };
         }
 
-        fs.writeFileSync(accountFile, JSON.stringify(accountData, null, 2));
+        writeAccount(accountData);
 
         return {
           content: [
@@ -191,4 +217,5 @@ module.exports = (registerTool) => {
       }
     },
     { tag: "Account" }
-  );};
+  );
+};

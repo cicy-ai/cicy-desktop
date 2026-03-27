@@ -5,6 +5,7 @@ const { WorkerRegistry } = require("../../src/master/worker-registry");
 const { AgentIndex } = require("../../src/master/agent-index");
 const { TaskStore } = require("../../src/master/task-store");
 const { SessionAffinityStore } = require("../../src/master/session-affinity-store");
+const { WorkerInventory } = require("../../src/master/worker-inventory");
 const remoteExecutor = require("../../src/cluster/remote-executor");
 
 describe("Master routes", () => {
@@ -13,6 +14,7 @@ describe("Master routes", () => {
   let agentIndex;
   let taskStore;
   let sessionAffinityStore;
+  let workerInventory;
   let forwardSpy;
 
   beforeEach(() => {
@@ -23,15 +25,21 @@ describe("Master routes", () => {
     taskStore = new TaskStore();
     sessionAffinityStore = new SessionAffinityStore();
     forwardSpy = jest.spyOn(remoteExecutor, "forwardJsonRequest");
+    workerInventory = new WorkerInventory({
+      workerRegistry,
+      loadConfiguredNodesImpl: () => [],
+      probeReachabilityImpl: async () => ({ reachable: false, reachabilityStatus: "unreachable" }),
+    });
 
     app.use(
       "/api",
       createMasterRoutes({
         workerRegistry,
+        workerInventory,
         agentIndex,
         taskStore,
         sessionAffinityStore,
-        masterAuthMiddleware: (req, res, next) => next(),
+        masterAuthMiddleware: (_req, _res, next) => next(),
       })
     );
   });
@@ -92,6 +100,118 @@ describe("Master routes", () => {
     expect(workerDetail.status).toBe(200);
     expect(workerDetail.body.agents).toHaveLength(1);
     expect(workerDetail.body.agents[0].agentId).toBe("worker-1:agent:2");
+  });
+
+  test("sanitizes auth tokens from worker inventory responses", async () => {
+    await request(app)
+      .post("/api/workers/register")
+      .send({
+        worker: { workerId: "worker-1", hostname: "test-host" },
+        snapshot: {
+          baseUrl: "http://127.0.0.1:18101",
+          authToken: "worker-token",
+        },
+      });
+
+    const workersResponse = await request(app).get("/api/workers");
+    expect(workersResponse.status).toBe(200);
+    expect(workersResponse.body.workers[0].authToken).toBeUndefined();
+
+    const workerDetail = await request(app).get("/api/workers/worker-1");
+    expect(workerDetail.status).toBe(200);
+    expect(workerDetail.body.worker.authToken).toBeUndefined();
+  });
+
+  test("merges configured and registered workers by normalized baseUrl", async () => {
+    workerInventory.loadConfiguredNodesImpl = () => [
+      {
+        workerId: "configured:windows",
+        configNodeName: "windows",
+        configured: true,
+        registered: false,
+        source: "configured",
+        baseUrl: "http://localhost:18101/",
+        normalizedBaseUrl: "http://127.0.0.1:18101",
+        hasAuthToken: true,
+        agents: [],
+        capabilities: [],
+        resources: null,
+        lastHeartbeatAt: null,
+        registeredAt: null,
+        healthStatus: "offline",
+        registrationStatus: "unregistered",
+      },
+    ];
+
+    await request(app)
+      .post("/api/workers/register")
+      .send({
+        worker: { workerId: "worker-1", hostname: "test-host" },
+        snapshot: {
+          baseUrl: "http://127.0.0.1:18101",
+          authToken: "worker-token",
+        },
+      });
+
+    const workersResponse = await request(app).get("/api/workers");
+    expect(workersResponse.status).toBe(200);
+    expect(workersResponse.body.workers).toHaveLength(1);
+    expect(workersResponse.body.workers[0].source).toBe("configured+registered");
+    expect(workersResponse.body.workers[0].configNodeName).toBe("windows");
+  });
+
+  test("includes configured-only workers and probes reachability", async () => {
+    workerInventory.loadConfiguredNodesImpl = () => [
+      {
+        workerId: "configured:windows",
+        configNodeName: "windows",
+        configured: true,
+        registered: false,
+        source: "configured",
+        baseUrl: "http://localhost:18101",
+        normalizedBaseUrl: "http://127.0.0.1:18101",
+        hasAuthToken: true,
+        agents: [],
+        capabilities: [],
+        resources: null,
+        lastHeartbeatAt: null,
+        registeredAt: null,
+        healthStatus: "offline",
+        registrationStatus: "unregistered",
+      },
+    ];
+    workerInventory.probeReachabilityImpl = jest.fn().mockResolvedValue({
+      reachable: true,
+      reachabilityStatus: "reachable",
+      reachabilityCheckedAt: "2026-03-26T00:00:00.000Z",
+      reachabilityError: null,
+    });
+
+    const workersResponse = await request(app).get("/api/workers");
+    expect(workersResponse.status).toBe(200);
+    expect(workersResponse.body.workers).toHaveLength(1);
+    expect(workersResponse.body.workers[0].registered).toBe(false);
+    expect(workersResponse.body.workers[0].reachable).toBe(true);
+    expect(workerInventory.probeReachabilityImpl).toHaveBeenCalledWith("http://localhost:18101", {
+      timeoutMs: workerInventory.probeTimeoutMs,
+    });
+  });
+
+  test("preserves registered-only workers in merged inventory", async () => {
+    await request(app)
+      .post("/api/workers/register")
+      .send({
+        worker: { workerId: "worker-1", hostname: "test-host" },
+        snapshot: {
+          baseUrl: "http://127.0.0.1:18101",
+          authToken: "worker-token",
+        },
+      });
+
+    const workersResponse = await request(app).get("/api/workers");
+    expect(workersResponse.status).toBe(200);
+    expect(workersResponse.body.workers).toHaveLength(1);
+    expect(workersResponse.body.workers[0].source).toBe("registered");
   });
 
   test("routes rpc call to worker and records task", async () => {

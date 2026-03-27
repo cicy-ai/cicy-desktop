@@ -44,7 +44,47 @@ function parseArgs() {
   }
   ACCOUNT = parseInt(ACCOUNT) || 0;
 
-  return { PORT, START_URL, PROXY, oneWindow, ACCOUNT };
+  let chromeBinary = args.find((arg) => arg.startsWith("--chrome-binary="))?.split("=").slice(1).join("=");
+  if (!chromeBinary) {
+    const chromeBinaryIndex = args.indexOf("--chrome-binary");
+    if (chromeBinaryIndex !== -1 && args[chromeBinaryIndex + 1]) {
+      chromeBinary = args[chromeBinaryIndex + 1];
+    }
+  }
+
+  let chromeUserDataRoot = args
+    .find((arg) => arg.startsWith("--chrome-user-data-root="))
+    ?.split("=")
+    .slice(1)
+    .join("=");
+  if (!chromeUserDataRoot) {
+    const chromeUserDataRootIndex = args.indexOf("--chrome-user-data-root");
+    if (chromeUserDataRootIndex !== -1 && args[chromeUserDataRootIndex + 1]) {
+      chromeUserDataRoot = args[chromeUserDataRootIndex + 1];
+    }
+  }
+
+  let chromeDebuggerBasePort = args
+    .find((arg) => arg.startsWith("--chrome-debugger-base-port="))
+    ?.split("=")[1];
+  if (!chromeDebuggerBasePort) {
+    const chromeDebuggerBasePortIndex = args.indexOf("--chrome-debugger-base-port");
+    if (chromeDebuggerBasePortIndex !== -1 && args[chromeDebuggerBasePortIndex + 1]) {
+      chromeDebuggerBasePort = args[chromeDebuggerBasePortIndex + 1];
+    }
+  }
+  chromeDebuggerBasePort = chromeDebuggerBasePort ? parseInt(chromeDebuggerBasePort, 10) : null;
+
+  return {
+    PORT,
+    START_URL,
+    PROXY,
+    oneWindow,
+    ACCOUNT,
+    chromeBinary,
+    chromeUserDataRoot,
+    chromeDebuggerBasePort,
+  };
 }
 
 module.exports = { parseArgs };

@@ -97,6 +97,9 @@
       .status-offline {
         color: #f87171;
       }
+      .status-reachable {
+        color: #60a5fa;
+      }
       #login {
         max-width: 420px;
         margin: 40px auto;
@@ -133,12 +136,10 @@
         <table>
           <thead>
             <tr>
-              <th>Worker</th>
-              <th>Status</th>
-              <th>Heartbeat</th>
-              <th>Agents</th>
-              <th>Capabilities</th>
-              <th>Memory RSS</th>
+              <th>Node</th>
+              <th>IP / URL</th>
+              <th>Online</th>
+              <th>RPC</th>
             </tr>
           </thead>
           <tbody id="workers-body"></tbody>
@@ -215,14 +216,10 @@
 
       function renderSummary(summary) {
         const items = [
-          ["Workers Total", summary.workers.total],
-          ["Workers Online", summary.workers.online],
-          ["Workers Stale", summary.workers.stale],
-          ["Workers Offline", summary.workers.offline],
-          ["Agents Total", summary.agents.total],
-          ["Agents Busy", summary.agents.busy || 0],
-          ["Tasks Total", summary.tasks.total],
-          ["Tasks Running", summary.tasks.running || 0],
+          ["Nodes Total", summary.workers.total],
+          ["Online", summary.workers.online],
+          ["Reachable Config", summary.workers.reachableConfiguredOnly || 0],
+          ["Registered", summary.workers.registered || 0],
         ];
         document.getElementById("summary").innerHTML = items
           .map(
@@ -232,17 +229,38 @@
           .join("");
       }
 
+      function labelWorker(worker) {
+        return worker.configNodeName || worker.workerId || "-";
+      }
+
+      function workerOnlineLabel(worker) {
+        if (worker.registered) {
+          return worker.healthStatus === "online" ? "yes" : worker.healthStatus;
+        }
+        return worker.reachabilityStatus === "reachable" ? "yes" : "no";
+      }
+
+      function workerRpcLabel(worker) {
+        if (worker.registered) return "yes";
+        return worker.hasAuthToken ? "configured" : "no token";
+      }
+
+      function workerOnlineClass(worker) {
+        if (worker.registered) {
+          return `status-${worker.healthStatus}`;
+        }
+        return worker.reachabilityStatus === "reachable" ? "status-reachable" : "status-offline";
+      }
+
       function renderWorkers(workers) {
         document.getElementById("workers-body").innerHTML = workers
           .map(
             (worker) => `
           <tr>
-            <td>${worker.workerId}</td>
-            <td class="status-${worker.healthStatus}">${worker.healthStatus}</td>
-            <td>${worker.lastHeartbeatAt || "-"}</td>
-            <td>${worker.agents?.length || 0}</td>
-            <td>${worker.capabilities?.length || 0}</td>
-            <td>${worker.resources?.memory?.rss || 0}</td>
+            <td>${labelWorker(worker)}</td>
+            <td>${worker.baseUrl || "-"}</td>
+            <td class="${workerOnlineClass(worker)}">${workerOnlineLabel(worker)}</td>
+            <td>${workerRpcLabel(worker)}</td>
           </tr>
         `
           )

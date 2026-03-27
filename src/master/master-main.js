@@ -7,6 +7,7 @@ const { SessionAffinityStore } = require("./session-affinity-store");
 const { MasterTokenManager } = require("./master-token-manager");
 const { createMasterRoutes } = require("./master-routes");
 const { createMasterAdminRoutes } = require("./master-admin-routes");
+const { WorkerInventory } = require("./worker-inventory");
 
 function createMasterAuthMiddleware(masterToken) {
   return (req, res, next) => {
@@ -40,11 +41,13 @@ function startMasterServer({ port = 8100, masterToken = process.env.CICY_MASTER_
   const taskStore = new TaskStore();
   const sessionAffinityStore = new SessionAffinityStore();
   const masterAuthMiddleware = createMasterAuthMiddleware(resolvedMasterToken);
+  const workerInventory = new WorkerInventory({ workerRegistry });
 
   app.use(
     "/api",
     createMasterRoutes({
       workerRegistry,
+      workerInventory,
       agentIndex,
       taskStore,
       sessionAffinityStore,
@@ -57,6 +60,7 @@ function startMasterServer({ port = 8100, masterToken = process.env.CICY_MASTER_
     masterAuthMiddleware,
     createMasterAdminRoutes({
       workerRegistry,
+      workerInventory,
       agentIndex,
       taskStore,
       sessionAffinityStore,
@@ -75,7 +79,7 @@ function startMasterServer({ port = 8100, masterToken = process.env.CICY_MASTER_
   return {
     app,
     server,
-    state: { workerRegistry, agentIndex, taskStore, sessionAffinityStore },
+    state: { workerRegistry, workerInventory, agentIndex, taskStore, sessionAffinityStore },
     masterToken: resolvedMasterToken,
     tokenPath: tokenManager.getConfigPath(),
   };
