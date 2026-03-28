@@ -1,23 +1,14 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import {
-  AlertTriangle,
   ArrowUpRight,
-  Boxes,
-  CheckCircle2,
   Copy,
-  ExternalLink,
   Eye,
-  Gauge,
-  Globe,
-  LayoutGrid,
   Link2,
   LogOut,
   Monitor,
   RefreshCw,
   RotateCcw,
   ScanSearch,
-  Shield,
-  SlidersHorizontal,
   Square,
   Trash2,
   Wifi,
@@ -26,6 +17,7 @@ import {
 import { getSnapshotUrl, requestJson, rpc, rpcJson } from "../lib/client";
 
 type ConsoleMode = "chrome" | "electron";
+type WorkspaceView = "operate" | "launch" | "tune";
 type NoticeTone = "neutral" | "success" | "error";
 
 interface WindowInfo {
@@ -78,9 +70,9 @@ const KEY_CODE_MAP: Record<string, string> = {
 };
 
 const QUICK_LAUNCH_TARGETS = [
-  { label: "ChatGPT", url: "https://chatgpt.com", note: "LLM workspace" },
-  { label: "Gemini", url: "https://gemini.google.com", note: "Google account context" },
-  { label: "AI Studio", url: "https://aistudio.google.com", note: "Prompt + API surface" },
+  { label: "ChatGPT", url: "https://chatgpt.com" },
+  { label: "Gemini", url: "https://gemini.google.com" },
+  { label: "AI Studio", url: "https://aistudio.google.com" },
 ] as const;
 
 function readStoredNumber(key: string, fallback: number) {
@@ -112,24 +104,20 @@ function formatHost(url: string) {
   }
 }
 
-function formatBounds(bounds: WindowInfo["bounds"]) {
-  return `${bounds.width}×${bounds.height} at ${bounds.x},${bounds.y}`;
-}
-
 function shortenUrl(url: string) {
   if (!url) return "No URL";
-  if (url.length <= 54) return url;
-  return `${url.slice(0, 51)}...`;
+  if (url.length <= 64) return url;
+  return `${url.slice(0, 61)}...`;
 }
 
-function toneClasses(tone: NoticeTone) {
-  if (tone === "success") {
-    return "border-emerald-500/25 bg-emerald-500/10 text-emerald-100";
-  }
-  if (tone === "error") {
-    return "border-rose-500/25 bg-rose-500/10 text-rose-100";
-  }
-  return "border-white/10 bg-white/5 text-slate-100";
+function formatBounds(bounds: WindowInfo["bounds"]) {
+  return `${bounds.width}×${bounds.height} · ${bounds.x},${bounds.y}`;
+}
+
+function buildWatchUrl(winId: number) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("win_id", String(winId));
+  return url.toString();
 }
 
 function isTypingTarget(target: EventTarget | null) {
@@ -145,49 +133,125 @@ function isTypingTarget(target: EventTarget | null) {
   );
 }
 
-function buildWatchUrl(winId: number) {
-  const url = new URL(window.location.href);
-  url.searchParams.set("win_id", String(winId));
-  return url.toString();
-}
-
-function SectionTitle({
-  eyebrow,
-  title,
-  detail,
-  action,
+function Button({
+  icon,
+  label,
+  onClick,
+  disabled,
+  active,
 }: {
-  eyebrow: string;
-  title: string;
-  detail?: string;
-  action?: ReactNode;
+  icon?: ReactNode;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  active?: boolean;
 }) {
   return (
-    <div className="flex items-start justify-between gap-3">
-      <div>
-        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">{eyebrow}</div>
-        <h2 className="mt-2 text-lg font-semibold text-white">{title}</h2>
-        {detail ? <p className="mt-1 text-sm text-slate-400">{detail}</p> : null}
-      </div>
-      {action}
-    </div>
+    <button
+      className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-45 ${
+        active
+          ? "border-[color:var(--accent)]/50 bg-[color:var(--accent)]/16 text-white"
+          : "border-white/8 bg-white/[0.04] text-slate-300 hover:border-white/14 hover:bg-white/[0.08] hover:text-white"
+      }`}
+      disabled={disabled}
+      onClick={onClick}
+      type="button"
+    >
+      {icon}
+      {label}
+    </button>
   );
 }
 
-function MetricCard({
+function ModeChip({
+  active,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className={`rounded-xl px-3 py-2 text-sm transition ${
+        active ? "bg-[var(--accent)] text-slate-950" : "text-slate-400 hover:bg-white/[0.06] hover:text-white"
+      }`}
+      onClick={onClick}
+      type="button"
+    >
+      {label}
+    </button>
+  );
+}
+
+function SidebarItem({
+  active,
+  label,
+  meta,
+  onClick,
+  status,
+}: {
+  active: boolean;
+  label: string;
+  meta: string;
+  onClick: () => void;
+  status?: "online" | "offline";
+}) {
+  return (
+    <button
+      className={`w-full rounded-2xl border px-4 py-3 text-left transition ${
+        active
+          ? "border-[color:var(--accent)]/55 bg-[color:var(--accent)]/14"
+          : "border-white/8 bg-white/[0.03] hover:border-white/14 hover:bg-white/[0.06]"
+      }`}
+      onClick={onClick}
+      type="button"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-medium text-white">{label}</div>
+          <div className="mt-1 truncate text-[11px] text-slate-500">{meta}</div>
+        </div>
+        {status ? <div className={`mt-1 h-2.5 w-2.5 rounded-full ${status === "online" ? "bg-emerald-400" : "bg-slate-600"}`} /> : null}
+      </div>
+    </button>
+  );
+}
+
+function WorkspaceChip({
+  active,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className={`rounded-xl px-3 py-2 text-sm transition ${
+        active ? "bg-white/[0.08] text-white" : "text-slate-500 hover:bg-white/[0.05] hover:text-slate-300"
+      }`}
+      onClick={onClick}
+      type="button"
+    >
+      {label}
+    </button>
+  );
+}
+
+function Field({
   label,
   value,
-  detail,
 }: {
   label: string;
   value: string;
-  detail?: string;
 }) {
   return (
-    <div className="rounded-2xl border border-white/8 bg-black/20 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+    <div className="space-y-1">
       <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">{label}</div>
-      <div className="mt-3 text-xl font-semibold text-white">{value}</div>
-      {detail ? <div className="mt-1 text-sm text-slate-400">{detail}</div> : null}
+      <div className="text-sm text-slate-200">{value}</div>
     </div>
   );
 }
@@ -228,108 +292,6 @@ function RangeField({
   );
 }
 
-function WindowListItem({
-  active,
-  onClick,
-  windowInfo,
-}: {
-  active: boolean;
-  onClick: () => void;
-  windowInfo: WindowInfo;
-}) {
-  return (
-    <button
-      className={`w-full rounded-2xl border px-4 py-3 text-left transition ${
-        active
-          ? "border-[color:var(--accent)]/50 bg-[color:var(--accent)]/14 shadow-[0_16px_32px_rgba(0,0,0,0.18)]"
-          : "border-white/8 bg-white/[0.03] hover:border-white/16 hover:bg-white/[0.05]"
-      }`}
-      onClick={onClick}
-      type="button"
-    >
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <div className="truncate text-sm font-semibold text-white">{windowInfo.title || "Untitled window"}</div>
-          <div className="mt-1 truncate font-mono text-[11px] text-slate-500">{formatHost(windowInfo.url)}</div>
-        </div>
-        <div className={`h-2.5 w-2.5 rounded-full ${active ? "bg-[var(--accent)]" : "bg-slate-600"}`} />
-      </div>
-      <div className="mt-3 flex items-center gap-2 text-[11px] text-slate-400">
-        <span className="rounded-full border border-white/8 px-2 py-0.5 font-mono">#{windowInfo.id}</span>
-        <span>{windowInfo.bounds.width}×{windowInfo.bounds.height}</span>
-      </div>
-    </button>
-  );
-}
-
-function ProfileListItem({
-  active,
-  onClick,
-  profile,
-}: {
-  active: boolean;
-  onClick: () => void;
-  profile: ChromeProfile;
-}) {
-  const isRunning = Boolean(profile.liveStatus?.isRunning);
-  return (
-    <button
-      className={`w-full rounded-2xl border px-4 py-3 text-left transition ${
-        active
-          ? "border-[color:var(--accent)]/50 bg-[color:var(--accent)]/14"
-          : "border-white/8 bg-white/[0.03] hover:border-white/16 hover:bg-white/[0.05]"
-      }`}
-      onClick={onClick}
-      type="button"
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-white">account_{profile.accountIdx}</div>
-          <div className="mt-1 truncate font-mono text-[11px] text-slate-500">{profile.gmail || "No mailbox label"}</div>
-        </div>
-        <div className={`mt-1 h-2.5 w-2.5 rounded-full ${isRunning ? "bg-emerald-400" : "bg-slate-600"}`} />
-      </div>
-      <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
-        <span className="rounded-full border border-white/8 px-2 py-0.5 font-mono">port {profile.port ?? "—"}</span>
-        <span>{profile.proxy ? "Proxy on" : "Proxy off"}</span>
-      </div>
-    </button>
-  );
-}
-
-function ActionButton({
-  icon,
-  label,
-  onClick,
-  disabled,
-  tone = "default",
-}: {
-  icon: ReactNode;
-  label: string;
-  onClick: () => void;
-  disabled?: boolean;
-  tone?: "default" | "primary" | "danger";
-}) {
-  const toneClass =
-    tone === "primary"
-      ? "border-transparent bg-[var(--accent)] text-slate-950 hover:bg-[var(--accent-strong)]"
-      : tone === "danger"
-        ? "border-rose-500/25 bg-rose-500/10 text-rose-100 hover:bg-rose-500/16"
-        : "border-white/8 bg-white/[0.04] text-slate-100 hover:border-white/16 hover:bg-white/[0.07]";
-
-  return (
-    <button
-      className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${toneClass}`}
-      disabled={disabled}
-      onClick={onClick}
-      type="button"
-    >
-      {icon}
-      {label}
-    </button>
-  );
-}
-
 export default function Dashboard({ mode, onLogout, onModeChange }: DashboardProps) {
   const [windows, setWindows] = useState<WindowInfo[]>([]);
   const [profiles, setProfiles] = useState<ChromeProfile[]>([]);
@@ -337,6 +299,7 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
   const [selectedProfileIdx, setSelectedProfileIdx] = useState<number | null>(() =>
     readStoredNullableNumber(STORAGE_KEYS.selectedProfile),
   );
+  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("operate");
   const [proxyDrafts, setProxyDrafts] = useState<Record<number, string>>({});
 
   const [windowsLoading, setWindowsLoading] = useState(false);
@@ -344,8 +307,8 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
   const [previewLoading, setPreviewLoading] = useState(false);
   const [boundsSaving, setBoundsSaving] = useState(false);
   const [snapshotLoading, setSnapshotLoading] = useState(false);
-  const [profileAction, setProfileAction] = useState<string | null>(null);
   const [windowAction, setWindowAction] = useState<string | null>(null);
+  const [profileAction, setProfileAction] = useState<string | null>(null);
 
   const [watchInterval, setWatchInterval] = useState(() => readStoredNumber(STORAGE_KEYS.watchInterval, 1200));
   const [quality, setQuality] = useState(() => readStoredNumber(STORAGE_KEYS.captureQuality, 72));
@@ -376,7 +339,7 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
   function announce(message: string, tone: NoticeTone = "neutral") {
     setNotice({ tone, message });
     if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current);
-    noticeTimerRef.current = window.setTimeout(() => setNotice(null), 4200);
+    noticeTimerRef.current = window.setTimeout(() => setNotice(null), 2800);
   }
 
   function releasePreviewUrl() {
@@ -408,7 +371,7 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
       const data = await requestJson<{ profiles?: ChromeProfile[] }>("/api/chrome/profiles");
       setProfiles(Array.isArray(data?.profiles) ? data.profiles : []);
     } catch (error) {
-      announce(error instanceof Error ? error.message : "Failed to load Chrome profiles.", "error");
+      announce(error instanceof Error ? error.message : "Failed to load profiles.", "error");
     } finally {
       setProfilesLoading(false);
     }
@@ -430,13 +393,10 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
       const objectUrl = URL.createObjectURL(blob);
       releasePreviewUrl();
       previewUrlRef.current = objectUrl;
-
-      if (imgRef.current) {
-        imgRef.current.src = objectUrl;
-      }
+      if (imgRef.current) imgRef.current.src = objectUrl;
     } catch (error) {
       if (announceErrors) {
-        announce(error instanceof Error ? error.message : "Failed to refresh preview.", "error");
+        announce(error instanceof Error ? error.message : "Preview failed.", "error");
       }
     } finally {
       setPreviewLoading(false);
@@ -458,15 +418,16 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
       if (existing) {
         await focusWindow(existing.id);
         setSelectedWinId(existing.id);
-        announce(`Focused existing window for ${formatHost(targetUrl)}.`, "success");
+        setWorkspaceView("operate");
+        announce(`Focused ${formatHost(targetUrl)}.`, "success");
         return;
       }
 
       await rpc("open_window", {
-        url: targetUrl,
         accountIdx: selectedProfile?.accountIdx ?? 0,
-        reuseWindow: false,
         options: { width: 1280, height: 860 },
+        reuseWindow: false,
+        url: targetUrl,
       });
 
       const nextWindows = await fetchWindowList();
@@ -476,9 +437,10 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
         setSelectedWinId(createdWindow.id);
         await refreshPreview(createdWindow.id);
       }
+      setWorkspaceView("operate");
       announce(`Opened ${formatHost(targetUrl)}.`, "success");
     } catch (error) {
-      announce(error instanceof Error ? error.message : "Failed to open a new window.", "error");
+      announce(error instanceof Error ? error.message : "Open window failed.", "error");
     } finally {
       setWindowAction(null);
     }
@@ -490,17 +452,15 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
     setProfileAction(action);
     try {
       await requestJson(`/api/chrome/profiles/${selectedProfile.accountIdx}/${action}`, {
-        body: JSON.stringify({}),
-        headers: { "Content-Type": "application/json" },
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
       });
       await loadProfiles();
-      announce(
-        `${action === "open" ? "Opened" : action === "restart" ? "Restarted" : "Stopped"} account_${selectedProfile.accountIdx}.`,
-        "success",
-      );
+      if (action === "open") setWorkspaceView("operate");
+      announce(`${action} account_${selectedProfile.accountIdx}`, "success");
     } catch (error) {
-      announce(error instanceof Error ? error.message : "Chrome profile action failed.", "error");
+      announce(error instanceof Error ? error.message : "Profile action failed.", "error");
     } finally {
       setProfileAction(null);
     }
@@ -512,18 +472,18 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
     setProfileAction(restart ? "proxy-restart" : "proxy-save");
     try {
       await requestJson(`/api/chrome/profiles/${selectedProfile.accountIdx}/proxy`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           enabled: Boolean(proxyDrafts[selectedProfile.accountIdx] || ""),
           proxy: proxyDrafts[selectedProfile.accountIdx] || "",
           restart,
         }),
-        headers: { "Content-Type": "application/json" },
-        method: "POST",
       });
       await loadProfiles();
-      announce(restart ? "Proxy saved and profile restarted." : "Proxy saved.", "success");
+      announce(restart ? "Proxy saved + restarted." : "Proxy saved.", "success");
     } catch (error) {
-      announce(error instanceof Error ? error.message : "Failed to save proxy settings.", "error");
+      announce(error instanceof Error ? error.message : "Proxy save failed.", "error");
     } finally {
       setProfileAction(null);
     }
@@ -542,16 +502,13 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
         height: bounds.h,
       });
       const payload = await response.json();
-      const resultText = payload?.result?.content?.[0]?.text;
-
       if (!response.ok || payload?.result?.isError) {
-        throw new Error(resultText || "Failed to apply window bounds.");
+        throw new Error(payload?.result?.content?.[0]?.text || "Bounds update failed.");
       }
-
       await loadWindows();
-      announce(resultText || "Window bounds updated.", "success");
+      announce("Bounds updated.", "success");
     } catch (error) {
-      announce(error instanceof Error ? error.message : "Failed to apply bounds.", "error");
+      announce(error instanceof Error ? error.message : "Bounds update failed.", "error");
     } finally {
       setBoundsSaving(false);
     }
@@ -559,15 +516,16 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
 
   async function handleReloadPage() {
     if (!selectedWindow) return;
+
     setWindowAction("reload");
     try {
       await rpc("control_electron_BrowserWindow", { win_id: selectedWindow.id, code: "win.reload()" });
       window.setTimeout(() => {
         void refreshPreview(selectedWindow.id);
       }, 400);
-      announce("Page reload sent to the selected window.", "success");
+      announce("Reload sent.", "success");
     } catch (error) {
-      announce(error instanceof Error ? error.message : "Failed to reload the page.", "error");
+      announce(error instanceof Error ? error.message : "Reload failed.", "error");
     } finally {
       setWindowAction(null);
     }
@@ -575,16 +533,15 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
 
   async function handleCloseWindow() {
     if (!selectedWindow) return;
-
     if (!window.confirm(`Close window #${selectedWindow.id}?`)) return;
 
     setWindowAction("close");
     try {
       await rpc("close_window", { win_id: selectedWindow.id });
       await loadWindows();
-      announce(`Closed window #${selectedWindow.id}.`, "success");
+      announce(`Closed #${selectedWindow.id}.`, "success");
     } catch (error) {
-      announce(error instanceof Error ? error.message : "Failed to close the window.", "error");
+      announce(error instanceof Error ? error.message : "Close failed.", "error");
     } finally {
       setWindowAction(null);
     }
@@ -603,7 +560,7 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
       if (imgRef.current) imgRef.current.removeAttribute("src");
       announce("Closed all windows.", "success");
     } catch (error) {
-      announce(error instanceof Error ? error.message : "Failed to close all windows.", "error");
+      announce(error instanceof Error ? error.message : "Close all failed.", "error");
     } finally {
       setWindowAction(null);
     }
@@ -615,28 +572,29 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
     setSnapshotLoading(true);
     try {
       const response = await rpc("webpage_snapshot", {
-        include_screenshot: true,
-        max_elements: maxElements,
-        show_overlays: showOverlays,
         win_id: selectedWindow.id,
+        max_elements: maxElements,
+        include_screenshot: true,
+        show_overlays: showOverlays,
       });
       const payload = await response.json();
       const text = payload?.result?.content?.[0]?.text;
+
       if (!response.ok || payload?.result?.isError) {
-        throw new Error(text || "Failed to capture webpage snapshot.");
+        throw new Error(text || "Snapshot failed.");
       }
 
-      let dialogText = text || "No snapshot data returned.";
-      if (text) {
+      if (!text) {
+        setSnapshotDialogText("No snapshot data.");
+      } else {
         try {
-          dialogText = JSON.stringify(JSON.parse(text), null, 2);
+          setSnapshotDialogText(JSON.stringify(JSON.parse(text), null, 2));
         } catch {
-          dialogText = text;
+          setSnapshotDialogText(text);
         }
       }
-      setSnapshotDialogText(dialogText);
     } catch (error) {
-      announce(error instanceof Error ? error.message : "Snapshot capture failed.", "error");
+      announce(error instanceof Error ? error.message : "Snapshot failed.", "error");
     } finally {
       setSnapshotLoading(false);
     }
@@ -644,12 +602,11 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
 
   async function handleCopyWatchLink() {
     if (!selectedWindow) return;
-    const watchUrl = buildWatchUrl(selectedWindow.id);
     try {
-      await navigator.clipboard.writeText(watchUrl);
-      announce("Watch link copied to the clipboard.", "success");
+      await navigator.clipboard.writeText(buildWatchUrl(selectedWindow.id));
+      announce("Watch link copied.", "success");
     } catch {
-      announce("Clipboard access failed. Open the live watch instead.", "error");
+      announce("Clipboard unavailable.", "error");
     }
   }
 
@@ -657,25 +614,20 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
     if (!selectedWindow || !imgRef.current) return;
 
     const rect = imgRef.current.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-    const relativeX = x / rect.width;
-    const relativeY = y / rect.height;
-
-    const clickX = Math.round(relativeX * selectedWindow.bounds.width);
-    const clickY = Math.round(relativeY * selectedWindow.bounds.height);
+    const clickX = Math.round(((event.clientX - rect.left) / rect.width) * selectedWindow.bounds.width);
+    const clickY = Math.round(((event.clientY - rect.top) / rect.height) * selectedWindow.bounds.height);
 
     setClickPulse({ x: event.clientX, y: event.clientY });
     if (clickPulseTimerRef.current) window.clearTimeout(clickPulseTimerRef.current);
     clickPulseTimerRef.current = window.setTimeout(() => setClickPulse(null), 700);
 
     try {
-      await rpc("cdp_click", { button: "left", win_id: selectedWindow.id, x: clickX, y: clickY });
+      await rpc("cdp_click", { win_id: selectedWindow.id, x: clickX, y: clickY, button: "left" });
       window.setTimeout(() => {
         void refreshPreview(selectedWindow.id);
       }, 160);
     } catch (error) {
-      announce(error instanceof Error ? error.message : "Failed to click inside the preview.", "error");
+      announce(error instanceof Error ? error.message : "Click failed.", "error");
     }
   }
 
@@ -685,11 +637,9 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
   }, []);
 
   useEffect(() => {
-    if (mode === "electron") {
-      void loadWindows();
-    } else {
-      void loadProfiles();
-    }
+    setWorkspaceView("operate");
+    if (mode === "electron") void loadWindows();
+    else void loadProfiles();
   }, [mode]);
 
   useEffect(() => {
@@ -717,19 +667,13 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
   }, [profiles]);
 
   useEffect(() => {
-    if (selectedWinId == null) {
-      localStorage.removeItem(STORAGE_KEYS.selectedWindow);
-      return;
-    }
-    localStorage.setItem(STORAGE_KEYS.selectedWindow, String(selectedWinId));
+    if (selectedWinId == null) localStorage.removeItem(STORAGE_KEYS.selectedWindow);
+    else localStorage.setItem(STORAGE_KEYS.selectedWindow, String(selectedWinId));
   }, [selectedWinId]);
 
   useEffect(() => {
-    if (selectedProfileIdx == null) {
-      localStorage.removeItem(STORAGE_KEYS.selectedProfile);
-      return;
-    }
-    localStorage.setItem(STORAGE_KEYS.selectedProfile, String(selectedProfileIdx));
+    if (selectedProfileIdx == null) localStorage.removeItem(STORAGE_KEYS.selectedProfile);
+    else localStorage.setItem(STORAGE_KEYS.selectedProfile, String(selectedProfileIdx));
   }, [selectedProfileIdx]);
 
   useEffect(() => {
@@ -754,30 +698,28 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
 
   useEffect(() => {
     if (!selectedWindow) return;
-
     setBounds({
-      h: selectedWindow.bounds.height,
-      w: selectedWindow.bounds.width,
       x: selectedWindow.bounds.x,
       y: selectedWindow.bounds.y,
+      w: selectedWindow.bounds.width,
+      h: selectedWindow.bounds.height,
     });
-
     if (mode === "electron") {
       void focusWindow(selectedWindow.id).catch(() => undefined);
     }
   }, [mode, selectedWindow]);
 
   useEffect(() => {
-    if (mode !== "electron" || !selectedWinId) return;
+    if (mode !== "electron" || !selectedWinId || workspaceView !== "operate") return;
     void refreshPreview(selectedWinId);
-  }, [mode, quality, scale, selectedWinId]);
+  }, [mode, quality, scale, selectedWinId, workspaceView]);
 
   useEffect(() => {
     async function ping() {
-      const pingStart = Date.now();
+      const startedAt = Date.now();
       try {
         await rpc("ping", {});
-        setPingTime(Date.now() - pingStart);
+        setPingTime(Date.now() - startedAt);
       } catch {
         setPingTime(null);
       }
@@ -787,13 +729,12 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
     const timer = window.setInterval(() => {
       void ping();
     }, 5000);
-
     return () => window.clearInterval(timer);
   }, []);
 
   useEffect(() => {
     const handleKeyDown = async (event: KeyboardEvent) => {
-      if (mode !== "electron" || !selectedWinId) return;
+      if (mode !== "electron" || workspaceView !== "operate" || !selectedWinId) return;
       if (event.ctrlKey || event.metaKey || event.altKey) return;
       if (isTypingTarget(event.target)) return;
 
@@ -803,21 +744,21 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
       try {
         const keyCode = KEY_CODE_MAP[key] || key.toUpperCase();
         await rpc("control_electron_WebContents", {
-          code: `webContents.sendInputEvent({type: 'keyDown', keyCode: '${keyCode}', key: '${key}'})`,
           win_id: selectedWinId,
+          code: `webContents.sendInputEvent({type: 'keyDown', keyCode: '${keyCode}', key: '${key}'})`,
         });
         await rpc("control_electron_WebContents", {
-          code: `webContents.sendInputEvent({type: 'keyUp', keyCode: '${keyCode}', key: '${key}'})`,
           win_id: selectedWinId,
+          code: `webContents.sendInputEvent({type: 'keyUp', keyCode: '${keyCode}', key: '${key}'})`,
         });
       } catch {
-        announce("Keyboard forwarding failed for the selected window.", "error");
+        announce("Keyboard forwarding failed.", "error");
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [mode, selectedWinId]);
+  }, [mode, selectedWinId, workspaceView]);
 
   useEffect(() => {
     return () => {
@@ -827,499 +768,193 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
     };
   }, []);
 
-  const chromeStatusLabel = selectedProfile?.liveStatus?.isRunning ? "Running" : "Stopped";
+  const noticeClass =
+    notice?.tone === "success"
+      ? "border-emerald-500/20 bg-emerald-500/12 text-emerald-100"
+      : notice?.tone === "error"
+        ? "border-rose-500/20 bg-rose-500/12 text-rose-100"
+        : "border-white/10 bg-white/[0.08] text-slate-100";
+
+  const chromeStatus = selectedProfile?.liveStatus?.isRunning ? "running" : "stopped";
 
   return (
     <div className="min-h-screen bg-[var(--app-bg)] text-slate-100">
-      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top_left,rgba(55,124,110,0.28),transparent_30%),radial-gradient(circle_at_bottom_right,rgba(191,160,91,0.14),transparent_25%)]" />
-      <div className="pointer-events-none fixed inset-0 opacity-30 [background-image:linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] [background-size:36px_36px]" />
+      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top_left,rgba(55,124,110,0.22),transparent_28%),radial-gradient(circle_at_bottom_right,rgba(191,160,91,0.1),transparent_22%)]" />
 
-      <div className="relative mx-auto min-h-screen max-w-[1800px] p-4 xl:grid xl:grid-cols-[320px_minmax(0,1fr)_360px] xl:gap-4">
-        <aside className="panel-surface flex flex-col gap-5">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-300">
-                <Boxes className="h-3.5 w-3.5 text-[var(--accent)]" />
-                CiCy Console
-              </div>
-              <h1 className="mt-4 text-2xl font-semibold tracking-tight text-white">Desktop launch control</h1>
-              <p className="mt-2 text-sm leading-6 text-slate-400">
-                Cleaner session orchestration for Electron windows and Chrome profiles.
-              </p>
+      <div className="relative mx-auto flex min-h-screen max-w-[1640px] gap-4 p-4">
+        <aside className="panel-surface hidden w-[288px] shrink-0 xl:flex xl:flex-col">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-sm font-semibold text-white">CiCy</div>
+            <div className={`rounded-full px-2 py-1 text-[11px] ${pingTime != null ? "bg-emerald-500/12 text-emerald-200" : "bg-rose-500/12 text-rose-200"}`}>
+              <Wifi className="mr-1 inline h-3 w-3" />
+              {pingTime != null ? `${pingTime}ms` : "offline"}
             </div>
+          </div>
 
+          <div className="mt-4 rounded-2xl border border-white/8 bg-black/20 p-1">
+            <div className="grid grid-cols-2 gap-1">
+              <ModeChip active={mode === "chrome"} label="Chrome" onClick={() => onModeChange("chrome")} />
+              <ModeChip active={mode === "electron"} label="Electron" onClick={() => onModeChange("electron")} />
+            </div>
+          </div>
+
+          <div className="mt-5 flex items-center justify-between">
+            <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">{mode === "electron" ? "Sessions" : "Profiles"}</div>
             <button
-              className="rounded-xl border border-white/8 bg-white/[0.04] p-2 text-slate-300 transition hover:border-white/16 hover:bg-white/[0.08] hover:text-white"
-              onClick={onLogout}
-              title="Sign out"
+              className="rounded-lg p-2 text-slate-400 transition hover:bg-white/[0.06] hover:text-white"
+              onClick={() => void (mode === "electron" ? loadWindows() : loadProfiles())}
               type="button"
             >
-              <LogOut className="h-4 w-4" />
+              <RefreshCw className={`h-4 w-4 ${(mode === "electron" ? windowsLoading : profilesLoading) ? "animate-spin" : ""}`} />
             </button>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <MetricCard detail={`${windows.length} tracked`} label="Electron" value={String(windows.length)} />
-            <MetricCard detail={`${profiles.length} available`} label="Profiles" value={String(profiles.length)} />
-          </div>
-
-          <div className="rounded-2xl border border-white/8 bg-black/20 p-3">
-            <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Mode</div>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                className={`rounded-xl px-3 py-2 text-sm font-medium transition ${
-                  mode === "chrome"
-                    ? "bg-[var(--accent)] text-slate-950"
-                    : "border border-white/8 bg-white/[0.04] text-slate-300 hover:bg-white/[0.08]"
-                }`}
-                onClick={() => onModeChange("chrome")}
-                type="button"
-              >
-                Chrome
-              </button>
-              <button
-                className={`rounded-xl px-3 py-2 text-sm font-medium transition ${
-                  mode === "electron"
-                    ? "bg-[var(--accent)] text-slate-950"
-                    : "border border-white/8 bg-white/[0.04] text-slate-300 hover:bg-white/[0.08]"
-                }`}
-                onClick={() => onModeChange("electron")}
-                type="button"
-              >
-                Electron
-              </button>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between rounded-2xl border border-white/8 bg-black/20 px-4 py-3">
-            <div className="flex items-center gap-3">
-              <div className={`rounded-full p-2 ${pingTime != null ? "bg-emerald-500/12 text-emerald-300" : "bg-rose-500/12 text-rose-300"}`}>
-                <Wifi className="h-4 w-4" />
-              </div>
-              <div>
-                <div className="text-sm font-medium text-white">Connection</div>
-                <div className="text-xs text-slate-400">{pingTime != null ? `${pingTime} ms latency` : "Disconnected"}</div>
-              </div>
-            </div>
-            <div className={`rounded-full px-2.5 py-1 text-xs font-medium ${pingTime != null ? "bg-emerald-500/12 text-emerald-200" : "bg-rose-500/12 text-rose-200"}`}>
-              {pingTime != null ? "Healthy" : "Offline"}
-            </div>
-          </div>
-
-          <div className="flex min-h-0 flex-1 flex-col gap-3">
-            <SectionTitle
-              action={
-                <button
-                  className="rounded-xl border border-white/8 bg-white/[0.04] p-2 text-slate-300 transition hover:border-white/16 hover:bg-white/[0.08]"
-                  onClick={() => void (mode === "electron" ? loadWindows() : loadProfiles())}
-                  type="button"
-                >
-                  <RefreshCw className={`h-4 w-4 ${(mode === "electron" ? windowsLoading : profilesLoading) ? "animate-spin" : ""}`} />
-                </button>
-              }
-              detail={mode === "electron" ? "Choose a managed browser window." : "Pick a Chrome profile to operate on."}
-              eyebrow="Sessions"
-              title={mode === "electron" ? "Window registry" : "Profile registry"}
-            />
-
-            <div className="min-h-[320px] space-y-2 overflow-y-auto pr-1">
-              {mode === "electron"
-                ? windows.map((item) => (
-                    <Fragment key={item.id}>
-                      <WindowListItem active={item.id === selectedWinId} onClick={() => setSelectedWinId(item.id)} windowInfo={item} />
-                    </Fragment>
-                  ))
-                : profiles.map((item) => (
-                    <Fragment key={item.profileKey}>
-                      <ProfileListItem
-                        active={item.accountIdx === selectedProfileIdx}
-                        onClick={() => setSelectedProfileIdx(item.accountIdx)}
-                        profile={item}
-                      />
-                    </Fragment>
-                  ))}
-
-              {mode === "electron" && !windowsLoading && windows.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-8 text-center text-sm text-slate-400">
-                  No windows are currently managed by the worker.
-                </div>
-              ) : null}
-
-              {mode === "chrome" && !profilesLoading && profiles.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-8 text-center text-sm text-slate-400">
-                  No Chrome profiles were returned by the worker.
-                </div>
-              ) : null}
-            </div>
-          </div>
-
-          {mode === "electron" ? (
-            <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
-              <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Quick launch</div>
-              <div className="space-y-2">
-                {QUICK_LAUNCH_TARGETS.map((target) => (
-                  <button
-                    className="flex w-full items-center justify-between rounded-xl border border-white/8 bg-white/[0.04] px-4 py-3 text-left transition hover:border-white/16 hover:bg-white/[0.08]"
-                    disabled={Boolean(windowAction)}
-                    key={target.label}
-                    onClick={() => void handleOpenWindow(target.url)}
-                    type="button"
-                  >
-                    <div>
-                      <div className="text-sm font-medium text-white">{target.label}</div>
-                      <div className="text-xs text-slate-400">{target.note}</div>
-                    </div>
-                    <ExternalLink className="h-4 w-4 text-slate-400" />
-                  </button>
+          <div className="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+            {mode === "electron"
+              ? windows.map((item) => (
+                  <Fragment key={item.id}>
+                    <SidebarItem
+                      active={item.id === selectedWinId}
+                      label={item.title || "Untitled"}
+                      meta={`${formatHost(item.url)} · #${item.id}`}
+                      onClick={() => setSelectedWinId(item.id)}
+                    />
+                  </Fragment>
+                ))
+              : profiles.map((item) => (
+                  <Fragment key={item.profileKey}>
+                    <SidebarItem
+                      active={item.accountIdx === selectedProfileIdx}
+                      label={`account_${item.accountIdx}`}
+                      meta={item.gmail || `port ${item.port ?? "—"}`}
+                      onClick={() => setSelectedProfileIdx(item.accountIdx)}
+                      status={item.liveStatus?.isRunning ? "online" : "offline"}
+                    />
+                  </Fragment>
                 ))}
-              </div>
-            </div>
-          ) : (
-            <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
-              <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Proxy status</div>
-              <p className="text-sm leading-6 text-slate-400">
-                Keep proxy configuration close to the profile that owns it. Save without restart when you are staging a change, or
-                restart immediately when you need it live.
-              </p>
-            </div>
-          )}
+          </div>
         </aside>
 
-        <main className="panel-surface mt-4 flex min-h-[780px] flex-col overflow-hidden xl:mt-0">
-          <div className="border-b border-white/8 px-6 py-5">
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-              <SectionTitle
-                detail={
-                  mode === "electron"
-                    ? selectedWindow
-                      ? shortenUrl(selectedWindow.url)
-                      : "Choose a window from the left rail to focus, inspect, and drive it."
-                    : selectedProfile
-                      ? selectedProfile.gmail || `account_${selectedProfile.accountIdx}`
-                      : "Choose a Chrome profile from the left rail to manage it."
-                }
-                eyebrow={mode === "electron" ? "Active window" : "Active profile"}
-                title={
-                  mode === "electron"
-                    ? selectedWindow?.title || "No window selected"
-                    : selectedProfile
-                      ? `account_${selectedProfile.accountIdx}`
-                      : "No profile selected"
-                }
-              />
-
-              <div className="flex flex-wrap items-center gap-2">
-                {mode === "electron" ? (
-                  <>
-                    <ActionButton
-                      disabled={!selectedWindow || previewLoading}
-                      icon={<RefreshCw className={`h-4 w-4 ${previewLoading ? "animate-spin" : ""}`} />}
-                      label="Refresh preview"
-                      onClick={() => {
-                        if (selectedWindow) void refreshPreview(selectedWindow.id, true);
-                      }}
-                    />
-                    <ActionButton
-                      disabled={!selectedWindow}
-                      icon={<Eye className="h-4 w-4" />}
-                      label="Open live watch"
-                      onClick={() => {
-                        if (selectedWindow) window.open(buildWatchUrl(selectedWindow.id), "_blank", "noopener,noreferrer");
-                      }}
-                    />
-                  </>
-                ) : (
-                  <ActionButton
-                    disabled={!selectedProfile}
-                    icon={<RefreshCw className={`h-4 w-4 ${profilesLoading ? "animate-spin" : ""}`} />}
-                    label="Refresh profiles"
-                    onClick={() => void loadProfiles()}
-                  />
-                )}
+        <main className="panel-surface flex min-w-0 flex-1 flex-col overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/8 pb-4">
+            <div className="min-w-0">
+              <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">{mode}</div>
+              <div className="mt-1 truncate text-lg font-semibold text-white">
+                {mode === "electron"
+                  ? selectedWindow?.title || "No window selected"
+                  : selectedProfile
+                    ? `account_${selectedProfile.accountIdx}`
+                    : "No profile selected"}
               </div>
+              <div className="mt-1 truncate text-sm text-slate-500">
+                {mode === "electron"
+                  ? selectedWindow
+                    ? shortenUrl(selectedWindow.url)
+                    : "Choose a session or launch a target"
+                  : selectedProfile?.gmail || "Choose a profile"}
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="rounded-2xl border border-white/8 bg-black/20 p-1">
+                <div className="flex gap-1">
+                  <WorkspaceChip active={workspaceView === "operate"} label="Operate" onClick={() => setWorkspaceView("operate")} />
+                  <WorkspaceChip active={workspaceView === "launch"} label="Launch" onClick={() => setWorkspaceView("launch")} />
+                  <WorkspaceChip active={workspaceView === "tune"} label="Tune" onClick={() => setWorkspaceView("tune")} />
+                </div>
+              </div>
+
+              <button
+                className="rounded-xl border border-white/8 bg-white/[0.04] p-2 text-slate-300 transition hover:border-white/14 hover:bg-white/[0.08] hover:text-white"
+                onClick={onLogout}
+                type="button"
+              >
+                <LogOut className="h-4 w-4" />
+              </button>
             </div>
           </div>
 
           {notice ? (
-            <div className={`mx-6 mt-5 rounded-2xl border px-4 py-3 text-sm ${toneClasses(notice.tone)}`}>
-              <div className="flex items-start gap-3">
-                {notice.tone === "error" ? (
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                ) : notice.tone === "success" ? (
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-                ) : (
-                  <Shield className="mt-0.5 h-4 w-4 shrink-0" />
-                )}
-                <span>{notice.message}</span>
+            <div className={`mt-4 rounded-2xl border px-4 py-3 text-sm ${noticeClass}`}>{notice.message}</div>
+          ) : null}
+
+          {mode === "electron" && workspaceView === "operate" ? (
+            <div className="mt-4 flex min-h-0 flex-1 flex-col">
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <Button
+                  disabled={!selectedWindow || previewLoading}
+                  icon={<RefreshCw className={`h-4 w-4 ${previewLoading ? "animate-spin" : ""}`} />}
+                  label="Preview"
+                  onClick={() => {
+                    if (selectedWindow) void refreshPreview(selectedWindow.id, true);
+                  }}
+                />
+                <Button
+                  disabled={!selectedWindow}
+                  icon={<Eye className="h-4 w-4" />}
+                  label="Watch"
+                  onClick={() => {
+                    if (selectedWindow) window.open(buildWatchUrl(selectedWindow.id), "_blank", "noopener,noreferrer");
+                  }}
+                />
+                <Button disabled={!selectedWindow} icon={<RotateCcw className="h-4 w-4" />} label="Reload" onClick={() => void handleReloadPage()} />
               </div>
+
+              {selectedWindow ? (
+                <div className="relative flex min-h-[480px] flex-1 items-center justify-center overflow-hidden rounded-[30px] border border-white/8 bg-black/35">
+                  <img
+                    alt="Managed window preview"
+                    className="max-h-full max-w-full cursor-crosshair rounded-[20px] object-contain shadow-[0_28px_90px_rgba(0,0,0,0.5)]"
+                    draggable={false}
+                    onClick={(event) => void handlePreviewClick(event)}
+                    onDragStart={(event) => event.preventDefault()}
+                    ref={imgRef}
+                  />
+                  <div className="absolute left-4 top-4 rounded-full border border-white/10 bg-black/55 px-3 py-1.5 text-xs text-slate-300 backdrop-blur">
+                    {formatBounds(selectedWindow.bounds)}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex min-h-[520px] flex-1 items-center justify-center rounded-[30px] border border-dashed border-white/10 bg-black/20 text-sm text-slate-500">
+                  No session selected
+                </div>
+              )}
             </div>
           ) : null}
 
-          {mode === "electron" ? (
-            <div className="flex min-h-0 flex-1 flex-col px-6 py-5">
-              <div className="grid gap-4 lg:grid-cols-3">
-                <MetricCard
-                  detail={selectedWindow ? shortenUrl(selectedWindow.url) : "Choose a managed session from the left rail."}
-                  label="Target host"
-                  value={selectedWindow ? formatHost(selectedWindow.url) : "No target"}
-                />
-                <MetricCard
-                  detail={selectedWindow ? `Window #${selectedWindow.id}` : "Bounds become editable after selection."}
-                  label="Window bounds"
-                  value={selectedWindow ? formatBounds(selectedWindow.bounds) : "—"}
-                />
-                <MetricCard
-                  detail="Used by preview + watch view."
-                  label="Capture profile"
-                  value={`${quality}% · ${Math.round(scale * 100)}%`}
-                />
-              </div>
-
-              <div className="mt-5 flex min-h-0 flex-1 flex-col rounded-[28px] border border-white/8 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.06),transparent_40%),rgba(8,13,18,0.92)] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
-                {selectedWindow ? (
-                  <>
-                    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
-                        <span className="rounded-full border border-white/8 px-2 py-1 font-mono text-slate-300">#{selectedWindow.id}</span>
-                        <span>{selectedWindow.bounds.width}×{selectedWindow.bounds.height}</span>
-                        <span>Click preview to send a CDP click. Keyboard input forwards unless a local form is focused.</span>
-                      </div>
-                      <ActionButton
-                        disabled={!selectedWindow}
-                        icon={<Copy className="h-4 w-4" />}
-                        label="Copy watch link"
-                        onClick={() => void handleCopyWatchLink()}
-                      />
-                    </div>
-
-                    <div className="relative flex min-h-[440px] flex-1 items-center justify-center overflow-hidden rounded-[24px] border border-white/8 bg-black/40">
-                      <img
-                        alt="Managed window preview"
-                        className="max-h-full max-w-full cursor-crosshair rounded-[18px] object-contain shadow-[0_24px_80px_rgba(0,0,0,0.45)]"
-                        draggable={false}
-                        onClick={(event) => void handlePreviewClick(event)}
-                        onDragStart={(event) => event.preventDefault()}
-                        ref={imgRef}
-                      />
-                      {previewLoading ? (
-                        <div className="absolute right-4 top-4 rounded-full border border-white/10 bg-black/55 px-3 py-1.5 text-xs text-slate-300 backdrop-blur">
-                          Refreshing preview…
-                        </div>
-                      ) : null}
-                    </div>
-                  </>
-                ) : (
-                  <div className="flex min-h-[520px] flex-1 flex-col items-center justify-center rounded-[24px] border border-dashed border-white/10 bg-black/20 px-8 text-center">
-                    <Monitor className="h-10 w-10 text-slate-500" />
-                    <h3 className="mt-6 text-xl font-semibold text-white">Select a window or launch one</h3>
-                    <p className="mt-3 max-w-xl text-sm leading-6 text-slate-400">
-                      The start page now treats the preview as the primary workspace. Open a known target from Quick launch or pick an
-                      existing session from the left rail.
-                    </p>
-                    <div className="mt-8 flex flex-wrap justify-center gap-2">
-                      {QUICK_LAUNCH_TARGETS.map((target) => (
-                        <Fragment key={target.label}>
-                          <ActionButton
-                            icon={<ArrowUpRight className="h-4 w-4" />}
-                            label={target.label}
-                            onClick={() => void handleOpenWindow(target.url)}
-                            tone="primary"
-                          />
-                        </Fragment>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
+          {mode === "electron" && workspaceView === "launch" ? (
+            <div className="mt-4 grid flex-1 gap-4 lg:grid-cols-3">
+              {QUICK_LAUNCH_TARGETS.map((target) => (
+                <button
+                  className="rounded-[28px] border border-white/8 bg-black/20 p-6 text-left transition hover:border-white/16 hover:bg-white/[0.05]"
+                  disabled={Boolean(windowAction)}
+                  key={target.label}
+                  onClick={() => void handleOpenWindow(target.url)}
+                  type="button"
+                >
+                  <ArrowUpRight className="h-5 w-5 text-[var(--accent)]" />
+                  <div className="mt-10 text-xl font-semibold text-white">{target.label}</div>
+                  <div className="mt-2 text-sm text-slate-500">{target.url}</div>
+                </button>
+              ))}
             </div>
-          ) : (
-            <div className="flex min-h-0 flex-1 flex-col gap-5 px-6 py-5">
-              <div className="grid gap-4 lg:grid-cols-3">
-                <MetricCard
-                  detail="Process state as reported by the worker."
-                  label="Lifecycle"
-                  value={selectedProfile ? chromeStatusLabel : "No profile"}
-                />
-                <MetricCard
-                  detail="Remote debugger endpoint."
-                  label="Debugger port"
-                  value={selectedProfile?.port != null ? String(selectedProfile.port) : "—"}
-                />
-                <MetricCard
-                  detail="Configuration attached to the selected profile."
-                  label="Proxy"
-                  value={selectedProfile?.proxy ? "Enabled" : "Disabled"}
-                />
-              </div>
+          ) : null}
 
-              <div className="grid flex-1 gap-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
-                <section className="rounded-[28px] border border-white/8 bg-black/20 p-6">
-                  <SectionTitle
-                    detail="Core lifecycle actions stay visible here. Deeper configuration lives in the inspector."
-                    eyebrow="Overview"
-                    title={selectedProfile ? `Profile account_${selectedProfile.accountIdx}` : "No profile selected"}
-                  />
-
-                  {selectedProfile ? (
-                    <>
-                      <div className="mt-6 rounded-2xl border border-white/8 bg-white/[0.03] p-5">
-                        <div className="text-sm font-medium text-white">{selectedProfile.gmail || "No mailbox label"}</div>
-                        <div className="mt-1 font-mono text-xs text-slate-500">{selectedProfile.profileKey}</div>
-                        <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-slate-400">
-                          <span className="rounded-full border border-white/8 px-2 py-1">port {selectedProfile.port ?? "—"}</span>
-                          <span className="rounded-full border border-white/8 px-2 py-1">{selectedProfile.proxy ? "Proxy configured" : "No proxy"}</span>
-                          <span className="rounded-full border border-white/8 px-2 py-1">{chromeStatusLabel}</span>
-                        </div>
-                      </div>
-
-                      <div className="mt-6 flex flex-wrap gap-2">
-                        <ActionButton
-                          disabled={Boolean(profileAction)}
-                          icon={<ArrowUpRight className="h-4 w-4" />}
-                          label={profileAction === "open" ? "Opening…" : "Open"}
-                          onClick={() => void handleProfileAction("open")}
-                          tone="primary"
-                        />
-                        <ActionButton
-                          disabled={Boolean(profileAction)}
-                          icon={<RotateCcw className="h-4 w-4" />}
-                          label={profileAction === "restart" ? "Restarting…" : "Restart"}
-                          onClick={() => void handleProfileAction("restart")}
-                        />
-                        <ActionButton
-                          disabled={Boolean(profileAction)}
-                          icon={<Square className="h-4 w-4" />}
-                          label={profileAction === "stop" ? "Stopping…" : "Stop"}
-                          onClick={() => void handleProfileAction("stop")}
-                          tone="danger"
-                        />
-                      </div>
-                    </>
-                  ) : (
-                    <div className="mt-6 rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-8 text-center text-sm text-slate-400">
-                      Pick a Chrome profile from the left rail to manage it.
-                    </div>
-                  )}
-                </section>
-
-                <section className="rounded-[28px] border border-white/8 bg-black/20 p-6">
-                  <SectionTitle
-                    detail="This space keeps operator notes visible instead of burying them in a debug-only panel."
-                    eyebrow="Guidance"
-                    title="Operational notes"
-                  />
-
-                  <div className="mt-6 space-y-4">
-                    <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
-                      <div className="flex items-center gap-2 text-sm font-medium text-white">
-                        <Gauge className="h-4 w-4 text-[var(--accent)]" />
-                        Launch discipline
-                      </div>
-                      <p className="mt-2 text-sm leading-6 text-slate-400">
-                        Keep the main workspace focused on the selected profile. Use the inspector for proxy changes so the primary
-                        content never turns into a settings dump.
-                      </p>
-                    </div>
-
-                    <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
-                      <div className="flex items-center gap-2 text-sm font-medium text-white">
-                        <Shield className="h-4 w-4 text-[var(--accent)]" />
-                        Why this layout
-                      </div>
-                      <p className="mt-2 text-sm leading-6 text-slate-400">
-                        The original page mixed login, launch, window selection, CDP debugging, and long-form controls in one surface.
-                        This rewrite makes the operator’s current target obvious first, and the advanced tooling contextual second.
-                      </p>
-                    </div>
-                  </div>
-                </section>
-              </div>
-            </div>
-          )}
-        </main>
-
-        <aside className="panel-surface mt-4 flex flex-col gap-5 xl:mt-0">
-          <SectionTitle
-            detail={mode === "electron" ? "Advanced tooling stays contextual here." : "Profile configuration is isolated here."}
-            eyebrow="Inspector"
-            title={mode === "electron" ? "Window controls" : "Profile controls"}
-          />
-
-          {mode === "electron" ? (
-            <>
-              <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
-                <div className="flex items-center gap-2 text-sm font-medium text-white">
-                  <LayoutGrid className="h-4 w-4 text-[var(--accent)]" />
-                  Session summary
-                </div>
-                <div className="mt-4 space-y-3 text-sm text-slate-300">
-                  <div>
-                    <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Window</div>
-                    <div className="mt-1">{selectedWindow ? selectedWindow.title || `Window #${selectedWindow.id}` : "No selection"}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs uppercase tracking-[0.18em] text-slate-500">URL</div>
-                    <div className="mt-1 break-all text-slate-400">{selectedWindow?.url || "—"}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Bounds</div>
-                    <div className="mt-1">{selectedWindow ? formatBounds(selectedWindow.bounds) : "—"}</div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
-                <div className="flex items-center gap-2 text-sm font-medium text-white">
-                  <SlidersHorizontal className="h-4 w-4 text-[var(--accent)]" />
-                  Capture profile
-                </div>
-                <div className="mt-4 space-y-4">
-                  <RangeField
-                    label="Watch refresh cadence"
-                    max={5000}
-                    min={200}
-                    onChange={setWatchInterval}
-                    step={100}
-                    value={watchInterval}
-                    valueLabel={`${(watchInterval / 1000).toFixed(1)} s`}
-                  />
-                  <RangeField
-                    label="JPEG quality"
-                    max={100}
-                    min={10}
-                    onChange={setQuality}
-                    step={5}
-                    value={quality}
-                    valueLabel={`${quality}%`}
-                  />
-                  <RangeField
-                    label="Scale"
-                    max={1}
-                    min={0.2}
-                    onChange={setScale}
-                    step={0.02}
-                    value={scale}
-                    valueLabel={`${Math.round(scale * 100)}%`}
-                  />
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-white/8 bg-black/20 p-4" data-local-input="true">
-                <div className="flex items-center gap-2 text-sm font-medium text-white">
-                  <Monitor className="h-4 w-4 text-[var(--accent)]" />
-                  Bounds editor
-                </div>
+          {mode === "electron" && workspaceView === "tune" ? (
+            <div className="mt-4 grid flex-1 gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+              <div className="rounded-[28px] border border-white/8 bg-black/20 p-5" data-local-input="true">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Bounds</div>
                 <div className="mt-4 grid grid-cols-2 gap-3">
                   {[
                     { key: "x", label: "X" },
                     { key: "y", label: "Y" },
-                    { key: "w", label: "Width" },
-                    { key: "h", label: "Height" },
+                    { key: "w", label: "W" },
+                    { key: "h", label: "H" },
                   ].map((field) => (
                     <label className="space-y-2" key={field.key}>
-                      <span className="text-xs uppercase tracking-[0.18em] text-slate-500">{field.label}</span>
+                      <span className="text-[11px] uppercase tracking-[0.18em] text-slate-500">{field.label}</span>
                       <input
-                        className="w-full rounded-xl border border-white/8 bg-white/[0.04] px-3 py-2 font-mono text-sm text-white outline-none transition focus:border-[color:var(--accent)]/60 focus:bg-white/[0.07]"
+                        className="w-full rounded-xl border border-white/8 bg-white/[0.04] px-3 py-2 font-mono text-sm text-white outline-none transition focus:border-[color:var(--accent)]/60"
                         onChange={(event) =>
                           setBounds((current) => ({
                             ...current,
@@ -1332,171 +967,173 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
                     </label>
                   ))}
                 </div>
-                <div className="mt-4">
-                  <ActionButton
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Button
                     disabled={!selectedWindow || boundsSaving}
                     icon={<RefreshCw className={`h-4 w-4 ${boundsSaving ? "animate-spin" : ""}`} />}
-                    label={boundsSaving ? "Applying…" : "Apply bounds"}
+                    label="Apply"
                     onClick={() => void handleApplyBounds()}
-                    tone="primary"
                   />
+                  <Button disabled={!selectedWindow} icon={<Copy className="h-4 w-4" />} label="Watch link" onClick={() => void handleCopyWatchLink()} />
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
-                <div className="flex items-center gap-2 text-sm font-medium text-white">
-                  <ScanSearch className="h-4 w-4 text-[var(--accent)]" />
-                  Page tools
+              <div className="space-y-4">
+                <div className="rounded-[28px] border border-white/8 bg-black/20 p-5">
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Capture</div>
+                  <div className="mt-4 space-y-4">
+                    <RangeField
+                      label="Refresh"
+                      max={5000}
+                      min={200}
+                      onChange={setWatchInterval}
+                      step={100}
+                      value={watchInterval}
+                      valueLabel={`${(watchInterval / 1000).toFixed(1)}s`}
+                    />
+                    <RangeField label="Quality" max={100} min={10} onChange={setQuality} step={5} value={quality} valueLabel={`${quality}%`} />
+                    <RangeField label="Scale" max={1} min={0.2} onChange={setScale} step={0.02} value={scale} valueLabel={`${Math.round(scale * 100)}%`} />
+                  </div>
                 </div>
-                <div className="mt-4 space-y-4">
-                  <RangeField
-                    label="Snapshot depth"
-                    max={100}
-                    min={5}
-                    onChange={setMaxElements}
-                    step={5}
-                    value={maxElements}
-                    valueLabel={`${maxElements} elements`}
-                  />
 
-                  <label className="flex items-center justify-between gap-4 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2" data-local-input="true">
-                    <div>
-                      <div className="text-sm font-medium text-white">Highlight overlays</div>
-                      <div className="text-xs text-slate-500">Overlay hit targets in the structured snapshot.</div>
-                    </div>
-                    <input
-                      checked={showOverlays}
-                      className="h-4 w-4 accent-[var(--accent)]"
-                      onChange={(event) => setShowOverlays(event.target.checked)}
-                      type="checkbox"
-                    />
-                  </label>
-
-                  <div className="flex flex-wrap gap-2">
-                    <ActionButton
-                      disabled={!selectedWindow || Boolean(windowAction)}
-                      icon={<RotateCcw className="h-4 w-4" />}
-                      label={windowAction === "reload" ? "Reloading…" : "Reload page"}
-                      onClick={() => void handleReloadPage()}
-                    />
-                    <ActionButton
+                <div className="rounded-[28px] border border-white/8 bg-black/20 p-5">
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Actions</div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <Button
                       disabled={!selectedWindow || snapshotLoading}
                       icon={<ScanSearch className={`h-4 w-4 ${snapshotLoading ? "animate-spin" : ""}`} />}
-                      label={snapshotLoading ? "Capturing…" : "Structured snapshot"}
+                      label="Snapshot"
                       onClick={() => void handleSnapshotCapture()}
                     />
+                    <Button disabled={!selectedWindow} icon={<X className="h-4 w-4" />} label="Close" onClick={() => void handleCloseWindow()} />
+                    <Button disabled={!windows.length} icon={<Trash2 className="h-4 w-4" />} label="Close all" onClick={() => void handleCloseAllWindows()} />
                   </div>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-rose-500/18 bg-rose-500/[0.06] p-4">
-                <div className="flex items-center gap-2 text-sm font-medium text-rose-100">
-                  <AlertTriangle className="h-4 w-4" />
-                  Destructive actions
-                </div>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <ActionButton
-                    disabled={!selectedWindow || Boolean(windowAction)}
-                    icon={<X className="h-4 w-4" />}
-                    label={windowAction === "close" ? "Closing…" : "Close selected"}
-                    onClick={() => void handleCloseWindow()}
-                    tone="danger"
-                  />
-                  <ActionButton
-                    disabled={!windows.length || Boolean(windowAction)}
-                    icon={<Trash2 className="h-4 w-4" />}
-                    label={windowAction === "close-all" ? "Closing all…" : "Close all"}
-                    onClick={() => void handleCloseAllWindows()}
-                    tone="danger"
-                  />
-                </div>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
-                <div className="flex items-center gap-2 text-sm font-medium text-white">
-                  <Globe className="h-4 w-4 text-[var(--accent)]" />
-                  Selected profile
-                </div>
-                <div className="mt-4 space-y-3 text-sm text-slate-300">
-                  <div>
-                    <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Identity</div>
-                    <div className="mt-1">{selectedProfile ? `account_${selectedProfile.accountIdx}` : "No selection"}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Mailbox</div>
-                    <div className="mt-1 break-all text-slate-400">{selectedProfile?.gmail || "—"}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Debugger port</div>
-                    <div className="mt-1">{selectedProfile?.port ?? "—"}</div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-white/8 bg-black/20 p-4" data-local-input="true">
-                <div className="flex items-center gap-2 text-sm font-medium text-white">
-                  <Link2 className="h-4 w-4 text-[var(--accent)]" />
-                  Proxy configuration
-                </div>
-                <div className="mt-4 space-y-3">
-                  <textarea
-                    className="min-h-[108px] w-full rounded-2xl border border-white/8 bg-white/[0.04] px-3 py-3 font-mono text-sm text-white outline-none transition focus:border-[color:var(--accent)]/60 focus:bg-white/[0.07]"
-                    disabled={!selectedProfile}
-                    onChange={(event) =>
-                      setProxyDrafts((current) => ({
-                        ...current,
-                        [selectedProfile?.accountIdx ?? -1]: event.target.value,
-                      }))
-                    }
-                    placeholder="socks5://127.0.0.1:1080"
-                    value={selectedProfile ? proxyDrafts[selectedProfile.accountIdx] ?? "" : ""}
-                  />
-                  <div className="text-xs leading-5 text-slate-500">
-                    Leave empty to disable the proxy. Save without restart when you want to stage the config first.
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <ActionButton
-                      disabled={!selectedProfile || Boolean(profileAction)}
-                      icon={<Shield className="h-4 w-4" />}
-                      label={profileAction === "proxy-save" ? "Saving…" : "Save"}
-                      onClick={() => void handleSaveProxy(false)}
+                  <label className="mt-4 flex items-center justify-between rounded-xl border border-white/8 bg-white/[0.04] px-3 py-2" data-local-input="true">
+                    <span className="text-sm text-slate-300">Overlays</span>
+                    <input checked={showOverlays} className="h-4 w-4 accent-[var(--accent)]" onChange={(event) => setShowOverlays(event.target.checked)} type="checkbox" />
+                  </label>
+                  <div className="mt-4">
+                    <RangeField
+                      label="Snapshot depth"
+                      max={100}
+                      min={5}
+                      onChange={setMaxElements}
+                      step={5}
+                      value={maxElements}
+                      valueLabel={`${maxElements}`}
                     />
-                    <ActionButton
-                      disabled={!selectedProfile || Boolean(profileAction)}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {mode === "chrome" && workspaceView === "operate" ? (
+            <div className="mt-4 flex min-h-0 flex-1 items-center justify-center">
+              {selectedProfile ? (
+                <div className="w-full max-w-[640px] rounded-[30px] border border-white/8 bg-black/20 p-8">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Profile</div>
+                      <div className="mt-2 text-3xl font-semibold text-white">account_{selectedProfile.accountIdx}</div>
+                      <div className="mt-2 text-sm text-slate-500">{selectedProfile.gmail || "No mailbox label"}</div>
+                    </div>
+                    <div className={`rounded-full px-3 py-1 text-xs ${selectedProfile.liveStatus?.isRunning ? "bg-emerald-500/12 text-emerald-200" : "bg-white/[0.06] text-slate-400"}`}>
+                      {chromeStatus}
+                    </div>
+                  </div>
+                  <div className="mt-8 grid grid-cols-2 gap-4">
+                    <Field label="Port" value={selectedProfile.port != null ? String(selectedProfile.port) : "—"} />
+                    <Field label="Proxy" value={selectedProfile.proxy ? "enabled" : "disabled"} />
+                  </div>
+                </div>
+              ) : (
+                <div className="text-sm text-slate-500">No profile selected</div>
+              )}
+            </div>
+          ) : null}
+
+          {mode === "chrome" && workspaceView === "launch" ? (
+            <div className="mt-4 flex min-h-0 flex-1 items-center justify-center">
+              {selectedProfile ? (
+                <div className="w-full max-w-[640px] rounded-[30px] border border-white/8 bg-black/20 p-8">
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Launch</div>
+                  <div className="mt-2 text-2xl font-semibold text-white">account_{selectedProfile.accountIdx}</div>
+                  <div className="mt-6 flex flex-wrap gap-2">
+                    <Button
+                      disabled={Boolean(profileAction)}
+                      icon={<ArrowUpRight className="h-4 w-4" />}
+                      label={profileAction === "open" ? "Opening" : "Open"}
+                      onClick={() => void handleProfileAction("open")}
+                    />
+                    <Button
+                      disabled={Boolean(profileAction)}
                       icon={<RotateCcw className="h-4 w-4" />}
-                      label={profileAction === "proxy-restart" ? "Saving + restarting…" : "Save + restart"}
-                      onClick={() => void handleSaveProxy(true)}
-                      tone="primary"
+                      label={profileAction === "restart" ? "Restarting" : "Restart"}
+                      onClick={() => void handleProfileAction("restart")}
                     />
-                    <ActionButton
-                      disabled={!selectedProfile || Boolean(profileAction)}
-                      icon={<Trash2 className="h-4 w-4" />}
-                      label="Clear"
-                      onClick={() => {
-                        if (!selectedProfile) return;
-                        setProxyDrafts((current) => ({ ...current, [selectedProfile.accountIdx]: "" }));
-                      }}
+                    <Button
+                      disabled={Boolean(profileAction)}
+                      icon={<Square className="h-4 w-4" />}
+                      label={profileAction === "stop" ? "Stopping" : "Stop"}
+                      onClick={() => void handleProfileAction("stop")}
                     />
                   </div>
                 </div>
+              ) : (
+                <div className="text-sm text-slate-500">No profile selected</div>
+              )}
+            </div>
+          ) : null}
+
+          {mode === "chrome" && workspaceView === "tune" ? (
+            <div className="mt-4 grid flex-1 gap-4 xl:grid-cols-[1fr_0.9fr]">
+              <div className="rounded-[28px] border border-white/8 bg-black/20 p-5" data-local-input="true">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Proxy</div>
+                <textarea
+                  className="mt-4 min-h-[220px] w-full rounded-2xl border border-white/8 bg-white/[0.04] px-3 py-3 font-mono text-sm text-white outline-none transition focus:border-[color:var(--accent)]/60"
+                  disabled={!selectedProfile}
+                  onChange={(event) =>
+                    setProxyDrafts((current) => ({
+                      ...current,
+                      [selectedProfile?.accountIdx ?? -1]: event.target.value,
+                    }))
+                  }
+                  placeholder="socks5://127.0.0.1:1080"
+                  value={selectedProfile ? proxyDrafts[selectedProfile.accountIdx] ?? "" : ""}
+                />
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Button disabled={!selectedProfile || Boolean(profileAction)} icon={<Link2 className="h-4 w-4" />} label="Save" onClick={() => void handleSaveProxy(false)} />
+                  <Button
+                    disabled={!selectedProfile || Boolean(profileAction)}
+                    icon={<RotateCcw className="h-4 w-4" />}
+                    label="Save + restart"
+                    onClick={() => void handleSaveProxy(true)}
+                  />
+                </div>
               </div>
-            </>
-          )}
-        </aside>
+
+              <div className="rounded-[28px] border border-white/8 bg-black/20 p-5">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Details</div>
+                <div className="mt-4 space-y-4">
+                  <Field label="Account" value={selectedProfile ? `account_${selectedProfile.accountIdx}` : "No selection"} />
+                  <Field label="Mailbox" value={selectedProfile?.gmail || "—"} />
+                  <Field label="Port" value={selectedProfile?.port != null ? String(selectedProfile.port) : "—"} />
+                  <Field label="Profile key" value={selectedProfile?.profileKey || "—"} />
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </main>
       </div>
 
       {snapshotDialogText ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/72 p-4 backdrop-blur-sm">
-          <div className="flex max-h-[85vh] w-full max-w-4xl flex-col overflow-hidden rounded-[28px] border border-white/10 bg-[#0c1418] shadow-[0_24px_120px_rgba(0,0,0,0.55)]">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/78 p-4 backdrop-blur-sm">
+          <div className="flex max-h-[82vh] w-full max-w-4xl flex-col overflow-hidden rounded-[28px] border border-white/10 bg-[#0b1318]">
             <div className="flex items-center justify-between border-b border-white/8 px-5 py-4">
-              <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Snapshot output</div>
-                <div className="mt-1 text-lg font-semibold text-white">Structured webpage snapshot</div>
-              </div>
+              <div className="text-sm font-medium text-white">Snapshot</div>
               <button
-                className="rounded-xl border border-white/8 bg-white/[0.04] p-2 text-slate-300 transition hover:border-white/16 hover:bg-white/[0.08]"
+                className="rounded-lg p-2 text-slate-400 transition hover:bg-white/[0.06] hover:text-white"
                 onClick={() => setSnapshotDialogText(null)}
                 type="button"
               >
@@ -1515,8 +1152,8 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
       {clickPulse ? (
         <div className="pointer-events-none fixed z-50" style={{ left: clickPulse.x, top: clickPulse.y }}>
           <div className="relative -translate-x-1/2 -translate-y-1/2">
-            <div className="h-10 w-10 animate-ping rounded-full border-2 border-[var(--accent)] bg-[color:var(--accent)]/25" />
-            <div className="absolute inset-0 rounded-full border-2 border-[var(--accent)] bg-[color:var(--accent)]/35" />
+            <div className="h-10 w-10 animate-ping rounded-full border-2 border-[var(--accent)] bg-[color:var(--accent)]/20" />
+            <div className="absolute inset-0 rounded-full border-2 border-[var(--accent)] bg-[color:var(--accent)]/28" />
           </div>
         </div>
       ) : null}

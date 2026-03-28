@@ -56,24 +56,15 @@ export default function Login({ onLogin }: LoginProps) {
             CiCy Desktop
           </div>
 
-          <h1 className="mt-8 max-w-lg text-4xl font-semibold tracking-tight text-white">Operator-grade start page for desktop automation.</h1>
-          <p className="mt-4 max-w-xl text-sm leading-7 text-slate-400">
-            Connect once, then work from a cleaner control surface that keeps the current target obvious and the low-level tools nearby
-            instead of everywhere.
-          </p>
-
-          <div className="mt-10 grid gap-3 sm:grid-cols-2">
+          <h1 className="mt-8 max-w-lg text-4xl font-semibold tracking-tight text-white">One console. Two runtimes.</h1>
+          <div className="mt-8 grid gap-3 sm:grid-cols-2">
             <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
-              <div className="text-sm font-medium text-white">Electron windows</div>
-              <p className="mt-2 text-sm leading-6 text-slate-400">
-                Preview, focus, resize, click, reload, snapshot, and watch active browser sessions.
-              </p>
+              <div className="text-sm font-medium text-white">Electron</div>
+              <div className="mt-2 text-sm text-slate-400">Preview and control windows.</div>
             </div>
             <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
-              <div className="text-sm font-medium text-white">Chrome profiles</div>
-              <p className="mt-2 text-sm leading-6 text-slate-400">
-                Keep lifecycle and proxy management available without turning the main view into a debug dump.
-              </p>
+              <div className="text-sm font-medium text-white">Chrome</div>
+              <div className="mt-2 text-sm text-slate-400">Launch and manage profiles.</div>
             </div>
           </div>
         </section>
@@ -83,10 +74,7 @@ export default function Login({ onLogin }: LoginProps) {
             <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04]">
               <KeyRound className="h-6 w-6 text-[var(--accent)]" />
             </div>
-            <h2 className="mt-6 text-2xl font-semibold text-white">Connect to a worker</h2>
-            <p className="mt-2 text-sm leading-6 text-slate-400">
-              If this page was opened from the worker directly, only the access token usually needs to change.
-            </p>
+            <h2 className="mt-6 text-2xl font-semibold text-white">Connect</h2>
           </div>
 
           <form className="space-y-5" onSubmit={(event) => void handleLogin(event)}>
