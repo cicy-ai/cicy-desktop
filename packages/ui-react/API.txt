@@ -1,0 +1,1170 @@
+API BASE_URL:https://gcp-8101.cicy.de5.net/
+
+tools:
+  - name: ping
+    description: 测试 MCP 服务器连接
+    inputSchema:
+      type: object
+      properties: {}
+  - name: refresh_token
+    description: 刷新认证 token
+    inputSchema:
+      type: object
+      properties: {}
+  - name: r-reset
+    description: 清除 require 缓存，重新加载 tools 和 utils 模块
+    inputSchema:
+      type: object
+      properties: {}
+  - name: get_system_windows
+    description: 获取系统所有窗口信息（进程名、PID、窗口位置）
+    inputSchema:
+      type: object
+      properties:
+        detail:
+          type: boolean
+          default: false
+          description: 是否显示详细信息
+  - name: focus_system_window
+    description: 聚焦指定的系统窗口
+    inputSchema:
+      type: object
+      properties:
+        windowId:
+          type: string
+          description: 窗口ID（从 get_system_windows 获取）
+      required:
+        - windowId
+  - name: get_system_info
+    description: 获取系统信息（CPU、内存、磁盘、负载、IP）
+    inputSchema:
+      type: object
+      properties: {}
+  - name: system_screenshot
+    description: 截取系统屏幕并保存到文件
+    inputSchema:
+      type: object
+      properties:
+        quality:
+          type: integer
+          default: 80
+          description: JPEG 质量 (1-100)
+        copyToClipboard:
+          type: boolean
+          default: false
+          description: 是否复制到剪贴板
+  - name: sys_win_screenshot
+    description: 截取指定系统窗口并保存到文件
+    inputSchema:
+      type: object
+      properties:
+        windowId:
+          type: string
+          description: 窗口ID（从 get_system_windows 获取）
+        quality:
+          type: integer
+          default: 80
+          description: JPEG 质量 (1-100)
+        copyToClipboard:
+          type: boolean
+          default: false
+          description: 是否复制到剪贴板
+      required:
+        - windowId
+  - name: system_window_setbound
+    description: 设置系统窗口的位置和大小
+    inputSchema:
+      type: object
+      properties:
+        windowId:
+          type: string
+          description: 窗口ID（从 get_system_windows 获取）
+        x:
+          type: integer
+          description: X 坐标
+        'y':
+          type: integer
+          description: Y 坐标
+        width:
+          type: integer
+          description: 宽度
+        height:
+          type: integer
+          description: 高度
+      required:
+        - windowId
+  - name: get_chatgpt_web_conversations
+    description: >-
+      List chatgpt conversations from indexedDB, returns id, title, updateTime,
+      total
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+        limit:
+          type: integer
+          default: 10
+          description: return limit
+        strip:
+          type: integer
+          default: 0
+          description: return strip
+  - name: get_chatgpt_web_current_messages
+    description: Get messages from the most recent chatgpt conversation in indexedDB
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+  - name: get_chatgpt_web_messages_by_id
+    description: Get messages from a specific chatgpt conversation by id
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+        conversation_id:
+          type: string
+          description: Conversation ID
+      required:
+        - conversation_id
+  - name: open_chatgpt_web_chat_by_id
+    description: Navigate to a specific chatgpt conversation by id
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+        conversation_id:
+          type: string
+          description: Conversation ID
+      required:
+        - conversation_id
+  - name: is_chatgpt_logged
+    description: Check if chatgpt is logged in by inspecting cookies and page state
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+  - name: chatgpt_web_status
+    description: >-
+      Get chatgpt web page status: login state, current URL, conversation info,
+      prompt textarea state
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+  - name: chatgpt_web_clear_prompt
+    description: Clear the chatgpt prompt input
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+  - name: chatgpt_web_set_prompt
+    description: Set the chatgpt prompt input value
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+        text:
+          type: string
+          description: Text to set in prompt
+      required:
+        - text
+  - name: chatgpt_web_click_send
+    description: Click the chatgpt send prompt button
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+  - name: chatgpt_web_ask
+    description: >-
+      Ask chatgpt a question - checks login, sets prompt, sends, waits for
+      response, returns reply
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+        text:
+          type: string
+          description: Question to ask
+        waitMs:
+          type: integer
+          default: 10000
+          description: Wait time for response in ms
+      required:
+        - text
+  - name: gemini_web_ensure
+    description: Ensure gemini window exists and is on gemini.google.com
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          description: 窗口 ID，不提供则创建新窗口
+        accountIdx:
+          type: integer
+          default: 0
+          description: 账户索引
+  - name: is_gemini_logged
+    description: Check if gemini is logged in
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+  - name: gemini_web_status
+    description: Get gemini web page status
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+  - name: gemini_web_clear_prompt
+    description: Clear the gemini prompt input
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+  - name: gemini_web_set_prompt
+    description: Set the gemini prompt input value
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+        text:
+          type: string
+          description: Text to set in prompt
+      required:
+        - text
+  - name: gemini_web_click_send
+    description: Click send button or press Enter in Gemini
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+  - name: gemini_web_image_clipboard_prompt
+    description: Paste image from clipboard to gemini input
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+  - name: gemini_web_image_base64_prompt
+    description: Ask Gemini with base64 image and prompt
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+        imageBase64:
+          type: string
+          description: Base64 image data
+        prompt:
+          type: string
+          description: Question to ask about the image
+        waitMs:
+          type: integer
+          default: 20000
+          description: Wait time for response
+      required:
+        - imageBase64
+        - prompt
+  - name: get_windows
+    description: |-
+      获取当前所有 Electron 窗口的实时状态列表。返回每个窗口的详细信息，是窗口管理和自动化操作的基础工具。
+        
+        返回信息包括：
+        - id: 窗口的唯一标识符（调用其他 invoke_window 工具时必需）
+        - title/url: 窗口当前的标题和网址
+        - debuggerIsAttached: 调试器是否已附加
+        - isActive/isVisible: 窗口焦点和可见性状态
+        - accountIdx: 窗口所在帐户,帐户可以是0,1,2,3...每个相同帐户下面的所有窗口共享缓存cookie等,
+        - bounds: 窗口位置和大小 (x, y, width, height)
+        - 加载状态: isLoading, isDomReady, isCrashed 等
+
+        主要用途：
+        - 窗口管理：获取窗口ID进行后续操作
+        - 状态监控：检查窗口是否正常运行
+        - 自动化测试：验证窗口状态和属性
+        - 调试辅助：查看所有窗口的实时信息
+    inputSchema:
+      type: object
+      properties: {}
+  - name: get_window_info
+    description: 获取指定窗口的详细信息
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: Window ID
+  - name: open_window
+    description: 打开新的浏览器窗口。用于创建新窗口访问网页、测试多窗口应用或隔离不同的浏览会话。支持自定义窗口大小和位置。
+    inputSchema:
+      type: object
+      properties:
+        url:
+          type: string
+          description: URL to open
+        accountIdx:
+          type: integer
+          default: 0
+          description: 窗口所在帐户,帐户可以是0,1,2,3...每个相同帐户下面的所有窗口共享缓存cookie等
+        reuseWindow:
+          type: boolean
+          default: true
+          description: 是否复用现有窗口。true=复用(默认)，false=创建新窗口
+        options:
+          type: object
+          description: Electron BrowserWindow options
+      required:
+        - url
+  - name: close_window
+    description: 关闭窗口
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: Window ID
+  - name: load_url
+    description: 加载URL
+    inputSchema:
+      type: object
+      properties:
+        url:
+          type: string
+          description: URL
+        win_id:
+          type: integer
+          description: Window ID
+      required:
+        - url
+  - name: get_title
+    description: 获取窗口标题
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: Window ID
+  - name: control_electron_BrowserWindow
+    description: >-
+      直接调用Electron
+      BrowserWindow实例的方法和属性。主要用途：窗口控制(移动、调整大小、最小化、最大化)、状态管理(置顶、焦点、可见性)、属性获取(位置、大小、状态)、高级操作(透明度、边框、图标)。可访问win(BrowserWindow实例)和webContents对象，支持async/await。示例:
+      win.getBounds() 或 win.maximize() 或
+      win.webContents.executeJavaScript('document.title')
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+        code:
+          type: string
+          description: JS 代码
+      required:
+        - code
+  - name: set_window_bounds
+    description: 设置窗口的位置和大小。可以单独设置 x, y 坐标或 width, height 尺寸，也可以同时设置。坐标原点在屏幕左上角。
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+        x:
+          type: integer
+          description: 窗口 X 坐标（像素）
+        'y':
+          type: integer
+          description: 窗口 Y 坐标（像素）
+        width:
+          type: integer
+          description: 窗口宽度（像素）
+        height:
+          type: integer
+          description: 窗口高度（像素）
+  - name: control_electron_WebContents
+    description: >-
+      调用Electron
+      webContents的方法和属性。主要用途：页面操作(截图、打印、缩放、导航)、内容获取(URL、标题、源码)、脚本执行(在页面中执行JS)、开发调试(控制台信息、性能数据)、媒体控制(音频/视频)。可访问webContents和win对象，支持async/await，自动处理NativeImage返回为图像格式。示例:
+      webContents.getURL() 或 webContents.reload() 或 webContents.capturePage()
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+        code:
+          type: string
+          description: JS 代码
+      required:
+        - code
+  - name: get_console_logs
+    description: >-
+      获取窗口的控制台日志。返回自窗口创建或上次重载以来的所有 console 输出，包括 log/info/warning/error
+      等级别。支持分页查询和过滤。
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+        page:
+          type: integer
+          default: 1
+          description: 页码，从1开始
+        page_size:
+          type: integer
+          default: 50
+          description: 每页数量
+        keyword:
+          type: string
+          description: 关键词过滤，匹配日志消息
+        level:
+          type: string
+          description: 日志级别过滤
+  - name: get_requests
+    description: 获取窗口的网络请求记录。返回所有请求的详细信息（包含文件路径）。支持 URL 过滤和分页。
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+        page:
+          type: integer
+          default: 1
+          description: 页码，从1开始
+        page_size:
+          type: integer
+          default: 50
+          description: 每页数量
+        filter:
+          type: string
+          description: URL 过滤关键词（支持正则表达式）
+  - name: filter_requests
+    description: 根据关键词或文档类型过滤网络请求。搜索 URL、POST data 或按文档类型筛选。
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+        keyword:
+          type: string
+          description: 搜索关键词（可选）
+        doc_type:
+          type: string
+          description: 文档类型过滤（如 json, html, javascript, css, image, xml）
+        page:
+          type: integer
+          default: 1
+          description: 页码，从1开始
+        page_size:
+          type: integer
+          default: 50
+          description: 每页数量
+  - name: get_request_detail
+    description: 获取指定请求的详细信息，包括请求头和请求体。使用请求的 index 来查询。
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+        index:
+          type: integer
+          description: 请求的 index
+      required:
+        - index
+  - name: session_download_url
+    description: 使用窗口的 session 下载文件到指定路径。不会弹出保存对话框，下载完成后文件直接保存到 save_path。
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+        url:
+          type: string
+          description: 下载 URL
+        save_path:
+          type: string
+          description: 保存路径（完整路径包含文件名），下载完成后文件保存在此路径
+        timeout:
+          type: integer
+          default: 300000
+          description: 超时时间（毫秒），默认 5 分钟
+      required:
+        - url
+        - save_path
+  - name: get_request_urls
+    description: 获取窗口的所有请求 URL 列表（队列）。支持 URL 过滤。
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+        page:
+          type: integer
+          default: 1
+          description: 页码，从1开始
+        page_size:
+          type: integer
+          default: 100
+          description: 每页数量
+        filter:
+          type: string
+          description: URL 过滤关键词（支持正则表达式）
+  - name: get_request_detail_by_url
+    description: 根据 URL 获取请求的完整详情。返回该 URL 的所有请求和响应的文件路径列表。
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+        url:
+          type: string
+          description: 请求的完整 URL
+      required:
+        - url
+  - name: clear_requests
+    description: 清空指定窗口的所有请求记录（仅清空内存，不删除已保存的文件）。
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+  - name: get_downloads
+    description: 获取所有下载记录
+    inputSchema:
+      type: object
+      properties: {}
+  - name: get_download
+    description: 获取指定下载的详细信息
+    inputSchema:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: 下载ID
+      required:
+        - id
+  - name: clear_downloads
+    description: 清空所有下载记录
+    inputSchema:
+      type: object
+      properties: {}
+  - name: webpage_screenshot_to_clipboard
+    description: |-
+      捕获指定窗口的页面截图并自动复制到系统剪贴板。这是快速获取页面视觉内容的便捷工具。
+
+      主要用途：
+      - 快速截图：一键获取页面截图
+      - 文档记录：保存页面状态用于报告或文档
+      - 测试验证：验证页面显示效果
+      - 问题报告：快速获取错误页面截图
+      - 内容分享：将页面内容复制到其他应用
+
+      特点：
+      - 自动复制到剪贴板，可直接粘贴到其他应用
+      - 返回 MCP 图像格式，支持在对话中显示
+      - 包含图像尺寸信息
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          description: Window ID to capture (defaults to 1)
+  - name: webpage_snapshot
+    description: 捕获页面的结构快照，包含 URL、截图和所有可交互元素的信息。支持按类型/文本搜索元素。
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          description: Window ID
+        max_elements:
+          type: integer
+          default: 20
+          description: 最大元素数量
+        include_screenshot:
+          type: boolean
+          default: true
+          description: 是否包含截图
+        show_overlays:
+          type: boolean
+          default: false
+          description: 是否显示可点击元素遮罩(5秒后消失)
+  - name: cdp_click
+    description: 使用 Chrome DevTools Protocol 点击页面指定坐标
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+        x:
+          type: integer
+          description: X 坐标
+        'y':
+          type: integer
+          description: Y 坐标
+        button:
+          type: string
+          default: left
+          description: 鼠标按钮
+      required:
+        - x
+        - 'y'
+  - name: cdp_dblclick
+    description: 使用 Chrome DevTools Protocol 双击页面指定坐标
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+        x:
+          type: integer
+          description: X 坐标
+        'y':
+          type: integer
+          description: Y 坐标
+        button:
+          type: string
+          default: left
+          description: 鼠标按钮
+      required:
+        - x
+        - 'y'
+  - name: cdp_press_key
+    description: 使用 CDP 按下指定按键
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+        key:
+          type: string
+          description: 按键名称，如 'Enter', 'Backspace', 'a', 'A'
+      required:
+        - key
+  - name: cdp_press_enter
+    description: 使用 CDP 按下回车键
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+  - name: cdp_press_backspace
+    description: 使用 CDP 按下退格键
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+  - name: cdp_press_copy
+    description: 使用 CDP 执行复制操作 (Ctrl+C)
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+  - name: cdp_press_paste
+    description: 执行粘贴操作，支持多种方法
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+        method:
+          type: string
+          default: sendInputEvent
+          description: '粘贴方法: sendInputEvent(推荐), cdp(CDP按键), js(JavaScript事件)'
+  - name: cdp_press_selectall
+    description: 使用 CDP 执行全选操作 (Ctrl+A)
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+  - name: cdp_press_cut
+    description: 使用 CDP 执行剪切操作 (Ctrl+X)
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+  - name: cdp_type_text
+    description: 使用 CDP 输入文本
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+        text:
+          type: string
+          description: 要输入的文本
+      required:
+        - text
+  - name: cdp_scroll
+    description: 使用 CDP 滚动页面
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+        x:
+          type: integer
+          default: 0
+          description: 水平滚动距离
+        'y':
+          type: integer
+          description: 垂直滚动距离
+      required:
+        - 'y'
+  - name: cdp_sendcmd
+    description: 使用 CDP 发送任意 Chrome DevTools Protocol 命令
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+        method:
+          type: string
+          description: CDP 方法名，如 'Page.navigate', 'Runtime.evaluate'
+        params:
+          type: string
+          default: {}
+          description: CDP 参数对象
+      required:
+        - method
+  - name: exec_js
+    description: >-
+      在窗口中执行JS代码并返回结果,支持async/await。示例: document.title 或 return document.title 或
+      await fetch('/api').then(r=>r.json())
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+        code:
+          type: string
+          description: JS 代码
+      required:
+        - code
+  - name: get_element_client_bound
+    description: >-
+      获取页面元素的位置和尺寸信息(getBoundingClientRect)。返回元素的 x, y, width, height, top,
+      left, right, bottom 坐标。selector 必须唯一且不能为空
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+        selector:
+          type: string
+          description: CSS 选择器，如 '#id', '.class', 'button'
+      required:
+        - selector
+  - name: show_float_div
+    description: 在页面中心显示一个可拖拽、可调整大小的浮动 div。支持自定义位置、尺寸和透明度。
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+        x:
+          type: integer
+          description: X 坐标 (默认居中)
+        'y':
+          type: integer
+          description: Y 坐标 (默认居中)
+        w:
+          type: integer
+          default: 300
+          description: 宽度 (默认 300)
+        h:
+          type: integer
+          default: 200
+          description: 高度 (默认 200)
+        opacity:
+          type: integer
+          default: 0.7
+          description: 背景透明度 0-1 (默认 0.7)
+  - name: clipboard_write_text
+    description: Write text to system clipboard
+    inputSchema:
+      type: object
+      properties:
+        text:
+          type: string
+          description: Text to write to clipboard
+      required:
+        - text
+  - name: clipboard_read_text
+    description: Read text from system clipboard
+    inputSchema:
+      type: object
+      properties: {}
+  - name: clipboard_write_image
+    description: Write image to system clipboard from base64 data
+    inputSchema:
+      type: object
+      properties:
+        base64:
+          type: string
+          description: Base64 encoded image data
+      required:
+        - base64
+  - name: test_paste_methods
+    description: 测试三种粘贴方法，返回哪些方法有效
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口 ID
+  - name: exec_shell
+    description: Execute shell command
+    inputSchema:
+      type: object
+      properties:
+        command:
+          type: string
+          description: Shell command to execute
+        cwd:
+          type: string
+          description: Working directory
+      required:
+        - command
+  - name: exec_python
+    description: Execute Python code
+    inputSchema:
+      type: object
+      properties:
+        code:
+          type: string
+          description: Python code to execute
+        cwd:
+          type: string
+          description: Working directory
+      required:
+        - code
+  - name: exec_node
+    description: Execute Node.js code
+    inputSchema:
+      type: object
+      properties:
+        code:
+          type: string
+          description: Node.js code to execute
+        cwd:
+          type: string
+          description: Working directory
+      required:
+        - code
+  - name: file_read
+    description: 读取文本文件内容
+    inputSchema:
+      type: object
+      properties:
+        path:
+          type: string
+          description: 文件路径
+      required:
+        - path
+  - name: file_write
+    description: 写入文本文件内容
+    inputSchema:
+      type: object
+      properties:
+        path:
+          type: string
+          description: 文件路径
+        content:
+          type: string
+          description: 文件内容
+      required:
+        - path
+        - content
+  - name: file_upload
+    description: 上传文件到服务器（base64编码），返回可访问的 URL
+    inputSchema:
+      type: object
+      properties:
+        filename:
+          type: string
+          description: 文件名
+        content:
+          type: string
+          description: 文件内容（base64编码）
+      required:
+        - filename
+        - content
+  - name: file_download
+    description: 从本地路径下载文件，复制到服务器并返回 URL
+    inputSchema:
+      type: object
+      properties:
+        path:
+          type: string
+          description: 本地文件路径
+      required:
+        - path
+  - name: electron_click
+    description: 点击页面上的元素（通过CSS选择器）
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口ID
+        selector:
+          type: string
+          description: CSS选择器，例如：button[aria-label='close']
+        waitTimeout:
+          type: integer
+          default: 5000
+          description: 等待元素出现的超时时间（毫秒）
+      required:
+        - selector
+  - name: electron_type
+    description: 在页面元素中输入文字（通过CSS选择器）
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口ID
+        selector:
+          type: string
+          description: CSS选择器，例如：input[name='username']
+        text:
+          type: string
+          description: 要输入的文字
+        clear:
+          type: boolean
+          default: true
+          description: 输入前是否清空原有内容
+        waitTimeout:
+          type: integer
+          default: 5000
+          description: 等待元素出现的超时时间（毫秒）
+      required:
+        - selector
+        - text
+  - name: electron_get_content
+    description: 获取页面的HTML内容或文本内容
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口ID
+        selector:
+          type: string
+          description: CSS选择器，不指定则获取整个页面
+        type:
+          type: string
+          default: text
+          description: 返回类型：html或text
+  - name: electron_screenshot
+    description: 截取窗口的屏幕截图
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口ID
+        format:
+          type: string
+          default: png
+          description: 图片格式
+  - name: electron_wait_for
+    description: 等待页面元素出现
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口ID
+        selector:
+          type: string
+          description: CSS选择器
+        timeout:
+          type: integer
+          default: 10000
+          description: 超时时间（毫秒）
+      required:
+        - selector
+  - name: electron_evaluate
+    description: 在页面中执行JavaScript代码并返回结果
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口ID
+        code:
+          type: string
+          description: 要执行的JavaScript代码
+      required:
+        - code
+  - name: electron_get_attribute
+    description: 获取页面元素的属性值
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口ID
+        selector:
+          type: string
+          description: CSS选择器
+        attribute:
+          type: string
+          description: 属性名，例如：href, src, value, class
+      required:
+        - selector
+        - attribute
+  - name: electron_select
+    description: 选择下拉框（select）的选项
+    inputSchema:
+      type: object
+      properties:
+        win_id:
+          type: integer
+          default: 1
+          description: 窗口ID
+        selector:
+          type: string
+          description: select元素的CSS选择器
+        value:
+          type: string
+          description: 要选择的option的value值
+      required:
+        - selector
+        - value
+  - name: get_account
+    description: 获取指定账户的配置信息，包括窗口列表、创建时间等
+    inputSchema:
+      type: object
+      properties:
+        accountIdx:
+          type: integer
+          description: 账户索引
+      required:
+        - accountIdx
+  - name: save_account_info
+    description: 保存或更新账户配置信息
+    inputSchema:
+      type: object
+      properties:
+        accountIdx:
+          type: integer
+          description: 账户索引
+        metadata:
+          type: object
+      required:
+        - accountIdx
+  - name: list_accounts
+    description: 列出所有已创建的账户
+    inputSchema:
+      type: object
+      properties: {}

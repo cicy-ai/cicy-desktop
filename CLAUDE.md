@@ -2,161 +2,211 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
+## Common commands
 
-This is an Electron-based MCP (Model Context Protocol) server that provides browser automation and web scraping capabilities. It exposes window management, Chrome DevTools Protocol (CDP) operations, and page interaction tools through a standardized MCP interface.
-
-## Development Commands
-
-### Starting the Server
+### Install and run
 ```bash
-# Start MCP server (default port 8101)
-npm start
-
-# Start with custom port
-npm start -- --port=8102
-
-# Start in test mode with environment variables
-export URL=https://www.google.com
-export TEST=true
-export DISPLAY=:1
-npx electron main.js
-```
-
-### Testing
-```bash
-# Run complete test suite
-npm test
-
-# Run specific test categories
-npm run test:api          # Basic API tests
-npm run test:cdp          # All CDP tools tests
-npm run test:cdp-mouse    # CDP mouse operations
-npm run test:cdp-keyboard # CDP keyboard operations
-npm run test:cdp-page     # CDP page operations
-
-# Run single test with pattern
-npm test -- --testNamePattern="cdp_click"
-```
-
-### Development Setup
-```bash
-# Install dependencies
 npm install
-
-# Kill existing processes on port
-pkill electron
+npm start
+npm run start:master
 ```
+
+- `npm start` runs the local Electron worker via `bin/cicy-desktop`
+- `npm run start:master` starts the control-plane master on port `8100` by default
+
+### Formatting
+```bash
+npm run format
+npm run format:check
+```
+
+### Tests
+```bash
+npm test
+npx jest --runInBand tests/rpc/master-routes.test.js
+npx jest --runInBand tests/rpc/cicy-rpc.test.js
+npx jest --runInBand --testNamePattern="Master routes" tests/rpc/master-routes.test.js
+```
+
+Notes:
+- Jest is configured in `jest.config.js` with `maxWorkers: 1`, global setup/teardown, and `forceExit: true`
+- Tests under `tests/rpc/` commonly spin up the Electron worker or hit HTTP routes through supertest
+- If you only need one file, prefer `npx jest --runInBand <path-to-test>`
+
+### Build
+```bash
+npm run build
+npm run build:win
+npm run build:linux
+```
+
+### RPC CLI workflows
+```bash
+./bin/cicy-rpc init
+./bin/cicy-rpc tools
+./bin/cicy-rpc ping
+CICY_NODE=windows ./bin/cicy-rpc ping
+CICY_NODE=windows ./bin/cicy-rpc chrome_launch_profile accountIdx=1 url=https://example.com/
+```
+
+Important:
+- `cicy` / `cicy-desktop` is for lifecycle management
+- `cicy-rpc` is the RPC/tool CLI
+- `cicy-rpc` reads `~/global.json`
+- remote node selection is done with `CICY_NODE=<name>`
 
 ## Architecture
 
-### Core Components
+The codebase has two runtime roles:
 
-**main.js** - Main application file containing:
-- `ElectronMcpServer` class - Core MCP server implementation
-- Tool registration system using `registerTool()` method
-- HTTP server with SSE (Server-Sent Events) transport
-- Authentication token management
-- Network monitoring and resource capture system
+1. **Worker**: an Electron desktop automation process exposing MCP-style tools and REST/RPC endpoints
+2. **Master**: a lightweight control plane that tracks workers/agents/tasks and forwards `/api/rpc/:toolName` calls to a selected worker
 
-**start-mcp.js** - Server launcher with:
-- Port management and conflict resolution
-- Background process spawning
-- Logging system (~/logs/cicy-desktop.log)
-- Process lifecycle management
+### Worker runtime
 
-**snapshot-utils.js** - Screenshot utilities:
-- Page capture with automatic macOS scaling
-- Clipboard integration
-- MCP-compatible image format conversion
+The main worker entrypoint is `src/main.js`.
 
-### MCP Tool Categories
+Key responsibilities there:
+- initialize Electron flags, auth, logging, Express, and MCP plumbing
+- load tool modules through `src/server/tool-catalog.js`
+- register every tool into both the MCP server and REST/RPC surface
+- expose worker metadata, agents, artifacts, and observability endpoints
+- optionally register/heartbeat to a master when `CICY_MASTER_URL` and `CICY_MASTER_TOKEN` are present
 
-1. **Window Management**: `get_windows`, `open_window`, `close_window`, `load_url`, `get_title`
-2. **Code Execution**: `invoke_window`, `invoke_window_webContents`, `invoke_window_webContents_debugger_cdp`
-3. **CDP Mouse**: `cdp_click`, `cdp_double_click`
-4. **CDP Keyboard**: `cdp_press_key`, `cdp_type_text`, `cdp_press_key_enter`, etc.
-5. **CDP Page**: `cdp_scroll`, `cdp_find_element`, `cdp_execute_script`, `cdp_get_page_title`
-6. **Screenshots**: `webpage_screenshot_to_clipboard`
-7. **System**: `ping`
+Important supporting modules:
+- `src/server/express-app.js`: base Express app, CORS, `/ping`, `/docs`, `/openapi.json`, and UI shell routes
+- `src/server/mcp-server.js`: MCP transport setup
+- `src/server/tool-registry.js`: tool registration bridge
+- `src/server/tool-executor.js`: central execution path for REST/MCP tool calls
+- `src/cluster/worker-client.js`: worker registration + heartbeat to the master
+- `src/cluster/worker-identity.js`: worker identity payload advertised to the master
 
-### Authentication System
+The worker exposes three important RPC surfaces:
+- `GET /rpc/tools`
+- `POST /rpc/tools/call`
+- `POST /rpc/:toolName`
 
-- Auto-generates authentication tokens stored in `~/global.json`
-- All HTTP requests require `Authorization: Bearer <token>` header
-- Token validation in `validateAuth()` method
+`POST /rpc/:toolName` is the simplest direct REST entrypoint and is what `cicy-rpc` uses after resolving the node from `~/global.json`.
 
-### Network Monitoring
+### Tool system
 
-The server automatically captures network resources when pages load:
-- Monitors Network.* CDP events
-- Saves resources by type: html, json, js, css, images
-- Organizes by domain in `~/data/captured_data/`
-- Prettifies JSON and code content
+Tool implementations live in `src/tools/*.js` and are loaded via `require("../tools")` from `src/server/tool-catalog.js`.
 
-## Key Implementation Details
+Each tool module exports a function that receives `registerTool(name, description, schema, handler, options)`. The resulting catalog is grouped by tag and then reused for:
+- MCP tool registration
+- `GET /rpc/tools`
+- OpenAPI generation in `/openapi.json`
 
-### Tool Registration Pattern
-```javascript
-this.registerTool(
-  "tool_name",
-  "Description in Chinese",
-  { param: z.string().describe("Parameter description") },
-  async ({ param }) => {
-    // Implementation
-    return { content: [{ type: "text", text: "Result" }] };
-  }
-);
+This means a tool definition change affects all three surfaces at once.
+
+### Master runtime
+
+The master entrypoint is `src/master/master-main.js`.
+
+It maintains in-memory state for:
+- `WorkerRegistry`: live registered workers
+- `WorkerInventory`: merged view of configured nodes from `~/global.json` plus registered workers
+- `AgentIndex`: worker agent metadata
+- `TaskStore`: forwarded task records
+- `SessionAffinityStore`: control-session routing affinity
+
+Master routes are split into:
+- `src/master/master-routes.js`: public API under `/api`
+- `src/master/master-admin-routes.js`: admin-only routes under `/admin`
+
+The most important master path is `POST /api/rpc/:toolName`:
+- builds request context from `workerId`, `agentId`, runtime session, control session, and `accountIdx`
+- chooses an execution target with `src/master/task-scheduler.js`
+- creates a task record
+- injects worker-specific fields like `win_id`, `agentId`, and `runtimeSessionId`
+- forwards the request to the selected worker via `src/cluster/remote-executor`
+- stores completion/failure state in `TaskStore`
+
+### Chrome profile dispatch model
+
+Chrome profile handling is split between master and worker.
+
+Current model:
+- the source-of-truth `chrome.json` lives on the **master** at `~/Private/chrome.json`
+- workers are not required to have local `~/Private/chrome.json`
+- workers only need a local template directory at `~/chrome/_tmp`
+
+Master-side profile resolution:
+- `src/master/chrome-config.js` reads master-local `~/Private/chrome.json`
+- `src/master/master-routes.js` injects `effectiveChromeProfile` for forwarded chrome tool calls when `accountIdx` is present
+- currently this injection is enabled for `chrome_launch_profile`, `chrome_get_profile`, `chrome_get_targets`, and `chrome_cdp_call`
+
+Worker-side launch behavior:
+- `src/tools/chrome-tools.js` implements chrome profile tools
+- `chrome_launch_profile` now prefers injected `effectiveChromeProfile`
+- if no injected profile is present, it falls back to local `~/Private/chrome.json` for backward compatibility
+- if neither exists, it returns a clear error
+- when a target user-data-dir does not exist, initialization is done from `~/chrome/_tmp`; if `_tmp` does not exist, it just creates the directory
+- `orgPath -> Default` copy is only best-effort if the path exists on that worker
+
+Chrome launch internals are intentionally separated:
+- `src/chrome/chrome-launcher.js`: binary resolution, Chrome args, process spawn, debugger readiness
+- `src/chrome/chrome-cdp-client.js`: `/json/version`, `/json/list`, activation, generic CDP calls
+- `src/chrome/runtime-registry.js`: local runtime state tracking per account
+
+### CLI/config split
+
+There are two separate CLIs and that distinction matters:
+- `bin/cicy-desktop` / `cicy`: local worker lifecycle management
+- `bin/cicy-rpc`: RPC/tool invocation
+
+`src/cli/rpc.js` is the source for `cicy-rpc`. It:
+- reads `~/global.json`
+- resolves `cicyDesktopNodes[<name>]`
+- uses `CICY_NODE` to choose the target node
+- POSTs directly to `/<rpc-path>` on that node with bearer auth
+
+`cicy-rpc init` only initializes `~/global.json` if the file does not already exist. It is not a general node-management command.
+
+## Config and auth
+
+### `~/global.json`
+
+This file is important for both RPC CLI usage and worker/master auth.
+
+Relevant fields:
+- top-level `api_token`
+- `cicyDesktopNodes.<name>.base_url`
+- `cicyDesktopNodes.<name>.api_token`
+
+`cicy-rpc` chooses the token in this order:
+1. `cicyDesktopNodes.<name>.api_token`
+2. top-level `api_token`
+
+### Worker registration to master
+
+To run a worker attached to a master, the important env vars are:
+```bash
+MASTER_TOKEN=$(jq -r '.api_token' ~/global.json)
+PORT=8101 CICY_MASTER_URL="http://127.0.0.1:8100" CICY_MASTER_TOKEN="$MASTER_TOKEN" npm start
 ```
 
-### Code Execution Context
-- `invoke_window`: Access to `win` (BrowserWindow) and `webContents` objects
-- `invoke_window_webContents`: Access to `webContents` and `win` objects
-- `invoke_window_webContents_debugger_cdp`: Access to `debuggerObj`, `webContents`, `win`
+The master itself uses `CICY_MASTER_TOKEN` or falls back to `MasterTokenManager`.
 
-### Error Handling
-- All tools return `{ isError: true }` for failures
-- Comprehensive error messages with stack traces
-- Parameter validation using Zod schemas
+## File map for common tasks
 
-### Test Architecture
-- Uses Jest with supertest for HTTP API testing
-- SSE connection management for real-time communication
-- Comprehensive CDP tool coverage (33 test cases)
-- Automatic Electron process lifecycle management
-- Authentication token integration
+- worker startup/runtime: `src/main.js`
+- master startup/runtime: `src/master/master-main.js`
+- master forwarding logic: `src/master/master-routes.js`
+- configured node inventory from `~/global.json`: `src/master/worker-inventory.js`
+- RPC CLI: `src/cli/rpc.js`
+- worker tool catalog loading: `src/server/tool-catalog.js`
+- tool execution plumbing: `src/server/tool-executor.js`
+- Chrome tools: `src/tools/chrome-tools.js`
+- Chrome launcher/CDP helpers: `src/chrome/chrome-launcher.js`, `src/chrome/chrome-cdp-client.js`
+- cluster registration/heartbeat: `src/cluster/worker-client.js`
+- RPC tests for forwarding and CLI behavior: `tests/rpc/master-routes.test.js`, `tests/rpc/cicy-rpc.test.js`
 
-## Common Patterns
+## Notes from existing docs
 
-### Adding New Tools
-1. Use `registerTool()` in the `setupTools()` method
-2. Follow the established parameter validation pattern with Zod
-3. Add corresponding test cases in `tests/api.test.js`
-4. Update documentation
-
-### CDP Operations
-- Always check if debugger is attached: `debuggerObj.isAttached()`
-- Attach with version: `debuggerObj.attach('1.3')`
-- Use `sendCommand()` for CDP protocol calls
-- Handle async operations with proper await
-
-### Window Management
-- Window IDs are used consistently across all window operations
-- Default window ID is 1 when not specified
-- Always validate window existence before operations
-
-## Environment Variables
-
-- `PORT`: Server port (default: 8101)
-- `TEST`: Enable test mode with auto-window creation
-- `URL`: Default URL for test window
-- `DISPLAY`: X11 display for headless environments
-- `NODE_ENV`: Environment mode (test/development/production)
-
-## File Structure Notes
-
-- Main server logic in `main.js` (1141 lines)
-- Comprehensive test suite in `tests/api.test.js` (712 lines)
-- Utility functions separated in `snapshot-utils.js`
-- Process management in `start-mcp.js`
-- All dependencies managed through `package.json`
+Important points already established in `README.md` and `AGENTS.md`:
+- this repo no longer uses the old unified CLI mental model
+- `cicy-rpc` is the canonical entrypoint for tool calls
+- remote node operations should be thought of as `CICY_NODE=<name> cicy-rpc <tool> ...`
+- tool modules use CommonJS and Zod schemas
+- tests often exercise real HTTP routes and Electron-backed behavior rather than pure unit isolation

@@ -33,7 +33,7 @@ function normalizeWorkerBaseUrl(baseUrl) {
   }
 }
 
-function readGlobalConfig(configPath = path.join(os.homedir(), "global.json")) {
+function readJson(configPath) {
   try {
     return JSON.parse(fs.readFileSync(configPath, "utf8"));
   } catch {
@@ -41,10 +41,23 @@ function readGlobalConfig(configPath = path.join(os.homedir(), "global.json")) {
   }
 }
 
+function getNodeConfigPath() {
+  return path.join(os.homedir(), "Private", "cicy-desktop.json");
+}
+
+function readGlobalConfig(configPath = path.join(os.homedir(), "global.json")) {
+  return readJson(configPath);
+}
+
+function readNodeConfig(configPath = getNodeConfigPath()) {
+  return readJson(configPath);
+}
+
 function loadConfiguredNodes(configPath) {
-  const config = readGlobalConfig(configPath);
+  const config = readNodeConfig(configPath);
+  const globalConfig = readGlobalConfig();
   const nodes = config.cicyDesktopNodes || {};
-  const fallbackToken = config.api_token || "";
+  const fallbackToken = globalConfig.api_token || "";
 
   return Object.entries(nodes)
     .map(([configNodeName, node]) => {
@@ -124,7 +137,7 @@ async function probeReachability(
 class WorkerInventory {
   constructor({
     workerRegistry,
-    configPath = path.join(os.homedir(), "global.json"),
+    configPath = getNodeConfigPath(),
     probeTimeoutMs = DEFAULT_REACHABILITY_TIMEOUT_MS,
     probeTtlMs = DEFAULT_REACHABILITY_TTL_MS,
     loadConfiguredNodesImpl = loadConfiguredNodes,

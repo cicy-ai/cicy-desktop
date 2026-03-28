@@ -7,6 +7,8 @@ const { killPort, isPortOpen } = require("../../src/utils/process-utils");
 
 const PORT = 18102;
 const initUrl = "http://www.google.com";
+const TEST_HOME = path.join(os.tmpdir(), "cicy-desktop-jest-home");
+const TEST_GLOBAL_JSON = path.join(TEST_HOME, "global.json");
 
 let desktopProcess;
 let sessionId;
@@ -18,6 +20,11 @@ async function startTestServer() {
   const isOpen = await isPortOpen(PORT);
   if (isOpen) {
     await killPort(PORT);
+  }
+
+  fs.mkdirSync(TEST_HOME, { recursive: true });
+  if (!fs.existsSync(TEST_GLOBAL_JSON)) {
+    fs.writeFileSync(TEST_GLOBAL_JSON, JSON.stringify({ api_token: "" }, null, 2) + "\n");
   }
 
   // Fix chrome-sandbox permissions on Linux
@@ -44,7 +51,7 @@ async function startTestServer() {
     stdio: "pipe",
     detached: false,
     cwd: path.join(__dirname, "../.."),
-    env: { ...process.env, TEST: "TRUE" },
+    env: { ...process.env, TEST: "TRUE", HOME: TEST_HOME },
   });
 
   desktopProcess.stdout.on("data", (data) => {
@@ -75,9 +82,8 @@ async function startTestServer() {
 
   await new Promise((resolve) => setTimeout(resolve, 3000));
 
-  const tokenPath = path.join(os.homedir(), "global.json");
-  if (fs.existsSync(tokenPath)) {
-    const config = JSON.parse(fs.readFileSync(tokenPath, "utf8"));
+  if (fs.existsSync(TEST_GLOBAL_JSON)) {
+    const config = JSON.parse(fs.readFileSync(TEST_GLOBAL_JSON, "utf8"));
     authToken = config.api_token || "";
   }
 
@@ -173,4 +179,6 @@ module.exports = {
   getAuthToken,
   getPort,
   getSSEResponses,
+  getTestHome: () => TEST_HOME,
+  getTestGlobalJsonPath: () => TEST_GLOBAL_JSON,
 };

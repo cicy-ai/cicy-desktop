@@ -16,6 +16,7 @@
     "test": "jest",
     "test:ls": "node tests/test-ls.js",
     "build": "electron-builder --publish never",
+    "build:ui": "cd packages/ui-react && npm install && npm run build",
     "build:win": "electron-builder --win --publish never",
     "build:linux": "electron-builder --linux --publish never"
   },

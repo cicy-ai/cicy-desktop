@@ -93,12 +93,12 @@ function showHelp() {
 
 Usage: cicy [command] [options]
 
-Cluster commands:
-  start                    Start cicy master + worker together in foreground (default)
-  stop                     Stop the running cicy master + worker cluster
-  status                   Show cicy master + worker cluster status
-  restart                  Restart the cicy master + worker cluster
-  logs                     Follow cluster logs
+Desktop commands:
+  start                    Start cicy worker in foreground (default)
+  stop                     Stop the running cicy worker
+  status                   Show cicy worker status
+  restart                  Restart the cicy worker
+  logs                     Follow worker logs
 
 Options:
   -h, --help               Show this help message
@@ -113,7 +113,7 @@ Examples:
   cicy status
   cicy restart
   cicy logs
-  cicy --master-port 8200 --port 8201
+  cicy --port 8201
 
 RPC commands moved to: cicy-rpc`);
 }
@@ -295,8 +295,8 @@ function hardCleanupBeforeStart({ masterPort, workerPort }) {
 function startForegroundCluster() {
   hardCleanupBeforeStart({ masterPort, workerPort });
   ensureDesktopCommandFile();
-  startMasterCluster({ masterPort, workerPort }).catch((error) => {
-    console.error(`❌ Failed to start master + worker: ${error.message}`);
+  startWorkerOnly({ workerPort }).catch((error) => {
+    console.error(`❌ Failed to start worker: ${error.message}`);
     process.exit(1);
   });
 }
@@ -308,19 +308,19 @@ function executeCommand(cmd) {
       break;
     case "stop":
       stop().catch((error) => {
-        console.error(`❌ Failed to stop cicy cluster: ${error.message}`);
+        console.error(`❌ Failed to stop cicy worker: ${error.message}`);
         process.exit(1);
       });
       break;
     case "status":
       status().catch((error) => {
-        console.error(`❌ Failed to get cicy cluster status: ${error.message}`);
+        console.error(`❌ Failed to get cicy worker status: ${error.message}`);
         process.exit(1);
       });
       break;
     case "restart":
       restart().catch((error) => {
-        console.error(`❌ Failed to restart cicy cluster: ${error.message}`);
+        console.error(`❌ Failed to restart cicy worker: ${error.message}`);
         process.exit(1);
       });
       break;
@@ -531,16 +531,16 @@ function parseToolText(response) {
   return text;
 }
 
-async function focusExistingWorker(worker, masterBaseUrl, masterUiUrl) {
+async function focusExistingWorker(worker, workerBaseUrl, workerUiUrl) {
   const windowsResponse = await callWorkerTool(worker, "get_windows", {});
   const text = parseToolText(windowsResponse);
   const windows = text ? JSON.parse(text) : [];
   const targetWindow =
-    windows.find((win) => (win.url || "").startsWith(masterBaseUrl)) || windows[0] || null;
+    windows.find((win) => (win.url || "").startsWith(workerBaseUrl)) || windows[0] || null;
 
   if (targetWindow) {
-    if (!String(targetWindow.url || "").startsWith(masterBaseUrl)) {
-      await callWorkerTool(worker, "load_url", { win_id: targetWindow.id, url: masterUiUrl });
+    if (!String(targetWindow.url || "").startsWith(workerBaseUrl)) {
+      await callWorkerTool(worker, "load_url", { win_id: targetWindow.id, url: workerUiUrl });
     }
 
     await callWorkerTool(worker, "control_electron_BrowserWindow", {
@@ -551,17 +551,17 @@ async function focusExistingWorker(worker, masterBaseUrl, masterUiUrl) {
   }
 
   await callWorkerTool(worker, "open_window", {
-    url: masterUiUrl,
+    url: workerUiUrl,
     reuseWindow: true,
     accountIdx: 0,
   });
   return { reused: true, winId: null };
 }
 
-async function startWorker({ workerPort, masterBaseUrl, token, masterUiUrl }) {
+async function startWorker({ workerPort, masterBaseUrl, token, workerUiUrl }) {
   const workerChild = spawn(
     isWindows ? "npx.cmd" : "npx",
-    ["electron", PACKAGE_ROOT, "--port", String(workerPort), "--url", masterUiUrl],
+    ["electron", PACKAGE_ROOT, "--port", String(workerPort), "--url", workerUiUrl],
     {
       cwd: PACKAGE_ROOT,
       shell: isWindows,
@@ -580,11 +580,81 @@ async function startWorker({ workerPort, masterBaseUrl, token, masterUiUrl }) {
   return workerChild;
 }
 
+async function startWorkerOnly({ workerPort }) {
+  const tokenManager = new MasterTokenManager();
+  const token = tokenManager.getToken();
+  const workerUiUrl = `http://localhost:${workerPort}/console/chrome?token=${token}`;
+
+  writeClusterState({
+    masterPid: null,
+    workerPid: null,
+    masterPort,
+    workerPort,
+    tokenPath: tokenManager.getConfigPath(),
+    startedAt: new Date().toISOString(),
+  });
+
+  console.log(`🚀 Target worker http://localhost:${workerPort}`);
+  console.log(`🪟 Worker UI ${workerUiUrl}`);
+  console.log(`📄 Token file: ${tokenManager.getConfigPath()}`);
+  console.log("🛑 Press Ctrl+C to stop processes started by this command");
+
+  const workerChild = spawn(
+    isWindows ? "npx.cmd" : "npx",
+    ["electron", PACKAGE_ROOT, "--port", String(workerPort), "--url", workerUiUrl],
+    {
+      cwd: PACKAGE_ROOT,
+      shell: isWindows,
+      env: {
+        ...process.env,
+        PORT: String(workerPort),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    }
+  );
+
+  pipeOutput(workerChild.stdout, "[worker]");
+  pipeOutput(workerChild.stderr, "[worker]");
+
+  writeClusterState({
+    masterPid: null,
+    workerPid: workerChild.pid,
+    masterPort,
+    workerPort,
+    tokenPath: tokenManager.getConfigPath(),
+    startedAt: new Date().toISOString(),
+  });
+
+  let shuttingDown = false;
+
+  const handleShutdown = async (exitCode) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    await shutdownChildren(workerChild, null);
+    clearClusterState();
+    process.exit(exitCode);
+  };
+
+  process.on("SIGINT", () => {
+    handleShutdown(0);
+  });
+  process.on("SIGTERM", () => {
+    handleShutdown(0);
+  });
+
+  workerChild.once("exit", async (code, signal) => {
+    if (shuttingDown) return;
+    console.error(`❌ Worker exited (code=${code}, signal=${signal})`);
+    await handleShutdown(code || 1);
+  });
+}
+
 async function startMasterCluster({ masterPort, workerPort }) {
   const tokenManager = new MasterTokenManager();
   const token = tokenManager.getToken();
   const masterBaseUrl = `http://localhost:${masterPort}`;
-  const masterUiUrl = `${masterBaseUrl}/master?token=${token}`;
+  // Don't open the master UI by default; open the worker UI instead.
+  const workerUiUrl = `http://localhost:${workerPort}/console/chrome?token=${token}`;
 
   writeClusterState({
     masterPid: null,
@@ -597,14 +667,14 @@ async function startMasterCluster({ masterPort, workerPort }) {
 
   console.log(`🚀 Target master ${masterBaseUrl}`);
   console.log(`🚀 Target worker http://localhost:${workerPort}`);
-  console.log(`🔗 Target page ${masterUiUrl}`);
+  console.log(`🪟 Worker UI ${workerUiUrl}`);
   console.log(`📄 Token file: ${tokenManager.getConfigPath()}`);
 
   const masterRunning = await checkMaster(masterBaseUrl);
   if (masterRunning) {
     const worker = await findReusableWorker(masterBaseUrl, workerPort);
     if (worker) {
-      await focusExistingWorker(worker, masterBaseUrl, masterUiUrl);
+      await focusExistingWorker(worker, `http://localhost:${workerPort}`, workerUiUrl);
       console.log("✅ Reused existing master and worker, focused Electron window");
       return;
     }
@@ -640,7 +710,7 @@ async function startMasterCluster({ masterPort, workerPort }) {
   }
 
   console.log(`🚀 Starting worker on http://localhost:${workerPort}`);
-  const workerChild = await startWorker({ workerPort, masterBaseUrl, token, masterUiUrl });
+  const workerChild = await startWorker({ workerPort, masterBaseUrl, token, workerUiUrl });
 
   writeClusterState({
     masterPid: masterChild?.pid || null,
@@ -703,7 +773,7 @@ function getClusterLogFiles(workerPort) {
 async function stop() {
   const state = getRunningClusterState();
   if (!state) {
-    console.log("❌ cicy cluster is not running");
+    console.log("❌ cicy worker is not running");
     clearClusterState();
     return;
   }
@@ -713,29 +783,23 @@ async function stop() {
   clearClusterState();
 
   if (stoppedMaster || stoppedWorker) {
-    console.log(
-      `✅ cicy cluster stopped (master:${state.masterPid || "-"} worker:${state.workerPid || "-"})`
-    );
+    console.log(`✅ cicy worker stopped (pid:${state.workerPid || "-"})`);
   } else {
-    console.log("❌ cicy cluster is not running");
+    console.log("❌ cicy worker is not running");
   }
 }
 
 async function status() {
   const state = getRunningClusterState();
   if (!state) {
-    console.log("❌ cicy cluster is not running");
+    console.log("❌ cicy worker is not running");
     return;
   }
 
-  console.log("✅ cicy cluster is running");
-  console.log(
-    `- master pid: ${state.masterPid || "reused external"} (${state.masterRunning ? "running" : "stopped"})`
-  );
+  console.log("✅ cicy worker is running");
   console.log(
     `- worker pid: ${state.workerPid || "reused external"} (${state.workerRunning ? "running" : "stopped"})`
   );
-  console.log(`- master url: http://localhost:${state.masterPort}`);
   console.log(`- worker url: http://localhost:${state.workerPort}`);
   if (state.tokenPath) {
     console.log(`- token file: ${state.tokenPath}`);
@@ -755,7 +819,7 @@ function logs() {
   );
 
   if (!logFiles.length) {
-    console.log("❌ No cluster logs found");
+    console.log("❌ No worker logs found");
     console.log(`- logs dir: ${LOGS_DIR}`);
     console.log(
       `- expected worker log: ${path.join(LOGS_DIR, `cicy-desktop-${workerPortForLogs}.log`)}`
@@ -764,11 +828,10 @@ function logs() {
   }
 
   if (state) {
-    console.log("✅ Following cicy cluster logs");
-    console.log(`- master url: http://localhost:${state.masterPort}`);
+    console.log("✅ Following cicy worker logs");
     console.log(`- worker url: http://localhost:${state.workerPort}`);
   } else {
-    console.log("⚠️  Cluster is not currently running, showing latest available logs");
+    console.log("⚠️  Worker is not currently running, showing latest available logs");
   }
   logFiles.forEach((filePath) => console.log(`- ${filePath}`));
 

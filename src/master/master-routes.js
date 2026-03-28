@@ -2,6 +2,25 @@ const express = require("express");
 const { randomUUID } = require("crypto");
 const remoteExecutor = require("../cluster/remote-executor");
 const { selectExecutionTarget } = require("./task-scheduler");
+const {
+  ChromeProfileResolutionError,
+  resolveEffectiveChromeProfileByAccountIdx,
+} = require("./chrome-config");
+
+const MASTER_INJECTED_CHROME_TOOLS = new Set([
+  "chrome_launch_profile",
+  "chrome_get_profile",
+  "chrome_get_targets",
+  "chrome_cdp_call",
+]);
+
+function shouldInjectEffectiveChromeProfile(toolName, payload) {
+  return (
+    MASTER_INJECTED_CHROME_TOOLS.has(toolName) &&
+    typeof payload?.accountIdx === "number" &&
+    payload.effectiveChromeProfile === undefined
+  );
+}
 
 function createMasterRoutes({
   workerRegistry,
@@ -143,6 +162,27 @@ function createMasterRoutes({
       }
       if (target.runtimeSessionId && payload.runtimeSessionId === undefined) {
         payload.runtimeSessionId = target.runtimeSessionId;
+      }
+      if (shouldInjectEffectiveChromeProfile(req.params.toolName, payload)) {
+        try {
+          payload.effectiveChromeProfile = resolveEffectiveChromeProfileByAccountIdx(payload.accountIdx);
+        } catch (error) {
+          if (error instanceof ChromeProfileResolutionError) {
+            taskStore.update(task.taskId, {
+              status: "failed",
+              completedAt: new Date().toISOString(),
+              error: error.message,
+            });
+            return res.status(error.statusCode || 400).json({
+              error: error.message,
+              taskId: task.taskId,
+              workerId: target.workerId,
+              agentId: target.agentId,
+              runtimeSessionId: target.runtimeSessionId,
+            });
+          }
+          throw error;
+        }
       }
 
       taskStore.update(task.taskId, {

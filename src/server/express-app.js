@@ -1,5 +1,6 @@
 const express = require("express");
 const cors = require("cors");
+const fs = require("fs");
 const path = require("path");
 const uiRoutes = require("./ui-routes");
 
@@ -152,13 +153,31 @@ function createExpressApp(authMiddleware, tools = {}) {
     }
   });
 
-  // Serve UI page (no auth — page handles token itself)
-  app.get("/ui", (req, res) => {
+  const reactUiDir = path.join(__dirname, "../ui-react-dist");
+
+  // Keep legacy UI for fallback/debugging
+  app.get("/ui-legacy", (req, res) => {
     res.sendFile(path.join(__dirname, "../ui.html"));
   });
 
-  // Mount UI API routes
+  // UI (React) lives at /console; /ui is reserved for UI APIs (snapshot, windows, etc.)
+  if (fs.existsSync(reactUiDir)) {
+    app.use("/console", express.static(reactUiDir));
+    app.get(["/console", "/console/*"], (req, res) => {
+      res.sendFile(path.join(reactUiDir, "index.html"));
+    });
+  } else {
+    // Fallback: serve legacy UI at /console too
+    app.get(["/console", "/console/*"], (req, res) => {
+      res.sendFile(path.join(__dirname, "../ui.html"));
+    });
+  }
+
+  // Mount UI API routes under /ui
   app.use("/ui", uiRoutes);
+
+  // Convenience redirect
+  app.get("/", (req, res) => res.redirect("/console/chrome"));
 
   return app;
 }
