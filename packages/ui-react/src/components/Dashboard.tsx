@@ -256,6 +256,21 @@ function Field({
   );
 }
 
+function MetricPill({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-white/8 bg-black/20 px-3 py-2">
+      <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">{label}</div>
+      <div className="mt-1 text-sm font-medium text-white">{value}</div>
+    </div>
+  );
+}
+
 function RangeField({
   label,
   valueLabel,
@@ -776,13 +791,14 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
         : "border-white/10 bg-white/[0.08] text-slate-100";
 
   const chromeStatus = selectedProfile?.liveStatus?.isRunning ? "running" : "stopped";
+  const onlineProfiles = profiles.filter((item) => item.liveStatus?.isRunning).length;
 
   return (
     <div className="min-h-screen bg-[var(--app-bg)] text-slate-100">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top_left,rgba(55,124,110,0.22),transparent_28%),radial-gradient(circle_at_bottom_right,rgba(191,160,91,0.1),transparent_22%)]" />
 
-      <div className="relative mx-auto flex min-h-screen max-w-[1640px] gap-4 p-4">
-        <aside className="panel-surface hidden w-[288px] shrink-0 xl:flex xl:flex-col">
+      <div className="relative mx-auto flex min-h-screen max-w-[1640px] flex-col gap-4 p-4 xl:flex-row">
+        <aside className="panel-surface flex w-full shrink-0 flex-col xl:w-[288px]">
           <div className="flex items-center justify-between gap-3">
             <div className="text-sm font-semibold text-white">CiCy</div>
             <div className={`rounded-full px-2 py-1 text-[11px] ${pingTime != null ? "bg-emerald-500/12 text-emerald-200" : "bg-rose-500/12 text-rose-200"}`}>
@@ -798,6 +814,12 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
             </div>
           </div>
 
+          <div className="mt-4 grid grid-cols-3 gap-2 xl:grid-cols-2">
+            <MetricPill label="Node" value={pingTime != null ? "healthy" : "offline"} />
+            <MetricPill label="Windows" value={String(windows.length)} />
+            <MetricPill label="Profiles" value={String(onlineProfiles)} />
+          </div>
+
           <div className="mt-5 flex items-center justify-between">
             <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">{mode === "electron" ? "Sessions" : "Profiles"}</div>
             <button
@@ -809,7 +831,7 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
             </button>
           </div>
 
-          <div className="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+          <div className="mt-3 grid grid-flow-col auto-cols-[220px] gap-2 overflow-x-auto pb-1 xl:min-h-0 xl:flex-1 xl:grid-flow-row xl:auto-cols-auto xl:overflow-y-auto xl:overflow-x-hidden xl:pr-1">
             {mode === "electron"
               ? windows.map((item) => (
                   <Fragment key={item.id}>
@@ -836,17 +858,17 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
         </aside>
 
         <main className="panel-surface flex min-w-0 flex-1 flex-col overflow-hidden">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/8 pb-4">
+          <div className="flex flex-wrap items-start justify-between gap-4 border-b border-white/8 pb-4">
             <div className="min-w-0">
-              <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">{mode}</div>
-              <div className="mt-1 truncate text-lg font-semibold text-white">
+              <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Node cockpit</div>
+              <div className="mt-1 truncate text-2xl font-semibold text-white">
                 {mode === "electron"
                   ? selectedWindow?.title || "No window selected"
                   : selectedProfile
                     ? `account_${selectedProfile.accountIdx}`
                     : "No profile selected"}
               </div>
-              <div className="mt-1 truncate text-sm text-slate-500">
+              <div className="mt-2 truncate text-sm text-slate-500">
                 {mode === "electron"
                   ? selectedWindow
                     ? shortenUrl(selectedWindow.url)
@@ -855,7 +877,11 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-col items-start gap-3 sm:items-end">
+              <div className="flex flex-wrap items-center gap-2">
+                <MetricPill label="Runtime" value={mode} />
+                <MetricPill label="Workspace" value={workspaceView} />
+              </div>
               <div className="rounded-2xl border border-white/8 bg-black/20 p-1">
                 <div className="flex gap-1">
                   <WorkspaceChip active={workspaceView === "operate"} label="Operate" onClick={() => setWorkspaceView("operate")} />
@@ -880,28 +906,8 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
 
           {mode === "electron" && workspaceView === "operate" ? (
             <div className="mt-4 flex min-h-0 flex-1 flex-col">
-              <div className="mb-3 flex flex-wrap items-center gap-2">
-                <Button
-                  disabled={!selectedWindow || previewLoading}
-                  icon={<RefreshCw className={`h-4 w-4 ${previewLoading ? "animate-spin" : ""}`} />}
-                  label="Preview"
-                  onClick={() => {
-                    if (selectedWindow) void refreshPreview(selectedWindow.id, true);
-                  }}
-                />
-                <Button
-                  disabled={!selectedWindow}
-                  icon={<Eye className="h-4 w-4" />}
-                  label="Watch"
-                  onClick={() => {
-                    if (selectedWindow) window.open(buildWatchUrl(selectedWindow.id), "_blank", "noopener,noreferrer");
-                  }}
-                />
-                <Button disabled={!selectedWindow} icon={<RotateCcw className="h-4 w-4" />} label="Reload" onClick={() => void handleReloadPage()} />
-              </div>
-
               {selectedWindow ? (
-                <div className="relative flex min-h-[480px] flex-1 items-center justify-center overflow-hidden rounded-[30px] border border-white/8 bg-black/35">
+                <div className="relative flex min-h-[520px] flex-1 items-center justify-center overflow-hidden rounded-[30px] border border-white/8 bg-black/35">
                   <img
                     alt="Managed window preview"
                     className="max-h-full max-w-full cursor-crosshair rounded-[20px] object-contain shadow-[0_28px_90px_rgba(0,0,0,0.5)]"
@@ -912,6 +918,31 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
                   />
                   <div className="absolute left-4 top-4 rounded-full border border-white/10 bg-black/55 px-3 py-1.5 text-xs text-slate-300 backdrop-blur">
                     {formatBounds(selectedWindow.bounds)}
+                  </div>
+                  <div className="absolute bottom-4 left-4 right-4 flex flex-wrap items-center justify-between gap-3 rounded-[24px] border border-white/8 bg-black/55 px-4 py-3 backdrop-blur">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-white">{formatHost(selectedWindow.url)}</div>
+                      <div className="mt-1 truncate text-xs text-slate-500">Click preview to interact. Keyboard forwarding is active in this mode.</div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        disabled={!selectedWindow || previewLoading}
+                        icon={<RefreshCw className={`h-4 w-4 ${previewLoading ? "animate-spin" : ""}`} />}
+                        label="Preview"
+                        onClick={() => {
+                          if (selectedWindow) void refreshPreview(selectedWindow.id, true);
+                        }}
+                      />
+                      <Button
+                        disabled={!selectedWindow}
+                        icon={<Eye className="h-4 w-4" />}
+                        label="Watch"
+                        onClick={() => {
+                          if (selectedWindow) window.open(buildWatchUrl(selectedWindow.id), "_blank", "noopener,noreferrer");
+                        }}
+                      />
+                      <Button disabled={!selectedWindow} icon={<RotateCcw className="h-4 w-4" />} label="Reload" onClick={() => void handleReloadPage()} />
+                    </div>
                   </div>
                 </div>
               ) : (
@@ -1031,7 +1062,7 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
           {mode === "chrome" && workspaceView === "operate" ? (
             <div className="mt-4 flex min-h-0 flex-1 items-center justify-center">
               {selectedProfile ? (
-                <div className="w-full max-w-[640px] rounded-[30px] border border-white/8 bg-black/20 p-8">
+                <div className="w-full max-w-[760px] rounded-[30px] border border-white/8 bg-black/20 p-8">
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Profile</div>
@@ -1045,6 +1076,26 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
                   <div className="mt-8 grid grid-cols-2 gap-4">
                     <Field label="Port" value={selectedProfile.port != null ? String(selectedProfile.port) : "—"} />
                     <Field label="Proxy" value={selectedProfile.proxy ? "enabled" : "disabled"} />
+                  </div>
+                  <div className="mt-8 flex flex-wrap gap-2 border-t border-white/8 pt-6">
+                    <Button
+                      disabled={Boolean(profileAction)}
+                      icon={<ArrowUpRight className="h-4 w-4" />}
+                      label={profileAction === "open" ? "Opening" : "Open"}
+                      onClick={() => void handleProfileAction("open")}
+                    />
+                    <Button
+                      disabled={Boolean(profileAction)}
+                      icon={<RotateCcw className="h-4 w-4" />}
+                      label={profileAction === "restart" ? "Restarting" : "Restart"}
+                      onClick={() => void handleProfileAction("restart")}
+                    />
+                    <Button
+                      disabled={Boolean(profileAction)}
+                      icon={<Square className="h-4 w-4" />}
+                      label={profileAction === "stop" ? "Stopping" : "Stop"}
+                      onClick={() => void handleProfileAction("stop")}
+                    />
                   </div>
                 </div>
               ) : (
