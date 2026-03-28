@@ -1,11 +1,32 @@
-import { useEffect, useState, useRef, MouseEvent } from 'react';
-import { getSnapshotUrl, rpc, rpcJson, getToken } from '../lib/client';
-import { 
-  RefreshCw, X, Monitor, Settings, 
-  RotateCcw, Plus, Layout, Maximize2, 
-  ChevronRight, ChevronLeft, Trash2, ExternalLink,
-  Search, Sliders, Check, AlertCircle, Terminal, Wifi
-} from 'lucide-react';
+import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import {
+  AlertTriangle,
+  ArrowUpRight,
+  Boxes,
+  CheckCircle2,
+  Copy,
+  ExternalLink,
+  Eye,
+  Gauge,
+  Globe,
+  LayoutGrid,
+  Link2,
+  LogOut,
+  Monitor,
+  RefreshCw,
+  RotateCcw,
+  ScanSearch,
+  Shield,
+  SlidersHorizontal,
+  Square,
+  Trash2,
+  Wifi,
+  X,
+} from "lucide-react";
+import { getSnapshotUrl, requestJson, rpc, rpcJson } from "../lib/client";
+
+type ConsoleMode = "chrome" | "electron";
+type NoticeTone = "neutral" | "success" | "error";
 
 interface WindowInfo {
   id: number;
@@ -24,924 +45,1481 @@ interface ChromeProfile {
 }
 
 interface DashboardProps {
+  mode: ConsoleMode;
   onLogout: () => void;
-  initialMode?: 'chrome' | 'electron';
+  onModeChange: (mode: ConsoleMode) => void;
 }
 
-export default function Dashboard({ onLogout, initialMode = 'chrome' }: DashboardProps) {
-  const [mode, setMode] = useState<'chrome' | 'electron'>(initialMode);
+const STORAGE_KEYS = {
+  selectedWindow: "ELECTRON_MCP_SELECTED_WIN",
+  selectedProfile: "ELECTRON_MCP_SELECTED_PROFILE",
+  watchInterval: "ELECTRON_MCP_INTERVAL",
+  captureQuality: "ELECTRON_MCP_QUALITY",
+  captureScale: "ELECTRON_MCP_SCALE",
+  snapshotMaxElements: "ELECTRON_MCP_SNAPSHOT_MAX_ELEMENTS",
+  snapshotShowOverlays: "ELECTRON_MCP_SNAPSHOT_SHOW_OVERLAYS",
+} as const;
 
+const KEY_CODE_MAP: Record<string, string> = {
+  Enter: "Return",
+  Backspace: "Backspace",
+  Tab: "Tab",
+  Escape: "Escape",
+  ArrowUp: "Up",
+  ArrowDown: "Down",
+  ArrowLeft: "Left",
+  ArrowRight: "Right",
+  Delete: "Delete",
+  Insert: "Insert",
+  Home: "Home",
+  End: "End",
+  PageUp: "PageUp",
+  PageDown: "PageDown",
+};
+
+const QUICK_LAUNCH_TARGETS = [
+  { label: "ChatGPT", url: "https://chatgpt.com", note: "LLM workspace" },
+  { label: "Gemini", url: "https://gemini.google.com", note: "Google account context" },
+  { label: "AI Studio", url: "https://aistudio.google.com", note: "Prompt + API surface" },
+] as const;
+
+function readStoredNumber(key: string, fallback: number) {
+  const raw = localStorage.getItem(key);
+  if (raw == null) return fallback;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function readStoredBoolean(key: string, fallback: boolean) {
+  const raw = localStorage.getItem(key);
+  if (raw == null) return fallback;
+  return raw === "true";
+}
+
+function readStoredNullableNumber(key: string) {
+  const raw = localStorage.getItem(key);
+  if (raw == null) return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function formatHost(url: string) {
+  if (!url) return "No URL";
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
+function formatBounds(bounds: WindowInfo["bounds"]) {
+  return `${bounds.width}×${bounds.height} at ${bounds.x},${bounds.y}`;
+}
+
+function shortenUrl(url: string) {
+  if (!url) return "No URL";
+  if (url.length <= 54) return url;
+  return `${url.slice(0, 51)}...`;
+}
+
+function toneClasses(tone: NoticeTone) {
+  if (tone === "success") {
+    return "border-emerald-500/25 bg-emerald-500/10 text-emerald-100";
+  }
+  if (tone === "error") {
+    return "border-rose-500/25 bg-rose-500/10 text-rose-100";
+  }
+  return "border-white/10 bg-white/5 text-slate-100";
+}
+
+function isTypingTarget(target: EventTarget | null) {
+  const node = target as HTMLElement | null;
+  if (!node) return false;
+  const tagName = node.tagName;
+  return (
+    tagName === "INPUT" ||
+    tagName === "TEXTAREA" ||
+    tagName === "SELECT" ||
+    node.isContentEditable ||
+    Boolean(node.closest("[data-local-input='true']"))
+  );
+}
+
+function buildWatchUrl(winId: number) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("win_id", String(winId));
+  return url.toString();
+}
+
+function SectionTitle({
+  eyebrow,
+  title,
+  detail,
+  action,
+}: {
+  eyebrow: string;
+  title: string;
+  detail?: string;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <div>
+        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">{eyebrow}</div>
+        <h2 className="mt-2 text-lg font-semibold text-white">{title}</h2>
+        {detail ? <p className="mt-1 text-sm text-slate-400">{detail}</p> : null}
+      </div>
+      {action}
+    </div>
+  );
+}
+
+function MetricCard({
+  label,
+  value,
+  detail,
+}: {
+  label: string;
+  value: string;
+  detail?: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-white/8 bg-black/20 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+      <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">{label}</div>
+      <div className="mt-3 text-xl font-semibold text-white">{value}</div>
+      {detail ? <div className="mt-1 text-sm text-slate-400">{detail}</div> : null}
+    </div>
+  );
+}
+
+function RangeField({
+  label,
+  valueLabel,
+  min,
+  max,
+  step,
+  value,
+  onChange,
+}: {
+  label: string;
+  valueLabel: string;
+  min: number;
+  max: number;
+  step: number;
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="block space-y-2" data-local-input="true">
+      <div className="flex items-center justify-between gap-4 text-sm">
+        <span className="text-slate-300">{label}</span>
+        <span className="font-mono text-xs text-slate-500">{valueLabel}</span>
+      </div>
+      <input
+        className="h-2 w-full cursor-pointer appearance-none rounded-full bg-white/8 accent-[var(--accent)]"
+        max={max}
+        min={min}
+        onChange={(event) => onChange(Number(event.target.value))}
+        step={step}
+        type="range"
+        value={value}
+      />
+    </label>
+  );
+}
+
+function WindowListItem({
+  active,
+  onClick,
+  windowInfo,
+}: {
+  active: boolean;
+  onClick: () => void;
+  windowInfo: WindowInfo;
+}) {
+  return (
+    <button
+      className={`w-full rounded-2xl border px-4 py-3 text-left transition ${
+        active
+          ? "border-[color:var(--accent)]/50 bg-[color:var(--accent)]/14 shadow-[0_16px_32px_rgba(0,0,0,0.18)]"
+          : "border-white/8 bg-white/[0.03] hover:border-white/16 hover:bg-white/[0.05]"
+      }`}
+      onClick={onClick}
+      type="button"
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold text-white">{windowInfo.title || "Untitled window"}</div>
+          <div className="mt-1 truncate font-mono text-[11px] text-slate-500">{formatHost(windowInfo.url)}</div>
+        </div>
+        <div className={`h-2.5 w-2.5 rounded-full ${active ? "bg-[var(--accent)]" : "bg-slate-600"}`} />
+      </div>
+      <div className="mt-3 flex items-center gap-2 text-[11px] text-slate-400">
+        <span className="rounded-full border border-white/8 px-2 py-0.5 font-mono">#{windowInfo.id}</span>
+        <span>{windowInfo.bounds.width}×{windowInfo.bounds.height}</span>
+      </div>
+    </button>
+  );
+}
+
+function ProfileListItem({
+  active,
+  onClick,
+  profile,
+}: {
+  active: boolean;
+  onClick: () => void;
+  profile: ChromeProfile;
+}) {
+  const isRunning = Boolean(profile.liveStatus?.isRunning);
+  return (
+    <button
+      className={`w-full rounded-2xl border px-4 py-3 text-left transition ${
+        active
+          ? "border-[color:var(--accent)]/50 bg-[color:var(--accent)]/14"
+          : "border-white/8 bg-white/[0.03] hover:border-white/16 hover:bg-white/[0.05]"
+      }`}
+      onClick={onClick}
+      type="button"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-white">account_{profile.accountIdx}</div>
+          <div className="mt-1 truncate font-mono text-[11px] text-slate-500">{profile.gmail || "No mailbox label"}</div>
+        </div>
+        <div className={`mt-1 h-2.5 w-2.5 rounded-full ${isRunning ? "bg-emerald-400" : "bg-slate-600"}`} />
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
+        <span className="rounded-full border border-white/8 px-2 py-0.5 font-mono">port {profile.port ?? "—"}</span>
+        <span>{profile.proxy ? "Proxy on" : "Proxy off"}</span>
+      </div>
+    </button>
+  );
+}
+
+function ActionButton({
+  icon,
+  label,
+  onClick,
+  disabled,
+  tone = "default",
+}: {
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  tone?: "default" | "primary" | "danger";
+}) {
+  const toneClass =
+    tone === "primary"
+      ? "border-transparent bg-[var(--accent)] text-slate-950 hover:bg-[var(--accent-strong)]"
+      : tone === "danger"
+        ? "border-rose-500/25 bg-rose-500/10 text-rose-100 hover:bg-rose-500/16"
+        : "border-white/8 bg-white/[0.04] text-slate-100 hover:border-white/16 hover:bg-white/[0.07]";
+
+  return (
+    <button
+      className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${toneClass}`}
+      disabled={disabled}
+      onClick={onClick}
+      type="button"
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
+
+export default function Dashboard({ mode, onLogout, onModeChange }: DashboardProps) {
   const [windows, setWindows] = useState<WindowInfo[]>([]);
   const [profiles, setProfiles] = useState<ChromeProfile[]>([]);
-  const [selectedWinId, setSelectedWinId] = useState<number | null>(null);
-  const [selectedAccountIdx, setSelectedAccountIdx] = useState<number | null>(null);
+  const [selectedWinId, setSelectedWinId] = useState<number | null>(() => readStoredNullableNumber(STORAGE_KEYS.selectedWindow));
+  const [selectedProfileIdx, setSelectedProfileIdx] = useState<number | null>(() =>
+    readStoredNullableNumber(STORAGE_KEYS.selectedProfile),
+  );
   const [proxyDrafts, setProxyDrafts] = useState<Record<number, string>>({});
-  const [loading, setLoading] = useState(false);
-  const [controlsOpen, setControlsOpen] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  
-  // Capture settings
-  const [interval, setIntervalMs] = useState(1000);
-  const [quality, setQuality] = useState(80);
-  const [scale, setScale] = useState(0.5);
 
-  // Bounds inputs
-  const [bounds, setBounds] = useState({ x: 0, y: 0, w: 0, h: 0 });
-  const [applyingBounds, setApplyingBounds] = useState(false);
-  const [boundsFeedback, setBoundsFeedback] = useState<{ msg: string; error: boolean } | null>(null);
-
-  // Webpage snapshot settings
-  const [maxElements, setMaxElements] = useState(20);
-  const [showOverlays, setShowOverlays] = useState(false);
+  const [windowsLoading, setWindowsLoading] = useState(false);
+  const [profilesLoading, setProfilesLoading] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [boundsSaving, setBoundsSaving] = useState(false);
   const [snapshotLoading, setSnapshotLoading] = useState(false);
+  const [profileAction, setProfileAction] = useState<string | null>(null);
+  const [windowAction, setWindowAction] = useState<string | null>(null);
+
+  const [watchInterval, setWatchInterval] = useState(() => readStoredNumber(STORAGE_KEYS.watchInterval, 1200));
+  const [quality, setQuality] = useState(() => readStoredNumber(STORAGE_KEYS.captureQuality, 72));
+  const [scale, setScale] = useState(() => readStoredNumber(STORAGE_KEYS.captureScale, 0.58));
+  const [maxElements, setMaxElements] = useState(() => readStoredNumber(STORAGE_KEYS.snapshotMaxElements, 24));
+  const [showOverlays, setShowOverlays] = useState(() => readStoredBoolean(STORAGE_KEYS.snapshotShowOverlays, false));
+
+  const [bounds, setBounds] = useState({ x: 0, y: 0, w: 0, h: 0 });
   const [snapshotDialogText, setSnapshotDialogText] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ tone: NoticeTone; message: string } | null>(null);
+  const [pingTime, setPingTime] = useState<number | null>(null);
+  const [clickPulse, setClickPulse] = useState<{ x: number; y: number } | null>(null);
 
   const imgRef = useRef<HTMLImageElement>(null);
-  const [clickPos, setClickPos] = useState<{x: number, y: number} | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
-  const [pingTime, setPingTime] = useState<number | null>(null);
+  const previewUrlRef = useRef<string | null>(null);
+  const noticeTimerRef = useRef<number | null>(null);
+  const clickPulseTimerRef = useRef<number | null>(null);
 
-  // Keyboard input handler
-  useEffect(() => {
-    const handleKeyDown = async (e: KeyboardEvent) => {
-      if (!selectedWinId || e.ctrlKey || e.altKey || e.metaKey) return;
-      
-      const key = e.key;
-      if (key.length !== 1 && !['Enter', 'Backspace', 'Tab', 'Escape', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Delete', 'Insert', 'Home', 'End', 'PageUp', 'PageDown'].includes(key)) {
-        return;
-      }
+  const selectedWindow = useMemo(
+    () => windows.find((item) => item.id === selectedWinId) || null,
+    [selectedWinId, windows],
+  );
+  const selectedProfile = useMemo(
+    () => profiles.find((item) => item.accountIdx === selectedProfileIdx) || null,
+    [profiles, selectedProfileIdx],
+  );
 
-      try {
-        const codeMap: Record<string, string> = {
-          'Enter': 'Return', 'Backspace': 'Backspace', 'Tab': 'Tab', 'Escape': 'Escape',
-          'ArrowUp': 'Up', 'ArrowDown': 'Down', 'ArrowLeft': 'Left', 'ArrowRight': 'Right',
-          'Delete': 'Delete', 'Insert': 'Insert', 'Home': 'Home', 'End': 'End',
-          'PageUp': 'PageUp', 'PageDown': 'PageDown'
-        };
-        
-        const keyCode = codeMap[key] || (key.length === 1 ? key.toUpperCase() : key);
-        
-        await rpc('control_electron_WebContents', {
-          win_id: selectedWinId,
-          code: `webContents.sendInputEvent({type: 'keyDown', keyCode: '${keyCode}', key: '${key}'})`
-        });
-        
-        if (key === 'Enter' || key === 'Tab' || key === 'Backspace') {
-          await rpc('control_electron_WebContents', {
-            win_id: selectedWinId,
-            code: `webContents.sendInputEvent({type: 'keyUp', keyCode: '${keyCode}', key: '${key}'})`
-          });
-        }
-      } catch (err) {
-        console.error('Key send failed:', err);
-      }
-    };
+  function announce(message: string, tone: NoticeTone = "neutral") {
+    setNotice({ tone, message });
+    if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current);
+    noticeTimerRef.current = window.setTimeout(() => setNotice(null), 4200);
+  }
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedWinId]);
+  function releasePreviewUrl() {
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = null;
+    }
+  }
 
-  // Ping to measure network latency
-  useEffect(() => {
-    const ping = async () => {
-      const start = Date.now();
-      try {
-        await rpc('ping', {});
-        setPingTime(Date.now() - start);
-      } catch {
-        setPingTime(null);
-      }
-    };
-    ping();
-    const interval = setInterval(ping, 5000);
-    return () => clearInterval(interval);
-  }, []);
+  async function fetchWindowList() {
+    const data = await rpcJson<WindowInfo[]>("get_windows");
+    return Array.isArray(data) ? data : [];
+  }
 
-  const loadProfiles = async () => {
+  async function loadWindows() {
+    setWindowsLoading(true);
     try {
-      const token = getToken();
-      const res = await fetch(`${window.location.origin}/api/chrome/profiles`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.status === 401) throw new Error('Unauthorized');
-      const data = await res.json();
-      const list = Array.isArray(data?.profiles) ? data.profiles : [];
-      setProfiles(list);
-    } catch (e) {
-      // ignore
+      setWindows(await fetchWindowList());
+    } catch (error) {
+      announce(error instanceof Error ? error.message : "Failed to load windows.", "error");
+    } finally {
+      setWindowsLoading(false);
     }
-  };
+  }
 
-  // Load windows/profiles on mount
-  useEffect(() => {
-    // Only fetch what we need initially; still keep both available for fast switching.
-    loadWindows();
-    loadProfiles();
-    const savedWin = localStorage.getItem('ELECTRON_MCP_SELECTED_WIN');
-    if (savedWin) setSelectedWinId(parseInt(savedWin));
-    
-    const savedInterval = localStorage.getItem('ELECTRON_MCP_INTERVAL');
-    if (savedInterval) setIntervalMs(parseInt(savedInterval));
-
-    const savedQuality = localStorage.getItem('ELECTRON_MCP_QUALITY');
-    if (savedQuality) setQuality(parseInt(savedQuality));
-
-    const savedScale = localStorage.getItem('ELECTRON_MCP_SCALE');
-    if (savedScale) setScale(parseFloat(savedScale));
-
-
-    const savedControls = localStorage.getItem('CONTROLS_VISIBLE');
-    if (savedControls) setControlsOpen(savedControls !== 'false');
-  }, []);
-
-  // Update bounds state when selected window changes
-  useEffect(() => {
-    if (selectedWinId) {
-      const win = windows.find(w => w.id === selectedWinId);
-      if (win) {
-        setBounds({
-          x: win.bounds.x,
-          y: win.bounds.y,
-          w: win.bounds.width,
-          h: win.bounds.height
-        });
-        // Focus window
-        rpc('control_electron_BrowserWindow', { win_id: selectedWinId, code: 'win.focus()' }).catch(() => {});
-      }
-      localStorage.setItem('ELECTRON_MCP_SELECTED_WIN', selectedWinId.toString());
-      if (mode === 'electron') {
-        refreshPreview(selectedWinId);
-      }
+  async function loadProfiles() {
+    setProfilesLoading(true);
+    try {
+      const data = await requestJson<{ profiles?: ChromeProfile[] }>("/api/chrome/profiles");
+      setProfiles(Array.isArray(data?.profiles) ? data.profiles : []);
+    } catch (error) {
+      announce(error instanceof Error ? error.message : "Failed to load Chrome profiles.", "error");
+    } finally {
+      setProfilesLoading(false);
     }
-  }, [selectedWinId, windows]);
+  }
 
-  const refreshPreview = async (winId: number) => {
-    if (!imgRef.current) return;
+  async function focusWindow(winId: number) {
+    await rpc("control_electron_BrowserWindow", { win_id: winId, code: "win.focus()" });
+  }
+
+  async function refreshPreview(winId: number, announceErrors = false) {
     setPreviewLoading(true);
     try {
-      const url = getSnapshotUrl(winId, quality, scale);
-      const res = await fetch(url);
-      if (!res.ok) return;
-      const blob = await res.blob();
+      const response = await fetch(getSnapshotUrl(winId, quality, scale));
+      if (!response.ok) {
+        throw new Error(`Preview request failed with ${response.status}`);
+      }
+
+      const blob = await response.blob();
       const objectUrl = URL.createObjectURL(blob);
+      releasePreviewUrl();
+      previewUrlRef.current = objectUrl;
 
-      const oldUrl = imgRef.current.getAttribute('data-object-url');
-      if (oldUrl) URL.revokeObjectURL(oldUrl);
-
-      imgRef.current.src = objectUrl;
-      imgRef.current.setAttribute('data-object-url', objectUrl);
-    } catch (e) {
-      console.error('Preview refresh error', e);
+      if (imgRef.current) {
+        imgRef.current.src = objectUrl;
+      }
+    } catch (error) {
+      if (announceErrors) {
+        announce(error instanceof Error ? error.message : "Failed to refresh preview.", "error");
+      }
     } finally {
       setPreviewLoading(false);
     }
-  };
+  }
 
-  // No auto-capture loop on the dashboard. Preview is manual/on-demand.
-
-  const loadWindows = async () => {
-    setLoading(true);
+  async function handleOpenWindow(targetUrl: string) {
+    setWindowAction(`open:${targetUrl}`);
     try {
-      const data = await rpcJson<WindowInfo[]>('get_windows');
-      setWindows(Array.isArray(data) ? data : []);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const postProfile = async (accountIdx: number, action: 'open' | 'restart' | 'stop', body: any = {}) => {
-    try {
-      const token = getToken();
-      await fetch(`${window.location.origin}/api/chrome/profiles/${accountIdx}/${action}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(body || {}),
+      const beforeIds = new Set(windows.map((item) => item.id));
+      const existing = windows.find((item) => {
+        try {
+          return new URL(item.url).hostname === new URL(targetUrl).hostname;
+        } catch {
+          return item.url === targetUrl;
+        }
       });
-    } finally {
-      loadProfiles();
-    }
-  };
 
-  const saveProfileProxy = async (accountIdx: number, restart = false) => {
-    const token = getToken();
-    const proxy = proxyDrafts[accountIdx] || '';
-    await fetch(`${window.location.origin}/api/chrome/profiles/${accountIdx}/proxy`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        enabled: !!proxy,
-        proxy,
-        restart,
-      }),
-    });
-    await loadProfiles();
-  };
-
-  const handleOpenWindow = async (url: string, accountIdx: number = 0) => {
-    try {
-      const wins = await rpcJson<WindowInfo[]>('get_windows');
-      const allWindows = Array.isArray(wins) ? wins : [];
-      const existing = allWindows.find(w => w.url && w.url.includes(new URL(url).hostname));
-      
       if (existing) {
-        await rpc('control_electron_BrowserWindow', { win_id: existing.id, code: 'win.focus()' });
+        await focusWindow(existing.id);
         setSelectedWinId(existing.id);
-      } else {
-        await rpc('open_window', { 
-          url, 
-          accountIdx,
-          reuseWindow: false,
-          options: { width: 1200, height: 800 }
-        });
-        loadWindows();
+        announce(`Focused existing window for ${formatHost(targetUrl)}.`, "success");
+        return;
       }
-    } catch (e) {
-      console.error(e);
-    }
-  };
 
-  const handleCloseAll = async () => {
-    if (!confirm('Close all windows?')) return;
-    try {
-      const wins = await rpcJson<WindowInfo[]>('get_windows');
-      await Promise.all((Array.isArray(wins) ? wins : []).map(w => rpc('close_window', { win_id: w.id })));
-      setSelectedWinId(null);
-      loadWindows();
-    } catch (e) {
-      console.error(e);
-    }
-  };
+      await rpc("open_window", {
+        url: targetUrl,
+        accountIdx: selectedProfile?.accountIdx ?? 0,
+        reuseWindow: false,
+        options: { width: 1280, height: 860 },
+      });
 
-  const handleApplyBounds = async () => {
-    if (!selectedWinId) return;
-    setApplyingBounds(true);
-    setBoundsFeedback(null);
+      const nextWindows = await fetchWindowList();
+      setWindows(nextWindows);
+      const createdWindow = nextWindows.find((item) => !beforeIds.has(item.id)) || nextWindows[nextWindows.length - 1];
+      if (createdWindow) {
+        setSelectedWinId(createdWindow.id);
+        await refreshPreview(createdWindow.id);
+      }
+      announce(`Opened ${formatHost(targetUrl)}.`, "success");
+    } catch (error) {
+      announce(error instanceof Error ? error.message : "Failed to open a new window.", "error");
+    } finally {
+      setWindowAction(null);
+    }
+  }
+
+  async function handleProfileAction(action: "open" | "restart" | "stop") {
+    if (!selectedProfile) return;
+
+    setProfileAction(action);
     try {
-      const res = await rpc('set_window_bounds', {
-        win_id: selectedWinId,
+      await requestJson(`/api/chrome/profiles/${selectedProfile.accountIdx}/${action}`, {
+        body: JSON.stringify({}),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      await loadProfiles();
+      announce(
+        `${action === "open" ? "Opened" : action === "restart" ? "Restarted" : "Stopped"} account_${selectedProfile.accountIdx}.`,
+        "success",
+      );
+    } catch (error) {
+      announce(error instanceof Error ? error.message : "Chrome profile action failed.", "error");
+    } finally {
+      setProfileAction(null);
+    }
+  }
+
+  async function handleSaveProxy(restart: boolean) {
+    if (!selectedProfile) return;
+
+    setProfileAction(restart ? "proxy-restart" : "proxy-save");
+    try {
+      await requestJson(`/api/chrome/profiles/${selectedProfile.accountIdx}/proxy`, {
+        body: JSON.stringify({
+          enabled: Boolean(proxyDrafts[selectedProfile.accountIdx] || ""),
+          proxy: proxyDrafts[selectedProfile.accountIdx] || "",
+          restart,
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      await loadProfiles();
+      announce(restart ? "Proxy saved and profile restarted." : "Proxy saved.", "success");
+    } catch (error) {
+      announce(error instanceof Error ? error.message : "Failed to save proxy settings.", "error");
+    } finally {
+      setProfileAction(null);
+    }
+  }
+
+  async function handleApplyBounds() {
+    if (!selectedWindow) return;
+
+    setBoundsSaving(true);
+    try {
+      const response = await rpc("set_window_bounds", {
+        win_id: selectedWindow.id,
         x: bounds.x,
         y: bounds.y,
         width: bounds.w,
-        height: bounds.h
+        height: bounds.h,
       });
-      const data = await res.json();
-      const isErr = data.result?.isError;
-      const msg = isErr ? (data.result?.content?.[0]?.text || 'Error') : 'Applied successfully';
-      setBoundsFeedback({ msg, error: !!isErr });
-      loadWindows();
-    } catch (e: any) {
-      setBoundsFeedback({ msg: e.message, error: true });
-    } finally {
-      setApplyingBounds(false);
-    }
-  };
+      const payload = await response.json();
+      const resultText = payload?.result?.content?.[0]?.text;
 
-  const handleReloadPage = async () => {
-    if (!selectedWinId) return;
-    await rpc('control_electron_BrowserWindow', { win_id: selectedWinId, code: 'win.reload()' });
-  };
-
-  const handleCloseWindow = async () => {
-    if (!selectedWinId) return;
-    if (!confirm(`Close window #${selectedWinId}?`)) return;
-    await rpc('close_window', { win_id: selectedWinId });
-    setSelectedWinId(null);
-    loadWindows();
-  };
-
-  const handleWebpageSnapshot = async () => {
-    if (!selectedWinId) return;
-    setSnapshotLoading(true);
-    setSnapshotDialogText(null);
-    try {
-      const res = await rpc('webpage_snapshot', {
-        win_id: selectedWinId,
-        max_elements: maxElements,
-        include_screenshot: true,
-        show_overlays: showOverlays
-      });
-      const data = await res.json();
-      let text = '';
-      if (data.result?.content?.[0]?.text) {
-        try {
-          const parsed = JSON.parse(data.result.content[0].text);
-          text = parsed?.elements?.[0]?.text || JSON.stringify(parsed, null, 2);
-        } catch {
-          text = data.result.content[0].text;
-        }
-      } else {
-        text = JSON.stringify(data, null, 2);
+      if (!response.ok || payload?.result?.isError) {
+        throw new Error(resultText || "Failed to apply window bounds.");
       }
-      setSnapshotDialogText(text || 'No data returned');
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to get snapshot';
-      setSnapshotDialogText(`Error: ${msg}`);
+
+      await loadWindows();
+      announce(resultText || "Window bounds updated.", "success");
+    } catch (error) {
+      announce(error instanceof Error ? error.message : "Failed to apply bounds.", "error");
+    } finally {
+      setBoundsSaving(false);
+    }
+  }
+
+  async function handleReloadPage() {
+    if (!selectedWindow) return;
+    setWindowAction("reload");
+    try {
+      await rpc("control_electron_BrowserWindow", { win_id: selectedWindow.id, code: "win.reload()" });
+      window.setTimeout(() => {
+        void refreshPreview(selectedWindow.id);
+      }, 400);
+      announce("Page reload sent to the selected window.", "success");
+    } catch (error) {
+      announce(error instanceof Error ? error.message : "Failed to reload the page.", "error");
+    } finally {
+      setWindowAction(null);
+    }
+  }
+
+  async function handleCloseWindow() {
+    if (!selectedWindow) return;
+
+    if (!window.confirm(`Close window #${selectedWindow.id}?`)) return;
+
+    setWindowAction("close");
+    try {
+      await rpc("close_window", { win_id: selectedWindow.id });
+      await loadWindows();
+      announce(`Closed window #${selectedWindow.id}.`, "success");
+    } catch (error) {
+      announce(error instanceof Error ? error.message : "Failed to close the window.", "error");
+    } finally {
+      setWindowAction(null);
+    }
+  }
+
+  async function handleCloseAllWindows() {
+    if (!windows.length) return;
+    if (!window.confirm("Close all managed windows?")) return;
+
+    setWindowAction("close-all");
+    try {
+      await Promise.all(windows.map((item) => rpc("close_window", { win_id: item.id })));
+      setWindows([]);
+      setSelectedWinId(null);
+      releasePreviewUrl();
+      if (imgRef.current) imgRef.current.removeAttribute("src");
+      announce("Closed all windows.", "success");
+    } catch (error) {
+      announce(error instanceof Error ? error.message : "Failed to close all windows.", "error");
+    } finally {
+      setWindowAction(null);
+    }
+  }
+
+  async function handleSnapshotCapture() {
+    if (!selectedWindow) return;
+
+    setSnapshotLoading(true);
+    try {
+      const response = await rpc("webpage_snapshot", {
+        include_screenshot: true,
+        max_elements: maxElements,
+        show_overlays: showOverlays,
+        win_id: selectedWindow.id,
+      });
+      const payload = await response.json();
+      const text = payload?.result?.content?.[0]?.text;
+      if (!response.ok || payload?.result?.isError) {
+        throw new Error(text || "Failed to capture webpage snapshot.");
+      }
+
+      let dialogText = text || "No snapshot data returned.";
+      if (text) {
+        try {
+          dialogText = JSON.stringify(JSON.parse(text), null, 2);
+        } catch {
+          dialogText = text;
+        }
+      }
+      setSnapshotDialogText(dialogText);
+    } catch (error) {
+      announce(error instanceof Error ? error.message : "Snapshot capture failed.", "error");
     } finally {
       setSnapshotLoading(false);
     }
-  };
+  }
 
-  const handleImageClick = async (e: MouseEvent<HTMLImageElement>) => {
-    if (!selectedWinId || !imgRef.current) return;
+  async function handleCopyWatchLink() {
+    if (!selectedWindow) return;
+    const watchUrl = buildWatchUrl(selectedWindow.id);
+    try {
+      await navigator.clipboard.writeText(watchUrl);
+      announce("Watch link copied to the clipboard.", "success");
+    } catch {
+      announce("Clipboard access failed. Open the live watch instead.", "error");
+    }
+  }
+
+  async function handlePreviewClick(event: MouseEvent<HTMLImageElement>) {
+    if (!selectedWindow || !imgRef.current) return;
 
     const rect = imgRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    const relativeX = x / rect.width;
+    const relativeY = y / rect.height;
 
-    // Show click position
-    setClickPos({ x: e.clientX, y: e.clientY });
-    setTimeout(() => setClickPos(null), 800);
+    const clickX = Math.round(relativeX * selectedWindow.bounds.width);
+    const clickY = Math.round(relativeY * selectedWindow.bounds.height);
 
-    // Calculate relative coordinates (0.0 to 1.0)
-    const rx = x / rect.width;
-    const ry = y / rect.height;
-
-    // Get window bounds to calculate absolute coordinates
-    const win = windows.find(w => w.id === selectedWinId);
-    if (!win) return;
-
-    // Calculate absolute coordinates in the window
-    const absoluteX = Math.round(rx * win.bounds.width);
-    const absoluteY = Math.round(ry * win.bounds.height);
-
-    console.log(`Click: ${absoluteX}, ${absoluteY} (Window: ${win.bounds.width}x${win.bounds.height})`);
+    setClickPulse({ x: event.clientX, y: event.clientY });
+    if (clickPulseTimerRef.current) window.clearTimeout(clickPulseTimerRef.current);
+    clickPulseTimerRef.current = window.setTimeout(() => setClickPulse(null), 700);
 
     try {
-      await rpc('cdp_click', {
-        win_id: selectedWinId,
-        x: absoluteX,
-        y: absoluteY,
-        button: 'left'
-      });
-    } catch (err) {
-      console.error('Click failed:', err);
+      await rpc("cdp_click", { button: "left", win_id: selectedWindow.id, x: clickX, y: clickY });
+      window.setTimeout(() => {
+        void refreshPreview(selectedWindow.id);
+      }, 160);
+    } catch (error) {
+      announce(error instanceof Error ? error.message : "Failed to click inside the preview.", "error");
     }
-  };
+  }
 
   useEffect(() => {
-    // Pick a default profile once profiles are loaded
-    if (selectedAccountIdx == null && profiles.length) {
-      setSelectedAccountIdx(profiles[0].accountIdx);
+    void loadWindows();
+    void loadProfiles();
+  }, []);
+
+  useEffect(() => {
+    if (mode === "electron") {
+      void loadWindows();
+    } else {
+      void loadProfiles();
     }
-    setProxyDrafts((prev) => {
-      const next = { ...prev };
-      for (const p of profiles) {
-        if (next[p.accountIdx] === undefined) next[p.accountIdx] = p.proxy || '';
+  }, [mode]);
+
+  useEffect(() => {
+    setSelectedWinId((current) => {
+      if (!windows.length) return null;
+      return current && windows.some((item) => item.id === current) ? current : windows[0].id;
+    });
+  }, [windows]);
+
+  useEffect(() => {
+    setSelectedProfileIdx((current) => {
+      if (!profiles.length) return null;
+      return current != null && profiles.some((item) => item.accountIdx === current) ? current : profiles[0].accountIdx;
+    });
+  }, [profiles]);
+
+  useEffect(() => {
+    setProxyDrafts((current) => {
+      const next = { ...current };
+      for (const profile of profiles) {
+        if (next[profile.accountIdx] === undefined) next[profile.accountIdx] = profile.proxy || "";
       }
       return next;
     });
-  }, [profiles, selectedAccountIdx]);
+  }, [profiles]);
 
-  const selectedWindow = windows.find(w => w.id === selectedWinId);
-  const selectedProfile = profiles.find(p => p.accountIdx === selectedAccountIdx) || null;
+  useEffect(() => {
+    if (selectedWinId == null) {
+      localStorage.removeItem(STORAGE_KEYS.selectedWindow);
+      return;
+    }
+    localStorage.setItem(STORAGE_KEYS.selectedWindow, String(selectedWinId));
+  }, [selectedWinId]);
+
+  useEffect(() => {
+    if (selectedProfileIdx == null) {
+      localStorage.removeItem(STORAGE_KEYS.selectedProfile);
+      return;
+    }
+    localStorage.setItem(STORAGE_KEYS.selectedProfile, String(selectedProfileIdx));
+  }, [selectedProfileIdx]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.watchInterval, String(watchInterval));
+  }, [watchInterval]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.captureQuality, String(quality));
+  }, [quality]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.captureScale, String(scale));
+  }, [scale]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.snapshotMaxElements, String(maxElements));
+  }, [maxElements]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.snapshotShowOverlays, String(showOverlays));
+  }, [showOverlays]);
+
+  useEffect(() => {
+    if (!selectedWindow) return;
+
+    setBounds({
+      h: selectedWindow.bounds.height,
+      w: selectedWindow.bounds.width,
+      x: selectedWindow.bounds.x,
+      y: selectedWindow.bounds.y,
+    });
+
+    if (mode === "electron") {
+      void focusWindow(selectedWindow.id).catch(() => undefined);
+    }
+  }, [mode, selectedWindow]);
+
+  useEffect(() => {
+    if (mode !== "electron" || !selectedWinId) return;
+    void refreshPreview(selectedWinId);
+  }, [mode, quality, scale, selectedWinId]);
+
+  useEffect(() => {
+    async function ping() {
+      const pingStart = Date.now();
+      try {
+        await rpc("ping", {});
+        setPingTime(Date.now() - pingStart);
+      } catch {
+        setPingTime(null);
+      }
+    }
+
+    void ping();
+    const timer = window.setInterval(() => {
+      void ping();
+    }, 5000);
+
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = async (event: KeyboardEvent) => {
+      if (mode !== "electron" || !selectedWinId) return;
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      if (isTypingTarget(event.target)) return;
+
+      const key = event.key;
+      if (key.length !== 1 && !KEY_CODE_MAP[key]) return;
+
+      try {
+        const keyCode = KEY_CODE_MAP[key] || key.toUpperCase();
+        await rpc("control_electron_WebContents", {
+          code: `webContents.sendInputEvent({type: 'keyDown', keyCode: '${keyCode}', key: '${key}'})`,
+          win_id: selectedWinId,
+        });
+        await rpc("control_electron_WebContents", {
+          code: `webContents.sendInputEvent({type: 'keyUp', keyCode: '${keyCode}', key: '${key}'})`,
+          win_id: selectedWinId,
+        });
+      } catch {
+        announce("Keyboard forwarding failed for the selected window.", "error");
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [mode, selectedWinId]);
+
+  useEffect(() => {
+    return () => {
+      if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current);
+      if (clickPulseTimerRef.current) window.clearTimeout(clickPulseTimerRef.current);
+      releasePreviewUrl();
+    };
+  }, []);
+
+  const chromeStatusLabel = selectedProfile?.liveStatus?.isRunning ? "Running" : "Stopped";
 
   return (
-    <div className="flex h-screen bg-zinc-950 text-zinc-100 overflow-hidden font-sans selection:bg-indigo-500/30">
-      
-      {/* Left Sidebar - Window List */}
-      <aside className={`${sidebarOpen ? 'w-72' : 'w-0'} bg-zinc-900 border-r border-zinc-800 flex flex-col transition-all duration-300 overflow-hidden shrink-0`}>
-        <div className="p-4 border-b border-zinc-800 flex items-center justify-between shrink-0 h-16">
-          <h2 className="font-semibold text-sm tracking-tight flex items-center gap-2.5 text-zinc-100">
-            <div className="p-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20">
-              <Layout className="w-4 h-4 text-indigo-500" />
-            </div>
-            {mode === 'electron' ? 'Electron Windows' : 'Chrome Profiles'}
-          </h2>
-          <button 
-            onClick={mode === 'electron' ? loadWindows : loadProfiles}
-            disabled={loading}
-            className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors disabled:opacity-50"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          </button>
-        </div>
-        
-        <div className="flex-1 overflow-y-auto p-3 space-y-6">
-          {mode === 'electron' && windows.length === 0 && !loading && (
-             <div className="flex flex-col items-center justify-center h-40 text-zinc-500 gap-3">
-               <Monitor className="w-8 h-8 opacity-20" />
-               <span className="text-xs">No active windows</span>
-             </div>
-          )}
+    <div className="min-h-screen bg-[var(--app-bg)] text-slate-100">
+      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top_left,rgba(55,124,110,0.28),transparent_30%),radial-gradient(circle_at_bottom_right,rgba(191,160,91,0.14),transparent_25%)]" />
+      <div className="pointer-events-none fixed inset-0 opacity-30 [background-image:linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] [background-size:36px_36px]" />
 
-          {mode === 'electron' ? (
-          <div className="space-y-1">
-            {windows.map(w => (
+      <div className="relative mx-auto min-h-screen max-w-[1800px] p-4 xl:grid xl:grid-cols-[320px_minmax(0,1fr)_360px] xl:gap-4">
+        <aside className="panel-surface flex flex-col gap-5">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-300">
+                <Boxes className="h-3.5 w-3.5 text-[var(--accent)]" />
+                CiCy Console
+              </div>
+              <h1 className="mt-4 text-2xl font-semibold tracking-tight text-white">Desktop launch control</h1>
+              <p className="mt-2 text-sm leading-6 text-slate-400">
+                Cleaner session orchestration for Electron windows and Chrome profiles.
+              </p>
+            </div>
+
             <button
-              key={w.id}
-              onClick={() => {
-                setSelectedWinId(w.id);
-                localStorage.setItem('ELECTRON_MCP_SELECTED_WIN', w.id.toString());
-                refreshPreview(w.id);
-              }}
-              className={`w-full text-left px-3 py-3 rounded-xl text-sm transition-all group relative border ${
-                selectedWinId === w.id 
-                  ? 'bg-zinc-800 border-zinc-700 text-white shadow-sm' 
-                  : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200 border-transparent hover:border-zinc-800'
-              }`}
+              className="rounded-xl border border-white/8 bg-white/[0.04] p-2 text-slate-300 transition hover:border-white/16 hover:bg-white/[0.08] hover:text-white"
+              onClick={onLogout}
+              title="Sign out"
+              type="button"
             >
-              <div className="flex items-center justify-between mb-1">
-                <div className="font-medium truncate pr-2">{w.title || 'Untitled Window'}</div>
-                {selectedWinId === w.id && (
-                  <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.5)] shrink-0" />
+              <LogOut className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <MetricCard detail={`${windows.length} tracked`} label="Electron" value={String(windows.length)} />
+            <MetricCard detail={`${profiles.length} available`} label="Profiles" value={String(profiles.length)} />
+          </div>
+
+          <div className="rounded-2xl border border-white/8 bg-black/20 p-3">
+            <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Mode</div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                className={`rounded-xl px-3 py-2 text-sm font-medium transition ${
+                  mode === "chrome"
+                    ? "bg-[var(--accent)] text-slate-950"
+                    : "border border-white/8 bg-white/[0.04] text-slate-300 hover:bg-white/[0.08]"
+                }`}
+                onClick={() => onModeChange("chrome")}
+                type="button"
+              >
+                Chrome
+              </button>
+              <button
+                className={`rounded-xl px-3 py-2 text-sm font-medium transition ${
+                  mode === "electron"
+                    ? "bg-[var(--accent)] text-slate-950"
+                    : "border border-white/8 bg-white/[0.04] text-slate-300 hover:bg-white/[0.08]"
+                }`}
+                onClick={() => onModeChange("electron")}
+                type="button"
+              >
+                Electron
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between rounded-2xl border border-white/8 bg-black/20 px-4 py-3">
+            <div className="flex items-center gap-3">
+              <div className={`rounded-full p-2 ${pingTime != null ? "bg-emerald-500/12 text-emerald-300" : "bg-rose-500/12 text-rose-300"}`}>
+                <Wifi className="h-4 w-4" />
+              </div>
+              <div>
+                <div className="text-sm font-medium text-white">Connection</div>
+                <div className="text-xs text-slate-400">{pingTime != null ? `${pingTime} ms latency` : "Disconnected"}</div>
+              </div>
+            </div>
+            <div className={`rounded-full px-2.5 py-1 text-xs font-medium ${pingTime != null ? "bg-emerald-500/12 text-emerald-200" : "bg-rose-500/12 text-rose-200"}`}>
+              {pingTime != null ? "Healthy" : "Offline"}
+            </div>
+          </div>
+
+          <div className="flex min-h-0 flex-1 flex-col gap-3">
+            <SectionTitle
+              action={
+                <button
+                  className="rounded-xl border border-white/8 bg-white/[0.04] p-2 text-slate-300 transition hover:border-white/16 hover:bg-white/[0.08]"
+                  onClick={() => void (mode === "electron" ? loadWindows() : loadProfiles())}
+                  type="button"
+                >
+                  <RefreshCw className={`h-4 w-4 ${(mode === "electron" ? windowsLoading : profilesLoading) ? "animate-spin" : ""}`} />
+                </button>
+              }
+              detail={mode === "electron" ? "Choose a managed browser window." : "Pick a Chrome profile to operate on."}
+              eyebrow="Sessions"
+              title={mode === "electron" ? "Window registry" : "Profile registry"}
+            />
+
+            <div className="min-h-[320px] space-y-2 overflow-y-auto pr-1">
+              {mode === "electron"
+                ? windows.map((item) => (
+                    <Fragment key={item.id}>
+                      <WindowListItem active={item.id === selectedWinId} onClick={() => setSelectedWinId(item.id)} windowInfo={item} />
+                    </Fragment>
+                  ))
+                : profiles.map((item) => (
+                    <Fragment key={item.profileKey}>
+                      <ProfileListItem
+                        active={item.accountIdx === selectedProfileIdx}
+                        onClick={() => setSelectedProfileIdx(item.accountIdx)}
+                        profile={item}
+                      />
+                    </Fragment>
+                  ))}
+
+              {mode === "electron" && !windowsLoading && windows.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-8 text-center text-sm text-slate-400">
+                  No windows are currently managed by the worker.
+                </div>
+              ) : null}
+
+              {mode === "chrome" && !profilesLoading && profiles.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-8 text-center text-sm text-slate-400">
+                  No Chrome profiles were returned by the worker.
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          {mode === "electron" ? (
+            <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
+              <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Quick launch</div>
+              <div className="space-y-2">
+                {QUICK_LAUNCH_TARGETS.map((target) => (
+                  <button
+                    className="flex w-full items-center justify-between rounded-xl border border-white/8 bg-white/[0.04] px-4 py-3 text-left transition hover:border-white/16 hover:bg-white/[0.08]"
+                    disabled={Boolean(windowAction)}
+                    key={target.label}
+                    onClick={() => void handleOpenWindow(target.url)}
+                    type="button"
+                  >
+                    <div>
+                      <div className="text-sm font-medium text-white">{target.label}</div>
+                      <div className="text-xs text-slate-400">{target.note}</div>
+                    </div>
+                    <ExternalLink className="h-4 w-4 text-slate-400" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
+              <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Proxy status</div>
+              <p className="text-sm leading-6 text-slate-400">
+                Keep proxy configuration close to the profile that owns it. Save without restart when you are staging a change, or
+                restart immediately when you need it live.
+              </p>
+            </div>
+          )}
+        </aside>
+
+        <main className="panel-surface mt-4 flex min-h-[780px] flex-col overflow-hidden xl:mt-0">
+          <div className="border-b border-white/8 px-6 py-5">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+              <SectionTitle
+                detail={
+                  mode === "electron"
+                    ? selectedWindow
+                      ? shortenUrl(selectedWindow.url)
+                      : "Choose a window from the left rail to focus, inspect, and drive it."
+                    : selectedProfile
+                      ? selectedProfile.gmail || `account_${selectedProfile.accountIdx}`
+                      : "Choose a Chrome profile from the left rail to manage it."
+                }
+                eyebrow={mode === "electron" ? "Active window" : "Active profile"}
+                title={
+                  mode === "electron"
+                    ? selectedWindow?.title || "No window selected"
+                    : selectedProfile
+                      ? `account_${selectedProfile.accountIdx}`
+                      : "No profile selected"
+                }
+              />
+
+              <div className="flex flex-wrap items-center gap-2">
+                {mode === "electron" ? (
+                  <>
+                    <ActionButton
+                      disabled={!selectedWindow || previewLoading}
+                      icon={<RefreshCw className={`h-4 w-4 ${previewLoading ? "animate-spin" : ""}`} />}
+                      label="Refresh preview"
+                      onClick={() => {
+                        if (selectedWindow) void refreshPreview(selectedWindow.id, true);
+                      }}
+                    />
+                    <ActionButton
+                      disabled={!selectedWindow}
+                      icon={<Eye className="h-4 w-4" />}
+                      label="Open live watch"
+                      onClick={() => {
+                        if (selectedWindow) window.open(buildWatchUrl(selectedWindow.id), "_blank", "noopener,noreferrer");
+                      }}
+                    />
+                  </>
+                ) : (
+                  <ActionButton
+                    disabled={!selectedProfile}
+                    icon={<RefreshCw className={`h-4 w-4 ${profilesLoading ? "animate-spin" : ""}`} />}
+                    label="Refresh profiles"
+                    onClick={() => void loadProfiles()}
+                  />
                 )}
               </div>
-              <div className="flex items-center gap-2 text-[10px] text-zinc-500 font-mono mt-1">
-                <span className="px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800">#{w.id}</span>
-                <span>{w.bounds.width}×{w.bounds.height}</span>
-                <span className="text-zinc-600">@</span>
-                <span>{w.bounds.x},{w.bounds.y}</span>
-              </div>
-            </button>
-          ))}
+            </div>
           </div>
+
+          {notice ? (
+            <div className={`mx-6 mt-5 rounded-2xl border px-4 py-3 text-sm ${toneClasses(notice.tone)}`}>
+              <div className="flex items-start gap-3">
+                {notice.tone === "error" ? (
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                ) : notice.tone === "success" ? (
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+                ) : (
+                  <Shield className="mt-0.5 h-4 w-4 shrink-0" />
+                )}
+                <span>{notice.message}</span>
+              </div>
+            </div>
+          ) : null}
+
+          {mode === "electron" ? (
+            <div className="flex min-h-0 flex-1 flex-col px-6 py-5">
+              <div className="grid gap-4 lg:grid-cols-3">
+                <MetricCard
+                  detail={selectedWindow ? shortenUrl(selectedWindow.url) : "Choose a managed session from the left rail."}
+                  label="Target host"
+                  value={selectedWindow ? formatHost(selectedWindow.url) : "No target"}
+                />
+                <MetricCard
+                  detail={selectedWindow ? `Window #${selectedWindow.id}` : "Bounds become editable after selection."}
+                  label="Window bounds"
+                  value={selectedWindow ? formatBounds(selectedWindow.bounds) : "—"}
+                />
+                <MetricCard
+                  detail="Used by preview + watch view."
+                  label="Capture profile"
+                  value={`${quality}% · ${Math.round(scale * 100)}%`}
+                />
+              </div>
+
+              <div className="mt-5 flex min-h-0 flex-1 flex-col rounded-[28px] border border-white/8 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.06),transparent_40%),rgba(8,13,18,0.92)] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+                {selectedWindow ? (
+                  <>
+                    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                        <span className="rounded-full border border-white/8 px-2 py-1 font-mono text-slate-300">#{selectedWindow.id}</span>
+                        <span>{selectedWindow.bounds.width}×{selectedWindow.bounds.height}</span>
+                        <span>Click preview to send a CDP click. Keyboard input forwards unless a local form is focused.</span>
+                      </div>
+                      <ActionButton
+                        disabled={!selectedWindow}
+                        icon={<Copy className="h-4 w-4" />}
+                        label="Copy watch link"
+                        onClick={() => void handleCopyWatchLink()}
+                      />
+                    </div>
+
+                    <div className="relative flex min-h-[440px] flex-1 items-center justify-center overflow-hidden rounded-[24px] border border-white/8 bg-black/40">
+                      <img
+                        alt="Managed window preview"
+                        className="max-h-full max-w-full cursor-crosshair rounded-[18px] object-contain shadow-[0_24px_80px_rgba(0,0,0,0.45)]"
+                        draggable={false}
+                        onClick={(event) => void handlePreviewClick(event)}
+                        onDragStart={(event) => event.preventDefault()}
+                        ref={imgRef}
+                      />
+                      {previewLoading ? (
+                        <div className="absolute right-4 top-4 rounded-full border border-white/10 bg-black/55 px-3 py-1.5 text-xs text-slate-300 backdrop-blur">
+                          Refreshing preview…
+                        </div>
+                      ) : null}
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex min-h-[520px] flex-1 flex-col items-center justify-center rounded-[24px] border border-dashed border-white/10 bg-black/20 px-8 text-center">
+                    <Monitor className="h-10 w-10 text-slate-500" />
+                    <h3 className="mt-6 text-xl font-semibold text-white">Select a window or launch one</h3>
+                    <p className="mt-3 max-w-xl text-sm leading-6 text-slate-400">
+                      The start page now treats the preview as the primary workspace. Open a known target from Quick launch or pick an
+                      existing session from the left rail.
+                    </p>
+                    <div className="mt-8 flex flex-wrap justify-center gap-2">
+                      {QUICK_LAUNCH_TARGETS.map((target) => (
+                        <Fragment key={target.label}>
+                          <ActionButton
+                            icon={<ArrowUpRight className="h-4 w-4" />}
+                            label={target.label}
+                            onClick={() => void handleOpenWindow(target.url)}
+                            tone="primary"
+                          />
+                        </Fragment>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           ) : (
-          <div className="space-y-2">
-            {profiles.length === 0 ? (
-              <div className="text-[11px] text-zinc-600 px-1">No profiles</div>
-            ) : (
-              <div className="space-y-1">
-                {profiles.map((p) => {
-                  const running = !!p?.liveStatus?.isRunning;
-                  const selected = selectedAccountIdx === p.accountIdx;
-                  return (
-                    <button
-                      type="button"
-                      key={p.profileKey}
-                      onClick={() => setSelectedAccountIdx(p.accountIdx)}
-                      className={`w-full text-left p-3 rounded-xl border transition-colors ${selected ? 'border-indigo-500/30 bg-indigo-500/10' : running ? 'border-emerald-500/20 bg-emerald-500/5 hover:bg-emerald-500/10' : 'border-zinc-800 bg-zinc-900/40 hover:bg-zinc-800/40'}`}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="min-w-0">
-                          <div className="text-xs font-semibold text-zinc-200 truncate">
-                            account_{p.accountIdx}
-                            <span className={`ml-2 inline-block w-1.5 h-1.5 rounded-full ${running ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
-                          </div>
-                          <div className="text-[10px] text-zinc-500 font-mono truncate">{p.gmail || '—'}</div>
-                          <div className="text-[10px] text-zinc-600 font-mono truncate">
-                            port: {p.port ?? '—'} {p.proxy ? `| proxy: on` : '| proxy: off'}
-                          </div>
+            <div className="flex min-h-0 flex-1 flex-col gap-5 px-6 py-5">
+              <div className="grid gap-4 lg:grid-cols-3">
+                <MetricCard
+                  detail="Process state as reported by the worker."
+                  label="Lifecycle"
+                  value={selectedProfile ? chromeStatusLabel : "No profile"}
+                />
+                <MetricCard
+                  detail="Remote debugger endpoint."
+                  label="Debugger port"
+                  value={selectedProfile?.port != null ? String(selectedProfile.port) : "—"}
+                />
+                <MetricCard
+                  detail="Configuration attached to the selected profile."
+                  label="Proxy"
+                  value={selectedProfile?.proxy ? "Enabled" : "Disabled"}
+                />
+              </div>
+
+              <div className="grid flex-1 gap-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
+                <section className="rounded-[28px] border border-white/8 bg-black/20 p-6">
+                  <SectionTitle
+                    detail="Core lifecycle actions stay visible here. Deeper configuration lives in the inspector."
+                    eyebrow="Overview"
+                    title={selectedProfile ? `Profile account_${selectedProfile.accountIdx}` : "No profile selected"}
+                  />
+
+                  {selectedProfile ? (
+                    <>
+                      <div className="mt-6 rounded-2xl border border-white/8 bg-white/[0.03] p-5">
+                        <div className="text-sm font-medium text-white">{selectedProfile.gmail || "No mailbox label"}</div>
+                        <div className="mt-1 font-mono text-xs text-slate-500">{selectedProfile.profileKey}</div>
+                        <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                          <span className="rounded-full border border-white/8 px-2 py-1">port {selectedProfile.port ?? "—"}</span>
+                          <span className="rounded-full border border-white/8 px-2 py-1">{selectedProfile.proxy ? "Proxy configured" : "No proxy"}</span>
+                          <span className="rounded-full border border-white/8 px-2 py-1">{chromeStatusLabel}</span>
                         </div>
                       </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-          )}
-        </div>
 
-        <div className="p-4 border-t border-zinc-800 bg-zinc-900/50 space-y-3 shrink-0">
-          {mode === 'electron' && (
+                      <div className="mt-6 flex flex-wrap gap-2">
+                        <ActionButton
+                          disabled={Boolean(profileAction)}
+                          icon={<ArrowUpRight className="h-4 w-4" />}
+                          label={profileAction === "open" ? "Opening…" : "Open"}
+                          onClick={() => void handleProfileAction("open")}
+                          tone="primary"
+                        />
+                        <ActionButton
+                          disabled={Boolean(profileAction)}
+                          icon={<RotateCcw className="h-4 w-4" />}
+                          label={profileAction === "restart" ? "Restarting…" : "Restart"}
+                          onClick={() => void handleProfileAction("restart")}
+                        />
+                        <ActionButton
+                          disabled={Boolean(profileAction)}
+                          icon={<Square className="h-4 w-4" />}
+                          label={profileAction === "stop" ? "Stopping…" : "Stop"}
+                          onClick={() => void handleProfileAction("stop")}
+                          tone="danger"
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <div className="mt-6 rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-8 text-center text-sm text-slate-400">
+                      Pick a Chrome profile from the left rail to manage it.
+                    </div>
+                  )}
+                </section>
+
+                <section className="rounded-[28px] border border-white/8 bg-black/20 p-6">
+                  <SectionTitle
+                    detail="This space keeps operator notes visible instead of burying them in a debug-only panel."
+                    eyebrow="Guidance"
+                    title="Operational notes"
+                  />
+
+                  <div className="mt-6 space-y-4">
+                    <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
+                      <div className="flex items-center gap-2 text-sm font-medium text-white">
+                        <Gauge className="h-4 w-4 text-[var(--accent)]" />
+                        Launch discipline
+                      </div>
+                      <p className="mt-2 text-sm leading-6 text-slate-400">
+                        Keep the main workspace focused on the selected profile. Use the inspector for proxy changes so the primary
+                        content never turns into a settings dump.
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
+                      <div className="flex items-center gap-2 text-sm font-medium text-white">
+                        <Shield className="h-4 w-4 text-[var(--accent)]" />
+                        Why this layout
+                      </div>
+                      <p className="mt-2 text-sm leading-6 text-slate-400">
+                        The original page mixed login, launch, window selection, CDP debugging, and long-form controls in one surface.
+                        This rewrite makes the operator’s current target obvious first, and the advanced tooling contextual second.
+                      </p>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </div>
+          )}
+        </main>
+
+        <aside className="panel-surface mt-4 flex flex-col gap-5 xl:mt-0">
+          <SectionTitle
+            detail={mode === "electron" ? "Advanced tooling stays contextual here." : "Profile configuration is isolated here."}
+            eyebrow="Inspector"
+            title={mode === "electron" ? "Window controls" : "Profile controls"}
+          />
+
+          {mode === "electron" ? (
             <>
-              <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider px-1">Quick Launch</div>
-              <div className="grid grid-cols-2 gap-2">
-                 <button onClick={() => handleOpenWindow('https://chatgpt.com')} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-xs font-medium transition-colors">
-                   <ExternalLink className="w-3 h-3 text-emerald-500" /> ChatGPT
-                 </button>
-                 <button onClick={() => handleOpenWindow('https://gemini.google.com')} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-xs font-medium transition-colors">
-                   <ExternalLink className="w-3 h-3 text-blue-500" /> Gemini
-                 </button>
-                 <button onClick={() => handleOpenWindow('https://aistudio.google.com')} className="col-span-2 flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-xs font-medium transition-colors">
-                   <ExternalLink className="w-3 h-3 text-purple-500" /> AI Studio
-                 </button>
+              <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
+                <div className="flex items-center gap-2 text-sm font-medium text-white">
+                  <LayoutGrid className="h-4 w-4 text-[var(--accent)]" />
+                  Session summary
+                </div>
+                <div className="mt-4 space-y-3 text-sm text-slate-300">
+                  <div>
+                    <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Window</div>
+                    <div className="mt-1">{selectedWindow ? selectedWindow.title || `Window #${selectedWindow.id}` : "No selection"}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs uppercase tracking-[0.18em] text-slate-500">URL</div>
+                    <div className="mt-1 break-all text-slate-400">{selectedWindow?.url || "—"}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Bounds</div>
+                    <div className="mt-1">{selectedWindow ? formatBounds(selectedWindow.bounds) : "—"}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
+                <div className="flex items-center gap-2 text-sm font-medium text-white">
+                  <SlidersHorizontal className="h-4 w-4 text-[var(--accent)]" />
+                  Capture profile
+                </div>
+                <div className="mt-4 space-y-4">
+                  <RangeField
+                    label="Watch refresh cadence"
+                    max={5000}
+                    min={200}
+                    onChange={setWatchInterval}
+                    step={100}
+                    value={watchInterval}
+                    valueLabel={`${(watchInterval / 1000).toFixed(1)} s`}
+                  />
+                  <RangeField
+                    label="JPEG quality"
+                    max={100}
+                    min={10}
+                    onChange={setQuality}
+                    step={5}
+                    value={quality}
+                    valueLabel={`${quality}%`}
+                  />
+                  <RangeField
+                    label="Scale"
+                    max={1}
+                    min={0.2}
+                    onChange={setScale}
+                    step={0.02}
+                    value={scale}
+                    valueLabel={`${Math.round(scale * 100)}%`}
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/8 bg-black/20 p-4" data-local-input="true">
+                <div className="flex items-center gap-2 text-sm font-medium text-white">
+                  <Monitor className="h-4 w-4 text-[var(--accent)]" />
+                  Bounds editor
+                </div>
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  {[
+                    { key: "x", label: "X" },
+                    { key: "y", label: "Y" },
+                    { key: "w", label: "Width" },
+                    { key: "h", label: "Height" },
+                  ].map((field) => (
+                    <label className="space-y-2" key={field.key}>
+                      <span className="text-xs uppercase tracking-[0.18em] text-slate-500">{field.label}</span>
+                      <input
+                        className="w-full rounded-xl border border-white/8 bg-white/[0.04] px-3 py-2 font-mono text-sm text-white outline-none transition focus:border-[color:var(--accent)]/60 focus:bg-white/[0.07]"
+                        onChange={(event) =>
+                          setBounds((current) => ({
+                            ...current,
+                            [field.key]: Number(event.target.value) || 0,
+                          }))
+                        }
+                        type="number"
+                        value={bounds[field.key as keyof typeof bounds]}
+                      />
+                    </label>
+                  ))}
+                </div>
+                <div className="mt-4">
+                  <ActionButton
+                    disabled={!selectedWindow || boundsSaving}
+                    icon={<RefreshCw className={`h-4 w-4 ${boundsSaving ? "animate-spin" : ""}`} />}
+                    label={boundsSaving ? "Applying…" : "Apply bounds"}
+                    onClick={() => void handleApplyBounds()}
+                    tone="primary"
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
+                <div className="flex items-center gap-2 text-sm font-medium text-white">
+                  <ScanSearch className="h-4 w-4 text-[var(--accent)]" />
+                  Page tools
+                </div>
+                <div className="mt-4 space-y-4">
+                  <RangeField
+                    label="Snapshot depth"
+                    max={100}
+                    min={5}
+                    onChange={setMaxElements}
+                    step={5}
+                    value={maxElements}
+                    valueLabel={`${maxElements} elements`}
+                  />
+
+                  <label className="flex items-center justify-between gap-4 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2" data-local-input="true">
+                    <div>
+                      <div className="text-sm font-medium text-white">Highlight overlays</div>
+                      <div className="text-xs text-slate-500">Overlay hit targets in the structured snapshot.</div>
+                    </div>
+                    <input
+                      checked={showOverlays}
+                      className="h-4 w-4 accent-[var(--accent)]"
+                      onChange={(event) => setShowOverlays(event.target.checked)}
+                      type="checkbox"
+                    />
+                  </label>
+
+                  <div className="flex flex-wrap gap-2">
+                    <ActionButton
+                      disabled={!selectedWindow || Boolean(windowAction)}
+                      icon={<RotateCcw className="h-4 w-4" />}
+                      label={windowAction === "reload" ? "Reloading…" : "Reload page"}
+                      onClick={() => void handleReloadPage()}
+                    />
+                    <ActionButton
+                      disabled={!selectedWindow || snapshotLoading}
+                      icon={<ScanSearch className={`h-4 w-4 ${snapshotLoading ? "animate-spin" : ""}`} />}
+                      label={snapshotLoading ? "Capturing…" : "Structured snapshot"}
+                      onClick={() => void handleSnapshotCapture()}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-rose-500/18 bg-rose-500/[0.06] p-4">
+                <div className="flex items-center gap-2 text-sm font-medium text-rose-100">
+                  <AlertTriangle className="h-4 w-4" />
+                  Destructive actions
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <ActionButton
+                    disabled={!selectedWindow || Boolean(windowAction)}
+                    icon={<X className="h-4 w-4" />}
+                    label={windowAction === "close" ? "Closing…" : "Close selected"}
+                    onClick={() => void handleCloseWindow()}
+                    tone="danger"
+                  />
+                  <ActionButton
+                    disabled={!windows.length || Boolean(windowAction)}
+                    icon={<Trash2 className="h-4 w-4" />}
+                    label={windowAction === "close-all" ? "Closing all…" : "Close all"}
+                    onClick={() => void handleCloseAllWindows()}
+                    tone="danger"
+                  />
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
+                <div className="flex items-center gap-2 text-sm font-medium text-white">
+                  <Globe className="h-4 w-4 text-[var(--accent)]" />
+                  Selected profile
+                </div>
+                <div className="mt-4 space-y-3 text-sm text-slate-300">
+                  <div>
+                    <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Identity</div>
+                    <div className="mt-1">{selectedProfile ? `account_${selectedProfile.accountIdx}` : "No selection"}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Mailbox</div>
+                    <div className="mt-1 break-all text-slate-400">{selectedProfile?.gmail || "—"}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Debugger port</div>
+                    <div className="mt-1">{selectedProfile?.port ?? "—"}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/8 bg-black/20 p-4" data-local-input="true">
+                <div className="flex items-center gap-2 text-sm font-medium text-white">
+                  <Link2 className="h-4 w-4 text-[var(--accent)]" />
+                  Proxy configuration
+                </div>
+                <div className="mt-4 space-y-3">
+                  <textarea
+                    className="min-h-[108px] w-full rounded-2xl border border-white/8 bg-white/[0.04] px-3 py-3 font-mono text-sm text-white outline-none transition focus:border-[color:var(--accent)]/60 focus:bg-white/[0.07]"
+                    disabled={!selectedProfile}
+                    onChange={(event) =>
+                      setProxyDrafts((current) => ({
+                        ...current,
+                        [selectedProfile?.accountIdx ?? -1]: event.target.value,
+                      }))
+                    }
+                    placeholder="socks5://127.0.0.1:1080"
+                    value={selectedProfile ? proxyDrafts[selectedProfile.accountIdx] ?? "" : ""}
+                  />
+                  <div className="text-xs leading-5 text-slate-500">
+                    Leave empty to disable the proxy. Save without restart when you want to stage the config first.
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <ActionButton
+                      disabled={!selectedProfile || Boolean(profileAction)}
+                      icon={<Shield className="h-4 w-4" />}
+                      label={profileAction === "proxy-save" ? "Saving…" : "Save"}
+                      onClick={() => void handleSaveProxy(false)}
+                    />
+                    <ActionButton
+                      disabled={!selectedProfile || Boolean(profileAction)}
+                      icon={<RotateCcw className="h-4 w-4" />}
+                      label={profileAction === "proxy-restart" ? "Saving + restarting…" : "Save + restart"}
+                      onClick={() => void handleSaveProxy(true)}
+                      tone="primary"
+                    />
+                    <ActionButton
+                      disabled={!selectedProfile || Boolean(profileAction)}
+                      icon={<Trash2 className="h-4 w-4" />}
+                      label="Clear"
+                      onClick={() => {
+                        if (!selectedProfile) return;
+                        setProxyDrafts((current) => ({ ...current, [selectedProfile.accountIdx]: "" }));
+                      }}
+                    />
+                  </div>
+                </div>
               </div>
             </>
           )}
-          <div className="pt-2 border-t border-zinc-800 text-center">
-            <span className="text-[10px] text-zinc-600 font-mono">v1.0.0</span>
-          </div>
-        </div>
-      </aside>
+        </aside>
+      </div>
 
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col min-w-0 bg-zinc-950 relative">
-        {/* Header Toolbar */}
-        <header className="h-16 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between px-6 shrink-0 backdrop-blur-sm z-10">
-           <div className="flex items-center gap-4">
-             <button 
-               onClick={() => setSidebarOpen(!sidebarOpen)}
-               className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors"
-             >
-               {sidebarOpen ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-             </button>
-             
-             <div className="h-6 w-px bg-zinc-800" />
-
-             {mode === 'electron' ? (
-              selectedWindow ? (
-                <div>
-                  <h1 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
-                    {selectedWindow.title || 'Untitled Window'}
-                    <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-zinc-800 text-zinc-400 border border-zinc-700">
-                      #{selectedWindow.id}
-                    </span>
-                  </h1>
-                  <div className="text-xs text-zinc-500 truncate max-w-md">{selectedWindow.url}</div>
-                </div>
-              ) : (
-                <div className="text-sm text-zinc-500">No window selected</div>
-              )
-             ) : (
+      {snapshotDialogText ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/72 p-4 backdrop-blur-sm">
+          <div className="flex max-h-[85vh] w-full max-w-4xl flex-col overflow-hidden rounded-[28px] border border-white/10 bg-[#0c1418] shadow-[0_24px_120px_rgba(0,0,0,0.55)]">
+            <div className="flex items-center justify-between border-b border-white/8 px-5 py-4">
               <div>
-                <h1 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
-                  Chrome Profiles
-                  {selectedProfile && (
-                    <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-zinc-800 text-zinc-400 border border-zinc-700">
-                      account_{selectedProfile.accountIdx}
-                    </span>
-                  )}
-                </h1>
-                <div className="text-xs text-zinc-500 truncate max-w-md">Manage profiles, proxy, lifecycle</div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Snapshot output</div>
+                <div className="mt-1 text-lg font-semibold text-white">Structured webpage snapshot</div>
               </div>
-             )}
-           </div>
-
-            <div className="flex items-center gap-2">
               <button
-                onClick={() => window.location.assign('/console/chrome')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium border ${mode === 'chrome' ? 'bg-indigo-500/20 text-indigo-200 border-indigo-500/30' : 'bg-zinc-800/50 text-zinc-400 border-zinc-700/50 hover:text-zinc-200'}`}
-              >
-                Chrome Console
-              </button>
-              <button
-                onClick={() => window.location.assign('/console/electron')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium border ${mode === 'electron' ? 'bg-indigo-500/20 text-indigo-200 border-indigo-500/30' : 'bg-zinc-800/50 text-zinc-400 border-zinc-700/50 hover:text-zinc-200'}`}
-              >
-                Electron Console
-              </button>
-              <div className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-zinc-800/50 border border-zinc-700/50 text-xs">
-                <Wifi className={`w-3.5 h-3.5 ${pingTime ? 'text-emerald-400' : 'text-red-400'}`} />
-                <span className={`font-mono ${pingTime ? 'text-zinc-300' : 'text-red-400'}`}>
-                  {pingTime ? `${pingTime}ms` : '--'}
-                </span>
-              </div>
-
-              <button
-                onClick={() => selectedWinId && refreshPreview(selectedWinId)}
-                disabled={!selectedWinId || previewLoading}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border bg-zinc-800 text-zinc-200 border-zinc-700 hover:bg-zinc-700 disabled:opacity-50"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${previewLoading ? 'animate-spin' : ''}`} />
-                Refresh Preview
-              </button>
-
-              <button
-                onClick={() => {
-                  const newVal = !controlsOpen;
-                  setControlsOpen(newVal);
-                  localStorage.setItem('CONTROLS_VISIBLE', String(newVal));
-                }}
-                className={`p-2 rounded-lg transition-colors border ${
-                  controlsOpen 
-                    ? 'bg-zinc-800 text-zinc-100 border-zinc-700' 
-                    : 'text-zinc-400 border-transparent hover:bg-zinc-800'
-                }`}
-              >
-                <Sliders className="w-4 h-4" />
-              </button>
-            </div>
-        </header>
-
-        {/* Main Panel */}
-        <div className="flex-1 overflow-hidden relative flex items-center justify-center bg-zinc-950">
-           {/* Grid Pattern Background */}
-           <div className="absolute inset-0 opacity-[0.03] pointer-events-none" style={{ 
-             backgroundImage: 'radial-gradient(#fff 1px, transparent 1px)', 
-             backgroundSize: '24px 24px' 
-           }} />
-           
-            {mode === 'electron' ? (
-              selectedWinId ? (
-               <div className="relative z-0 max-w-full max-h-full p-8 flex items-center justify-center">
-                  <img 
-                    ref={imgRef} 
-                    onClick={handleImageClick}
-                    onDragStart={(e) => e.preventDefault()}
-                    draggable={false}
-                    alt="Preview" 
-                    className="max-w-full max-h-full object-contain shadow-2xl shadow-black rounded-lg ring-1 ring-zinc-800 bg-zinc-900 cursor-crosshair select-none" 
-                  />
-                  {clickPos && (
-                    <div 
-                      className="fixed pointer-events-none z-50"
-                      style={{ left: clickPos.x, top: clickPos.y }}
-                    >
-                      <div className="relative -translate-x-1/2 -translate-y-1/2">
-                        <div className="w-8 h-8 rounded-full bg-indigo-500/30 border-2 border-indigo-400 animate-ping" />
-                        <div className="absolute inset-0 w-8 h-8 rounded-full bg-indigo-500/50 border-2 border-indigo-400" />
-                      </div>
-                    </div>
-                  )}
-               </div>
-              ) : (
-                <div className="flex flex-col items-center gap-4 text-zinc-600 relative z-0">
-                  <div className="w-16 h-16 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center">
-                    <Monitor className="w-8 h-8 opacity-50" />
-                  </div>
-                  <p className="text-sm font-medium">Select a window to preview</p>
-                </div>
-              )
-            ) : (
-              <div className="w-full max-w-3xl p-8">
-                <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6">
-                  <div className="flex items-center justify-between gap-4">
-                    <div>
-                      <div className="text-sm font-semibold text-zinc-100">Profile</div>
-                      <div className="text-xs text-zinc-500 font-mono mt-1">
-                        {selectedProfile ? `account_${selectedProfile.accountIdx} | ${selectedProfile.gmail || '—'}` : 'Select a profile'}
-                      </div>
-                    </div>
-                    {selectedProfile && (
-                      <div className="flex items-center gap-2">
-                        <button onClick={() => postProfile(selectedProfile.accountIdx, 'open')} className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-xs font-medium">Open</button>
-                        <button onClick={() => postProfile(selectedProfile.accountIdx, 'restart')} className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-xs font-medium">Restart</button>
-                        <button onClick={() => postProfile(selectedProfile.accountIdx, 'stop')} className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-xs font-medium">Stop</button>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-4">
-                      <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Debugger</div>
-                      <div className="mt-2 text-sm text-zinc-200 font-mono">port: {selectedProfile?.port ?? '—'}</div>
-                    </div>
-                    <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-4">
-                      <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Proxy (config)</div>
-
-                      {selectedProfile ? (
-                        <>
-                          <input
-                            value={proxyDrafts[selectedProfile.accountIdx] ?? ''}
-                            onChange={(e) =>
-                              setProxyDrafts((prev) => ({
-                                ...prev,
-                                [selectedProfile.accountIdx]: e.target.value,
-                              }))
-                            }
-                            placeholder="socks5://127.0.0.1:1080 (empty = off)"
-                            className="mt-2 w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700 text-xs font-mono text-zinc-200 placeholder:text-zinc-600"
-                          />
-
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            <button
-                              onClick={() => saveProfileProxy(selectedProfile.accountIdx, false)}
-                              className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-xs font-medium"
-                            >
-                              Save
-                            </button>
-                            <button
-                              onClick={() => saveProfileProxy(selectedProfile.accountIdx, true)}
-                              className="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 border border-indigo-500/30 text-xs font-medium text-white"
-                            >
-                              Save + Restart
-                            </button>
-                            <button
-                              onClick={() =>
-                                setProxyDrafts((prev) => ({
-                                  ...prev,
-                                  [selectedProfile.accountIdx]: '',
-                                }))
-                              }
-                              className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-xs font-medium"
-                            >
-                              Clear
-                            </button>
-                          </div>
-
-                          <div className="mt-3 text-[11px] text-zinc-500">
-                            Tip: proxy changes apply on restart (A).
-                          </div>
-                        </>
-                      ) : (
-                        <div className="mt-2 text-xs text-zinc-500">Select a profile</div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="mt-6 text-[11px] text-zinc-500">
-                    下一步：我会把“平台登录状态（ChatGPT/Gmail/GitHub/Cloudflare/Outlook/Apple）”挂在这里。
-                  </div>
-                </div>
-              </div>
-            )}
-        </div>
-      </main>
-
-      {/* Right Sidebar - Controls (Electron only) */}
-      {mode === 'electron' && (
-      <aside className={`${controlsOpen ? 'w-80' : 'w-0'} bg-zinc-900 border-l border-zinc-800 flex flex-col transition-all duration-300 overflow-hidden shrink-0`}>
-         <div className="p-4 border-b border-zinc-800 h-16 flex items-center shrink-0">
-           <h2 className="font-semibold text-sm tracking-tight flex items-center gap-2 text-zinc-100">
-             <Settings className="w-4 h-4 text-zinc-400" />
-             Controls
-           </h2>
-         </div>
-
-         {selectedWinId ? (
-           <div className="flex-1 overflow-y-auto p-5 space-y-8">
-             
-             {/* Capture Settings */}
-             <div className="space-y-4">
-               <div className="flex items-center justify-between">
-                 <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Capture Settings</h3>
-               </div>
-               
-               <div className="space-y-4">
-                 <div className="space-y-2">
-                   <div className="flex justify-between text-xs">
-                     <span className="text-zinc-400">Interval</span>
-                     <span className="text-zinc-200 font-mono">{(interval / 1000).toFixed(1)}s</span>
-                   </div>
-                   <input 
-                      type="range" min="200" max="5000" step="100" 
-                      value={interval} 
-                      onChange={(e) => {
-                        const v = parseInt(e.target.value);
-                        setIntervalMs(v);
-                        localStorage.setItem('ELECTRON_MCP_INTERVAL', String(v));
-                      }}
-                      className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
-                    />
-                 </div>
-
-                 <div className="space-y-2">
-                   <div className="flex justify-between text-xs">
-                     <span className="text-zinc-400">Quality</span>
-                     <span className="text-zinc-200 font-mono">{quality}%</span>
-                   </div>
-                   <input 
-                      type="range" min="10" max="100" step="5" 
-                      value={quality} 
-                      onChange={(e) => {
-                        const v = parseInt(e.target.value);
-                        setQuality(v);
-                        localStorage.setItem('ELECTRON_MCP_QUALITY', String(v));
-                      }}
-                      className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
-                    />
-                 </div>
-
-                 <div className="space-y-2">
-                   <div className="flex justify-between text-xs">
-                     <span className="text-zinc-400">Scale</span>
-                     <span className="text-zinc-200 font-mono">{Math.round(scale * 100)}%</span>
-                   </div>
-                   <input 
-                      type="range" min="0.1" max="1" step="0.1" 
-                      value={scale} 
-                      onChange={(e) => {
-                        const v = parseFloat(e.target.value);
-                        setScale(v);
-                        localStorage.setItem('ELECTRON_MCP_SCALE', String(v));
-                      }}
-                      className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
-                    />
-                 </div>
-               </div>
-             </div>
-
-             <div className="h-px bg-zinc-800" />
-
-             {/* Bounds */}
-             <div className="space-y-4">
-               <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Window Bounds</h3>
-               <div className="grid grid-cols-2 gap-3">
-                  {['x', 'y', 'w', 'h'].map((key) => (
-                    <div key={key} className="space-y-1.5">
-                      <label className="text-[10px] font-medium text-zinc-500 uppercase">{key === 'w' ? 'Width' : key === 'h' ? 'Height' : key}</label>
-                      <div className="relative">
-                        <input 
-                          type="number" 
-                          value={bounds[key as keyof typeof bounds]} 
-                          onChange={(e) => setBounds({...bounds, [key]: parseInt(e.target.value) || 0})}
-                          className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-200 text-xs font-mono focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all" 
-                        />
-                      </div>
-                    </div>
-                  ))}
-               </div>
-               
-               <button 
-                  onClick={handleApplyBounds}
-                  disabled={applyingBounds}
-                  className="w-full py-2.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium border border-zinc-700 transition-all flex items-center justify-center gap-2"
-                >
-                  {applyingBounds ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-                  {applyingBounds ? 'Applying...' : 'Apply Bounds'}
-                </button>
-                
-                {boundsFeedback && (
-                  <div className={`text-xs flex items-center gap-2 p-2 rounded-lg ${boundsFeedback.error ? 'bg-red-500/10 text-red-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
-                    {boundsFeedback.error ? <AlertCircle className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />}
-                    {boundsFeedback.msg}
-                  </div>
-                )}
-             </div>
-
-             <div className="h-px bg-zinc-800" />
-
-             {/* Actions */}
-             <div className="space-y-3">
-               <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Actions</h3>
-               <button onClick={handleReloadPage} className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium shadow-lg shadow-indigo-500/20 transition-all flex items-center justify-center gap-2">
-                  <RotateCcw className="w-3.5 h-3.5" /> Reload Page
-               </button>
-               <button onClick={handleCloseWindow} className="w-full py-2.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 text-xs font-medium transition-all flex items-center justify-center gap-2">
-                  <X className="w-3.5 h-3.5" /> Close Window
-               </button>
-             </div>
-
-             <div className="h-px bg-zinc-800" />
-             
-              <div className="space-y-3">
-                 <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Danger Zone</h3>
-                 <button onClick={handleCloseAll} className="w-full py-2.5 rounded-lg border border-zinc-800 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 text-xs font-medium transition-all flex items-center justify-center gap-2">
-                   <Trash2 className="w-3.5 h-3.5" /> Close All Windows
-                 </button>
-              </div>
-
-              <div className="h-px bg-zinc-800" />
-
-              {/* Webpage Snapshot */}
-              <div className="space-y-3">
-                <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Webpage Snapshot</h3>
-                
-                <div className="space-y-2">
-                  <div className="flex justify-between text-xs">
-                    <span className="text-zinc-400">Max Elements</span>
-                    <span className="text-zinc-200 font-mono">{maxElements}</span>
-                  </div>
-                  <input 
-                    type="range" min="5" max="100" step="5" 
-                    value={maxElements} 
-                    onChange={(e) => setMaxElements(parseInt(e.target.value))}
-                    className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
-                  />
-                </div>
-
-                <label className="flex items-center justify-between text-xs cursor-pointer">
-                  <span className="text-zinc-400">Show Overlays</span>
-                  <div className={`w-9 h-5 rounded-full transition-colors ${showOverlays ? 'bg-indigo-500' : 'bg-zinc-700'}`}>
-                    <input 
-                      type="checkbox" 
-                      checked={showOverlays}
-                      onChange={(e) => setShowOverlays(e.target.checked)}
-                      className="sr-only"
-                    />
-                    <div className={`w-4 h-4 bg-white rounded-full shadow transform transition-transform ${showOverlays ? 'translate-x-4.5' : 'translate-x-0.5'} mt-0.5`} />
-                  </div>
-                </label>
-
-                <button 
-                  onClick={handleWebpageSnapshot}
-                  disabled={snapshotLoading || !selectedWinId}
-                  className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium shadow-lg shadow-indigo-500/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {snapshotLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
-                  {snapshotLoading ? 'Loading...' : 'Get Snapshot'}
-                </button>
-              </div>
-
-           </div>
-         ) : (
-           <div className="flex-1 flex flex-col items-center justify-center text-zinc-500 p-8 text-center">
-             <Settings className="w-10 h-10 opacity-20 mb-3" />
-             <p className="text-sm">Select a window to view controls</p>
-           </div>
-         )}
-      </aside>
-      )}
-
-      {/* Snapshot Dialog (Electron only) */}
-      {mode === 'electron' && snapshotDialogText && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="w-full max-w-2xl max-h-[80vh] bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl flex flex-col">
-            <div className="flex items-center justify-between p-4 border-b border-zinc-800">
-              <h3 className="text-sm font-semibold text-zinc-100">Webpage Snapshot</h3>
-              <button 
+                className="rounded-xl border border-white/8 bg-white/[0.04] p-2 text-slate-300 transition hover:border-white/16 hover:bg-white/[0.08]"
                 onClick={() => setSnapshotDialogText(null)}
-                className="p-1 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors"
+                type="button"
               >
-                <X className="w-5 h-5" />
+                <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto p-4 max-h-[50vh]">
-              <pre className="text-xs text-zinc-300 font-mono whitespace-pre-wrap max-h-full">{snapshotDialogText}</pre>
+            <div className="overflow-auto p-5">
+              <pre className="whitespace-pre-wrap break-words rounded-2xl border border-white/8 bg-black/20 p-4 text-xs leading-6 text-slate-200">
+                {snapshotDialogText}
+              </pre>
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
+      {clickPulse ? (
+        <div className="pointer-events-none fixed z-50" style={{ left: clickPulse.x, top: clickPulse.y }}>
+          <div className="relative -translate-x-1/2 -translate-y-1/2">
+            <div className="h-10 w-10 animate-ping rounded-full border-2 border-[var(--accent)] bg-[color:var(--accent)]/25" />
+            <div className="absolute inset-0 rounded-full border-2 border-[var(--accent)] bg-[color:var(--accent)]/35" />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
