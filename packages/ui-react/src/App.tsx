@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import Dashboard from "./components/Dashboard";
 import Login from "./components/Login";
 import WatchView from "./components/WatchView";
-import { getToken, removeToken, setToken } from "./lib/client";
+import { getToken, setToken } from "./lib/client";
 
 type ConsoleMode = "chrome" | "electron";
 
@@ -60,12 +60,6 @@ export default function App() {
     setMode(nextMode);
   };
 
-  const handleLogout = () => {
-    removeToken();
-    setWatchWinId(null);
-    setIsAuthenticated(false);
-  };
-
   if (isChecking) {
     return <div className="min-h-screen bg-[var(--app-bg)]" />;
   }
@@ -78,5 +72,5 @@ export default function App() {
     return <Login onLogin={() => setIsAuthenticated(true)} />;
   }
 
-  return <Dashboard mode={mode} onModeChange={handleModeChange} onLogout={handleLogout} />;
+  return <Dashboard mode={mode} onModeChange={handleModeChange} />;
 }

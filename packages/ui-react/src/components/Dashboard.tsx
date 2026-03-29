@@ -4,7 +4,6 @@ import {
   Copy,
   Eye,
   Link2,
-  LogOut,
   Monitor,
   RefreshCw,
   RotateCcw,
@@ -38,7 +37,6 @@ interface ChromeProfile {
 
 interface DashboardProps {
   mode: ConsoleMode;
-  onLogout: () => void;
   onModeChange: (mode: ConsoleMode) => void;
 }
 
@@ -208,7 +206,7 @@ function SidebarItem({
 }) {
   return (
     <button
-      className={`w-full rounded-2xl border px-4 py-3 text-left transition ${
+      className={`w-full self-start rounded-2xl border px-4 py-3 text-left transition ${
         active
           ? "border-[color:var(--accent)]/55 bg-[color:var(--accent)]/14"
           : "border-white/8 bg-white/[0.03] hover:border-white/14 hover:bg-white/[0.06]"
@@ -325,7 +323,7 @@ function RangeField({
   );
 }
 
-export default function Dashboard({ mode, onLogout, onModeChange }: DashboardProps) {
+export default function Dashboard({ mode, onModeChange }: DashboardProps) {
   const [windows, setWindows] = useState<WindowInfo[]>([]);
   const [profiles, setProfiles] = useState<ChromeProfile[]>([]);
   const [selectedWinId, setSelectedWinId] = useState<number | null>(() => readStoredNullableNumber(STORAGE_KEYS.selectedWindow));
@@ -850,7 +848,7 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
             </button>
           </div>
 
-          <div className="mt-3 grid grid-flow-col auto-cols-[220px] gap-2 overflow-x-auto pb-1 xl:min-h-0 xl:flex-1 xl:grid-flow-row xl:auto-cols-auto xl:overflow-y-auto xl:overflow-x-hidden xl:pr-1" data-id="sidebar-list">
+          <div className="mt-3 grid grid-flow-col auto-cols-[220px] gap-2 overflow-x-auto pb-1 xl:min-h-0 xl:flex-1 xl:auto-rows-max xl:grid-flow-row xl:auto-cols-auto xl:content-start xl:overflow-y-auto xl:overflow-x-hidden xl:pr-1" data-id="sidebar-list">
             {mode === "electron"
               ? windows.map((item) => (
                   <Fragment key={item.id}>
@@ -911,14 +909,6 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
                 </div>
               </div>
 
-              <button
-                className="rounded-xl border border-white/8 bg-white/[0.04] p-2 text-slate-300 transition hover:border-white/14 hover:bg-white/[0.08] hover:text-white"
-                data-id="logout-button"
-                onClick={onLogout}
-                type="button"
-              >
-                <LogOut className="h-4 w-4" />
-              </button>
             </div>
           </div>
 
