@@ -196,24 +196,45 @@ function buildTargetsPreview(targets = []) {
     .map((target) => ({ id: target.id, title: target.title, url: target.url }));
 }
 
-async function ensurePageTargets({ debuggerPort, url, activateIfRunning }) {
+async function ensurePageTargets({ debuggerPort, url, activateIfRunning, deps = {} }) {
+  const getTargetsImpl = deps.getTargets || getTargets;
+  const createTargetImpl = deps.createTarget || createTarget;
+  const activateTargetImpl = deps.activateTarget || activateTarget;
   let targets = [];
   let activatedTargetId = null;
 
   try {
-    targets = await getTargets(debuggerPort);
+    targets = await getTargetsImpl(debuggerPort);
   } catch (_) {
     return { targets, activatedTargetId };
   }
 
   const pageTargets = targets.filter((target) => target.type === "page");
-  const matchingTarget = url ? pageTargets.find((target) => target.url === url) || null : null;
+  const targetUrl = typeof url === "string" && url.length ? url : null;
+  const matchingTarget = targetUrl ? pageTargets.find((target) => target.url === targetUrl) || null : null;
 
-  if (url && !matchingTarget) {
+  if (!pageTargets.length) {
     try {
-      const createdTarget = await createTarget(debuggerPort, url);
+      const createdTarget = await createTargetImpl(debuggerPort, targetUrl || "about:blank");
       activatedTargetId = createdTarget?.id || null;
-      targets = await getTargets(debuggerPort);
+      if (activateIfRunning && activatedTargetId) {
+        await activateTargetImpl(debuggerPort, activatedTargetId);
+      }
+      targets = await getTargetsImpl(debuggerPort);
+      return { targets, activatedTargetId };
+    } catch (_) {
+      return { targets, activatedTargetId };
+    }
+  }
+
+  if (targetUrl && !matchingTarget) {
+    try {
+      const createdTarget = await createTargetImpl(debuggerPort, targetUrl);
+      activatedTargetId = createdTarget?.id || null;
+      if (activateIfRunning && activatedTargetId) {
+        await activateTargetImpl(debuggerPort, activatedTargetId);
+      }
+      targets = await getTargetsImpl(debuggerPort);
       return { targets, activatedTargetId };
     } catch (_) {
       return { targets, activatedTargetId };
@@ -224,7 +245,7 @@ async function ensurePageTargets({ debuggerPort, url, activateIfRunning }) {
   if (activateIfRunning && targetToActivate?.id) {
     activatedTargetId = targetToActivate.id;
     try {
-      await activateTarget(debuggerPort, targetToActivate.id);
+      await activateTargetImpl(debuggerPort, targetToActivate.id);
     } catch (_) {}
   }
 
@@ -371,7 +392,7 @@ async function launchOrActivateProfile({
   };
 }
 
-module.exports = (registerTool) => {
+function registerChromeTools(registerTool) {
   registerTool(
     "chrome_list_profiles",
     "列出 ~/Private/chrome.json 中全部 Chrome profiles，并附带 runtime + live 状态",
@@ -739,4 +760,9 @@ module.exports = (registerTool) => {
     },
     { tag: "Chrome" }
   );
+}
+
+module.exports = registerChromeTools;
+module.exports.__testables = {
+  ensurePageTargets,
 };
