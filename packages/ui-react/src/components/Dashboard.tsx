@@ -494,7 +494,6 @@ export default function Dashboard({ mode, onModeChange }: DashboardProps) {
         body: JSON.stringify(url ? { url } : {}),
       });
       await loadProfiles();
-      if (action === "open" && !url) setWorkspaceView("operate");
       announce(url ? `Opened ${formatHost(url)}.` : `${action} account_${selectedProfile.accountIdx}`, "success");
     } catch (error) {
       announce(error instanceof Error ? error.message : "Profile action failed.", "error");
