@@ -139,12 +139,14 @@ function Button({
   onClick,
   disabled,
   active,
+  dataId,
 }: {
   icon?: ReactNode;
   label: string;
   onClick: () => void;
   disabled?: boolean;
   active?: boolean;
+  dataId?: string;
 }) {
   return (
     <button
@@ -153,6 +155,7 @@ function Button({
           ? "border-[color:var(--accent)]/50 bg-[color:var(--accent)]/16 text-white"
           : "border-white/8 bg-white/[0.04] text-slate-300 hover:border-white/14 hover:bg-white/[0.08] hover:text-white"
       }`}
+      data-id={dataId}
       disabled={disabled}
       onClick={onClick}
       type="button"
@@ -167,16 +170,19 @@ function ModeChip({
   active,
   label,
   onClick,
+  dataId,
 }: {
   active: boolean;
   label: string;
   onClick: () => void;
+  dataId?: string;
 }) {
   return (
     <button
       className={`rounded-xl px-3 py-2 text-sm transition ${
         active ? "bg-[var(--accent)] text-slate-950" : "text-slate-400 hover:bg-white/[0.06] hover:text-white"
       }`}
+      data-id={dataId}
       onClick={onClick}
       type="button"
     >
@@ -191,12 +197,14 @@ function SidebarItem({
   meta,
   onClick,
   status,
+  dataId,
 }: {
   active: boolean;
   label: string;
   meta: string;
   onClick: () => void;
   status?: "online" | "offline";
+  dataId?: string;
 }) {
   return (
     <button
@@ -205,6 +213,7 @@ function SidebarItem({
           ? "border-[color:var(--accent)]/55 bg-[color:var(--accent)]/14"
           : "border-white/8 bg-white/[0.03] hover:border-white/14 hover:bg-white/[0.06]"
       }`}
+      data-id={dataId}
       onClick={onClick}
       type="button"
     >
@@ -223,16 +232,19 @@ function WorkspaceChip({
   active,
   label,
   onClick,
+  dataId,
 }: {
   active: boolean;
   label: string;
   onClick: () => void;
+  dataId?: string;
 }) {
   return (
     <button
       className={`rounded-xl px-3 py-2 text-sm transition ${
         active ? "bg-white/[0.08] text-white" : "text-slate-500 hover:bg-white/[0.05] hover:text-slate-300"
       }`}
+      data-id={dataId}
       onClick={onClick}
       type="button"
     >
@@ -244,12 +256,14 @@ function WorkspaceChip({
 function Field({
   label,
   value,
+  dataId,
 }: {
   label: string;
   value: string;
+  dataId?: string;
 }) {
   return (
-    <div className="space-y-1">
+    <div className="space-y-1" data-id={dataId}>
       <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">{label}</div>
       <div className="text-sm text-slate-200">{value}</div>
     </div>
@@ -259,12 +273,14 @@ function Field({
 function MetricPill({
   label,
   value,
+  dataId,
 }: {
   label: string;
   value: string;
+  dataId?: string;
 }) {
   return (
-    <div className="rounded-2xl border border-white/8 bg-black/20 px-3 py-2">
+    <div className="rounded-2xl border border-white/8 bg-black/20 px-3 py-2" data-id={dataId}>
       <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">{label}</div>
       <div className="mt-1 text-sm font-medium text-white">{value}</div>
     </div>
@@ -279,6 +295,7 @@ function RangeField({
   step,
   value,
   onChange,
+  dataId,
 }: {
   label: string;
   valueLabel: string;
@@ -287,9 +304,10 @@ function RangeField({
   step: number;
   value: number;
   onChange: (value: number) => void;
+  dataId?: string;
 }) {
   return (
-    <label className="block space-y-2" data-local-input="true">
+    <label className="block space-y-2" data-id={dataId} data-local-input="true">
       <div className="flex items-center justify-between gap-4 text-sm">
         <span className="text-slate-300">{label}</span>
         <span className="font-mono text-xs text-slate-500">{valueLabel}</span>
@@ -794,36 +812,37 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
   const onlineProfiles = profiles.filter((item) => item.liveStatus?.isRunning).length;
 
   return (
-    <div className="min-h-screen bg-[var(--app-bg)] text-slate-100">
+    <div className="min-h-screen bg-[var(--app-bg)] text-slate-100" data-id="dashboard-root">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top_left,rgba(55,124,110,0.22),transparent_28%),radial-gradient(circle_at_bottom_right,rgba(191,160,91,0.1),transparent_22%)]" />
 
-      <div className="relative mx-auto flex min-h-screen max-w-[1640px] flex-col gap-4 p-4 xl:flex-row">
-        <aside className="panel-surface flex w-full shrink-0 flex-col xl:w-[288px]">
-          <div className="flex items-center justify-between gap-3">
+      <div className="relative mx-auto flex min-h-screen max-w-[1640px] flex-col gap-4 p-4 xl:flex-row" data-id="dashboard-shell">
+        <aside className="panel-surface flex w-full shrink-0 flex-col xl:w-[288px]" data-id="sidebar">
+          <div className="flex items-center justify-between gap-3" data-id="sidebar-header">
             <div className="text-sm font-semibold text-white">CiCy</div>
-            <div className={`rounded-full px-2 py-1 text-[11px] ${pingTime != null ? "bg-emerald-500/12 text-emerald-200" : "bg-rose-500/12 text-rose-200"}`}>
+            <div className={`rounded-full px-2 py-1 text-[11px] ${pingTime != null ? "bg-emerald-500/12 text-emerald-200" : "bg-rose-500/12 text-rose-200"}`} data-id="sidebar-connection-status">
               <Wifi className="mr-1 inline h-3 w-3" />
               {pingTime != null ? `${pingTime}ms` : "offline"}
             </div>
           </div>
 
-          <div className="mt-4 rounded-2xl border border-white/8 bg-black/20 p-1">
+          <div className="mt-4 rounded-2xl border border-white/8 bg-black/20 p-1" data-id="mode-switch">
             <div className="grid grid-cols-2 gap-1">
-              <ModeChip active={mode === "chrome"} label="Chrome" onClick={() => onModeChange("chrome")} />
-              <ModeChip active={mode === "electron"} label="Electron" onClick={() => onModeChange("electron")} />
+              <ModeChip active={mode === "chrome"} dataId="mode-chip-chrome" label="Chrome" onClick={() => onModeChange("chrome")} />
+              <ModeChip active={mode === "electron"} dataId="mode-chip-electron" label="Electron" onClick={() => onModeChange("electron")} />
             </div>
           </div>
 
-          <div className="mt-4 grid grid-cols-3 gap-2 xl:grid-cols-2">
-            <MetricPill label="Node" value={pingTime != null ? "healthy" : "offline"} />
-            <MetricPill label="Windows" value={String(windows.length)} />
-            <MetricPill label="Profiles" value={String(onlineProfiles)} />
+          <div className="mt-4 grid grid-cols-3 gap-2 xl:grid-cols-2" data-id="sidebar-metrics">
+            <MetricPill dataId="metric-node" label="Node" value={pingTime != null ? "healthy" : "offline"} />
+            <MetricPill dataId="metric-windows" label="Windows" value={String(windows.length)} />
+            <MetricPill dataId="metric-profiles" label="Profiles" value={String(onlineProfiles)} />
           </div>
 
-          <div className="mt-5 flex items-center justify-between">
-            <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">{mode === "electron" ? "Sessions" : "Profiles"}</div>
+          <div className="mt-5 flex items-center justify-between" data-id="sidebar-toolbar">
+            <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500" data-id="sidebar-list-label">{mode === "electron" ? "Sessions" : "Profiles"}</div>
             <button
               className="rounded-lg p-2 text-slate-400 transition hover:bg-white/[0.06] hover:text-white"
+              data-id="sidebar-refresh"
               onClick={() => void (mode === "electron" ? loadWindows() : loadProfiles())}
               type="button"
             >
@@ -831,12 +850,13 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
             </button>
           </div>
 
-          <div className="mt-3 grid grid-flow-col auto-cols-[220px] gap-2 overflow-x-auto pb-1 xl:min-h-0 xl:flex-1 xl:grid-flow-row xl:auto-cols-auto xl:overflow-y-auto xl:overflow-x-hidden xl:pr-1">
+          <div className="mt-3 grid grid-flow-col auto-cols-[220px] gap-2 overflow-x-auto pb-1 xl:min-h-0 xl:flex-1 xl:grid-flow-row xl:auto-cols-auto xl:overflow-y-auto xl:overflow-x-hidden xl:pr-1" data-id="sidebar-list">
             {mode === "electron"
               ? windows.map((item) => (
                   <Fragment key={item.id}>
                     <SidebarItem
                       active={item.id === selectedWinId}
+                      dataId={`sidebar-window-${item.id}`}
                       label={item.title || "Untitled"}
                       meta={`${formatHost(item.url)} · #${item.id}`}
                       onClick={() => setSelectedWinId(item.id)}
@@ -847,6 +867,7 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
                   <Fragment key={item.profileKey}>
                     <SidebarItem
                       active={item.accountIdx === selectedProfileIdx}
+                      dataId={`sidebar-profile-${item.accountIdx}`}
                       label={`account_${item.accountIdx}`}
                       meta={item.gmail || `port ${item.port ?? "—"}`}
                       onClick={() => setSelectedProfileIdx(item.accountIdx)}
@@ -857,18 +878,18 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
           </div>
         </aside>
 
-        <main className="panel-surface flex min-w-0 flex-1 flex-col overflow-hidden">
-          <div className="flex flex-wrap items-start justify-between gap-4 border-b border-white/8 pb-4">
-            <div className="min-w-0">
-              <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Node cockpit</div>
-              <div className="mt-1 truncate text-2xl font-semibold text-white">
+        <main className="panel-surface flex min-w-0 flex-1 flex-col overflow-hidden" data-id="main-panel">
+          <div className="flex flex-wrap items-start justify-between gap-4 border-b border-white/8 pb-4" data-id="main-header">
+            <div className="min-w-0" data-id="main-heading">
+              <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500" data-id="main-heading-kicker">Node cockpit</div>
+              <div className="mt-1 truncate text-2xl font-semibold text-white" data-id="main-heading-title">
                 {mode === "electron"
                   ? selectedWindow?.title || "No window selected"
                   : selectedProfile
                     ? `account_${selectedProfile.accountIdx}`
                     : "No profile selected"}
               </div>
-              <div className="mt-2 truncate text-sm text-slate-500">
+              <div className="mt-2 truncate text-sm text-slate-500" data-id="main-heading-meta">
                 {mode === "electron"
                   ? selectedWindow
                     ? shortenUrl(selectedWindow.url)
@@ -877,21 +898,22 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
               </div>
             </div>
 
-            <div className="flex flex-col items-start gap-3 sm:items-end">
-              <div className="flex flex-wrap items-center gap-2">
-                <MetricPill label="Runtime" value={mode} />
-                <MetricPill label="Workspace" value={workspaceView} />
+            <div className="flex flex-col items-start gap-3 sm:items-end" data-id="main-controls">
+              <div className="flex flex-wrap items-center gap-2" data-id="main-status-metrics">
+                <MetricPill dataId="metric-runtime" label="Runtime" value={mode} />
+                <MetricPill dataId="metric-workspace" label="Workspace" value={workspaceView} />
               </div>
-              <div className="rounded-2xl border border-white/8 bg-black/20 p-1">
+              <div className="rounded-2xl border border-white/8 bg-black/20 p-1" data-id="workspace-switch">
                 <div className="flex gap-1">
-                  <WorkspaceChip active={workspaceView === "operate"} label="Operate" onClick={() => setWorkspaceView("operate")} />
-                  <WorkspaceChip active={workspaceView === "launch"} label="Launch" onClick={() => setWorkspaceView("launch")} />
-                  <WorkspaceChip active={workspaceView === "tune"} label="Tune" onClick={() => setWorkspaceView("tune")} />
+                  <WorkspaceChip active={workspaceView === "operate"} dataId="workspace-chip-operate" label="Operate" onClick={() => setWorkspaceView("operate")} />
+                  <WorkspaceChip active={workspaceView === "launch"} dataId="workspace-chip-launch" label="Launch" onClick={() => setWorkspaceView("launch")} />
+                  <WorkspaceChip active={workspaceView === "tune"} dataId="workspace-chip-tune" label="Tune" onClick={() => setWorkspaceView("tune")} />
                 </div>
               </div>
 
               <button
                 className="rounded-xl border border-white/8 bg-white/[0.04] p-2 text-slate-300 transition hover:border-white/14 hover:bg-white/[0.08] hover:text-white"
+                data-id="logout-button"
                 onClick={onLogout}
                 type="button"
               >
@@ -901,31 +923,33 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
           </div>
 
           {notice ? (
-            <div className={`mt-4 rounded-2xl border px-4 py-3 text-sm ${noticeClass}`}>{notice.message}</div>
+            <div className={`mt-4 rounded-2xl border px-4 py-3 text-sm ${noticeClass}`} data-id="notice-banner">{notice.message}</div>
           ) : null}
 
           {mode === "electron" && workspaceView === "operate" ? (
-            <div className="mt-4 flex min-h-0 flex-1 flex-col">
+            <div className="mt-4 flex min-h-0 flex-1 flex-col" data-id="electron-operate-panel">
               {selectedWindow ? (
-                <div className="relative flex min-h-[520px] flex-1 items-center justify-center overflow-hidden rounded-[30px] border border-white/8 bg-black/35">
+                <div className="relative flex min-h-[520px] flex-1 items-center justify-center overflow-hidden rounded-[30px] border border-white/8 bg-black/35" data-id="electron-operate-preview-shell">
                   <img
                     alt="Managed window preview"
                     className="max-h-full max-w-full cursor-crosshair rounded-[20px] object-contain shadow-[0_28px_90px_rgba(0,0,0,0.5)]"
+                    data-id="electron-operate-preview"
                     draggable={false}
                     onClick={(event) => void handlePreviewClick(event)}
                     onDragStart={(event) => event.preventDefault()}
                     ref={imgRef}
                   />
-                  <div className="absolute left-4 top-4 rounded-full border border-white/10 bg-black/55 px-3 py-1.5 text-xs text-slate-300 backdrop-blur">
+                  <div className="absolute left-4 top-4 rounded-full border border-white/10 bg-black/55 px-3 py-1.5 text-xs text-slate-300 backdrop-blur" data-id="electron-operate-bounds">
                     {formatBounds(selectedWindow.bounds)}
                   </div>
-                  <div className="absolute bottom-4 left-4 right-4 flex flex-wrap items-center justify-between gap-3 rounded-[24px] border border-white/8 bg-black/55 px-4 py-3 backdrop-blur">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium text-white">{formatHost(selectedWindow.url)}</div>
-                      <div className="mt-1 truncate text-xs text-slate-500">Click preview to interact. Keyboard forwarding is active in this mode.</div>
+                  <div className="absolute bottom-4 left-4 right-4 flex flex-wrap items-center justify-between gap-3 rounded-[24px] border border-white/8 bg-black/55 px-4 py-3 backdrop-blur" data-id="electron-operate-action-bar">
+                    <div className="min-w-0" data-id="electron-operate-preview-meta">
+                      <div className="truncate text-sm font-medium text-white" data-id="electron-operate-host">{formatHost(selectedWindow.url)}</div>
+                      <div className="mt-1 truncate text-xs text-slate-500" data-id="electron-operate-hint">Click preview to interact. Keyboard forwarding is active in this mode.</div>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2" data-id="electron-operate-actions">
                       <Button
+                        dataId="electron-operate-preview-button"
                         disabled={!selectedWindow || previewLoading}
                         icon={<RefreshCw className={`h-4 w-4 ${previewLoading ? "animate-spin" : ""}`} />}
                         label="Preview"
@@ -934,6 +958,7 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
                         }}
                       />
                       <Button
+                        dataId="electron-operate-watch-button"
                         disabled={!selectedWindow}
                         icon={<Eye className="h-4 w-4" />}
                         label="Watch"
@@ -941,12 +966,12 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
                           if (selectedWindow) window.open(buildWatchUrl(selectedWindow.id), "_blank", "noopener,noreferrer");
                         }}
                       />
-                      <Button disabled={!selectedWindow} icon={<RotateCcw className="h-4 w-4" />} label="Reload" onClick={() => void handleReloadPage()} />
+                      <Button dataId="electron-operate-reload-button" disabled={!selectedWindow} icon={<RotateCcw className="h-4 w-4" />} label="Reload" onClick={() => void handleReloadPage()} />
                     </div>
                   </div>
                 </div>
               ) : (
-                <div className="flex min-h-[520px] flex-1 items-center justify-center rounded-[30px] border border-dashed border-white/10 bg-black/20 text-sm text-slate-500">
+                <div className="flex min-h-[520px] flex-1 items-center justify-center rounded-[30px] border border-dashed border-white/10 bg-black/20 text-sm text-slate-500" data-id="electron-operate-empty">
                   No session selected
                 </div>
               )}
@@ -954,10 +979,11 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
           ) : null}
 
           {mode === "electron" && workspaceView === "launch" ? (
-            <div className="mt-4 grid flex-1 gap-4 lg:grid-cols-3">
+            <div className="mt-4 grid flex-1 gap-4 lg:grid-cols-3" data-id="electron-launch-panel">
               {QUICK_LAUNCH_TARGETS.map((target) => (
                 <button
                   className="rounded-[28px] border border-white/8 bg-black/20 p-6 text-left transition hover:border-white/16 hover:bg-white/[0.05]"
+                  data-id={`electron-launch-card-${target.label.toLowerCase().replace(/\s+/g, "-")}`}
                   disabled={Boolean(windowAction)}
                   key={target.label}
                   onClick={() => void handleOpenWindow(target.url)}
@@ -972,8 +998,8 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
           ) : null}
 
           {mode === "electron" && workspaceView === "tune" ? (
-            <div className="mt-4 grid flex-1 gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-              <div className="rounded-[28px] border border-white/8 bg-black/20 p-5" data-local-input="true">
+            <div className="mt-4 grid flex-1 gap-4 xl:grid-cols-[1.1fr_0.9fr]" data-id="electron-tune-panel">
+              <div className="rounded-[28px] border border-white/8 bg-black/20 p-5" data-id="electron-tune-bounds-card" data-local-input="true">
                 <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Bounds</div>
                 <div className="mt-4 grid grid-cols-2 gap-3">
                   {[
@@ -982,10 +1008,11 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
                     { key: "w", label: "W" },
                     { key: "h", label: "H" },
                   ].map((field) => (
-                    <label className="space-y-2" key={field.key}>
+                    <label className="space-y-2" data-id={`electron-tune-bound-${field.key}`} key={field.key}>
                       <span className="text-[11px] uppercase tracking-[0.18em] text-slate-500">{field.label}</span>
                       <input
                         className="w-full rounded-xl border border-white/8 bg-white/[0.04] px-3 py-2 font-mono text-sm text-white outline-none transition focus:border-[color:var(--accent)]/60"
+                        data-id={`electron-tune-bound-input-${field.key}`}
                         onChange={(event) =>
                           setBounds((current) => ({
                             ...current,
@@ -998,22 +1025,24 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
                     </label>
                   ))}
                 </div>
-                <div className="mt-4 flex flex-wrap gap-2">
+                <div className="mt-4 flex flex-wrap gap-2" data-id="electron-tune-bounds-actions">
                   <Button
+                    dataId="electron-tune-apply-button"
                     disabled={!selectedWindow || boundsSaving}
                     icon={<RefreshCw className={`h-4 w-4 ${boundsSaving ? "animate-spin" : ""}`} />}
                     label="Apply"
                     onClick={() => void handleApplyBounds()}
                   />
-                  <Button disabled={!selectedWindow} icon={<Copy className="h-4 w-4" />} label="Watch link" onClick={() => void handleCopyWatchLink()} />
+                  <Button dataId="electron-tune-watch-link-button" disabled={!selectedWindow} icon={<Copy className="h-4 w-4" />} label="Watch link" onClick={() => void handleCopyWatchLink()} />
                 </div>
               </div>
 
-              <div className="space-y-4">
-                <div className="rounded-[28px] border border-white/8 bg-black/20 p-5">
+              <div className="space-y-4" data-id="electron-tune-side">
+                <div className="rounded-[28px] border border-white/8 bg-black/20 p-5" data-id="electron-tune-capture-card">
                   <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Capture</div>
                   <div className="mt-4 space-y-4">
                     <RangeField
+                      dataId="electron-tune-refresh-range"
                       label="Refresh"
                       max={5000}
                       min={200}
@@ -1022,29 +1051,31 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
                       value={watchInterval}
                       valueLabel={`${(watchInterval / 1000).toFixed(1)}s`}
                     />
-                    <RangeField label="Quality" max={100} min={10} onChange={setQuality} step={5} value={quality} valueLabel={`${quality}%`} />
-                    <RangeField label="Scale" max={1} min={0.2} onChange={setScale} step={0.02} value={scale} valueLabel={`${Math.round(scale * 100)}%`} />
+                    <RangeField dataId="electron-tune-quality-range" label="Quality" max={100} min={10} onChange={setQuality} step={5} value={quality} valueLabel={`${quality}%`} />
+                    <RangeField dataId="electron-tune-scale-range" label="Scale" max={1} min={0.2} onChange={setScale} step={0.02} value={scale} valueLabel={`${Math.round(scale * 100)}%`} />
                   </div>
                 </div>
 
-                <div className="rounded-[28px] border border-white/8 bg-black/20 p-5">
+                <div className="rounded-[28px] border border-white/8 bg-black/20 p-5" data-id="electron-tune-actions-card">
                   <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Actions</div>
-                  <div className="mt-4 flex flex-wrap gap-2">
+                  <div className="mt-4 flex flex-wrap gap-2" data-id="electron-tune-actions">
                     <Button
+                      dataId="electron-tune-snapshot-button"
                       disabled={!selectedWindow || snapshotLoading}
                       icon={<ScanSearch className={`h-4 w-4 ${snapshotLoading ? "animate-spin" : ""}`} />}
                       label="Snapshot"
                       onClick={() => void handleSnapshotCapture()}
                     />
-                    <Button disabled={!selectedWindow} icon={<X className="h-4 w-4" />} label="Close" onClick={() => void handleCloseWindow()} />
-                    <Button disabled={!windows.length} icon={<Trash2 className="h-4 w-4" />} label="Close all" onClick={() => void handleCloseAllWindows()} />
+                    <Button dataId="electron-tune-close-button" disabled={!selectedWindow} icon={<X className="h-4 w-4" />} label="Close" onClick={() => void handleCloseWindow()} />
+                    <Button dataId="electron-tune-close-all-button" disabled={!windows.length} icon={<Trash2 className="h-4 w-4" />} label="Close all" onClick={() => void handleCloseAllWindows()} />
                   </div>
-                  <label className="mt-4 flex items-center justify-between rounded-xl border border-white/8 bg-white/[0.04] px-3 py-2" data-local-input="true">
+                  <label className="mt-4 flex items-center justify-between rounded-xl border border-white/8 bg-white/[0.04] px-3 py-2" data-id="electron-tune-overlays-toggle" data-local-input="true">
                     <span className="text-sm text-slate-300">Overlays</span>
-                    <input checked={showOverlays} className="h-4 w-4 accent-[var(--accent)]" onChange={(event) => setShowOverlays(event.target.checked)} type="checkbox" />
+                    <input checked={showOverlays} className="h-4 w-4 accent-[var(--accent)]" data-id="electron-tune-overlays-input" onChange={(event) => setShowOverlays(event.target.checked)} type="checkbox" />
                   </label>
                   <div className="mt-4">
                     <RangeField
+                      dataId="electron-tune-snapshot-depth-range"
                       label="Snapshot depth"
                       max={100}
                       min={5}
@@ -1060,37 +1091,40 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
           ) : null}
 
           {mode === "chrome" && workspaceView === "operate" ? (
-            <div className="mt-4 flex min-h-0 flex-1 items-center justify-center">
+            <div className="mt-4 flex min-h-0 flex-1 items-center justify-center" data-id="chrome-operate-panel">
               {selectedProfile ? (
-                <div className="w-full max-w-[760px] rounded-[30px] border border-white/8 bg-black/20 p-8">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
+                <div className="w-full max-w-[760px] rounded-[30px] border border-white/8 bg-black/20 p-8" data-id="chrome-operate-card">
+                  <div className="flex items-start justify-between gap-4" data-id="chrome-operate-header">
+                    <div data-id="chrome-operate-profile-meta">
                       <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Profile</div>
                       <div className="mt-2 text-3xl font-semibold text-white">account_{selectedProfile.accountIdx}</div>
                       <div className="mt-2 text-sm text-slate-500">{selectedProfile.gmail || "No mailbox label"}</div>
                     </div>
-                    <div className={`rounded-full px-3 py-1 text-xs ${selectedProfile.liveStatus?.isRunning ? "bg-emerald-500/12 text-emerald-200" : "bg-white/[0.06] text-slate-400"}`}>
+                    <div className={`rounded-full px-3 py-1 text-xs ${selectedProfile.liveStatus?.isRunning ? "bg-emerald-500/12 text-emerald-200" : "bg-white/[0.06] text-slate-400"}`} data-id="chrome-operate-status">
                       {chromeStatus}
                     </div>
                   </div>
-                  <div className="mt-8 grid grid-cols-2 gap-4">
-                    <Field label="Port" value={selectedProfile.port != null ? String(selectedProfile.port) : "—"} />
-                    <Field label="Proxy" value={selectedProfile.proxy ? "enabled" : "disabled"} />
+                  <div className="mt-8 grid grid-cols-2 gap-4" data-id="chrome-operate-fields">
+                    <Field dataId="chrome-operate-field-port" label="Port" value={selectedProfile.port != null ? String(selectedProfile.port) : "—"} />
+                    <Field dataId="chrome-operate-field-proxy" label="Proxy" value={selectedProfile.proxy ? "enabled" : "disabled"} />
                   </div>
-                  <div className="mt-8 flex flex-wrap gap-2 border-t border-white/8 pt-6">
+                  <div className="mt-8 flex flex-wrap gap-2 border-t border-white/8 pt-6" data-id="chrome-operate-actions">
                     <Button
+                      dataId="chrome-operate-open-button"
                       disabled={Boolean(profileAction)}
                       icon={<ArrowUpRight className="h-4 w-4" />}
                       label={profileAction === "open" ? "Opening" : "Open"}
                       onClick={() => void handleProfileAction("open")}
                     />
                     <Button
+                      dataId="chrome-operate-restart-button"
                       disabled={Boolean(profileAction)}
                       icon={<RotateCcw className="h-4 w-4" />}
                       label={profileAction === "restart" ? "Restarting" : "Restart"}
                       onClick={() => void handleProfileAction("restart")}
                     />
                     <Button
+                      dataId="chrome-operate-stop-button"
                       disabled={Boolean(profileAction)}
                       icon={<Square className="h-4 w-4" />}
                       label={profileAction === "stop" ? "Stopping" : "Stop"}
@@ -1099,31 +1133,34 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
                   </div>
                 </div>
               ) : (
-                <div className="text-sm text-slate-500">No profile selected</div>
+                <div className="text-sm text-slate-500" data-id="chrome-operate-empty">No profile selected</div>
               )}
             </div>
           ) : null}
 
           {mode === "chrome" && workspaceView === "launch" ? (
-            <div className="mt-4 flex min-h-0 flex-1 items-center justify-center">
+            <div className="mt-4 flex min-h-0 flex-1 items-center justify-center" data-id="chrome-launch-panel">
               {selectedProfile ? (
-                <div className="w-full max-w-[640px] rounded-[30px] border border-white/8 bg-black/20 p-8">
+                <div className="w-full max-w-[640px] rounded-[30px] border border-white/8 bg-black/20 p-8" data-id="chrome-launch-card">
                   <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Launch</div>
                   <div className="mt-2 text-2xl font-semibold text-white">account_{selectedProfile.accountIdx}</div>
-                  <div className="mt-6 flex flex-wrap gap-2">
+                  <div className="mt-6 flex flex-wrap gap-2" data-id="chrome-launch-actions">
                     <Button
+                      dataId="chrome-launch-open-button"
                       disabled={Boolean(profileAction)}
                       icon={<ArrowUpRight className="h-4 w-4" />}
                       label={profileAction === "open" ? "Opening" : "Open"}
                       onClick={() => void handleProfileAction("open")}
                     />
                     <Button
+                      dataId="chrome-launch-restart-button"
                       disabled={Boolean(profileAction)}
                       icon={<RotateCcw className="h-4 w-4" />}
                       label={profileAction === "restart" ? "Restarting" : "Restart"}
                       onClick={() => void handleProfileAction("restart")}
                     />
                     <Button
+                      dataId="chrome-launch-stop-button"
                       disabled={Boolean(profileAction)}
                       icon={<Square className="h-4 w-4" />}
                       label={profileAction === "stop" ? "Stopping" : "Stop"}
@@ -1132,17 +1169,18 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
                   </div>
                 </div>
               ) : (
-                <div className="text-sm text-slate-500">No profile selected</div>
+                <div className="text-sm text-slate-500" data-id="chrome-launch-empty">No profile selected</div>
               )}
             </div>
           ) : null}
 
           {mode === "chrome" && workspaceView === "tune" ? (
-            <div className="mt-4 grid flex-1 gap-4 xl:grid-cols-[1fr_0.9fr]">
-              <div className="rounded-[28px] border border-white/8 bg-black/20 p-5" data-local-input="true">
+            <div className="mt-4 grid flex-1 gap-4 xl:grid-cols-[1fr_0.9fr]" data-id="chrome-tune-panel">
+              <div className="rounded-[28px] border border-white/8 bg-black/20 p-5" data-id="chrome-tune-proxy-card" data-local-input="true">
                 <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Proxy</div>
                 <textarea
                   className="mt-4 min-h-[220px] w-full rounded-2xl border border-white/8 bg-white/[0.04] px-3 py-3 font-mono text-sm text-white outline-none transition focus:border-[color:var(--accent)]/60"
+                  data-id="chrome-tune-proxy-input"
                   disabled={!selectedProfile}
                   onChange={(event) =>
                     setProxyDrafts((current) => ({
@@ -1153,9 +1191,10 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
                   placeholder="socks5://127.0.0.1:1080"
                   value={selectedProfile ? proxyDrafts[selectedProfile.accountIdx] ?? "" : ""}
                 />
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <Button disabled={!selectedProfile || Boolean(profileAction)} icon={<Link2 className="h-4 w-4" />} label="Save" onClick={() => void handleSaveProxy(false)} />
+                <div className="mt-4 flex flex-wrap gap-2" data-id="chrome-tune-proxy-actions">
+                  <Button dataId="chrome-tune-save-button" disabled={!selectedProfile || Boolean(profileAction)} icon={<Link2 className="h-4 w-4" />} label="Save" onClick={() => void handleSaveProxy(false)} />
                   <Button
+                    dataId="chrome-tune-save-restart-button"
                     disabled={!selectedProfile || Boolean(profileAction)}
                     icon={<RotateCcw className="h-4 w-4" />}
                     label="Save + restart"
@@ -1164,13 +1203,13 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
                 </div>
               </div>
 
-              <div className="rounded-[28px] border border-white/8 bg-black/20 p-5">
+              <div className="rounded-[28px] border border-white/8 bg-black/20 p-5" data-id="chrome-tune-details-card">
                 <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Details</div>
-                <div className="mt-4 space-y-4">
-                  <Field label="Account" value={selectedProfile ? `account_${selectedProfile.accountIdx}` : "No selection"} />
-                  <Field label="Mailbox" value={selectedProfile?.gmail || "—"} />
-                  <Field label="Port" value={selectedProfile?.port != null ? String(selectedProfile.port) : "—"} />
-                  <Field label="Profile key" value={selectedProfile?.profileKey || "—"} />
+                <div className="mt-4 space-y-4" data-id="chrome-tune-details-fields">
+                  <Field dataId="chrome-tune-field-account" label="Account" value={selectedProfile ? `account_${selectedProfile.accountIdx}` : "No selection"} />
+                  <Field dataId="chrome-tune-field-mailbox" label="Mailbox" value={selectedProfile?.gmail || "—"} />
+                  <Field dataId="chrome-tune-field-port" label="Port" value={selectedProfile?.port != null ? String(selectedProfile.port) : "—"} />
+                  <Field dataId="chrome-tune-field-profile-key" label="Profile key" value={selectedProfile?.profileKey || "—"} />
                 </div>
               </div>
             </div>
@@ -1179,20 +1218,21 @@ export default function Dashboard({ mode, onLogout, onModeChange }: DashboardPro
       </div>
 
       {snapshotDialogText ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/78 p-4 backdrop-blur-sm">
-          <div className="flex max-h-[82vh] w-full max-w-4xl flex-col overflow-hidden rounded-[28px] border border-white/10 bg-[#0b1318]">
-            <div className="flex items-center justify-between border-b border-white/8 px-5 py-4">
-              <div className="text-sm font-medium text-white">Snapshot</div>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/78 p-4 backdrop-blur-sm" data-id="snapshot-dialog">
+          <div className="flex max-h-[82vh] w-full max-w-4xl flex-col overflow-hidden rounded-[28px] border border-white/10 bg-[#0b1318]" data-id="snapshot-dialog-card">
+            <div className="flex items-center justify-between border-b border-white/8 px-5 py-4" data-id="snapshot-dialog-header">
+              <div className="text-sm font-medium text-white" data-id="snapshot-dialog-title">Snapshot</div>
               <button
                 className="rounded-lg p-2 text-slate-400 transition hover:bg-white/[0.06] hover:text-white"
+                data-id="snapshot-dialog-close"
                 onClick={() => setSnapshotDialogText(null)}
                 type="button"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="overflow-auto p-5">
-              <pre className="whitespace-pre-wrap break-words rounded-2xl border border-white/8 bg-black/20 p-4 text-xs leading-6 text-slate-200">
+            <div className="overflow-auto p-5" data-id="snapshot-dialog-body">
+              <pre className="whitespace-pre-wrap break-words rounded-2xl border border-white/8 bg-black/20 p-4 text-xs leading-6 text-slate-200" data-id="snapshot-dialog-content">
                 {snapshotDialogText}
               </pre>
             </div>

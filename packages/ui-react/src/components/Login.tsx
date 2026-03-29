@@ -46,45 +46,46 @@ export default function Login({ onLogin }: LoginProps) {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[var(--app-bg)] px-4 py-10 text-slate-100">
+    <div className="flex min-h-screen items-center justify-center bg-[var(--app-bg)] px-4 py-10 text-slate-100" data-id="login-root">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top_left,rgba(55,124,110,0.28),transparent_28%),radial-gradient(circle_at_bottom_right,rgba(191,160,91,0.18),transparent_24%)]" />
 
-      <div className="relative grid w-full max-w-5xl overflow-hidden rounded-[32px] border border-white/10 bg-[#091116]/92 shadow-[0_32px_120px_rgba(0,0,0,0.45)] lg:grid-cols-[1.05fr_0.95fr]">
-        <section className="border-b border-white/8 p-8 lg:border-b-0 lg:border-r lg:p-10">
-          <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-300">
+      <div className="relative grid w-full max-w-5xl overflow-hidden rounded-[32px] border border-white/10 bg-[#091116]/92 shadow-[0_32px_120px_rgba(0,0,0,0.45)] lg:grid-cols-[1.05fr_0.95fr]" data-id="login-shell">
+        <section className="border-b border-white/8 p-8 lg:border-b-0 lg:border-r lg:p-10" data-id="login-intro">
+          <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-300" data-id="login-brand">
             <ShieldCheck className="h-3.5 w-3.5 text-[var(--accent)]" />
             CiCy Desktop
           </div>
 
-          <h1 className="mt-8 max-w-lg text-4xl font-semibold tracking-tight text-white">One console. Two runtimes.</h1>
-          <div className="mt-8 grid gap-3 sm:grid-cols-2">
-            <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
+          <h1 className="mt-8 max-w-lg text-4xl font-semibold tracking-tight text-white" data-id="login-title">One console. Two runtimes.</h1>
+          <div className="mt-8 grid gap-3 sm:grid-cols-2" data-id="login-runtime-cards">
+            <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4" data-id="login-runtime-electron">
               <div className="text-sm font-medium text-white">Electron</div>
               <div className="mt-2 text-sm text-slate-400">Preview and control windows.</div>
             </div>
-            <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
+            <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4" data-id="login-runtime-chrome">
               <div className="text-sm font-medium text-white">Chrome</div>
               <div className="mt-2 text-sm text-slate-400">Launch and manage profiles.</div>
             </div>
           </div>
         </section>
 
-        <section className="p-8 lg:p-10">
-          <div className="mb-8">
-            <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04]">
+        <section className="p-8 lg:p-10" data-id="login-connect">
+          <div className="mb-8" data-id="login-connect-header">
+            <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04]" data-id="login-connect-icon">
               <KeyRound className="h-6 w-6 text-[var(--accent)]" />
             </div>
-            <h2 className="mt-6 text-2xl font-semibold text-white">Connect</h2>
+            <h2 className="mt-6 text-2xl font-semibold text-white" data-id="login-connect-title">Connect</h2>
           </div>
 
-          <form className="space-y-5" onSubmit={(event) => void handleLogin(event)}>
-            <label className="block space-y-2" data-local-input="true">
+          <form className="space-y-5" data-id="login-form" onSubmit={(event) => void handleLogin(event)}>
+            <label className="block space-y-2" data-id="login-endpoint-field" data-local-input="true">
               <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">API endpoint</span>
               <div className="relative">
                 <Server className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
                 <input
                   autoComplete="off"
                   className="w-full rounded-2xl border border-white/8 bg-white/[0.04] py-3 pl-11 pr-4 text-sm text-white outline-none transition focus:border-[color:var(--accent)]/60 focus:bg-white/[0.07]"
+                  data-id="login-endpoint-input"
                   onChange={(event) => setEndpointInput(event.target.value)}
                   placeholder="https://g-electron.cicy.de5.net"
                   type="text"
@@ -93,11 +94,12 @@ export default function Login({ onLogin }: LoginProps) {
               </div>
             </label>
 
-            <label className="block space-y-2" data-local-input="true">
+            <label className="block space-y-2" data-id="login-token-field" data-local-input="true">
               <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Access token</span>
               <input
                 autoComplete="off"
                 className="w-full rounded-2xl border border-white/8 bg-white/[0.04] px-4 py-3 text-sm text-white outline-none transition focus:border-[color:var(--accent)]/60 focus:bg-white/[0.07]"
+                data-id="login-token-input"
                 onChange={(event) => setTokenInput(event.target.value)}
                 placeholder="eyJhbGciOi..."
                 type="password"
@@ -106,11 +108,12 @@ export default function Login({ onLogin }: LoginProps) {
             </label>
 
             {error ? (
-              <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{error}</div>
+              <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100" data-id="login-error">{error}</div>
             ) : null}
 
             <button
               className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-[var(--accent-strong)] disabled:cursor-not-allowed disabled:opacity-60"
+              data-id="login-submit"
               disabled={loading}
               type="submit"
             >
