@@ -73,6 +73,12 @@ const QUICK_LAUNCH_TARGETS = [
   { label: "AI Studio", url: "https://aistudio.google.com" },
 ] as const;
 
+const CHROME_TUNE_TARGETS = [
+  { label: "api.myip.com", url: "https://api.myip.com" },
+  { label: "ifconfig.me", url: "https://ifconfig.me" },
+  { label: "ip138.com", url: "https://ip138.com" },
+] as const;
+
 function readStoredNumber(key: string, fallback: number) {
   const raw = localStorage.getItem(key);
   if (raw == null) return fallback;
@@ -477,7 +483,7 @@ export default function Dashboard({ mode, onModeChange }: DashboardProps) {
     }
   }
 
-  async function handleProfileAction(action: "open" | "restart" | "stop") {
+  async function handleProfileAction(action: "open" | "restart" | "stop", url?: string) {
     if (!selectedProfile) return;
 
     setProfileAction(action);
@@ -485,11 +491,11 @@ export default function Dashboard({ mode, onModeChange }: DashboardProps) {
       await requestJson(`/api/chrome/profiles/${selectedProfile.accountIdx}/${action}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify(url ? { url } : {}),
       });
       await loadProfiles();
       if (action === "open") setWorkspaceView("operate");
-      announce(`${action} account_${selectedProfile.accountIdx}`, "success");
+      announce(url ? `Opened ${formatHost(url)}.` : `${action} account_${selectedProfile.accountIdx}`, "success");
     } catch (error) {
       announce(error instanceof Error ? error.message : "Profile action failed.", "error");
     } finally {
@@ -1207,6 +1213,21 @@ export default function Dashboard({ mode, onModeChange }: DashboardProps) {
                   <Field dataId="chrome-tune-field-mailbox" label="Mailbox" value={selectedProfile?.gmail || "—"} />
                   <Field dataId="chrome-tune-field-port" label="Port" value={selectedProfile?.port != null ? String(selectedProfile.port) : "—"} />
                   <Field dataId="chrome-tune-field-profile-key" label="Profile key" value={selectedProfile?.profileKey || "—"} />
+                </div>
+                <div className="mt-6 border-t border-white/8 pt-5" data-id="chrome-tune-targets">
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Network checks</div>
+                  <div className="mt-4 flex flex-wrap gap-2" data-id="chrome-tune-target-actions">
+                    {CHROME_TUNE_TARGETS.map((target) => (
+                      <Button
+                        key={target.url}
+                        dataId={`chrome-tune-open-${target.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+                        disabled={!selectedProfile || Boolean(profileAction)}
+                        icon={<ArrowUpRight className="h-4 w-4" />}
+                        label={target.label}
+                        onClick={() => void handleProfileAction("open", target.url)}
+                      />
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
