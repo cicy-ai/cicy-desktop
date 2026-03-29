@@ -801,10 +801,10 @@ export default function Dashboard({ mode, onModeChange }: DashboardProps) {
 
   const noticeClass =
     notice?.tone === "success"
-      ? "border-emerald-500/20 bg-emerald-500/12 text-emerald-100"
+      ? "border-emerald-500/30 bg-emerald-500/14 text-emerald-50 shadow-[0_18px_60px_rgba(18,120,88,0.28)]"
       : notice?.tone === "error"
-        ? "border-rose-500/20 bg-rose-500/12 text-rose-100"
-        : "border-white/10 bg-white/[0.08] text-slate-100";
+        ? "border-rose-500/30 bg-rose-500/14 text-rose-50 shadow-[0_18px_60px_rgba(190,24,93,0.24)]"
+        : "border-white/10 bg-[#0d171d]/92 text-slate-100 shadow-[0_18px_60px_rgba(0,0,0,0.32)]";
 
   const chromeStatus = selectedProfile?.liveStatus?.isRunning ? "running" : "stopped";
   const onlineProfiles = profiles.filter((item) => item.liveStatus?.isRunning).length;
@@ -812,6 +812,17 @@ export default function Dashboard({ mode, onModeChange }: DashboardProps) {
   return (
     <div className="min-h-screen bg-[var(--app-bg)] text-slate-100" data-id="dashboard-root">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top_left,rgba(55,124,110,0.22),transparent_28%),radial-gradient(circle_at_bottom_right,rgba(191,160,91,0.1),transparent_22%)]" />
+      <div className="pointer-events-none fixed right-4 top-4 z-50 flex w-[min(420px,calc(100vw-2rem))] flex-col gap-3" data-id="notice-layer">
+        {notice ? (
+          <div
+            className={`pointer-events-auto rounded-2xl border px-4 py-3 text-sm backdrop-blur-xl transition-all duration-200 ${noticeClass}`}
+            data-id="notice-banner"
+            role="status"
+          >
+            {notice.message}
+          </div>
+        ) : null}
+      </div>
 
       <div className="relative mx-auto flex min-h-screen max-w-[1640px] flex-col gap-4 p-4 xl:flex-row" data-id="dashboard-shell">
         <aside className="panel-surface flex w-full shrink-0 flex-col xl:w-[288px]" data-id="sidebar">
@@ -911,10 +922,6 @@ export default function Dashboard({ mode, onModeChange }: DashboardProps) {
 
             </div>
           </div>
-
-          {notice ? (
-            <div className={`mt-4 rounded-2xl border px-4 py-3 text-sm ${noticeClass}`} data-id="notice-banner">{notice.message}</div>
-          ) : null}
 
           {mode === "electron" && workspaceView === "operate" ? (
             <div className="mt-4 flex min-h-0 flex-1 flex-col" data-id="electron-operate-panel">
