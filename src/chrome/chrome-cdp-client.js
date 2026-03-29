@@ -16,6 +16,15 @@ async function getTargets(debuggerPort, host = "127.0.0.1") {
   return fetchJson(`http://${host}:${debuggerPort}/json/list`);
 }
 
+async function createTarget(debuggerPort, targetUrl = "about:blank", host = "127.0.0.1") {
+  const url = `http://${host}:${debuggerPort}/json/new?${encodeURIComponent(String(targetUrl || "about:blank"))}`;
+  const response = await fetch(url, { method: "PUT" });
+  if (!response.ok) {
+    throw new Error(`Request failed ${response.status} ${response.statusText} for ${url}`);
+  }
+  return response.json();
+}
+
 async function activateTarget(debuggerPort, targetId, host = "127.0.0.1") {
   if (!targetId) {
     throw new Error("Missing targetId");
@@ -64,6 +73,7 @@ async function callCdp({ debuggerPort, method, params = {}, host = "127.0.0.1", 
 module.exports = {
   getVersion,
   getTargets,
+  createTarget,
   activateTarget,
   waitForDebugger,
   callCdp,

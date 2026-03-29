@@ -13,7 +13,7 @@ const {
   closeChromeProcess,
 } = require("../chrome/chrome-launcher");
 const { isPortOpen } = require("../utils/process-utils");
-const { getVersion, getTargets, activateTarget, callCdp } = require("../chrome/chrome-cdp-client");
+const { getVersion, getTargets, createTarget, activateTarget, callCdp } = require("../chrome/chrome-cdp-client");
 const { resolveChromeDebuggerPort } = require("../chrome/debugger-port-resolver");
 const { config } = require("../config");
 
@@ -189,6 +189,48 @@ function toToolResult(obj, { isError = false } = {}) {
   };
 }
 
+function buildTargetsPreview(targets = []) {
+  return targets
+    .filter((target) => target.type === "page")
+    .slice(0, 3)
+    .map((target) => ({ id: target.id, title: target.title, url: target.url }));
+}
+
+async function ensurePageTargets({ debuggerPort, url, activateIfRunning }) {
+  let targets = [];
+  let activatedTargetId = null;
+
+  try {
+    targets = await getTargets(debuggerPort);
+  } catch (_) {
+    return { targets, activatedTargetId };
+  }
+
+  const pageTargets = targets.filter((target) => target.type === "page");
+  const matchingTarget = url ? pageTargets.find((target) => target.url === url) || null : null;
+
+  if (url && !matchingTarget) {
+    try {
+      const createdTarget = await createTarget(debuggerPort, url);
+      activatedTargetId = createdTarget?.id || null;
+      targets = await getTargets(debuggerPort);
+      return { targets, activatedTargetId };
+    } catch (_) {
+      return { targets, activatedTargetId };
+    }
+  }
+
+  const targetToActivate = matchingTarget || pageTargets[0] || null;
+  if (activateIfRunning && targetToActivate?.id) {
+    activatedTargetId = targetToActivate.id;
+    try {
+      await activateTarget(debuggerPort, targetToActivate.id);
+    } catch (_) {}
+  }
+
+  return { targets, activatedTargetId };
+}
+
 async function launchOrActivateProfile({
   accountIdx,
   url,
@@ -229,19 +271,11 @@ async function launchOrActivateProfile({
   // Script parity: if /json/version reachable => activate first page target and return reused
   const liveStatus = await probeChromeDebugger(effectivePort);
   if (liveStatus.isRunning) {
-    let targets = [];
-    let activatedTargetId = null;
-
-    try {
-      targets = await getTargets(effectivePort);
-      const firstPage = targets.find((t) => t.type === "page") || null;
-      if (activateIfRunning && firstPage?.id) {
-        activatedTargetId = firstPage.id;
-        await activateTarget(effectivePort, firstPage.id);
-      }
-    } catch (_) {
-      // ignore activation errors, still consider it reused
-    }
+    const { targets, activatedTargetId } = await ensurePageTargets({
+      debuggerPort: effectivePort,
+      url,
+      activateIfRunning,
+    });
 
     const nextRuntime = registry.upsert(accountIdx, {
       status: "running",
@@ -266,10 +300,7 @@ async function launchOrActivateProfile({
       userDataDirRoot: effectiveUserDataDirRoot,
       runtime: nextRuntime,
       liveStatus,
-      targetsPreview: targets
-        .filter((t) => t.type === "page")
-        .slice(0, 3)
-        .map((t) => ({ id: t.id, title: t.title, url: t.url })),
+      targetsPreview: buildTargetsPreview(targets),
     };
   }
 
@@ -319,6 +350,12 @@ async function launchOrActivateProfile({
     error: null,
   });
 
+  const { targets, activatedTargetId } = await ensurePageTargets({
+    debuggerPort: launched.debuggerPort,
+    url,
+    activateIfRunning: true,
+  });
+
   return {
     reused: false,
     profileKey,
@@ -329,6 +366,8 @@ async function launchOrActivateProfile({
     proxy: effectiveProxy || null,
     userDataDirRoot: effectiveUserDataDirRoot,
     runtime: nextRuntime,
+    activatedTargetId,
+    targetsPreview: buildTargetsPreview(targets),
   };
 }
 

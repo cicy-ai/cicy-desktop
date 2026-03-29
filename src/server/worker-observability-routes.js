@@ -1,5 +1,11 @@
 const express = require("express");
 
+function toPublicSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") return snapshot;
+  const { authToken, ...publicSnapshot } = snapshot;
+  return publicSnapshot;
+}
+
 function createWorkerObservabilityRoutes({ getWorkerIdentity, getWorkerSnapshot }) {
   const router = express.Router();
 
@@ -38,11 +44,11 @@ function createWorkerObservabilityRoutes({ getWorkerIdentity, getWorkerSnapshot 
     const snapshot = getWorkerSnapshot();
     res.json({
       worker: identity,
-      snapshot,
+      snapshot: toPublicSnapshot(snapshot),
     });
   });
 
   return router;
 }
 
-module.exports = { createWorkerObservabilityRoutes };
+module.exports = { createWorkerObservabilityRoutes, toPublicSnapshot };
