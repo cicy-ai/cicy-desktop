@@ -1,4 +1,5 @@
 const { z } = require("zod");
+const { updateGlobalConfig } = require("../utils/global-json");
 
 module.exports = (registerTool) => {
   registerTool(
@@ -24,21 +25,16 @@ module.exports = (registerTool) => {
     z.object({}),
     async () => {
       const crypto = require("crypto");
-      const fs = require("fs");
       const os = require("os");
       const path = require("path");
 
       const newToken = crypto.randomBytes(32).toString("hex");
       const tokenPath = path.join(os.homedir(), "global.json");
 
-      let config = {};
-      try {
-        if (fs.existsSync(tokenPath)) {
-          config = JSON.parse(fs.readFileSync(tokenPath, "utf8"));
-        }
-      } catch (_) {}
-      config.api_token = newToken;
-      fs.writeFileSync(tokenPath, JSON.stringify(config, null, 2) + "\n");
+      updateGlobalConfig(tokenPath, (config) => {
+        config.api_token = newToken;
+        return config;
+      });
 
       // Update global auth manager
       if (global.authManager) {

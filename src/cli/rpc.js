@@ -2,6 +2,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const yaml = require("js-yaml");
+const { ensureGlobalApiTokenFile, readGlobalConfig } = require("../utils/global-json");
 
 const HOME = os.homedir();
 const GLOBAL_CONFIG_FILE = path.join(HOME, "global.json");
@@ -94,8 +95,10 @@ function ensureNodeConfig(workerPort = DEFAULT_WORKER_PORT) {
 
 function initRpcConfig(workerPort = DEFAULT_WORKER_PORT) {
   if (!fs.existsSync(GLOBAL_CONFIG_FILE)) {
-    fs.writeFileSync(GLOBAL_CONFIG_FILE, `${JSON.stringify({ api_token: "" }, null, 2)}\n`);
+    ensureGlobalApiTokenFile(GLOBAL_CONFIG_FILE, "");
     console.log(`✅ Created: ${GLOBAL_CONFIG_FILE}`);
+  } else {
+    ensureGlobalApiTokenFile(GLOBAL_CONFIG_FILE, "");
   }
 
   const config = ensureNodeConfig(workerPort);
@@ -107,10 +110,10 @@ function initRpcConfig(workerPort = DEFAULT_WORKER_PORT) {
 }
 
 function loadRpcNode(workerPort = DEFAULT_WORKER_PORT) {
-  const globalConfig = readJson(GLOBAL_CONFIG_FILE, null);
-  if (!globalConfig) {
+  if (!fs.existsSync(GLOBAL_CONFIG_FILE)) {
     throw new Error(`${GLOBAL_CONFIG_FILE} not found. Run 'cicy-rpc init' first`);
   }
+  const globalConfig = readGlobalConfig(GLOBAL_CONFIG_FILE);
 
   const nodesConfig = ensureNodeConfig(workerPort);
   const nodes = nodesConfig.cicyDesktopNodes || {};

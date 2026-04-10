@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const os = require("os");
+const { readGlobalConfig, updateGlobalConfig } = require("../utils/global-json");
 
 class MasterTokenManager {
   constructor() {
@@ -12,7 +13,7 @@ class MasterTokenManager {
   getOrCreateToken() {
     try {
       if (fs.existsSync(this.configPath)) {
-        const config = JSON.parse(fs.readFileSync(this.configPath, "utf8"));
+        const config = readGlobalConfig(this.configPath);
         if (config.api_token) {
           return config.api_token;
         }
@@ -27,15 +28,10 @@ class MasterTokenManager {
   }
 
   saveToken(token) {
-    let config = {};
-    try {
-      if (fs.existsSync(this.configPath)) {
-        config = JSON.parse(fs.readFileSync(this.configPath, "utf8"));
-      }
-    } catch (_) {}
-
-    config.api_token = token;
-    fs.writeFileSync(this.configPath, JSON.stringify(config, null, 2) + "\n");
+    updateGlobalConfig(this.configPath, (config) => {
+      config.api_token = token;
+      return config;
+    });
   }
 
   getToken() {

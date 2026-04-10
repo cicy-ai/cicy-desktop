@@ -9,12 +9,70 @@ const PRIVATE_CICY_DESKTOP_FILE = path.join(HOME, "Private", "cicy-desktop.json"
 const PRIVATE_CICY_DESKTOP_AUDIT_LOG = path.join(HOME, "Private", "cicy-desktop.audit.log");
 const DEFAULT_WORKER_PORT = 8101;
 
+function sleep(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 function readJson(filePath, fallback = {}) {
   try {
     return JSON.parse(fs.readFileSync(filePath, "utf8"));
   } catch {
     return fallback;
   }
+}
+
+function withFileLock(lockPath, fn, { timeoutMs = 5000, retryDelayMs = 50 } = {}) {
+  const startedAt = Date.now();
+  while (true) {
+    try {
+      fs.mkdirSync(lockPath, { recursive: false });
+      break;
+    } catch (error) {
+      if (error?.code !== "EEXIST") {
+        throw error;
+      }
+      if (Date.now() - startedAt >= timeoutMs) {
+        throw new Error(`timed out acquiring lock: ${lockPath}`);
+      }
+      sleep(retryDelayMs);
+    }
+  }
+
+  try {
+    return fn();
+  } finally {
+    try {
+      fs.rmdirSync(lockPath);
+    } catch (_) {}
+  }
+}
+
+function readGlobalConfig() {
+  if (!fs.existsSync(GLOBAL_CONFIG_FILE)) {
+    return {};
+  }
+  const raw = fs.readFileSync(GLOBAL_CONFIG_FILE, "utf8").trim();
+  if (!raw) {
+    return {};
+  }
+  const parsed = JSON.parse(raw);
+  if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
+    throw new Error(`${GLOBAL_CONFIG_FILE} must contain a JSON object`);
+  }
+  return parsed;
+}
+
+function ensureGlobalApiTokenFile(apiToken = "") {
+  return withFileLock(`${GLOBAL_CONFIG_FILE}.lock`, () => {
+    const config = readGlobalConfig();
+    if (typeof config.api_token !== "string") {
+      config.api_token = apiToken;
+    }
+    const tempPath = `${GLOBAL_CONFIG_FILE}.${process.pid}.tmp`;
+    fs.writeFileSync(tempPath, `${JSON.stringify(config, null, 2)}\n`);
+    fs.renameSync(tempPath, GLOBAL_CONFIG_FILE);
+    return config;
+  });
 }
 
 function redactTokens(value) {
@@ -90,8 +148,10 @@ function ensureNodeConfig(workerPort = DEFAULT_WORKER_PORT) {
 
 function initRpcConfig(workerPort = DEFAULT_WORKER_PORT) {
   if (!fs.existsSync(GLOBAL_CONFIG_FILE)) {
-    fs.writeFileSync(GLOBAL_CONFIG_FILE, `${JSON.stringify({ api_token: "" }, null, 2)}\n`);
+    ensureGlobalApiTokenFile("");
     console.log(`✅ Created: ${GLOBAL_CONFIG_FILE}`);
+  } else {
+    ensureGlobalApiTokenFile("");
   }
 
   const config = ensureNodeConfig(workerPort);
@@ -103,10 +163,10 @@ function initRpcConfig(workerPort = DEFAULT_WORKER_PORT) {
 }
 
 function loadRpcNode(workerPort = DEFAULT_WORKER_PORT) {
-  const config = readJson(GLOBAL_CONFIG_FILE, null);
-  if (!config) {
+  if (!fs.existsSync(GLOBAL_CONFIG_FILE)) {
     throw new Error(`${GLOBAL_CONFIG_FILE} not found. Run 'cicy-rpc init' first`);
   }
+  const config = readGlobalConfig();
 
   const nodesConfig = ensureNodeConfig(workerPort);
   const nodes = nodesConfig.cicyDesktopNodes || {};

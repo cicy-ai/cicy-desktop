@@ -3,6 +3,7 @@ const path = require("path");
 const crypto = require("crypto");
 const os = require("os");
 const log = require("electron-log");
+const { readGlobalConfig, updateGlobalConfig } = require("./global-json");
 
 /**
  * 认证模块 - 处理令牌生成、验证和管理
@@ -25,7 +26,7 @@ class AuthManager {
     try {
       // 1. Try ~/global.json first
       if (fs.existsSync(this.globalJsonPath)) {
-        const config = JSON.parse(fs.readFileSync(this.globalJsonPath, "utf8"));
+        const config = readGlobalConfig(this.globalJsonPath);
         if (config.api_token) {
           log.info("[MCP] Using token from ~/global.json");
           return config.api_token;
@@ -57,14 +58,10 @@ class AuthManager {
    * 将 token 写入 ~/global.json（保留已有字段）
    */
   _saveToGlobalJson(token) {
-    let config = {};
-    try {
-      if (fs.existsSync(this.globalJsonPath)) {
-        config = JSON.parse(fs.readFileSync(this.globalJsonPath, "utf8"));
-      }
-    } catch (_) {}
-    config.api_token = token;
-    fs.writeFileSync(this.globalJsonPath, JSON.stringify(config, null, 2) + "\n");
+    updateGlobalConfig(this.globalJsonPath, (config) => {
+      config.api_token = token;
+      return config;
+    });
   }
 
   /**
