@@ -502,6 +502,25 @@ export default function Dashboard({ mode, onModeChange }: DashboardProps) {
     }
   }
 
+  async function handleChromeTuneTargetOpen(targetUrl: string) {
+    if (!selectedProfile) return;
+
+    setProfileAction(`open:${targetUrl}`);
+    try {
+      await requestJson(`/api/chrome/profiles/${selectedProfile.accountIdx}/open`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: targetUrl }),
+      });
+      await loadProfiles();
+      announce(`Opened ${formatHost(targetUrl)}.`, "success");
+    } catch (error) {
+      announce(error instanceof Error ? error.message : "Profile action failed.", "error");
+    } finally {
+      setProfileAction(null);
+    }
+  }
+
   async function handleSaveProxy(restart: boolean) {
     if (!selectedProfile) return;
 
@@ -1223,7 +1242,7 @@ export default function Dashboard({ mode, onModeChange }: DashboardProps) {
                         disabled={!selectedProfile || Boolean(profileAction)}
                         icon={<ArrowUpRight className="h-4 w-4" />}
                         label={target.label}
-                        onClick={() => void handleProfileAction("open", target.url)}
+                        onClick={() => void handleChromeTuneTargetOpen(target.url)}
                       />
                     ))}
                   </div>
