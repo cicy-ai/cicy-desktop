@@ -1,0 +1,68 @@
+name: Build Windows EXE Release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows-exe:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install project dependencies
+        run: npm install --no-audit
+
+      - name: Install Electron build dependencies in project directory
+        run: npm install --save-dev --no-audit electron@41.0.2 electron-builder@26.7.0
+
+      - name: Prepare Windows icon
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path build | Out-Null
+          Invoke-WebRequest -Uri "https://cicy-ai.com/logo.svg" -OutFile "build\logo.svg"
+          magick "build\logo.svg" -background none -define icon:auto-resize=256,128,64,48,32,16 "build\logo.ico"
+
+      - name: Build Windows EXE
+        shell: powershell
+        run: |
+          if (Test-Path dist) {
+            Remove-Item -Recurse -Force dist
+          }
+          npm run build:win -- --config.win.icon=build/logo.ico
+
+      - name: Upload EXE artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cicy-desktop-windows-exe
+          path: dist/*.exe
+          if-no-files-found: error
+
+      - name: Resolve release version
+        id: release_meta
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_meta.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: CiCy Desktop v${{ steps.release_meta.outputs.version }}
+          files: dist/*.exe
+          generate_release_notes: true
