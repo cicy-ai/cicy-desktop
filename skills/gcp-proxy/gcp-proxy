@@ -19,12 +19,23 @@ get_port() {
   esac
 }
 
+format_myip() {
+  local payload="$1"
+  if [ -z "$payload" ]; then
+    return 1
+  fi
+  if command -v jq >/dev/null 2>&1; then
+    jq -r '"ip: \(.ip) | country: \(.country) | cc: \(.cc)"' <<<"$payload" 2>/dev/null && return 0
+  fi
+  printf '%s\n' "$payload"
+}
+
 start_node() {
   local host=$(get_host $1) port=$(get_port $1)
   if pgrep -f "ssh -N.*$host" > /dev/null; then
     echo "[$1] 已在运行，SOCKS5: 127.0.0.1:$port"
   else
-    ssh -N -f -D $port $host
+    ssh -F ~/.ssh/config -N -f -D $port $host
     echo "[$1] 已启动，SOCKS5: 127.0.0.1:$port"
   fi
 }
@@ -37,8 +48,10 @@ stop_node() {
 status_node() {
   local host=$(get_host $1) port=$(get_port $1)
   if pgrep -f "ssh -N.*$host" > /dev/null; then
-    local ip=$(curl -s --socks5h 127.0.0.1:$port --connect-timeout 5 https://ipinfo.io/ip 2>/dev/null)
-    echo "✅ [$1] 运行中  SOCKS5: 127.0.0.1:$port  出口IP: ${ip:-测试失败}"
+    local payload formatted
+    payload=$(curl -s --socks5-hostname 127.0.0.1:$port --connect-timeout 5 https://api.myip.com 2>/dev/null)
+    formatted=$(format_myip "$payload")
+    echo "✅ [$1] 运行中  SOCKS5: 127.0.0.1:$port  ${formatted:-测试失败}"
   else
     echo "❌ [$1] 未运行"
   fi
@@ -48,7 +61,7 @@ case "$ACTION" in
   list)
     echo "可用节点："
     echo "  hk → gcp-proxy      (port 1080) tn.cicy-ai.com"
-    echo "  us → gcp-proxy-us   (port 1081) 34.57.163.22"
+    echo "  us → gcp-proxy-us   (port 1081) 34.63.101.115"
     ;;
   start)
     [ "$NODE" = "all" ] && { start_node hk; start_node us; } || start_node $NODE
@@ -62,14 +75,14 @@ case "$ACTION" in
       status_node us
     else
       status_node $NODE
-      local port=$(get_port $NODE)
+      port=$(get_port $NODE)
       echo ""
       echo "── 使用方式 ──"
       echo "  export https_proxy=socks5://127.0.0.1:$port"
       echo "  export http_proxy=socks5://127.0.0.1:$port"
       echo ""
       echo "  # 测试"
-      echo "  curl --socks5 127.0.0.1:$port https://ipinfo.io"
+      echo "  curl --socks5 127.0.0.1:$port https://api.myip.com"
       echo ""
       echo "  # Chrome"
       echo "  open -a 'Google Chrome' --args --proxy-server='socks5://127.0.0.1:$port'"
@@ -78,9 +91,10 @@ case "$ACTION" in
   test)
     for node in hk us; do
       port=$(get_port $node)
-      ip=$(curl -s --socks5h 127.0.0.1:$port --connect-timeout 5 https://ipinfo.io/ip 2>/dev/null)
-      if [ -n "$ip" ]; then
-        echo "✅ [$node] 出口IP: $ip"
+      payload=$(curl -s --socks5-hostname 127.0.0.1:$port --connect-timeout 5 https://api.myip.com 2>/dev/null)
+      formatted=$(format_myip "$payload")
+      if [ -n "$formatted" ]; then
+        echo "✅ [$node] $formatted"
       else
         echo "❌ [$node] 连接失败（代理未启动或网络异常）"
       fi
@@ -98,7 +112,7 @@ case "$ACTION" in
     echo ""
     echo "节点："
     echo "  hk   香港 tn.cicy-ai.com  → SOCKS5 127.0.0.1:1080"
-    echo "  us   美国 34.57.163.22    → SOCKS5 127.0.0.1:1081"
+    echo "  us   美国 34.63.101.115    → SOCKS5 127.0.0.1:1081"
     echo "  all  两个节点同时操作"
     echo ""
     echo "示例："
