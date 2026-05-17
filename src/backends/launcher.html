@@ -1,0 +1,123 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';" />
+  <title>CiCy Desktop — Backends</title>
+  <style>
+    body { font: 13px -apple-system, BlinkMacSystemFont, system-ui, sans-serif; margin: 0; padding: 16px 18px; color: #ddd; background: #1a1a1a; }
+    h1 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px; margin: 0 0 10px; color: #888; font-weight: 600; }
+    .row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid #2e2e2e; border-radius: 6px; margin-bottom: 6px; background: #222; }
+    .row .name { font-weight: 600; color: #fff; }
+    .row .url { color: #888; font-size: 11px; margin-top: 2px; word-break: break-all; }
+    .row .meta { flex: 1; min-width: 0; }
+    .row button { font: inherit; padding: 4px 12px; background: #2a3a55; color: #cde; border: 1px solid #355; border-radius: 4px; cursor: pointer; }
+    .row button:hover { background: #355; }
+    .row .danger { background: transparent; border-color: #533; color: #d77; }
+    .row .danger:hover { background: #2a1a1a; }
+    .badge { background: #1e3320; color: #6c6; font-size: 10px; padding: 2px 6px; border-radius: 3px; margin-left: 6px; font-weight: 600; }
+    form { margin-top: 18px; padding: 14px; background: #1f1f1f; border: 1px solid #2e2e2e; border-radius: 6px; display: grid; grid-template-columns: 90px 1fr; gap: 8px 12px; align-items: center; }
+    form label { color: #aaa; font-size: 12px; }
+    form input { font: inherit; padding: 7px 9px; background: #181818; color: #fff; border: 1px solid #333; border-radius: 4px; }
+    form input:focus { outline: none; border-color: #468; }
+    form .actions { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; margin-top: 4px; }
+    form button { font: inherit; padding: 7px 16px; background: #2a4a7a; color: #fff; border: 1px solid #3a5a8a; border-radius: 4px; cursor: pointer; }
+    form button:hover { background: #356; }
+    .status { color: #888; font-size: 11px; }
+    .status.err { color: #d77; }
+    .status.ok { color: #6c6; }
+    h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px; color: #888; margin: 16px 0 8px; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <h1>Backends</h1>
+  <div id="list"></div>
+  <h2>Add backend</h2>
+  <form id="addForm">
+    <label>Name</label><input name="name" required placeholder="e.g. Staging cloud" />
+    <label>URL</label><input name="url" required placeholder="https://cicy.example.com:8008" />
+    <label>Token</label><input name="token" placeholder="(optional bearer / query token)" />
+    <div class="actions">
+      <span id="status" class="status"></span>
+      <button type="submit">Probe + Add</button>
+    </div>
+  </form>
+  <script>
+    const $list = document.getElementById("list");
+    const $form = document.getElementById("addForm");
+    const $status = document.getElementById("status");
+
+    function escapeHtml(s) {
+      return String(s == null ? "" : s).replace(/[&<>"']/g, ch => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      }[ch]));
+    }
+
+    async function refresh() {
+      const items = await window.backends.list();
+      $list.innerHTML = "";
+      for (const b of items) {
+        const row = document.createElement("div");
+        row.className = "row";
+        const localBadge = b.kind === "local" ? '<span class="badge">LOCAL</span>' : "";
+        const urlText = b.kind === "local"
+          ? "Bundled cicy-code on :8008 (sidecar)"
+          : escapeHtml(b.url);
+        row.innerHTML = `
+          <div class="meta">
+            <div class="name">${escapeHtml(b.name)} ${localBadge}</div>
+            <div class="url">${urlText}</div>
+          </div>
+          <button data-act="open">Open</button>
+          ${b.kind === "local" ? "" : '<button data-act="remove" class="danger">Delete</button>'}
+        `;
+        row.querySelector("[data-act=open]").addEventListener("click", async () => {
+          $status.className = "status";
+          $status.textContent = "Opening…";
+          const r = await window.backends.open(b.id);
+          $status.textContent = r && r.ok ? "" : `Open failed: ${r && r.error || "unknown"}`;
+          if (r && !r.ok) $status.className = "status err";
+        });
+        const rm = row.querySelector("[data-act=remove]");
+        if (rm) rm.addEventListener("click", async () => {
+          if (!confirm(`Remove backend "${b.name}"?`)) return;
+          await window.backends.remove(b.id);
+          refresh();
+        });
+        $list.appendChild(row);
+      }
+    }
+
+    $form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const fd = new FormData($form);
+      const input = {
+        name: (fd.get("name") || "").toString().trim(),
+        url: (fd.get("url") || "").toString().trim(),
+        token: ((fd.get("token") || "").toString().trim()) || undefined,
+      };
+      if (!input.url) return;
+      $status.className = "status";
+      $status.textContent = "Probing…";
+      try {
+        const probe = await window.backends.probe({ url: input.url, token: input.token });
+        if (probe && probe.ok) {
+          $status.className = "status ok";
+          $status.textContent = `Probe OK (${probe.statusCode})`;
+        } else {
+          $status.className = "status err";
+          $status.textContent = `Probe ${probe && probe.error || probe && probe.statusCode || "failed"} (saving anyway)`;
+        }
+        await window.backends.add(input);
+        $form.reset();
+        refresh();
+      } catch (err) {
+        $status.className = "status err";
+        $status.textContent = `Error: ${err.message}`;
+      }
+    });
+
+    refresh();
+  </script>
+</body>
+</html>

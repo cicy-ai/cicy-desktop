@@ -4,6 +4,11 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const cicyCodeSidecar = require("./sidecar/cicy-code");
+const backendsIPC = require("./backends/ipc");
+const { openLauncher } = require("./backends/launcher-window");
+const backendsRegistry = require("./backends/registry");
+const { openWindowForBackend } = require("./backends/window-manager");
+const { Menu } = require("electron");
 
 // 🎯 添加右键上下文菜单
 contextMenu({
@@ -511,6 +516,33 @@ electronApp.whenReady().then(() => {
     .start({ logPath: path.join(os.homedir(), "logs", "cicy-code-sidecar.log") })
     .then((c) => { if (c) log.info(`[Sidecar] cicy-code spawned pid=${c.pid}`); })
     .catch((e) => log.warn(`[Sidecar] cicy-code start failed: ${e.message}`));
+
+  // Backend launcher: app menu + IPC handlers. Menu adds a Backends top-level
+  // entry; IPC powers the launcher window (src/backends/launcher.html).
+  backendsIPC.register({ sidecarLogPath: path.join(os.homedir(), "logs", "cicy-code-sidecar.log") });
+  const menuTemplate = [
+    ...(process.platform === "darwin" ? [{ role: "appMenu" }] : []),
+    {
+      label: "Backends",
+      submenu: [
+        { label: "Open Backend Launcher\u2026", accelerator: "CmdOrCtrl+Shift+N", click: () => openLauncher() },
+        { type: "separator" },
+        {
+          label: "New Local Window",
+          accelerator: "CmdOrCtrl+N",
+          click: async () => {
+            const local = backendsRegistry.get(backendsRegistry.LOCAL_ID);
+            if (local) await openWindowForBackend(local, { sidecarLogPath: path.join(os.homedir(), "logs", "cicy-code-sidecar.log") });
+          },
+        },
+      ],
+    },
+    { role: "fileMenu" },
+    { role: "editMenu" },
+    { role: "viewMenu" },
+    { role: "windowMenu" },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate));
 
   // 为 webview partition 设置代理
   if (config.proxy) {
