@@ -60,17 +60,22 @@
         const row = document.createElement("div");
         row.className = "row";
         const localBadge = b.kind === "local" ? '<span class="badge">LOCAL</span>' : "";
-        const urlText = b.kind === "local"
-          ? "Bundled cicy-code on :8008 (sidecar)"
-          : escapeHtml(b.url);
+        const urlText = escapeHtml(b.resolvedUrl || b.url || "");
         row.innerHTML = `
           <div class="meta">
             <div class="name">${escapeHtml(b.name)} ${localBadge}</div>
             <div class="url">${urlText}</div>
           </div>
+          <button data-act="copy" title="Copy URL" style="background:transparent;border:1px solid #444;color:#aaa;padding:4px 8px;">Copy</button>
           <button data-act="open">Open</button>
           ${b.kind === "local" ? "" : '<button data-act="remove" class="danger">Delete</button>'}
         `;
+        const cp = row.querySelector("[data-act=copy]");
+        if (cp) cp.addEventListener("click", async () => {
+          const u = b.resolvedUrl || b.url || "";
+          try { await navigator.clipboard.writeText(u); $status.className="status ok"; $status.textContent = "URL copied"; }
+          catch (e) { $status.className="status err"; $status.textContent = "copy failed: "+e.message; }
+        });
         row.querySelector("[data-act=open]").addEventListener("click", async () => {
           $status.className = "status";
           $status.textContent = "Opening…";

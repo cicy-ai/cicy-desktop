@@ -40,6 +40,12 @@ function buildRemoteUrl(backend) {
   return url;
 }
 
+function resolveBackendUrl(backend) {
+  if (!backend) return null;
+  if (backend.kind === "local") return buildLocalUrl();
+  return buildRemoteUrl(backend);
+}
+
 async function openWindowForBackend(backend, opts = {}) {
   if (!backend) throw new Error("backend required");
 
@@ -60,4 +66,4 @@ async function openWindowForBackend(backend, opts = {}) {
   return createWindow({ url }, 0, true);
 }
 
-module.exports = { openWindowForBackend, buildLocalUrl, readCicyAiApiToken };
+module.exports = { openWindowForBackend, buildLocalUrl, buildRemoteUrl, resolveBackendUrl, readCicyAiApiToken };

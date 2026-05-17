@@ -6,7 +6,7 @@ const https = require("https");
 const { URL } = require("url");
 const { ipcMain } = require("electron");
 const registry = require("./registry");
-const { openWindowForBackend } = require("./window-manager");
+const { openWindowForBackend, resolveBackendUrl } = require("./window-manager");
 const { openLauncher } = require("./launcher-window");
 
 function probe({ url, token, timeoutMs = 3500 }) {
@@ -40,7 +40,7 @@ function register(opts = {}) {
   if (registered) return;
   registered = true;
 
-  ipcMain.handle("backends:list", () => registry.list());
+  ipcMain.handle("backends:list", () => registry.list().map(b => ({ ...b, resolvedUrl: resolveBackendUrl(b) })));
   ipcMain.handle("backends:add", (_e, input) => registry.add(input || {}));
   ipcMain.handle("backends:remove", (_e, id) => registry.remove(id));
   ipcMain.handle("backends:probe", (_e, input) => probe(input || {}));
