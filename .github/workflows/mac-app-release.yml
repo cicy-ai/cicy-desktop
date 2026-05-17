@@ -22,6 +22,35 @@ jobs:
           node-version: "20"
           cache: "npm"
 
+      - name: Setup Go (for cicy-code sidecar build)
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Read cicy-code ref pin
+        id: cicy_code_ref
+        shell: bash
+        run: echo "ref=$(cat .cicy-code-ref | tr -d '[:space:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout cicy-code as sibling
+        uses: actions/checkout@v4
+        with:
+          repository: cicy-ai/cicy-code
+          ref: ${{ steps.cicy_code_ref.outputs.ref }}
+          path: cicy-code
+
+      - name: Build cicy-code sidecar binaries (darwin amd64 + arm64)
+        # `bash build.sh all` runs prepare_embed (cicy-skills tarball, frontend,
+        # ttyd assets) and cross-compiles all four darwin/linux targets.
+        # We only need the two darwin slots for the Mac .app, but building
+        # the linux ones here is cheap (~20s) and keeps the prepare:sidecar
+        # script's "all targets at once" mode happy.
+        shell: bash
+        working-directory: cicy-code
+        run: |
+          bash build.sh all
+          ls -lh dist/
+
       - name: Install project dependencies
         run: npm install --no-audit
 
@@ -48,16 +77,21 @@ jobs:
           iconutil -c icns build/icon.iconset -o build/logo.icns
 
       - name: Build macOS app (dmg + zip, unsigned)
+        # prebuild:mac (declared in package.json) chains npm run prepare:sidecar
+        # which reads CICY_CODE_DIST_DIR and populates vendor/cicy-code/.
+        # CSC_IDENTITY_AUTO_DISCOVERY=false stops electron-builder from probing
+        # the runner keychain for a cert it does not have; combined with
+        # build.mac.identity=null in package.json this produces a clean
+        # unsigned build (with the cicy-code sidecar ad-hoc signed by
+        # prepare-cicy-code-sidecar.js so Apple Silicon will exec it).
         shell: bash
+        env:
+          CICY_CODE_DIST_DIR: ${{ github.workspace }}/cicy-code/dist
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: |
           set -euo pipefail
           rm -rf dist
-          # CSC_IDENTITY_AUTO_DISCOVERY=false stops electron-builder from
-          # probing the runner keychain for a code-signing cert it does not
-          # have; combined with build.mac.identity=null in package.json this
-          # produces a clean unsigned build.
-          CSC_IDENTITY_AUTO_DISCOVERY=false \
-            npm run build:mac -- --config.mac.icon=build/logo.icns
+          npm run build:mac -- --config.mac.icon=build/logo.icns
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
