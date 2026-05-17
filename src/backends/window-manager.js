@@ -46,6 +46,18 @@ function resolveBackendUrl(backend) {
   return buildRemoteUrl(backend);
 }
 
+function backendAccountIdx(backend) {
+  // Each backend gets its own persist:sandbox-<idx> partition. 1000 is
+  // reserved for the local sidecar; manual backends derive a stable int
+  // from their uuid so the partition survives restarts. 1001..1999 range
+  // avoids collision with user-managed Chrome account indices (0..N).
+  if (!backend) return 1000;
+  if (backend.id === "local") return 1000;
+  const crypto = require("crypto");
+  const h = crypto.createHash("sha256").update(String(backend.id)).digest("hex");
+  return 1001 + (parseInt(h.slice(0, 8), 16) % 999);
+}
+
 async function openWindowForBackend(backend, opts = {}) {
   if (!backend) throw new Error("backend required");
 
@@ -63,7 +75,7 @@ async function openWindowForBackend(backend, opts = {}) {
   registry.markUsed(backend.id);
   // forceNew=true so each "Open" produces a new BrowserWindow even when
   // oneWindow mode is on — the whole point of the launcher is multi-window.
-  return createWindow({ url }, 0, true);
+  return createWindow({ url }, backendAccountIdx(backend), true);
 }
 
-module.exports = { openWindowForBackend, buildLocalUrl, buildRemoteUrl, resolveBackendUrl, readCicyAiApiToken };
+module.exports = { openWindowForBackend, buildLocalUrl, buildRemoteUrl, resolveBackendUrl, readCicyAiApiToken, backendAccountIdx };
