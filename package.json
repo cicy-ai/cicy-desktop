@@ -18,6 +18,7 @@
     "build": "electron-builder --publish never",
     "build:ui": "cd packages/ui-react && npm install && npm run build",
     "build:win": "electron-builder --win --publish never",
+    "build:mac": "electron-builder --mac --publish never",
     "build:linux": "electron-builder --linux --publish never"
   },
   "build": {
@@ -41,6 +42,15 @@
         "AppImage"
       ],
       "category": "Development"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.developer-tools",
+      "identity": null,
+      "hardenedRuntime": false
     }
   },
   "keywords": [

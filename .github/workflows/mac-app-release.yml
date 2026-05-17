@@ -1,0 +1,88 @@
+name: Build macOS App Release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build-mac-app:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install project dependencies
+        run: npm install --no-audit
+
+      - name: Install Electron build dependencies in project directory
+        run: npm install --save-dev --no-audit electron@41.0.2 electron-builder@26.7.0
+
+      - name: Prepare macOS icon
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/icon.iconset
+          curl -fsSL "https://cicy-ai.com/logo.svg" -o build/logo.svg
+          # macos-latest ships with ImageMagick; -density + -resize avoids the
+          # blurry result you get from sips reading SVG directly (sips treats
+          # SVG as raster and rasterizes at the SVG default 72dpi).
+          magick -background none -density 1024 build/logo.svg \
+            -alpha on -resize 1024x1024 PNG32:build/logo-1024.png
+          for size in 16 32 128 256 512; do
+            sips -z $size $size build/logo-1024.png \
+              --out "build/icon.iconset/icon_${size}x${size}.png" >/dev/null
+            sips -z $((size*2)) $((size*2)) build/logo-1024.png \
+              --out "build/icon.iconset/icon_${size}x${size}@2x.png" >/dev/null
+          done
+          iconutil -c icns build/icon.iconset -o build/logo.icns
+
+      - name: Build macOS app (dmg + zip, unsigned)
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf dist
+          # CSC_IDENTITY_AUTO_DISCOVERY=false stops electron-builder from
+          # probing the runner keychain for a code-signing cert it does not
+          # have; combined with build.mac.identity=null in package.json this
+          # produces a clean unsigned build.
+          CSC_IDENTITY_AUTO_DISCOVERY=false \
+            npm run build:mac -- --config.mac.icon=build/logo.icns
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cicy-desktop-mac
+          path: |
+            dist/*.dmg
+            dist/*.zip
+          if-no-files-found: error
+
+      - name: Resolve release version
+        id: release_meta
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_meta.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: CiCy Desktop v${{ steps.release_meta.outputs.version }}
+          files: |
+            dist/*.dmg
+            dist/*.zip
+          generate_release_notes: true

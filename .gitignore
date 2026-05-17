@@ -18,3 +18,4 @@ yarn-error.log*
 .cache/
 .ipynb_checkpoints/
 *.ipynb_checkpoints
+dist/
