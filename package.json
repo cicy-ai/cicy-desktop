@@ -17,9 +17,13 @@
     "test:ls": "node tests/test-ls.js",
     "build": "electron-builder --publish never",
     "build:ui": "cd packages/ui-react && npm install && npm run build",
+    "prepare:sidecar": "node scripts/prepare-cicy-code-sidecar.js",
     "build:win": "electron-builder --win --publish never",
     "build:mac": "electron-builder --mac --publish never",
-    "build:linux": "electron-builder --linux --publish never"
+    "build:linux": "electron-builder --linux --publish never",
+    "prebuild": "npm run prepare:sidecar",
+    "prebuild:mac": "npm run prepare:sidecar",
+    "prebuild:linux": "npm run prepare:sidecar"
   },
   "build": {
     "appId": "com.cicy.desktop",
@@ -41,7 +45,13 @@
         "deb",
         "AppImage"
       ],
-      "category": "Development"
+      "category": "Development",
+      "extraResources": [
+        {
+          "from": "vendor/cicy-code/linux-${arch}/cicy-code",
+          "to": "cicy-code/cicy-code"
+        }
+      ]
     },
     "mac": {
       "target": [
@@ -50,7 +60,13 @@
       ],
       "category": "public.app-category.developer-tools",
       "identity": null,
-      "hardenedRuntime": false
+      "hardenedRuntime": false,
+      "extraResources": [
+        {
+          "from": "vendor/cicy-code/darwin-${arch}/cicy-code",
+          "to": "cicy-code/cicy-code"
+        }
+      ]
     }
   },
   "keywords": [

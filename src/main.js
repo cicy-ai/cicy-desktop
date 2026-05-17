@@ -3,6 +3,7 @@ const { default: contextMenu } = require("electron-context-menu");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const cicyCodeSidecar = require("./sidecar/cicy-code");
 
 // 🎯 添加右键上下文菜单
 contextMenu({
@@ -504,6 +505,13 @@ function ensureWindowsDesktopLauncher() {
 
 electronApp.whenReady().then(() => {
   ensureDesktopLauncher();
+  // Start bundled cicy-code daemon as a sidecar. Reuses an existing
+  // instance on :8008 if one is already running; no-op on Windows.
+  cicyCodeSidecar
+    .start({ logPath: path.join(os.homedir(), "logs", "cicy-code-sidecar.log") })
+    .then((c) => { if (c) log.info(`[Sidecar] cicy-code spawned pid=${c.pid}`); })
+    .catch((e) => log.warn(`[Sidecar] cicy-code start failed: ${e.message}`));
+
   // 为 webview partition 设置代理
   if (config.proxy) {
     const { session } = require("electron");
@@ -552,6 +560,7 @@ electronApp.on("window-all-closed", () => {
 
 function cleanup() {
   log.info("[MCP] Server shutting down");
+  try { cicyCodeSidecar.stop(); } catch (e) { /* best-effort */ }
   if (workerClient) {
     workerClient.stop();
   }
