@@ -61,6 +61,14 @@ function list() {
   return data.backends;
 }
 
+// Best-effort: invalidate window-utils trusted-origin cache so newly added
+// backends are eligible for electronRPC auto-inject on next dom-ready
+// without restarting the app. Wrapped in try so this module can be loaded
+// during tests where window-utils isn't available.
+function invalidateTrustCache() {
+  try { require("../utils/window-utils").refreshTrustedOrigins(); } catch {}
+}
+
 function add({ name, url, token }) {
   if (!url || typeof url !== "string") throw new Error("url is required");
   const data = load();
@@ -74,6 +82,7 @@ function add({ name, url, token }) {
   };
   data.backends.push(b);
   save(data);
+  invalidateTrustCache();
   return b;
 }
 
@@ -84,6 +93,7 @@ function remove(id) {
   data.backends = data.backends.filter(b => b.id !== id);
   if (data.backends.length === before) return false;
   save(data);
+  invalidateTrustCache();
   return true;
 }
 

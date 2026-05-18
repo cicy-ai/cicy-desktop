@@ -53,11 +53,13 @@ function setupWindowHandlers(win) {
   }
 
   win.webContents.on("dom-ready", async () => {
-    // Auto-inject electronRPC for trusted URLs
+    // Auto-inject electronRPC for trusted URLs. Trust comes from
+    // isTrustedUrl(), which includes built-in dev hosts AND any backend the
+    // user explicitly added to the registry (they opt in by adding the URL,
+    // and the auth token is required to reach the cicy-code there anyway).
     const pageUrl = win.webContents.getURL();
     try {
-      const u = new URL(pageUrl);
-      if (u.hostname === "localhost" || u.hostname.endsWith(".de5.net")) {
+      if (isTrustedUrl(pageUrl)) {
         const rpcCode = `
           if (!window.electronRPC) {
             try {
@@ -133,13 +135,43 @@ function setupWindowHandlers(win) {
   });
 }
 
+// Cache the trusted-origin set so we don't hit the registry on every window
+// event. Invalidated whenever backends are added/removed (registry.add /
+// registry.remove call refreshTrustedOrigins() — wired in registry.js).
+let _trustedOriginsCache = null;
+function loadTrustedOrigins() {
+  // Built-in always-trusted hosts (dev + reserved internal domain).
+  const set = new Set(["localhost", "127.0.0.1"]);
+  try {
+    // Lazy require to avoid a cycle (registry.js requires electron.app which
+    // isn't ready when this module is first loaded by main.js).
+    const registry = require("../backends/registry");
+    for (const b of registry.list()) {
+      if (!b || !b.url) continue;
+      try {
+        const h = new URL(b.url).hostname;
+        if (h) set.add(h);
+      } catch {}
+    }
+  } catch (e) {
+    // Registry not ready yet — fall back to built-ins.
+  }
+  return set;
+}
+function trustedOrigins() {
+  if (!_trustedOriginsCache) _trustedOriginsCache = loadTrustedOrigins();
+  return _trustedOriginsCache;
+}
+function refreshTrustedOrigins() {
+  _trustedOriginsCache = null;
+}
+
 function isTrustedUrl(url) {
   if (!url) return false;
   try {
     const u = new URL(url);
-    return (
-      u.hostname === "localhost" || u.hostname === "127.0.0.1" || u.hostname.endsWith(".de5.net")
-    );
+    if (u.hostname.endsWith(".de5.net")) return true;
+    return trustedOrigins().has(u.hostname);
   } catch {
     return false;
   }
@@ -350,4 +382,5 @@ module.exports = {
   createWindow,
   setupWindowHandlers,
   getWindowInfo,
+  refreshTrustedOrigins,
 };

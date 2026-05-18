@@ -515,11 +515,50 @@
     refreshWindows();
   };
 
+  // --- local IPs ---
+  // Stash this machine's non-loopback IPv4 addresses in localStorage so any
+  // part of the UI (frp-server install drawer, remote-control flows, etc.)
+  // can read them without re-probing the host shell. Schema:
+  //   { ips: ["192.168.1.5", "10.0.0.7"], primary: "192.168.1.5", at: 17... }
+  async function probeLocalIPs() {
+    const platform = (window.cicy && window.cicy.platform) || "";
+    let cmd;
+    if (platform === "win32") {
+      cmd = `powershell -NoProfile -Command "Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.IPAddress -notmatch '^(127|169\\.254)'} | Select-Object -ExpandProperty IPAddress"`;
+    } else if (platform === "darwin") {
+      cmd = `ifconfig | awk '/inet / && $2 !~ /^127/ {print $2}'`;
+    } else {
+      cmd = `hostname -I 2>/dev/null | tr ' ' '\\n' | grep -v '^$' | grep -v '^127'`;
+    }
+    if (!window.electronRPC) return [];
+    try {
+      const res = await window.electronRPC("exec_shell", { command: cmd });
+      const raw = ((res && res.content) || []).map(c => c.text).filter(Boolean).join("\n");
+      let stdout = raw;
+      try { const inner = JSON.parse(raw); if (inner && typeof inner.stdout === "string") stdout = inner.stdout; } catch {}
+      return stdout
+        .split(/\r?\n/)
+        .map(s => s.trim())
+        .filter(s => /^\d+\.\d+\.\d+\.\d+$/.test(s) && !s.startsWith("127.") && !s.startsWith("169.254."));
+    } catch { return []; }
+  }
+  async function refreshLocalIPs() {
+    const ips = await probeLocalIPs();
+    const payload = { ips, primary: ips[0] || null, at: Date.now() };
+    try { localStorage.setItem("cicy.localIPs", JSON.stringify(payload)); } catch {}
+    if (window.dispatchEvent && window.CustomEvent) {
+      window.dispatchEvent(new CustomEvent("cicy:local-ips", { detail: payload }));
+    }
+    return payload;
+  }
+
   // --- init + periodic refresh ---
   refreshBackends();
   refreshWindows();
+  refreshLocalIPs();
   setInterval(() => refreshHealth(), 30000);
   setInterval(refreshWindows, 5000);
+  setInterval(refreshLocalIPs, 60000);
 </script>
 </body>
 </html>
