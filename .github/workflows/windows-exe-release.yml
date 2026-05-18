@@ -29,12 +29,28 @@ jobs:
         run: npm install --save-dev --no-audit electron@41.0.2 electron-builder@26.7.0
 
       - name: Prepare Windows icon
+        # cicy-ai.com sometimes returns 522 (origin unreachable). Don't let
+        # an icon-asset hiccup kill the release — we fall back to the default
+        # Electron icon if anything in the fetch + convert chain fails. The
+        # build step downstream checks `build/logo.ico` and conditionally
+        # passes --config.win.icon.
         shell: powershell
+        continue-on-error: true
         run: |
           New-Item -ItemType Directory -Force -Path build | Out-Null
-          Invoke-WebRequest -Uri "https://cicy-ai.com/logo.svg" -OutFile "build\logo.svg"
-          magick -background none -density 768 "build\logo.svg" -alpha on -resize 256x256 PNG32:"build\logo-256.png"
-          magick "build\logo-256.png" -define icon:auto-resize=256,128,64,48,32,16 "build\logo.ico"
+          try {
+            Invoke-WebRequest -Uri "https://cicy-ai.com/logo.svg" -OutFile "build\logo.svg" -TimeoutSec 12
+          } catch {
+            Write-Host "::warning::logo.svg fetch failed ($_); building with default Electron icon"
+            exit 0
+          }
+          try {
+            magick -background none -density 768 "build\logo.svg" -alpha on -resize 256x256 PNG32:"build\logo-256.png"
+            magick "build\logo-256.png" -define icon:auto-resize=256,128,64,48,32,16 "build\logo.ico"
+          } catch {
+            Write-Host "::warning::magick convert failed ($_); skipping icon"
+            exit 0
+          }
 
       - name: Build Windows EXE
         shell: powershell
@@ -42,7 +58,12 @@ jobs:
           if (Test-Path dist) {
             Remove-Item -Recurse -Force dist
           }
-          npm run build:win -- --config.win.icon=build/logo.ico
+          if (Test-Path "build\logo.ico") {
+            npm run build:win -- --config.win.icon=build/logo.ico
+          } else {
+            Write-Host "::warning::build/logo.ico missing — using default Electron icon"
+            npm run build:win
+          }
 
       - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
