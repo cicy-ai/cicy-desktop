@@ -4,6 +4,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `cicy-desktop` is an Electron app that exposes ~50 system tools (Chrome control, clipboard, screenshot, shell exec, system info, ...) over MCP and REST/RPC. The app runs in two roles — **worker** (the Electron process exposing tools) and **master** (a thin control plane that routes tool calls across workers) — and ships a bundled `cicy-code` sidecar daemon so the desktop is a fully offline-capable backend.
 
+## Development workflow rules (read first)
+
+**This repo is edited in exactly one place.** Code changes happen on the main dev machine (Linux). The Mac is a **build host only** — it compiles and the user launches the resulting `.app`. Windows builds are produced by **GitHub Actions**, never on a local Windows checkout.
+
+1. **Edit only on the main dev machine** (this Linux checkout at `~/projects/cicy-desktop`). Never `ssh mac` to edit `src/...`; that creates two-master divergence (the kind of issue rebase had to clean up in earlier sessions).
+2. **Sync to Mac with `rsync`** before each Mac build:
+
+   ```bash
+   rsync -avz --delete \
+     --exclude=node_modules --exclude=dist --exclude=.git \
+     ~/projects/cicy-desktop/ mac:~/projects/cicy-desktop/
+   ```
+
+   Then on Mac: `cd ~/projects/cicy-desktop && npm install && npm run build:mac`. The user opens the resulting `.app` — the agent does NOT auto-launch it.
+3. **Windows builds: GitHub Actions only.** Do not attempt local Windows builds. The workflow is already wired (see `.github/workflows/build-windows*.yml` / equivalents); just push to `main` and let CI produce the artifact.
+4. **Commits / pushes happen on the Linux side.** Mac stays as a working-tree mirror; nothing committed there should be the source of truth. If Mac diverges, rsync overwrites.
+
 ## Common commands
 
 ### Install and run
