@@ -556,6 +556,28 @@
   refreshBackends();
   refreshWindows();
   refreshLocalIPs();
+
+  // Auto-open the most-recently-used backend on a fresh launcher load.
+  // Skipped when user navigated back here from a backend (history.length > 1)
+  // or when this session already auto-opened once (sessionStorage flag), so
+  // the user can still manage backends without instant redirect.
+  async function autoOpenLastUsed() {
+    try {
+      if (history.length > 1) return;
+      if (sessionStorage.getItem("cicy-auto-opened")) return;
+      const params = new URLSearchParams(location.search);
+      if (params.get("stay") === "1") return;
+      sessionStorage.setItem("cicy-auto-opened", "1");
+      const list = await window.cicy.backends.list();
+      const ranked = list
+        .filter(b => b.lastUsedAt)
+        .sort((a, b) => new Date(b.lastUsedAt) - new Date(a.lastUsedAt));
+      if (!ranked.length) return;
+      await new Promise(r => setTimeout(r, 150));
+      await window.cicy.backends.open(ranked[0].id);
+    } catch (e) { console.warn("[auto-open]", e); }
+  }
+  autoOpenLastUsed();
   setInterval(() => refreshHealth(), 30000);
   setInterval(refreshWindows, 5000);
   setInterval(refreshLocalIPs, 60000);
