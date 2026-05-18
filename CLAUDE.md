@@ -2,45 +2,55 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+`cicy-desktop` is an Electron app that exposes ~50 system tools (Chrome control, clipboard, screenshot, shell exec, system info, ...) over MCP and REST/RPC. The app runs in two roles — **worker** (the Electron process exposing tools) and **master** (a thin control plane that routes tool calls across workers) — and ships a bundled `cicy-code` sidecar daemon so the desktop is a fully offline-capable backend.
+
 ## Common commands
 
 ### Install and run
+
 ```bash
 npm install
-npm start
-npm run start:master
+npm start                          # local Electron worker via bin/cicy-desktop
+npm run start:master               # control-plane master on port 8100
 ```
 
-- `npm start` runs the local Electron worker via `bin/cicy-desktop`
-- `npm run start:master` starts the control-plane master on port `8100` by default
-
 ### Formatting
+
 ```bash
 npm run format
 npm run format:check
 ```
 
 ### Tests
+
 ```bash
-npm test
-npx jest --runInBand tests/rpc/master-routes.test.js
-npx jest --runInBand tests/rpc/cicy-rpc.test.js
+npm test                                                          # full suite
+npx jest --runInBand tests/rpc/master-routes.test.js              # single file
 npx jest --runInBand --testNamePattern="Master routes" tests/rpc/master-routes.test.js
 ```
 
-Notes:
-- Jest is configured in `jest.config.js` with `maxWorkers: 1`, global setup/teardown, and `forceExit: true`
-- Tests under `tests/rpc/` commonly spin up the Electron worker or hit HTTP routes through supertest
-- If you only need one file, prefer `npx jest --runInBand <path-to-test>`
+`jest.config.js` runs single-process (`maxWorkers: 1`) with `forceExit: true`. Tests under `tests/rpc/` spin up the real Electron worker or supertest HTTP routes, so they take real time and are not pure unit tests.
 
-### Build
+### Build & distribute
+
 ```bash
-npm run build
-npm run build:win
-npm run build:linux
+npm install
+npm run build                  # multi-platform via electron-builder
+npm run build:mac              # dist/CiCy Desktop-<ver>.dmg + .zip + dist/mac/CiCy Desktop.app
+npm run build:win              # NSIS installer
+npm run build:linux            # deb + AppImage
 ```
 
+Dev iteration loop on macOS:
+
+1. edit `src/...`
+2. `pkill -f "MacOS/CiCy Desktop"` (electron-builder won't overwrite a running app)
+3. `CICY_CODE_BIN_PATH=<path-to-cicy-code-binary> npm run build:mac`
+4. `open "dist/mac/CiCy Desktop.app"`
+5. inspect the packaged renderer via `npx --yes asar extract-file "dist/mac/CiCy Desktop.app/Contents/Resources/app.asar" <path>`
+
 ### RPC CLI workflows
+
 ```bash
 ./bin/cicy-rpc init
 ./bin/cicy-rpc tools
@@ -49,164 +59,242 @@ CICY_NODE=windows ./bin/cicy-rpc ping
 CICY_NODE=windows ./bin/cicy-rpc chrome_launch_profile accountIdx=1 url=https://example.com/
 ```
 
-Important:
-- `cicy` / `cicy-desktop` is for lifecycle management
-- `cicy-rpc` is the RPC/tool CLI
-- `cicy-rpc` reads `~/global.json`
-- remote node selection is done with `CICY_NODE=<name>`
+Distinctions to internalize:
+
+- `cicy` / `cicy-desktop` — local worker lifecycle (start/stop/status). **Not** for tool calls.
+- `cicy-rpc` — tool invocation. Reads `~/global.json`. Choose remote node via `CICY_NODE=<name>`.
 
 ## Architecture
 
-The codebase has two runtime roles:
+Two runtime roles:
 
-1. **Worker**: an Electron desktop automation process exposing MCP-style tools and REST/RPC endpoints
-2. **Master**: a lightweight control plane that tracks workers/agents/tasks and forwards `/api/rpc/:toolName` calls to a selected worker
+1. **Worker** — an Electron process exposing tools over MCP and REST/RPC
+2. **Master** — a thin control plane that tracks workers/agents/tasks and forwards `/api/rpc/:toolName` calls to a selected worker
+
+A single host can run either or both. The bundled `.app` is normally a worker; running `npm run start:master` adds the master role.
 
 ### Worker runtime
 
-The main worker entrypoint is `src/main.js`.
+Entrypoint: `src/main.js`.
 
-Key responsibilities there:
-- initialize Electron flags, auth, logging, Express, and MCP plumbing
-- load tool modules through `src/server/tool-catalog.js`
-- register every tool into both the MCP server and REST/RPC surface
-- expose worker metadata, agents, artifacts, and observability endpoints
-- optionally register/heartbeat to a master when `CICY_MASTER_URL` and `CICY_MASTER_TOKEN` are present
+Initializes Electron flags, auth, logging, Express, MCP plumbing, loads tool modules through `src/server/tool-catalog.js`, and registers every tool into both the MCP server and the REST/RPC surface. Registers + heartbeats to a master when `CICY_MASTER_URL` and `CICY_MASTER_TOKEN` are present.
 
-Important supporting modules:
-- `src/server/express-app.js`: base Express app, CORS, `/ping`, `/docs`, `/openapi.json`, and UI shell routes
-- `src/server/mcp-server.js`: MCP transport setup
-- `src/server/tool-registry.js`: tool registration bridge
-- `src/server/tool-executor.js`: central execution path for REST/MCP tool calls
-- `src/cluster/worker-client.js`: worker registration + heartbeat to the master
-- `src/cluster/worker-identity.js`: worker identity payload advertised to the master
+Supporting modules:
 
-The worker exposes three important RPC surfaces:
-- `GET /rpc/tools`
-- `POST /rpc/tools/call`
-- `POST /rpc/:toolName`
+- `src/server/express-app.js` — base Express app, CORS, `/ping`, `/docs`, `/openapi.json`, UI shell routes
+- `src/server/mcp-server.js` — MCP transport setup
+- `src/server/tool-registry.js` — tool registration bridge
+- `src/server/tool-executor.js` — central execution path for REST/MCP tool calls
+- `src/cluster/worker-client.js` — worker registration + heartbeat to the master
+- `src/cluster/worker-identity.js` — identity payload advertised to the master
 
-`POST /rpc/:toolName` is the simplest direct REST entrypoint and is what `cicy-rpc` uses after resolving the node from `~/global.json`.
+Worker RPC surface:
+
+- `GET  /rpc/tools` — list registered tools
+- `POST /rpc/tools/call` — `{ name, arguments }` style invocation
+- `POST /rpc/:toolName` — direct REST entrypoint, what `cicy-rpc` uses after resolving the node
 
 ### Tool system
 
-Tool implementations live in `src/tools/*.js` and are loaded via `require("../tools")` from `src/server/tool-catalog.js`.
+Tool implementations live in `src/tools/*.js` and are loaded via `require("../tools")` from `src/server/tool-catalog.js`. Each module exports a function receiving `registerTool(name, description, schema, handler, options)`. The catalog is grouped by `tag` and reused for:
 
-Each tool module exports a function that receives `registerTool(name, description, schema, handler, options)`. The resulting catalog is grouped by tag and then reused for:
 - MCP tool registration
 - `GET /rpc/tools`
 - OpenAPI generation in `/openapi.json`
 
-This means a tool definition change affects all three surfaces at once.
+A tool definition change affects all three surfaces at once.
+
+Tools use **CommonJS** and **Zod schemas**.
 
 ### Master runtime
 
-The master entrypoint is `src/master/master-main.js`.
+Entrypoint: `src/master/master-main.js`.
 
-It maintains in-memory state for:
-- `WorkerRegistry`: live registered workers
-- `WorkerInventory`: merged view of configured nodes from `~/global.json` plus registered workers
-- `AgentIndex`: worker agent metadata
-- `TaskStore`: forwarded task records
-- `SessionAffinityStore`: control-session routing affinity
+In-memory state:
 
-Master routes are split into:
-- `src/master/master-routes.js`: public API under `/api`
-- `src/master/master-admin-routes.js`: admin-only routes under `/admin`
+- `WorkerRegistry` — live registered workers
+- `WorkerInventory` — merged view of configured nodes from `~/global.json` plus registered workers
+- `AgentIndex` — worker agent metadata
+- `TaskStore` — forwarded task records
+- `SessionAffinityStore` — control-session routing affinity
 
-The most important master path is `POST /api/rpc/:toolName`:
-- builds request context from `workerId`, `agentId`, runtime session, control session, and `accountIdx`
-- chooses an execution target with `src/master/task-scheduler.js`
-- creates a task record
-- injects worker-specific fields like `win_id`, `agentId`, and `runtimeSessionId`
-- forwards the request to the selected worker via `src/cluster/remote-executor`
-- stores completion/failure state in `TaskStore`
+Master routes split into:
 
-### Chrome profile dispatch model
+- `src/master/master-routes.js` — public API under `/api`
+- `src/master/master-admin-routes.js` — admin-only routes under `/admin`
 
-Chrome profile handling is split between master and worker.
+The hot path is `POST /api/rpc/:toolName`:
 
-Current model:
-- the source-of-truth `chrome.json` lives on the **master** at `~/Private/chrome.json`
-- workers are not required to have local `~/Private/chrome.json`
-- workers only need a local template directory at `~/chrome/_tmp`
+1. build request context from `workerId`, `agentId`, runtime session, control session, `accountIdx`
+2. choose an execution target with `src/master/task-scheduler.js`
+3. create a task record in `TaskStore`
+4. inject worker-specific fields (`win_id`, `agentId`, `runtimeSessionId`, `effectiveChromeProfile`)
+5. forward to the selected worker via `src/cluster/remote-executor`
+6. store completion/failure state
 
-Master-side profile resolution:
+### Chrome profile dispatch
+
+Chrome profile handling is split between master and worker. The source-of-truth `chrome.json` lives on the **master** at `~/Private/chrome.json`; workers don't need a local one.
+
+Master-side:
+
 - `src/master/chrome-config.js` reads master-local `~/Private/chrome.json`
 - `src/master/master-routes.js` injects `effectiveChromeProfile` for forwarded chrome tool calls when `accountIdx` is present
-- currently this injection is enabled for `chrome_launch_profile`, `chrome_get_profile`, `chrome_get_targets`, and `chrome_cdp_call`
+- injection covers `chrome_launch_profile`, `chrome_get_profile`, `chrome_get_targets`, `chrome_cdp_call`
 
-Worker-side launch behavior:
-- `src/tools/chrome-tools.js` implements chrome profile tools
-- `chrome_launch_profile` now prefers injected `effectiveChromeProfile`
-- if no injected profile is present, it falls back to local `~/Private/chrome.json` for backward compatibility
-- if neither exists, it returns a clear error
-- when a target user-data-dir does not exist, initialization is done from `~/chrome/_tmp`; if `_tmp` does not exist, it just creates the directory
-- `orgPath -> Default` copy is only best-effort if the path exists on that worker
+Worker-side launch (`src/tools/chrome-tools.js::chrome_launch_profile`):
 
-Chrome launch internals are intentionally separated:
-- `src/chrome/chrome-launcher.js`: binary resolution, Chrome args, process spawn, debugger readiness
-- `src/chrome/chrome-cdp-client.js`: `/json/version`, `/json/list`, activation, generic CDP calls
-- `src/chrome/runtime-registry.js`: local runtime state tracking per account
+- prefers injected `effectiveChromeProfile`
+- falls back to local `~/Private/chrome.json` for backward compat
+- if neither exists → clear error
+- if target user-data-dir doesn't exist → initialize from `~/chrome/_tmp` (or just `mkdir`)
+- `orgPath -> Default` copy is best-effort if the path exists
+
+Chrome internals separated:
+
+- `src/chrome/chrome-launcher.js` — binary resolution, args, spawn, debugger readiness, per-profile proxy via `--proxy-server=<url>`
+- `src/chrome/chrome-cdp-client.js` — `/json/version`, `/json/list`, activation, generic CDP calls
+- `src/chrome/runtime-registry.js` — local runtime state per account
+- `src/chrome/debugger-port-resolver.js` — port assignment
+
+Cross-platform Chrome discovery (`chrome-launcher.js::getBinaryCandidates`):
+
+- macOS: `/Applications/Google Chrome.app`, `~/Applications/Google Chrome.app`, `/Applications/Chromium.app`
+- Windows: `%LOCALAPPDATA%` / `%PROGRAMFILES%` / `%PROGRAMFILES(X86)%` under `Google\Chrome\Application\chrome.exe` (+ Chromium variants)
+- Linux: `google-chrome` / `chromium` / `chromium-browser` from PATH
+
+When none are present, launch errors with `"Chrome/Chromium binary not found"` — user must install Chrome first.
+
+### Backends launcher (post-2.0.2)
+
+The app no longer auto-loads a remote URL at startup. The first window shows a dashboard at `src/backends/homepage.html` listing configured backends.
+
+- registry file: `<userData>/backends.json` — created on demand by `src/backends/registry.js`
+- backend kinds: `local` (the bundled sidecar — see [Sidecar cicy-code daemon](#sidecar-cicy-code-daemon)) and `manual` (URLs added via the Add form, with optional token)
+- preload bridge: `src/backends/homepage-preload.js` exposes
+  - `cicy.backends.{list, add, remove, probe, open, health, healthAll, restartSidecar}`
+  - `cicy.windows.*` for spawned backend windows
+- IPC handlers: `src/backends/ipc.js`
+- on cold load, `homepage.html` auto-opens the backend with the most-recent `lastUsedAt`. Skipped when `history.length > 1` (user navigated *back*), `?stay=1` URL param, or `sessionStorage["cicy-auto-opened"]` is set (per-session one-shot).
+
+### Trust gate (`isTrustedUrl`)
+
+`src/utils/window-utils.js::isTrustedUrl(url)` decides whether a `BrowserWindow` gets:
+
+- `nodeIntegration: true`
+- `contextIsolation: false`
+- the `dom-ready` `electronRPC` auto-injection
+
+Trusted hosts:
+
+1. `localhost` / `127.0.0.1`
+2. `*.de5.net`
+3. **any hostname in `backends.json`** — anything the user added via the Add form (v2.0.2 widening)
+
+Effect for renderers loading a trusted URL: `window.electronRPC(toolName, args)` is a function round-tripping through `ipcRenderer.invoke("rpc", toolName, args)` into the worker's tool registry.
+
+### Bridge to cicy-code (`desktop_event` / `rpc_call`)
+
+When this app opens a cicy-code backend, the server-side `agent-desktop` and `agent-chrome` skills reach Electron-main tools through cicy-code's chat WebSocket — **not** through this app's REST/RPC surface.
+
+Flow:
+
+1. cicy-code server posts `POST /api/chat/push` with `{ type: "desktop_event", data: { type: "rpc_call", tool, args, requestId } }`
+2. cicy-code relays to the connected client over WebSocket
+3. cicy-code's React app (`app/src/components/layout/useDesktopEvents.ts`) listens for `desktop_event`, sees `type === "rpc_call"`, awaits `window.electronRPC(tool, args)` — the same function the trust gate exposes
+4. result dispatched as `rpc-result` CustomEvent → relayed back through the WS by `Workspace.tsx`
+5. server-side skill (`hosttools.go::desktopRPC`) matches by `requestId` and returns
+
+Why this exists: `agent-webpage exec-js` runs synchronously via `window.eval` and cannot await Promises, so it can't call `electronRPC` directly. `rpc_call` is the async-safe sibling.
+
+Implication: anything that calls `window.electronRPC` from outside the cicy-code React tree must run inside a renderer where `isTrustedUrl` granted `nodeIntegration`, or where `homepage-preload.js` is the preload.
+
+### Sidecar cicy-code daemon
+
+`npm run build` runs `scripts/prepare-cicy-code-sidecar.js`, which copies the platform-matching `cicy-code` binary into `vendor/cicy-code/<platform>-<arch>/`. electron-builder bundles it as `extraResources`, ending up at `Contents/Resources/cicy-code/cicy-code` inside the `.app`.
+
+Source resolution (first hit wins):
+
+1. `CICY_CODE_BIN_PATH` — single binary, dev shortcut for the current host's platform/arch
+2. `CICY_CODE_DIST_DIR` — directory with all four `cicy-code-{darwin,linux}-{amd64,arm64}` files from `bash build.sh all` in the cicy-code repo (CI path)
+3. `../cicy-code/dist` — sibling checkout fallback
+
+On macOS the copied binary is ad-hoc signed (`codesign --sign -`) so it loads on Apple Silicon without a Developer ID. Real signing happens in electron-builder's signing pass when configured.
+
+The "Local (bundled)" entry in the Backends launcher uses this sidecar — the homepage spawns it as a child to provide a fully-offline backend.
 
 ### CLI/config split
 
-There are two separate CLIs and that distinction matters:
-- `bin/cicy-desktop` / `cicy`: local worker lifecycle management
-- `bin/cicy-rpc`: RPC/tool invocation
+Two CLIs, different jobs:
 
-`src/cli/rpc.js` is the source for `cicy-rpc`. It:
+- `bin/cicy-desktop` / `cicy` — local worker lifecycle (start/stop/status)
+- `bin/cicy-rpc` — tool invocation
+
+`src/cli/rpc.js` (`cicy-rpc`):
+
 - reads `~/global.json`
 - resolves `cicyDesktopNodes[<name>]`
 - uses `CICY_NODE` to choose the target node
 - POSTs directly to `/<rpc-path>` on that node with bearer auth
 
-`cicy-rpc init` only initializes `~/global.json` if the file does not already exist. It is not a general node-management command.
+`cicy-rpc init` only initializes `~/global.json` if missing. It is not a general node-management command.
 
 ## Config and auth
 
 ### `~/global.json`
 
-This file is important for both RPC CLI usage and worker/master auth.
+```json
+{
+  "api_token": "cicy_…",
+  "cicyDesktopNodes": {
+    "mac":     { "base_url": "http://127.0.0.1:8101", "api_token": "…" },
+    "windows": { "base_url": "http://1.2.3.4:8101",   "api_token": "…" }
+  }
+}
+```
 
-Relevant fields:
-- top-level `api_token`
-- `cicyDesktopNodes.<name>.base_url`
-- `cicyDesktopNodes.<name>.api_token`
+`cicy-rpc` picks the token in this order:
 
-`cicy-rpc` chooses the token in this order:
 1. `cicyDesktopNodes.<name>.api_token`
 2. top-level `api_token`
 
 ### Worker registration to master
 
-To run a worker attached to a master, the important env vars are:
 ```bash
 MASTER_TOKEN=$(jq -r '.api_token' ~/global.json)
 PORT=8101 CICY_MASTER_URL="http://127.0.0.1:8100" CICY_MASTER_TOKEN="$MASTER_TOKEN" npm start
 ```
 
-The master itself uses `CICY_MASTER_TOKEN` or falls back to `MasterTokenManager`.
+The master uses `CICY_MASTER_TOKEN` directly or falls back to `MasterTokenManager`.
 
-## File map for common tasks
+## File map
 
-- worker startup/runtime: `src/main.js`
-- master startup/runtime: `src/master/master-main.js`
-- master forwarding logic: `src/master/master-routes.js`
-- configured node inventory from `~/global.json`: `src/master/worker-inventory.js`
-- RPC CLI: `src/cli/rpc.js`
-- worker tool catalog loading: `src/server/tool-catalog.js`
-- tool execution plumbing: `src/server/tool-executor.js`
-- Chrome tools: `src/tools/chrome-tools.js`
-- Chrome launcher/CDP helpers: `src/chrome/chrome-launcher.js`, `src/chrome/chrome-cdp-client.js`
-- cluster registration/heartbeat: `src/cluster/worker-client.js`
-- RPC tests for forwarding and CLI behavior: `tests/rpc/master-routes.test.js`, `tests/rpc/cicy-rpc.test.js`
+| What | Where |
+|---|---|
+| worker startup/runtime | `src/main.js` |
+| master startup/runtime | `src/master/master-main.js` |
+| master forwarding | `src/master/master-routes.js` |
+| `~/global.json` inventory | `src/master/worker-inventory.js` |
+| RPC CLI | `src/cli/rpc.js` |
+| worker tool catalog | `src/server/tool-catalog.js` |
+| tool execution plumbing | `src/server/tool-executor.js` |
+| Chrome tools | `src/tools/chrome-tools.js` |
+| Chrome launcher | `src/chrome/chrome-launcher.js` |
+| Chrome CDP helpers | `src/chrome/chrome-cdp-client.js` |
+| cluster registration | `src/cluster/worker-client.js` |
+| backends registry | `src/backends/registry.js` |
+| backends launcher UI | `src/backends/homepage.html` |
+| backends preload bridge | `src/backends/homepage-preload.js` |
+| BrowserWindow trust + auto-inject | `src/utils/window-utils.js` |
+| sidecar packaging | `scripts/prepare-cicy-code-sidecar.js` |
+| RPC test files | `tests/rpc/master-routes.test.js`, `tests/rpc/cicy-rpc.test.js` |
 
-## Notes from existing docs
+## Mental model checklist
 
-Important points already established in `README.md` and `AGENTS.md`:
-- this repo no longer uses the old unified CLI mental model
-- `cicy-rpc` is the canonical entrypoint for tool calls
-- remote node operations should be thought of as `CICY_NODE=<name> cicy-rpc <tool> ...`
-- tool modules use CommonJS and Zod schemas
-- tests often exercise real HTTP routes and Electron-backed behavior rather than pure unit isolation
+When touching any of these, expect ripple effects:
+
+- adding a tool → touches MCP server, REST/RPC, OpenAPI all at once via the catalog
+- changing trust criteria → changes `nodeIntegration` for whole classes of windows; verify with the cicy-code bridge still works
+- changing the homepage entry flow → check that cold-launch and "back to launcher" paths both behave (history.length / sessionStorage gates)
+- changing the sidecar packaging → verify `dist/mac/CiCy Desktop.app/Contents/Resources/cicy-code/cicy-code` is present and executable after build
+- changing `chrome_*` tools → both master injection (`effectiveChromeProfile`) and worker fallback (`~/Private/chrome.json`) paths still need to work
