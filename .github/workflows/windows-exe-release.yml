@@ -61,7 +61,7 @@ jobs:
           if (Test-Path "build\logo.ico") {
             npm run build:win -- --config.win.icon=build/logo.ico
           } else {
-            Write-Host "::warning::build/logo.ico missing — using default Electron icon"
+            Write-Host "::warning::build/logo.ico missing - using default Electron icon"
             npm run build:win
           }
 
