@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';" />
+  <title>CiCy Desktop</title>
+  <style>
+    /* --- design tokens --- */
+    :root {
+      --bg: #0f1115;
+      --bg-2: #161a21;
+      --bg-card: #181c24;
+      --bg-card-hover: #1c2230;
+      --border: #232938;
+      --border-strong: #2e3548;
+      --fg: #e6e9ef;
+      --fg-dim: #9aa3b2;
+      --fg-mute: #5e6678;
+      --accent: #5b8df7;
+      --accent-2: #3c6fde;
+      --green: #4ade80;
+      --yellow: #facc15;
+      --red: #f87171;
+      --gray: #6b7280;
+      --radius: 8px;
+      --shadow: 0 1px 0 rgba(255,255,255,0.02), 0 8px 24px rgba(0,0,0,0.25);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--fg); }
+    body {
+      font: 13px -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      display: flex; flex-direction: column; min-height: 100vh;
+    }
+
+    /* --- top bar --- */
+    .topbar {
+      -webkit-app-region: drag;
+      display: flex; align-items: center; gap: 12px;
+      padding: 10px 20px 10px 84px;
+      background: var(--bg-2);
+      border-bottom: 1px solid var(--border);
+      user-select: none;
+    }
+    .topbar .brand {
+      font-weight: 600; font-size: 13px; letter-spacing: 0.2px; color: var(--fg);
+      display: flex; align-items: center; gap: 8px;
+    }
+    .topbar .brand .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+    .topbar .ver { font-size: 11px; color: var(--fg-mute); margin-left: 4px; }
+    .topbar .spacer { flex: 1; }
+    .topbar button {
+      -webkit-app-region: no-drag;
+      background: transparent; border: 1px solid var(--border); color: var(--fg-dim);
+      padding: 5px 10px; font: inherit; font-size: 12px;
+      border-radius: 5px; cursor: pointer;
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .topbar button:hover { color: var(--fg); border-color: var(--border-strong); }
+
+    /* --- content --- */
+    main {
+      flex: 1; padding: 24px 24px 40px;
+      max-width: 920px; width: 100%; margin: 0 auto;
+    }
+    .section-head {
+      display: flex; align-items: center; justify-content: space-between;
+      margin: 18px 0 10px;
+    }
+    .section-head h2 {
+      margin: 0;
+      font-size: 11px; font-weight: 600; letter-spacing: 1px;
+      text-transform: uppercase; color: var(--fg-mute);
+    }
+    .section-head .actions { display: flex; gap: 8px; }
+    .section-head .btn-add {
+      -webkit-app-region: no-drag;
+      background: transparent; border: 1px dashed var(--border-strong);
+      color: var(--fg-dim); padding: 4px 10px; font: inherit; font-size: 11px;
+      border-radius: 4px; cursor: pointer;
+    }
+    .section-head .btn-add:hover { color: var(--fg); border-color: var(--accent); }
+
+    /* --- card --- */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      transition: border-color 120ms ease, transform 120ms ease;
+      margin-bottom: 10px;
+      overflow: hidden;
+    }
+    .card:hover { border-color: var(--border-strong); }
+    .card-row { padding: 14px 16px; display: flex; align-items: center; gap: 12px; }
+    .card-row + .card-row { border-top: 1px solid var(--border); }
+    .status-dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--gray); flex-shrink: 0;
+      box-shadow: 0 0 6px transparent;
+      transition: background 120ms, box-shadow 120ms;
+    }
+    .status-dot.s-up    { background: var(--green); box-shadow: 0 0 6px rgba(74, 222, 128, 0.6); }
+    .status-dot.s-warn  { background: var(--yellow); }
+    .status-dot.s-down  { background: var(--red); }
+    .status-dot.s-unknown { background: var(--gray); }
+
+    .head-text { flex: 1; min-width: 0; }
+    .head-text .name { font-size: 14px; font-weight: 600; color: var(--fg); display: flex; align-items: center; gap: 8px; }
+    .head-text .meta { font-size: 11px; color: var(--fg-mute); margin-top: 3px; word-break: break-all; }
+    .head-right { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--fg-dim); }
+    .badge { background: rgba(91, 141, 247, 0.12); color: var(--accent); font-size: 10px; padding: 2px 6px; border-radius: 3px; font-weight: 600; letter-spacing: 0.4px; }
+
+    .metric-row { padding: 10px 16px; background: rgba(255,255,255,0.012); display: flex; gap: 24px; font-size: 11px; color: var(--fg-dim); flex-wrap: wrap; }
+    .metric-row .m { display: flex; align-items: baseline; gap: 6px; }
+    .metric-row .m .k { color: var(--fg-mute); font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .metric-row .m .v { color: var(--fg); font-weight: 500; font-size: 12px; }
+
+    .action-row { padding: 10px 12px; display: flex; gap: 6px; flex-wrap: wrap; background: rgba(0,0,0,0.15); }
+    .action-row button {
+      background: transparent;
+      border: 1px solid var(--border-strong);
+      color: var(--fg-dim);
+      padding: 5px 12px;
+      font: inherit; font-size: 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      display: inline-flex; align-items: center; gap: 5px;
+      transition: all 120ms;
+    }
+    .action-row button:hover { color: var(--fg); border-color: var(--accent); background: rgba(91, 141, 247, 0.06); }
+    .action-row button.primary { background: var(--accent-2); color: #fff; border-color: var(--accent-2); }
+    .action-row button.primary:hover { background: var(--accent); border-color: var(--accent); }
+    .action-row button.danger:hover { color: var(--red); border-color: var(--red); background: rgba(248, 113, 113, 0.06); }
+    .action-row .grow { flex: 1; }
+    .action-row .upd-tip { font-size: 11px; color: var(--yellow); align-self: center; padding: 0 6px; }
+
+    /* --- recent windows --- */
+    .recent {
+      margin-top: 28px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+    .recent-row {
+      display: flex; align-items: center; gap: 12px;
+      padding: 8px 4px;
+      font-size: 12px;
+      color: var(--fg-dim);
+      border-bottom: 1px solid rgba(255,255,255,0.02);
+    }
+    .recent-row .label { flex: 1; }
+    .recent-row .label .name { color: var(--fg); font-weight: 500; }
+    .recent-row .label .sub { font-size: 11px; color: var(--fg-mute); margin-top: 2px; }
+    .recent-row .ago { font-size: 11px; color: var(--fg-mute); margin-right: 8px; }
+    .recent-row button { background: transparent; border: 1px solid var(--border-strong); color: var(--fg-dim); padding: 4px 10px; border-radius: 4px; cursor: pointer; font: inherit; font-size: 11px; }
+    .recent-row button:hover { color: var(--fg); border-color: var(--accent); }
+
+    /* --- add form --- */
+    .add-form {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      margin-bottom: 10px;
+      display: none;
+    }
+    .add-form.open { display: block; }
+    .add-form .grid {
+      display: grid; grid-template-columns: 70px 1fr;
+      gap: 8px 12px; align-items: center;
+    }
+    .add-form label { font-size: 12px; color: var(--fg-mute); }
+    .add-form input {
+      background: var(--bg);
+      color: var(--fg);
+      border: 1px solid var(--border-strong);
+      border-radius: 4px;
+      padding: 6px 9px;
+      font: inherit; font-size: 12px;
+    }
+    .add-form input:focus { outline: none; border-color: var(--accent); }
+    .add-form .footer { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
+    .add-form .status { font-size: 11px; color: var(--fg-mute); }
+    .add-form .status.ok  { color: var(--green); }
+    .add-form .status.err { color: var(--red); }
+    .add-form .btns { display: flex; gap: 6px; }
+    .add-form button {
+      background: var(--accent-2); color: #fff; border: 1px solid var(--accent-2);
+      padding: 5px 14px; border-radius: 4px; cursor: pointer; font: inherit; font-size: 12px;
+    }
+    .add-form button.cancel { background: transparent; border-color: var(--border-strong); color: var(--fg-dim); }
+    .add-form button:hover { background: var(--accent); border-color: var(--accent); }
+    .add-form button.cancel:hover { background: rgba(255,255,255,0.04); }
+
+    .empty { text-align: center; color: var(--fg-mute); padding: 20px; font-size: 12px; }
+
+    /* toast */
+    .toast {
+      position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+      background: var(--bg-card); border: 1px solid var(--border-strong);
+      padding: 8px 16px; border-radius: 6px;
+      color: var(--fg); font-size: 12px;
+      box-shadow: var(--shadow);
+      opacity: 0; transition: opacity 200ms;
+      pointer-events: none;
+    }
+    .toast.show { opacity: 1; }
+    .toast.err { border-color: var(--red); color: var(--red); }
+  </style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand"><span class="dot"></span> CiCy Desktop <span class="ver" id="topbar-version">v1.0.9</span></div>
+  <div class="spacer"></div>
+  <button id="btn-refresh" title="Refresh all">↻ Refresh</button>
+</header>
+
+<main>
+  <div class="section-head">
+    <h2>Local Engine</h2>
+  </div>
+  <div id="local-cards"></div>
+
+  <div class="section-head">
+    <h2>Cloud Engines</h2>
+    <button class="btn-add" id="btn-toggle-add">+ Add cloud</button>
+  </div>
+  <div class="add-form" id="add-form">
+    <div class="grid">
+      <label>Name</label><input id="f-name" placeholder="e.g. Staging cloud" />
+      <label>URL</label><input id="f-url" placeholder="https://cicy.example.com:8008" />
+      <label>Token</label><input id="f-token" placeholder="(optional bearer)" />
+    </div>
+    <div class="footer">
+      <span class="status" id="f-status"></span>
+      <div class="btns">
+        <button class="cancel" id="f-cancel" type="button">Cancel</button>
+        <button id="f-submit" type="button">Probe & Add</button>
+      </div>
+    </div>
+  </div>
+  <div id="cloud-cards"></div>
+
+  <div class="recent">
+    <div class="section-head">
+      <h2>Recent Windows</h2>
+    </div>
+    <div id="recent-list"></div>
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  const $local = document.getElementById("local-cards");
+  const $cloud = document.getElementById("cloud-cards");
+  const $recent = document.getElementById("recent-list");
+  const $addForm = document.getElementById("add-form");
+  const $fStatus = document.getElementById("f-status");
+  const $toast = document.getElementById("toast");
+
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch])); }
+  function bytes(n) { if (!n) return "—"; const u=["B","KB","MB","GB"]; let i=0; while(n>1024&&i<u.length-1){n/=1024;i++;} return n.toFixed(i?1:0)+" "+u[i]; }
+  function dur(sec) { if (!sec || sec<0) return "—"; const d=Math.floor(sec/86400), h=Math.floor(sec%86400/3600), m=Math.floor(sec%3600/60); if(d) return `${d}d ${h}h`; if(h) return `${h}h ${m}m`; if(m) return `${m}m`; return `${sec}s`; }
+  function ago(ms) { const s=Math.floor((Date.now()-ms)/1000); if(s<60) return s+"s ago"; if(s<3600) return Math.floor(s/60)+"m ago"; if(s<86400) return Math.floor(s/3600)+"h ago"; return Math.floor(s/86400)+"d ago"; }
+
+  function dotClass(health) {
+    if (!health) return "s-unknown";
+    if (health.ok && health.status === "ok") return "s-up";
+    if (health.ok) return "s-warn";
+    return "s-down";
+  }
+
+  function showToast(msg, isErr = false) {
+    $toast.textContent = msg;
+    $toast.className = "toast show" + (isErr ? " err" : "");
+    setTimeout(() => { $toast.className = "toast"; }, 2200);
+  }
+
+  let healthByBackend = {};      // backendId -> latest /api/health response
+  let updateInfo = null;         // { hasUpdate, currentVersion, latestVersion, releaseUrl }
+
+  function renderLocal(backend) {
+    const h = healthByBackend[backend.id] || null;
+    const dot = dotClass(h);
+    const memTxt = h && h.mem_bytes ? bytes(h.mem_bytes) : "—";
+    const upTxt = h && h.uptime_sec != null ? dur(h.uptime_sec) : "—";
+    const agentsTxt = h && h.agents_count != null && h.agents_count >= 0 ? h.agents_count : "—";
+    const verTxt = h && h.version ? `v${esc(h.version)}` : "—";
+    const goroutTxt = h && h.goroutines != null ? h.goroutines : "—";
+    const pidTxt = h && h.pid ? `pid ${h.pid}` : "—";
+    const updTip = updateInfo && updateInfo.hasUpdate
+      ? `<span class="upd-tip">Update available: v${esc(updateInfo.latestVersion)}</span>`
+      : "";
+    return `
+      <div class="card" data-backend="${esc(backend.id)}">
+        <div class="card-row">
+          <div class="status-dot ${dot}"></div>
+          <div class="head-text">
+            <div class="name">${esc(backend.name)} <span class="badge">LOCAL</span></div>
+            <div class="meta">bundled · cicy-code on :8008 · ${esc(pidTxt)}</div>
+          </div>
+          <div class="head-right">${esc(verTxt)}</div>
+        </div>
+        <div class="metric-row">
+          <div class="m"><span class="k">Status</span><span class="v">${h && h.ok ? "Running" : "Unreachable"}</span></div>
+          <div class="m"><span class="k">Uptime</span><span class="v">${esc(upTxt)}</span></div>
+          <div class="m"><span class="k">Mem</span><span class="v">${esc(memTxt)}</span></div>
+          <div class="m"><span class="k">Agents</span><span class="v">${esc(String(agentsTxt))}</span></div>
+          <div class="m"><span class="k">Goroutines</span><span class="v">${esc(String(goroutTxt))}</span></div>
+        </div>
+        <div class="action-row">
+          <button class="primary" data-act="open">▷ Open</button>
+          <button data-act="restart">↻ Restart</button>
+          <button data-act="check-update">⇧ Check for updates</button>
+          <button data-act="copy">⎘ Copy URL</button>
+          <span class="grow"></span>
+          ${updTip}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderCloud(backend) {
+    const h = healthByBackend[backend.id] || null;
+    const dot = dotClass(h);
+    const latencyTxt = h && h.latencyMs != null ? `${h.latencyMs} ms` : "—";
+    const verTxt = h && h.version ? `v${esc(h.version)}` : (h && h.ok ? "ok" : "—");
+    const agentsTxt = h && h.agents_count != null && h.agents_count >= 0 ? h.agents_count : "—";
+    return `
+      <div class="card" data-backend="${esc(backend.id)}">
+        <div class="card-row">
+          <div class="status-dot ${dot}"></div>
+          <div class="head-text">
+            <div class="name">${esc(backend.name)}</div>
+            <div class="meta">${esc(backend.url || "")}</div>
+          </div>
+          <div class="head-right">${esc(verTxt)} · ${esc(latencyTxt)}</div>
+        </div>
+        <div class="metric-row">
+          <div class="m"><span class="k">Status</span><span class="v">${h && h.ok ? "Healthy" : h ? "Unreachable" : "Unknown"}</span></div>
+          <div class="m"><span class="k">Agents</span><span class="v">${esc(String(agentsTxt))}</span></div>
+          ${h && h.uptime_sec != null ? `<div class="m"><span class="k">Uptime</span><span class="v">${esc(dur(h.uptime_sec))}</span></div>` : ""}
+        </div>
+        <div class="action-row">
+          <button class="primary" data-act="open">▷ Open</button>
+          <button data-act="copy">⎘ Copy URL</button>
+          <span class="grow"></span>
+          <button class="danger" data-act="remove">✕ Remove</button>
+        </div>
+      </div>
+    `;
+  }
+
+  async function refreshBackends() {
+    const list = await window.cicy.backends.list();
+    const local = list.filter(b => b.kind === "local");
+    const cloud = list.filter(b => b.kind !== "local");
+    $local.innerHTML = local.map(renderLocal).join("") || `<div class="empty">No local engine</div>`;
+    $cloud.innerHTML = cloud.length
+      ? cloud.map(renderCloud).join("")
+      : `<div class="empty">No cloud backends yet — add one above.</div>`;
+    wireCards(list);
+    await refreshHealth(list);
+  }
+
+  async function refreshHealth(list) {
+    try {
+      const results = await window.cicy.backends.healthAll();
+      results.forEach(r => { healthByBackend[r.id] = r.health; });
+    } catch (e) { /* ignore */ }
+    rerender(list);
+  }
+
+  function rerender(list) {
+    // Cheap: re-render the dot + metric + version in place (avoid full DOM blow).
+    // For now we just rebuild — list size is small.
+    refreshFromCache(list);
+  }
+
+  async function refreshFromCache(list) {
+    if (!list) list = await window.cicy.backends.list();
+    const local = list.filter(b => b.kind === "local");
+    const cloud = list.filter(b => b.kind !== "local");
+    $local.innerHTML = local.map(renderLocal).join("");
+    $cloud.innerHTML = cloud.length ? cloud.map(renderCloud).join("") : `<div class="empty">No cloud backends yet — add one above.</div>`;
+    wireCards(list);
+  }
+
+  function wireCards(list) {
+    document.querySelectorAll(".card").forEach(card => {
+      const id = card.getAttribute("data-backend");
+      const backend = list.find(b => b.id === id);
+      if (!backend) return;
+      card.querySelectorAll("[data-act]").forEach(btn => {
+        const act = btn.getAttribute("data-act");
+        btn.onclick = () => handleAction(act, backend);
+      });
+    });
+  }
+
+  async function handleAction(act, backend) {
+    switch (act) {
+      case "open": {
+        const r = await window.cicy.backends.open(backend.id);
+        if (r && r.ok) {
+          showToast(`Opened ${backend.name}`);
+          setTimeout(refreshWindows, 600);
+        } else showToast(`Open failed: ${r && r.error || "unknown"}`, true);
+        break;
+      }
+      case "copy": {
+        const url = backend.resolvedUrl || backend.url || "";
+        await window.cicy.clipboard.write(url);
+        showToast("URL copied");
+        break;
+      }
+      case "remove": {
+        if (!confirm(`Remove backend "${backend.name}"?`)) return;
+        await window.cicy.backends.remove(backend.id);
+        await refreshBackends();
+        showToast(`Removed ${backend.name}`);
+        break;
+      }
+      case "restart": {
+        showToast("Restarting cicy-code sidecar…");
+        const r = await window.cicy.backends.restartSidecar();
+        if (r && r.ok) {
+          showToast(`Sidecar restarted (pid ${r.pid})`);
+          setTimeout(() => refreshHealth(), 1500);
+        } else showToast(`Restart failed: ${r && r.error || "unknown"}`, true);
+        break;
+      }
+      case "check-update": {
+        showToast("Checking GitHub for updates…");
+        try {
+          const info = await window.cicy.updates.check();
+          updateInfo = info;
+          if (info.hasUpdate) {
+            const accept = confirm(`Update available: v${info.latestVersion} (you have v${info.currentVersion || "?"})\n\nOpen the release page in your browser to download?`);
+            if (accept) await window.cicy.updates.openReleasePage(info.releaseUrl);
+          } else {
+            showToast(`You're on the latest version (v${info.currentVersion || "?"})`);
+          }
+          await refreshFromCache();
+        } catch (e) {
+          showToast(`Update check failed: ${e.message}`, true);
+        }
+        break;
+      }
+    }
+  }
+
+  async function refreshWindows() {
+    const wins = await window.cicy.windows.list();
+    if (!wins.length) {
+      $recent.innerHTML = `<div class="empty">No backend windows open yet.</div>`;
+      return;
+    }
+    const backends = await window.cicy.backends.list();
+    const byId = Object.fromEntries(backends.map(b => [b.id, b]));
+    $recent.innerHTML = wins.map(w => {
+      const backend = byId[w.backendId] || { name: "?" };
+      return `
+        <div class="recent-row" data-win="${w.windowId}">
+          <div class="label">
+            <div class="name">${esc(backend.name)}${w.title ? " — " + esc(w.title) : ""}</div>
+            <div class="sub">window ${w.windowId} · ${esc(ago(w.openedAt))}</div>
+          </div>
+          <span class="ago"></span>
+          <button data-act="focus">Focus</button>
+        </div>
+      `;
+    }).join("");
+    $recent.querySelectorAll(".recent-row").forEach(row => {
+      const id = Number(row.getAttribute("data-win"));
+      row.querySelector("[data-act=focus]").onclick = async () => {
+        await window.cicy.windows.focus(id);
+      };
+    });
+  }
+
+  // --- add form ---
+  document.getElementById("btn-toggle-add").onclick = () => {
+    $addForm.classList.toggle("open");
+    if ($addForm.classList.contains("open")) document.getElementById("f-name").focus();
+  };
+  document.getElementById("f-cancel").onclick = () => {
+    $addForm.classList.remove("open");
+    $fStatus.className = "status"; $fStatus.textContent = "";
+  };
+  document.getElementById("f-submit").onclick = async () => {
+    const name = document.getElementById("f-name").value.trim();
+    const url = document.getElementById("f-url").value.trim();
+    const token = document.getElementById("f-token").value.trim() || undefined;
+    if (!url) { $fStatus.className = "status err"; $fStatus.textContent = "URL required"; return; }
+    $fStatus.className = "status"; $fStatus.textContent = "Probing…";
+    try {
+      const probe = await window.cicy.backends.probe({ url, token });
+      if (probe && probe.ok) { $fStatus.className = "status ok"; $fStatus.textContent = `Probe OK (${probe.statusCode})`; }
+      else { $fStatus.className = "status err"; $fStatus.textContent = `Probe ${probe && probe.error || probe && probe.statusCode || "failed"} (saving anyway)`; }
+      await window.cicy.backends.add({ name, url, token });
+      document.getElementById("f-name").value = "";
+      document.getElementById("f-url").value = "";
+      document.getElementById("f-token").value = "";
+      $addForm.classList.remove("open");
+      await refreshBackends();
+      showToast(`Added ${name || url}`);
+    } catch (e) { $fStatus.className = "status err"; $fStatus.textContent = `Error: ${e.message}`; }
+  };
+
+  document.getElementById("btn-refresh").onclick = () => {
+    refreshBackends();
+    refreshWindows();
+  };
+
+  // --- init + periodic refresh ---
+  refreshBackends();
+  refreshWindows();
+  setInterval(() => refreshHealth(), 30000);
+  setInterval(refreshWindows, 5000);
+</script>
+</body>
+</html>

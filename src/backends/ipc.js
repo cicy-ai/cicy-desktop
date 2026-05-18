@@ -1,15 +1,24 @@
-// Register main-side IPC handlers for the backend selector / launcher.
-// Call register() once from src/main.js after app.whenReady.
+// Main-side IPC for the homepage. Same backends:* / windows:* / updates:*
+// contract as before plus the "one rebuild for the year" additions below
+// (app, shell, tos, logs). Anything more specific should go through the
+// existing `rpc` channel (window.electronRPC) and a tool in src/tools/.
 
+const fs = require("fs");
 const http = require("http");
 const https = require("https");
+const path = require("path");
 const { URL } = require("url");
-const { ipcMain } = require("electron");
-const registry = require("./registry");
-const { openWindowForBackend, resolveBackendUrl } = require("./window-manager");
-const { openLauncher } = require("./launcher-window");
+const { ipcMain, clipboard, shell, app } = require("electron");
 
-function probe({ url, token, timeoutMs = 3500 }) {
+const registry = require("./registry");
+const { openWindowForBackend } = require("./window-manager");
+const { openHomepage } = require("./homepage-window");
+const { probeBackend, probeAll } = require("./poller");
+const updater = require("./updater");
+const sidecar = require("../sidecar/cicy-code");
+const windowTracker = require("./window-tracker");
+
+function probeArbitrary({ url, token, timeoutMs = 3500 }) {
   return new Promise(resolve => {
     let u;
     try { u = new URL(url); } catch { return resolve({ ok: false, error: "invalid url" }); }
@@ -18,10 +27,7 @@ function probe({ url, token, timeoutMs = 3500 }) {
       method: "GET",
       hostname: u.hostname,
       port: u.port || (u.protocol === "https:" ? 443 : 80),
-      // /health is a conventional liveness endpoint; cicy-code serves a UI
-      // root that 200s too, so accept any 2xx/3xx/4xx (anything but 5xx and
-      // connection errors) as proof the host is up.
-      path: "/health",
+      path: "/api/health",
       timeout: timeoutMs,
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     };
@@ -35,25 +41,116 @@ function probe({ url, token, timeoutMs = 3500 }) {
   });
 }
 
+function tosPath() { return path.join(app.getPath("userData"), "tos.json"); }
+function readTos() {
+  try { return JSON.parse(fs.readFileSync(tosPath(), "utf8")); }
+  catch { return { version: null, acceptedAt: null }; }
+}
+function writeTos(data) {
+  const p = tosPath();
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, JSON.stringify(data, null, 2));
+}
+
+function tailLog({ name, lines }) {
+  // Whitelisted log targets — never let renderer name an arbitrary path.
+  const home = app.getPath("home");
+  const targets = {
+    "sidecar":    path.join(home, "logs", "cicy-code-sidecar.log"),
+    "desktop":    path.join(home, "logs", `cicy-desktop-${process.env.CICY_DESKTOP_PORT || 8101}.log`),
+    "cicy-code":  path.join(home, ".cicy-code.log"),
+  };
+  const file = targets[name];
+  if (!file) return { ok: false, error: `unknown log: ${name}` };
+  try {
+    const buf = fs.readFileSync(file, "utf8");
+    const all = buf.split("\n");
+    return { ok: true, file, lines: all.slice(-Math.max(1, Number(lines) || 200)).join("\n") };
+  } catch (e) {
+    return { ok: false, file, error: e.message };
+  }
+}
+
 let registered = false;
 function register(opts = {}) {
   if (registered) return;
   registered = true;
 
-  ipcMain.handle("backends:list", () => registry.list().map(b => ({ ...b, resolvedUrl: resolveBackendUrl(b) })));
+  // --- backends ---
+  ipcMain.handle("backends:list", () => {
+    const { resolveBackendUrl } = require("./window-manager");
+    return registry.list().map(b => ({ ...b, resolvedUrl: resolveBackendUrl(b) }));
+  });
   ipcMain.handle("backends:add", (_e, input) => registry.add(input || {}));
   ipcMain.handle("backends:remove", (_e, id) => registry.remove(id));
-  ipcMain.handle("backends:probe", (_e, input) => probe(input || {}));
+  ipcMain.handle("backends:probe", (_e, input) => probeArbitrary(input || {}));
   ipcMain.handle("backends:open", async (_e, id) => {
     try {
       const b = registry.get(id);
       if (!b) return { ok: false, error: "backend not found" };
       const win = await openWindowForBackend(b, opts);
+      if (win && win.id) windowTracker.register(win, id);
       return { ok: true, windowId: win && win.id };
     } catch (err) {
       return { ok: false, error: err.message || String(err) };
     }
   });
+  ipcMain.handle("backends:health", async (_e, id) => {
+    const b = registry.get(id);
+    if (!b) return { ok: false, error: "backend not found" };
+    return probeBackend(b);
+  });
+  ipcMain.handle("backends:health-all", async () => probeAll(registry.list()));
+  ipcMain.handle("backends:restart-sidecar", async () => {
+    try {
+      await sidecar.stop({ timeoutMs: 4000 });
+      const child = await sidecar.start({ logPath: opts.sidecarLogPath });
+      return { ok: true, pid: child && child.pid, reused: !child };
+    } catch (err) {
+      return { ok: false, error: err.message || String(err) };
+    }
+  });
+
+  // --- windows ---
+  ipcMain.handle("windows:list", () => windowTracker.list());
+  ipcMain.handle("windows:focus", (_e, id) => windowTracker.focus(Number(id)));
+
+  // --- updates ---
+  ipcMain.handle("updates:check", async () => {
+    const localBackend = registry.get(registry.LOCAL_ID);
+    let currentVersion = null;
+    if (localBackend) {
+      try {
+        const h = await probeBackend(localBackend);
+        if (h && h.ok && h.version) currentVersion = h.version;
+      } catch {}
+    }
+    return updater.checkForUpdate({ currentVersion });
+  });
+  ipcMain.handle("updates:open-release-page", (_e, url) => updater.openReleaseInBrowser(url));
+
+  // --- clipboard ---
+  ipcMain.handle("clipboard:write", (_e, text) => {
+    clipboard.writeText(String(text || ""));
+    return true;
+  });
+
+  // --- shell / app / tos / logs (last rebuild!) ---
+  ipcMain.handle("shell:open-external", (_e, url) => {
+    if (!url) return false;
+    shell.openExternal(String(url));
+    return true;
+  });
+  ipcMain.handle("app:quit", () => {
+    setTimeout(() => app.quit(), 100);
+    return true;
+  });
+  ipcMain.handle("tos:get", () => readTos());
+  ipcMain.handle("tos:accept", (_e, version) => {
+    writeTos({ version: String(version || ""), acceptedAt: new Date().toISOString() });
+    return { ok: true, ...readTos() };
+  });
+  ipcMain.handle("logs:tail", (_e, input) => tailLog(input || {}));
 }
 
-module.exports = { register, probe, openLauncher };
+module.exports = { register, openHomepage };

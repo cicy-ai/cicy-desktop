@@ -5,7 +5,7 @@ const os = require("os");
 const path = require("path");
 const cicyCodeSidecar = require("./sidecar/cicy-code");
 const backendsIPC = require("./backends/ipc");
-const { openLauncher } = require("./backends/launcher-window");
+const { openHomepage } = require("./backends/homepage-window");
 const backendsRegistry = require("./backends/registry");
 const { openWindowForBackend } = require("./backends/window-manager");
 const { Menu } = require("electron");
@@ -525,7 +525,7 @@ electronApp.whenReady().then(() => {
     {
       label: "Backends",
       submenu: [
-        { label: "Open Backend Launcher\u2026", accelerator: "CmdOrCtrl+Shift+N", click: () => openLauncher() },
+        { label: "Show Homepage", accelerator: "CmdOrCtrl+Shift+H", click: () => openHomepage() },
         { type: "separator" },
         {
           label: "New Local Window",
@@ -543,6 +543,13 @@ electronApp.whenReady().then(() => {
     { role: "windowMenu" },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate));
+
+  // No START_URL (typical .app double-click): land on the homepage. With
+  // START_URL set (bin/cicy-desktop --url …) the existing createWindow path
+  // below still fires, preserving the legacy power-user entry point.
+  if (!START_URL) {
+    openHomepage();
+  }
 
   // 为 webview partition 设置代理
   if (config.proxy) {
