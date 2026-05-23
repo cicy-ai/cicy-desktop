@@ -14,15 +14,40 @@ const registry = require("./registry");
 const LOCAL_PORT = Number(process.env.CICY_CODE_PORT || 8008);
 const LOCAL_HOST = "127.0.0.1";
 
-function readCicyAiApiToken() {
-  const p = path.join(os.homedir(), "cicy-ai", "global.json");
+// On a typical install cicy-code runs as the same user as cicy-desktop,
+// so its config lives at <user-home>/cicy-ai/global.json. But on shared
+// machines an externally-managed daemon may run as a different user
+// (e.g. /Users/cicy-code on mac dev boxes). In that case `~/cicy-ai/...`
+// of the cicy-desktop user is the *wrong* token — the cicy-code web UI
+// will reject it and bounce to the login page.
+//
+// Strategy: find the running cicy-code binary path, derive its home from
+// `<home>/bin/cicy-code`, and read that user's global.json. Fall back to
+// our own user's global.json if no daemon is running yet.
+function findCicyCodeDaemonHome() {
   try {
-    const raw = fs.readFileSync(p, "utf8");
-    const data = JSON.parse(raw);
-    return typeof data.api_token === "string" ? data.api_token : "";
-  } catch {
-    return "";
+    const { execFileSync } = require("child_process");
+    const out = execFileSync("ps", ["-eo", "command"], { encoding: "utf8", timeout: 2000 });
+    for (const line of out.split("\n")) {
+      // Match e.g. "/Users/cicy-code/bin/cicy-code --public" or "/home/foo/bin/cicy-code"
+      const m = line.match(/^([^\s]+?)\/bin\/cicy-code(?:\s|$)/);
+      if (m) return m[1];
+    }
+  } catch {}
+  return os.homedir();
+}
+
+function readCicyAiApiToken() {
+  for (const home of [findCicyCodeDaemonHome(), os.homedir()]) {
+    const p = path.join(home, "cicy-ai", "global.json");
+    try {
+      const raw = fs.readFileSync(p, "utf8");
+      const data = JSON.parse(raw);
+      const t = typeof data.api_token === "string" ? data.api_token : "";
+      if (t) return t;
+    } catch {}
   }
+  return "";
 }
 
 function buildLocalUrl() {
