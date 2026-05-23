@@ -351,6 +351,68 @@ async function checkLatest() {
   }
 }
 
+// ---- parallel race download ----
+// Race a list of URLs in parallel — whichever responds first wins. Each
+// candidate writes to its own .partN temp file; on success, the winner is
+// atomically moved (or copied) to dest and losers are cancelled and cleaned up.
+//
+// emit:        coarse phase events (per-attempt "downloading" announcement)
+// emitProgress: throttled byte-level progress updates
+// outerSignal: external cancel — checked after the race resolves
+async function raceDownload({ urls, dest, version, network, emit, emitProgress, outerSignal }) {
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  let lastErr;
+
+  await new Promise((resolve, reject) => {
+    let settled = false;
+    let pending = urls.length;
+
+    const settle = (winner) => {
+      if (settled) return;
+      settled = true;
+      resolve(winner);
+      controllers.forEach(c => { try { c.abort(); } catch {} });
+    };
+    const fail = (err) => {
+      lastErr = err;
+      if (--pending === 0 && !settled) reject(lastErr);
+    };
+
+    const controllers = urls.map((url, i) => {
+      const ctl = new AbortController();
+      const tmpPath = dest + `.part${i}`;
+      const { MIRRORS } = require("./mirrors");
+      const isMirror = MIRRORS.some(m => url.startsWith(m.url));
+      emit({ phase: "downloading", message: "并行下载中…", version, network, progress: 0 });
+      downloadFile(url, tmpPath, {
+        signal: ctl.signal,
+        timeoutMs: 60000,
+        onProgress: ({ received, total }) => {
+          if (settled) return;
+          const pct = total ? received / total : null;
+          emitProgress({ phase: "downloading", message: `下载中 (${isMirror ? "镜像" : "直连"})`, progress: pct, version, network, received, total });
+        },
+      }).then(({ destPath }) => {
+        if (settled) { try { fs.unlinkSync(destPath); } catch {} return; }
+        try { fs.unlinkSync(dest); } catch {}
+        try {
+          fs.renameSync(destPath, dest);
+        } catch {
+          fs.copyFileSync(destPath, dest);
+          try { fs.unlinkSync(destPath); } catch {}
+        }
+        settle(url);
+      }).catch(err => {
+        if (err.message !== "cancelled") fail(err);
+        try { fs.unlinkSync(tmpPath); } catch {}
+      });
+      return ctl;
+    });
+  });
+
+  if (outerSignal && outerSignal.aborted) throw new Error("cancelled");
+}
+
 // ---- install ----
 async function install({ onProgress } = {}) {
   if (inflight) throw new Error("install already in progress");
@@ -402,27 +464,50 @@ async function install({ onProgress } = {}) {
       log.info(`[installer] version=${check.latest} but binary missing, re-downloading`);
     }
 
-    // ── Windows: install via WSL (linux-amd64 binary inside the distro) ──
+    // ── Windows: download on host (parallel race + progress + verify),
+    // then hand the file to WSL to copy into the distro. This shares all
+    // the network logic with macOS/Linux instead of curl-ing inside bash.
     if (process.platform === "win32") {
       const wsl = require("./wsl");
       const status = await wsl.checkStatus();
       if (!status.installed)  throw new Error("WSL 未安装。请在管理员 PowerShell 运行: wsl --install -d Ubuntu");
       if (!status.hasDistro)  throw new Error("WSL 未配置发行版。请运行: wsl --install -d Ubuntu");
-      emit({ phase: "downloading", message: `在 WSL (${status.distro}) 内下载 v${check.latest}…`, version: check.latest, network });
-      await wsl.installCicyCode({
+
+      // Stage to userData/cicy-code/wsl-stage on the Windows side. Path is
+      // accessible from WSL via /mnt/c/... (wslpath translates).
+      const stageDir = path.join(app.getPath("userData"), "cicy-code", "wsl-stage");
+      const stagePath = path.join(stageDir, "cicy-code-staged");
+
+      emit({ phase: "downloading", message: `下载 cicy-code v${check.latest}…`, version: check.latest, network, progress: 0 });
+      const order = buildUrlList(check.assetUrl, network);
+      await raceDownload({
+        urls: order,
+        dest: stagePath,
         version: check.latest,
-        assetUrl: check.assetUrl,
         network,
-        onProgress: emit,
+        emit,
+        emitProgress,
+        outerSignal: ac.signal,
       });
-      // Mirror the version into a Windows-side cache so userVersion() can
-      // read it without shelling into WSL on every call.
+
+      emit({ phase: "installing", message: `安装到 WSL (${status.distro})…`, version: check.latest, network, progress: 1 });
+      const result = await wsl.installFromHostFile({ hostPath: stagePath, version: check.latest });
+      const installedVersion = result.version || check.latest;
+      if (installedVersion !== check.latest) {
+        log.warn(`[installer] WSL binary reports v${installedVersion}, expected v${check.latest} — mirror likely cached stale content`);
+      }
+
+      // Cache version on Windows side so userVersion() doesn't need WSL.
       try {
         const cacheDir = path.join(app.getPath("userData"), "cicy-code");
         fs.mkdirSync(cacheDir, { recursive: true });
-        fs.writeFileSync(path.join(cacheDir, "wsl-version"), check.latest, "utf8");
+        fs.writeFileSync(path.join(cacheDir, "wsl-version"), installedVersion, "utf8");
       } catch {}
-      const final = { phase: "done", message: `已安装 v${check.latest}`, version: check.latest, network };
+
+      // Cleanup stage file
+      try { fs.unlinkSync(stagePath); } catch {}
+
+      const final = { phase: "done", message: `已安装 v${installedVersion}`, version: installedVersion, network };
       emit(final);
       return final;
     }
@@ -433,64 +518,15 @@ async function install({ onProgress } = {}) {
     const dest = userBinary();
     if (!dest) throw new Error(`unsupported platform ${process.platform}-${process.arch}`);
 
-    // Race all mirrors in parallel — whichever responds first wins.
-    // Each candidate writes to a unique temp path; the winner renames to dest.
-    // Losers are cleaned up.
-    let downloaded = false;
-    let lastErr;
-
-    await new Promise((resolve, reject) => {
-      let settled = false;
-      let pending = order.length;
-
-      const settle = (winner) => {
-        if (settled) return;
-        settled = true;
-        downloaded = true;
-        resolve(winner);
-        // cancel other controllers
-        controllers.forEach(c => { try { c.abort(); } catch {} });
-      };
-
-      const fail = (err) => {
-        lastErr = err;
-        if (--pending === 0 && !settled) reject(lastErr);
-      };
-
-      const controllers = order.map((url, i) => {
-        const ctl = new AbortController();
-        const tmpPath = dest + `.part${i}`;
-        const { MIRRORS } = require('./mirrors');
-        const isMirror = MIRRORS.some(m => url.startsWith(m.url));
-        emit({ phase: "downloading", message: `并行下载中…`, version: check.latest, network, progress: 0 });
-        downloadFile(url, tmpPath, {
-          signal: ctl.signal,
-          timeoutMs: 60000,
-          onProgress: ({ received, total }) => {
-            if (settled) return;
-            const pct = total ? received / total : null;
-            emitProgress({ phase: "downloading", message: `下载中 (${isMirror ? "镜像" : "直连"})`, progress: pct, version: check.latest, network, received, total });
-          },
-        }).then(({ destPath }) => {
-          if (settled) { try { fs.unlinkSync(destPath); } catch {} return; }
-          // Atomically replace dest
-          try { fs.unlinkSync(dest); } catch {}
-          try {
-            fs.renameSync(destPath, dest);
-          } catch {
-            fs.copyFileSync(destPath, dest);
-            try { fs.unlinkSync(destPath); } catch {}
-          }
-          settle(url);
-        }).catch(err => {
-          if (err.message !== "cancelled") fail(err);
-          try { fs.unlinkSync(tmpPath); } catch {}
-        });
-        return ctl;
-      });
+    await raceDownload({
+      urls: order,
+      dest,
+      version: check.latest,
+      network,
+      emit,
+      emitProgress,
+      outerSignal: ac.signal,
     });
-    // Also wire outer cancel signal
-    if (ac.signal.aborted) throw new Error("cancelled");
 
     emit({ phase: "installing", message: "正在安装…", version: check.latest, network, progress: 1 });
 

@@ -79,10 +79,26 @@ function register({ sidecarLogPath } = {}) {
       // replacement still works on Unix (unlink old inode, rename new file).
       const final = await installer.install({ onProgress: broadcast });
 
-      // ── Try to restart if we OWN the process ─────────────────────────────
-      // lsof → get PID → attempt SIGKILL. If it succeeds we own it and can
-      // start fresh. If it throws EPERM the daemon is externally managed;
-      // the new binary will be used on its next restart.
+      // ── Restart the daemon so the new binary takes effect ────────────────
+      // Platform-specific because the kill primitive differs:
+      //   Windows: cicy-code lives inside WSL → wsl.stop() does pkill in distro
+      //   macOS/Linux: lsof + SIGKILL on the listening process (skip if EPERM)
+      let restartedPid = null;
+
+      if (process.platform === "win32") {
+        try {
+          const wsl = require("../sidecar/wsl");
+          await wsl.stop();
+          await new Promise(r => setTimeout(r, 500));
+          const ch = await sidecar.start({ logPath: sidecarLogPath, force: true });
+          if (ch?.pid) restartedPid = ch.pid;
+        } catch (e) { log.warn(`[sidecar-ipc] win32 restart failed: ${e.message}`); }
+
+        const reply = { ok: true, ...final, restartedPid };
+        broadcast({ ...final, restartedPid });
+        return reply;
+      }
+
       // Find the PID *listening* on :8008 (not clients connecting to it).
       // Without -sTCP:LISTEN, lsof also returns processes that have open
       // connections TO port 8008 — including cicy-desktop's own health
@@ -94,7 +110,6 @@ function register({ sidecarLogPath } = {}) {
         });
       });
 
-      let restartedPid = null;
       if (portPid) {
         const canKill = await new Promise(resolve => {
           try { process.kill(portPid, 9); resolve(true); }

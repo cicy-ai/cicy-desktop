@@ -95,50 +95,51 @@ async function userInstalled() {
   return r.ok && r.stdout === "ok";
 }
 
-// Download + install cicy-code into WSL. assetUrl points to the linux-amd64
-// release binary; CN_MIRRORS are tried first when network is "cn".
+// Install cicy-code into WSL by copying a pre-downloaded binary from the
+// Windows host into the distro. Uses wslpath to translate C:\... → /mnt/c/...
+// then cp + chmod + verify --version.
 //
-// onProgress receives:
-//   { phase: "downloading", message, version, network, received?, total?, progress? }
-//   { phase: "installing",  message }
-//   { phase: "done",        version }
-async function installCicyCode({ version, assetUrl, network, onProgress }) {
-  if (!version || !assetUrl) throw new Error("installCicyCode: version + assetUrl required");
-  const emit = (e) => { try { onProgress && onProgress(e); } catch {} };
+// This is invoked by installer.js after it has finished a parallel-race
+// download to userData on the Windows side. The wsl module never touches
+// the network — we share download logic with macOS/Linux.
+//
+// Returns { ok, version } where version is the value reported by the binary
+// (which may differ from `expectedVersion` if a mirror served stale content).
+async function installFromHostFile({ hostPath, version }) {
+  if (!hostPath || !version) throw new Error("installFromHostFile: hostPath + version required");
 
-  const { buildUrlList } = require("./mirrors");
-  const order = buildUrlList(assetUrl, network);
+  // Translate Windows path to /mnt/c/... so WSL can read it.
+  const trans = await wslRun(["-e", "wslpath", "-a", hostPath], { timeoutMs: 5000 });
+  if (!trans.ok) throw new Error(`wslpath failed: ${trans.stderr || trans.error}`);
+  const wslHostPath = trans.stdout.replace(/\u0000/g, "").trim();
+  if (!wslHostPath.startsWith("/")) throw new Error(`wslpath returned unexpected: ${wslHostPath}`);
 
-  // Build a heredoc'd bash script. Use printf to surface progress lines that
-  // we parse on the Node side via an exec_shell-style readline pump. (For the
-  // first cut we don't stream byte-level progress; curl prints a nice meter
-  // to stderr that we surface as-is.)
-  const urlsArg = order.map(u => `'${u.replace(/'/g, `'\\''`)}'`).join(" ");
+  // Single bash session for atomic-ish install: mkdir → cp → chmod → write
+  // version file → run --version to confirm. If --version fails or reports
+  // a different version, return the actual one so the caller can record it.
   const script = `
 set -eu
 mkdir -p "$HOME/.local/bin"
-TMP=$(mktemp)
-ok=0
-for url in ${urlsArg}; do
-  echo "[wsl-installer] trying $url"
-  if curl -fL --connect-timeout 8 -o "$TMP" "$url"; then ok=1; break; fi
-  echo "[wsl-installer] failed: $url"
-done
-if [ "$ok" -ne 1 ]; then echo "[wsl-installer] all sources failed" >&2; exit 1; fi
-chmod +x "$TMP"
-mv "$TMP" "${CICY_BIN_PATH}"
-printf '%s' '${version}' > "${CICY_VERSION_PATH}"
-echo "[wsl-installer] installed v${version}"
+cp '${wslHostPath.replace(/'/g, `'\\''`)}' "${CICY_BIN_PATH}.new"
+chmod +x "${CICY_BIN_PATH}.new"
+mv -f "${CICY_BIN_PATH}.new" "${CICY_BIN_PATH}"
+ACTUAL=$("${CICY_BIN_PATH}" --version 2>/dev/null | grep -oE '[0-9]+\\.[0-9]+\\.[0-9]+' | head -1 || true)
+if [ -z "$ACTUAL" ]; then ACTUAL='${version}'; fi
+printf '%s' "$ACTUAL" > "${CICY_VERSION_PATH}"
+echo "INSTALLED_VERSION=$ACTUAL"
 `.trim();
 
-  emit({ phase: "downloading", message: "downloading cicy-code", version, network });
-  const result = await wslBash(script, { timeoutMs: 5 * 60 * 1000 });
-  if (!result.ok) {
-    log.warn(`[wsl] install script failed: ${result.stderr || result.stdout}`);
-    throw new Error(result.stderr || "wsl install failed");
+  const r = await wslBash(script, { timeoutMs: 60_000 });
+  if (!r.ok) {
+    log.warn(`[wsl] installFromHostFile failed: ${r.stderr || r.stdout}`);
+    throw new Error(r.stderr || "wsl install failed");
   }
-  emit({ phase: "done", version });
-  return { ok: true, version };
+
+  // Parse the INSTALLED_VERSION line
+  const m = r.stdout.match(/INSTALLED_VERSION=([0-9.]+)/);
+  const actual = m ? m[1] : version;
+  log.info(`[wsl] installed cicy-code v${actual} (expected v${version})`);
+  return { ok: true, version: actual };
 }
 
 // Start cicy-code as a background process inside WSL. With `force: true` we
@@ -178,7 +179,7 @@ module.exports = {
   installWsl,
   userInstalled,
   userVersion,
-  installCicyCode,
+  installFromHostFile,
   start,
   stop,
 };
