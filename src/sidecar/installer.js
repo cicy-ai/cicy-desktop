@@ -412,35 +412,68 @@ async function install({ onProgress } = {}) {
 
     emit({ phase: "downloading", message: `下载 cicy-code v${check.latest}…`, version: check.latest, network, progress: 0 });
 
-    // CN: try mirrors before direct (direct often slow/blocked). Global:
-    // direct first since mirrors add an unnecessary hop.
     const order = buildUrlList(check.assetUrl, network);
-
     const dest = userBinary();
     if (!dest) throw new Error(`unsupported platform ${process.platform}-${process.arch}`);
 
-    let lastErr;
+    // Race all mirrors in parallel — whichever responds first wins.
+    // Each candidate writes to a unique temp path; the winner renames to dest.
+    // Losers are cleaned up.
     let downloaded = false;
-    for (const url of order) {
-      const { MIRRORS } = require('./mirrors'); const isMirror = MIRRORS.some(m => url.startsWith(m.url));
-      try {
-        emit({ phase: "downloading", message: `下载中 (${isMirror ? "镜像" : "直连"})…`, version: check.latest, network, progress: 0 });
-        await downloadFile(url, dest, {
-          signal: ac.signal,
-          onProgress: ({ received, total }) => {
-            const pct = total ? received / total : null;
-            emit({ phase: "downloading", message: "下载中", progress: pct, version: check.latest, network, received, total });
-          },
-        });
+    let lastErr;
+
+    await new Promise((resolve, reject) => {
+      let settled = false;
+      let pending = order.length;
+
+      const settle = (winner) => {
+        if (settled) return;
+        settled = true;
         downloaded = true;
-        break;
-      } catch (e) {
-        if (e.message === "cancelled") throw e;
-        lastErr = e;
-        log.warn(`[installer] download via ${url} failed: ${e.message}`);
-      }
-    }
-    if (!downloaded) throw lastErr || new Error("all download sources failed");
+        resolve(winner);
+        // cancel other controllers
+        controllers.forEach(c => { try { c.abort(); } catch {} });
+      };
+
+      const fail = (err) => {
+        lastErr = err;
+        if (--pending === 0 && !settled) reject(lastErr);
+      };
+
+      const controllers = order.map((url, i) => {
+        const ctl = new AbortController();
+        const tmpPath = dest + `.part${i}`;
+        const { MIRRORS } = require('./mirrors');
+        const isMirror = MIRRORS.some(m => url.startsWith(m.url));
+        emit({ phase: "downloading", message: `并行下载中…`, version: check.latest, network, progress: 0 });
+        downloadFile(url, tmpPath, {
+          signal: ctl.signal,
+          timeoutMs: 60000,
+          onProgress: ({ received, total }) => {
+            if (settled) return;
+            const pct = total ? received / total : null;
+            emit({ phase: "downloading", message: `下载中 (${isMirror ? "镜像" : "直连"})`, progress: pct, version: check.latest, network, received, total });
+          },
+        }).then(({ destPath }) => {
+          if (settled) { try { fs.unlinkSync(destPath); } catch {} return; }
+          // Atomically replace dest
+          try { fs.unlinkSync(dest); } catch {}
+          try {
+            fs.renameSync(destPath, dest);
+          } catch {
+            fs.copyFileSync(destPath, dest);
+            try { fs.unlinkSync(destPath); } catch {}
+          }
+          settle(url);
+        }).catch(err => {
+          if (err.message !== "cancelled") fail(err);
+          try { fs.unlinkSync(tmpPath); } catch {}
+        });
+        return ctl;
+      });
+    });
+    // Also wire outer cancel signal
+    if (ac.signal.aborted) throw new Error("cancelled");
 
     emit({ phase: "installing", message: "正在安装…", version: check.latest, network, progress: 1 });
 
