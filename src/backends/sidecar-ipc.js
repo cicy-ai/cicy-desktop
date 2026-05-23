@@ -29,8 +29,26 @@ function register({ sidecarLogPath } = {}) {
   if (registered) return;
   registered = true;
 
-  ipcMain.handle("sidecar:status", () => {
+  ipcMain.handle("sidecar:status", async () => {
     const s = installer.getStatus();
+    // On Windows the version cache might be stale; probe WSL for truth.
+    if (process.platform === "win32") {
+      try {
+        const wsl = require("../sidecar/wsl");
+        const [wslStatus, wslInstalled, wslVer] = await Promise.all([
+          wsl.checkStatus(),
+          wsl.userInstalled(),
+          wsl.userVersion(),
+        ]);
+        return {
+          ...s,
+          userInstalled: wslInstalled,
+          userVersion: wslVer || s.userVersion,
+          wsl: wslStatus,
+          lastProgress,
+        };
+      } catch {}
+    }
     return { ...s, lastProgress };
   });
 

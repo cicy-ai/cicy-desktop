@@ -102,16 +102,12 @@ async function userInstalled() {
 //   { phase: "downloading", message, version, network, received?, total?, progress? }
 //   { phase: "installing",  message }
 //   { phase: "done",        version }
-async function installCicyCode({ version, assetUrl, network, onProgress, mirrors = [] }) {
+async function installCicyCode({ version, assetUrl, network, onProgress }) {
   if (!version || !assetUrl) throw new Error("installCicyCode: version + assetUrl required");
   const emit = (e) => { try { onProgress && onProgress(e); } catch {} };
 
-  // Order URLs based on network. We curl from inside WSL, which has its own
-  // network stack; the CN detection on the Windows side is a hint, not a hard
-  // gate. The shell loop below tries each in turn until one succeeds.
-  const order = (network === "cn")
-    ? [...mirrors.map(m => m + assetUrl), assetUrl]
-    : [assetUrl, ...mirrors.map(m => m + assetUrl)];
+  const { buildUrlList } = require("./mirrors");
+  const order = buildUrlList(assetUrl, network);
 
   // Build a heredoc'd bash script. Use printf to surface progress lines that
   // we parse on the Node side via an exec_shell-style readline pump. (For the

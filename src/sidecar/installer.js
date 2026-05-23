@@ -86,11 +86,21 @@ let inflight = null;        // { abort: () => void }
 let lastProgress = null;    // last emitted event (for late subscribers)
 
 function getStatus() {
+  // win32: binaryPath is a virtual marker; actual existence is inside WSL.
+  // We can't call wsl.userInstalled() synchronously here, so we rely on the
+  // cached wsl-version file: if it exists the user already completed an
+  // install. The sidecar:status IPC also has a dedicated sidecar:wsl-status
+  // channel for deeper probing.
+  const bin    = userBinary();
+  const ver    = userVersion();
+  const installed = process.platform === "win32"
+    ? !!ver   // win32: treat "has version cache" as installed
+    : !!(bin && fs.existsSync(bin));
   return {
-    userInstalled: !!(userBinary() && fs.existsSync(userBinary())),
-    userVersion: userVersion(),
-    binaryPath: userBinary(),
-    installing: !!inflight,
+    userInstalled: installed,
+    userVersion:   ver,
+    binaryPath:    bin,
+    installing:    !!inflight,
     lastProgress,
   };
 }
@@ -220,8 +230,7 @@ const MANIFEST_DIRECT = `https://github.com/${MANIFEST_PATH}`;
 
 async function fetchManifest() {
   const network = await netDetect.detect();
-  const urls = network === "cn"
-    buildUrlList(MANIFEST_DIRECT, network);
+  const urls = buildUrlList(MANIFEST_DIRECT, network);
   return new Promise((resolve, reject) => {
     let done = 0;
     let lastErr;
@@ -279,8 +288,7 @@ async function fetchLatestReleaseLegacy() {
   const plat = platformDir();
   for (const version of versions.slice(0, 6)) {
     const directUrl = `https://github.com/${REPO}/releases/download/v${version}/cicy-code-${plat}-${archAlias}`;
-    const probeOrder = network === "cn"
-      buildUrlList(directUrl, network);
+    const probeOrder = buildUrlList(directUrl, network);
     log.info(`[installer] probing v${version} (legacy, network=${network})`);
     const found = await new Promise(resolve => {
       let done = 0;
@@ -369,7 +377,6 @@ async function install({ onProgress } = {}) {
         version: check.latest,
         assetUrl: check.assetUrl,
         network,
-        mirrors: require('./mirrors').MIRRORS.map(m => m.url),
         onProgress: emit,
       });
       // Mirror the version into a Windows-side cache so userVersion() can
@@ -388,8 +395,7 @@ async function install({ onProgress } = {}) {
 
     // CN: try mirrors before direct (direct often slow/blocked). Global:
     // direct first since mirrors add an unnecessary hop.
-    const order = (network === "cn")
-      buildUrlList(check.assetUrl, network);
+    const order = buildUrlList(check.assetUrl, network);
 
     const dest = userBinary();
     if (!dest) throw new Error(`unsupported platform ${process.platform}-${process.arch}`);
