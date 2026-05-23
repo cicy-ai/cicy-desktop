@@ -651,9 +651,10 @@ electronApp.whenReady().then(() => {
   // Re-init i18n now that app is ready — getLocale() returns reliable values
   // only after the ready event. The module-load init may have picked English
   // on platforms (e.g. Windows) where LANG env is unset.
+  // changeLanguage() is async; await it so tray/menu labels use the correct language.
   try {
     const realLocale = electronApp.getLocale && electronApp.getLocale();
-    if (realLocale) i18n.i18next.changeLanguage(i18n.pickLocale(realLocale));
+    if (realLocale) await i18n.i18next.changeLanguage(i18n.pickLocale(realLocale));
     log.info(`[i18n] locale = ${i18n.i18next.language} (raw: ${realLocale})`);
   } catch (e) { log.warn(`[i18n] ready-time relocale failed: ${e.message}`); }
 
@@ -675,10 +676,48 @@ electronApp.whenReady().then(() => {
 
   const menuTemplate = [
     ...(process.platform === "darwin" ? [{ role: "appMenu" }] : []),
-    { role: "fileMenu" },
-    { role: "editMenu" },
-    { role: "viewMenu" },
-    { role: "windowMenu" },
+    {
+      label: i18n.t("menu.file"),
+      submenu: [
+        { label: i18n.t("menu.close"), role: "close" },
+        { label: i18n.t("menu.quit"), role: "quit" },
+      ],
+    },
+    {
+      label: i18n.t("menu.edit"),
+      submenu: [
+        { label: i18n.t("menu.undo"), role: "undo" },
+        { label: i18n.t("menu.redo"), role: "redo" },
+        { type: "separator" },
+        { label: i18n.t("menu.cut"), role: "cut" },
+        { label: i18n.t("menu.copy"), role: "copy" },
+        { label: i18n.t("menu.paste"), role: "paste" },
+        { label: i18n.t("menu.selectAll"), role: "selectAll" },
+      ],
+    },
+    {
+      label: i18n.t("menu.view"),
+      submenu: [
+        { label: i18n.t("menu.reload"), role: "reload" },
+        { label: i18n.t("menu.forceReload"), role: "forceReload" },
+        { label: i18n.t("menu.toggleDevTools"), role: "toggleDevTools" },
+        { type: "separator" },
+        { label: i18n.t("menu.actualSize"), role: "resetZoom" },
+        { label: i18n.t("menu.zoomIn"), role: "zoomIn" },
+        { label: i18n.t("menu.zoomOut"), role: "zoomOut" },
+        { type: "separator" },
+        { label: i18n.t("menu.toggleFullscreen"), role: "togglefullscreen" },
+      ],
+    },
+    {
+      label: i18n.t("menu.window"),
+      submenu: [
+        { label: i18n.t("menu.minimize"), role: "minimize" },
+        ...(process.platform === "darwin"
+          ? [{ label: i18n.t("menu.zoom"), role: "zoom" }, { type: "separator" }, { label: i18n.t("menu.front"), role: "front" }]
+          : [{ label: i18n.t("menu.close"), role: "close" }]),
+      ],
+    },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate));
 

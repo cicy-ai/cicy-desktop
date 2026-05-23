@@ -38,6 +38,29 @@ function findCicyCodeDaemonHome() {
 }
 
 function readCicyAiApiToken() {
+  // On Windows, cicy-code runs inside WSL, so its global.json lives under
+  // \\wsl$\<distro>\home\<user>\cicy-ai\global.json. Try WSL paths first.
+  if (process.platform === "win32") {
+    try {
+      const { execFileSync } = require("child_process");
+      // Ask WSL for the actual path
+      const wslPath = execFileSync(
+        "wsl.exe", ["-e", "bash", "-c", "echo $HOME/cicy-ai/global.json"],
+        { encoding: "utf8", timeout: 3000 }
+      ).trim();
+      // Convert WSL path to Windows UNC: /home/cicy/... → \\wsl$\Ubuntu\home\cicy\...
+      // wslpath -w gives us the Windows path directly
+      const winPath = execFileSync(
+        "wsl.exe", ["-e", "wslpath", "-w", wslPath],
+        { encoding: "utf8", timeout: 3000 }
+      ).trim();
+      if (winPath) {
+        const raw = fs.readFileSync(winPath, "utf8");
+        const data = JSON.parse(raw);
+        if (typeof data.api_token === "string" && data.api_token) return data.api_token;
+      }
+    } catch {}
+  }
   for (const home of [findCicyCodeDaemonHome(), os.homedir()]) {
     const p = path.join(home, "cicy-ai", "global.json");
     try {
