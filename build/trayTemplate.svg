@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22" fill="none">
+  <!-- Menu bar template: bold rounded "C", solid black on transparent.
+       Matches the dock icon C shape for visual consistency. -->
+  <path d="M16.5 7.2
+           C 15.5 5.9, 13.9 5.2, 12 5.2
+           C 8.7 5.2, 6.3 7.7, 6.3 11
+           C 6.3 14.3, 8.7 16.8, 12 16.8
+           C 13.9 16.8, 15.5 16.1, 16.5 14.8"
+        stroke="#000"
+        stroke-width="2.6"
+        stroke-linecap="round"
+        fill="none"/>
+</svg>

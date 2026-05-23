@@ -34,13 +34,20 @@ function bundledBinaryPath() {
   const plat = platformDir();
   const arch = archDir();
   if (!plat || !arch) return null;
-  // Detect packaged via process.resourcesPath. In dev mode resourcesPath
+  // 1. User-installed via in-app installer (preferred — freshest version)
+  try {
+    const installer = require("./installer");
+    const userBin = installer.userBinary();
+    if (userBin && fs.existsSync(userBin)) return userBin;
+  } catch {}
+  // 2. Detect packaged via process.resourcesPath. In dev mode resourcesPath
   // points into electron's own .app, which doesn't contain our sidecar dir,
   // so fall through to the repo vendor/ path.
   if (process.resourcesPath) {
     const packaged = path.join(process.resourcesPath, "cicy-code", "cicy-code");
     if (fs.existsSync(packaged)) return packaged;
   }
+  // 3. Dev mode — repo vendor dir
   return path.resolve(__dirname, "..", "..", "vendor", "cicy-code", `${plat}-${arch}`, "cicy-code");
 }
 
@@ -60,17 +67,37 @@ function probeExisting(port = DEFAULT_PORT, timeoutMs = 500) {
 
 let child = null;
 
-async function start({ logPath, port = DEFAULT_PORT } = {}) {
-  if (child) return child;
+async function start({ logPath, port = DEFAULT_PORT, force = false } = {}) {
+  if (child && !force) return child;
 
-  if (await probeExisting(port)) {
+  if (!force && await probeExisting(port)) {
     console.log(`[cicy-code-sidecar] existing instance on :${port}, reusing`);
     return null;
   }
 
   if (process.platform === "win32") {
-    console.warn("[cicy-code-sidecar] Windows is not supported — run cicy-code in Docker, then point this app at it");
-    return null;
+    // Windows uses WSL2 to host the linux-amd64 binary. The wsl module owns
+    // every wsl-touching command; here we just delegate.
+    try {
+      const wsl = require("./wsl");
+      const status = await wsl.checkStatus();
+      if (!status.installed || !status.hasDistro) {
+        console.warn(`[cicy-code-sidecar] WSL not ready (${JSON.stringify(status)}) — homepage will guide install`);
+        return null;
+      }
+      if (!(await wsl.userInstalled())) {
+        console.warn("[cicy-code-sidecar] cicy-code not installed in WSL yet — homepage will trigger install");
+        return null;
+      }
+      const r = await wsl.start({ port, force });
+      // Treat WSL-internal pid as the child token so the outer code knows we're up.
+      child = { wsl: true, pid: r.pid };
+      console.log(`[cicy-code-sidecar] started inside WSL pid=${r.pid}`);
+      return child;
+    } catch (e) {
+      console.warn(`[cicy-code-sidecar] WSL start failed: ${e.message}`);
+      return null;
+    }
   }
 
   const bin = bundledBinaryPath();
@@ -101,6 +128,11 @@ async function stop({ timeoutMs = 5000 } = {}) {
   if (!child) return;
   const p = child;
   child = null;
+  // WSL-launched: not a real ChildProcess, kill via wsl pkill instead.
+  if (p && p.wsl) {
+    try { await require("./wsl").stop(); } catch {}
+    return;
+  }
   try { p.kill("SIGTERM"); } catch {}
   const start = Date.now();
   while (p.exitCode === null && Date.now() - start < timeoutMs) {

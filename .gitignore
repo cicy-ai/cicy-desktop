@@ -1,7 +1,6 @@
 # Node.js / Electron project ignores
 node_modules/
 dist/
-build/
 coverage/
 logs/
 *.log
@@ -18,5 +17,8 @@ yarn-error.log*
 .cache/
 .ipynb_checkpoints/
 *.ipynb_checkpoints
-dist/
-vendor/
+
+# build/ holds shipped icons (kept) + transient outputs (.icns/.ico generated
+# by CI from logo.svg, kept). The workflow re-generates if missing, but we
+# keep what's checked-in as a fallback.
+build/*.svg.bak

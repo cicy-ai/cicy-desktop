@@ -103,9 +103,37 @@ function register(opts = {}) {
   ipcMain.handle("backends:health-all", async () => probeAll(registry.list()));
   ipcMain.handle("backends:restart-sidecar", async () => {
     try {
-      await sidecar.stop({ timeoutMs: 4000 });
-      const child = await sidecar.start({ logPath: opts.sidecarLogPath });
-      return { ok: true, pid: child && child.pid, reused: !child };
+      const { execFile } = require("child_process");
+      // 1. Hard-kill any cicy-code on this host. -9 is intentional — restart
+      //    is a "blow it away" semantics, not a graceful shutdown.
+      await new Promise(resolve => {
+        if (process.platform === "win32") {
+          execFile("taskkill", ["/F", "/IM", "cicy-code.exe"], () => resolve());
+        } else {
+          execFile("pkill", ["-9", "-f", "cicy-code"], () => resolve());
+        }
+      });
+      // On Windows, cicy-code lives inside WSL — kill it there too.
+      if (process.platform === "win32") {
+        try { await require("../sidecar/wsl").stop(); } catch {}
+      }
+      // 2. Reset our internal child handle so start() doesn't short-circuit.
+      try { await sidecar.stop({ timeoutMs: 500 }); } catch {}
+      // 3. Wait for :8008 to actually free. SIGKILL → kernel cleanup is fast
+      //    but not instant; previously we used a fixed 500ms which sometimes
+      //    raced. Poll up to 5s.
+      const port = 8008;
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline && (await sidecar.probeExisting(port))) {
+        await new Promise(r => setTimeout(r, 200));
+      }
+      // 4. Force-start a fresh instance even if something else snuck in on
+      //    the port — we want a known-good pid back.
+      const child = await sidecar.start({ logPath: opts.sidecarLogPath, force: true });
+      if (!child || !child.pid) {
+        return { ok: false, error: "spawn returned no child (port may still be busy)" };
+      }
+      return { ok: true, pid: child.pid };
     } catch (err) {
       return { ok: false, error: err.message || String(err) };
     }

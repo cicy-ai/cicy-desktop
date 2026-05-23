@@ -10,7 +10,7 @@ const { getWorkerIdentity } = require("../cluster/worker-identity");
 const { createAgentId, createRuntimeSessionId, createWindowRef } = require("../cluster/types");
 
 if (app) {
-  app.name = "ElectronMCP";
+  app.name = "CiCy Desktop";
 }
 
 function setupWindowHandlers(win) {
@@ -30,8 +30,15 @@ function setupWindowHandlers(win) {
   initWindowMonitoring(win);
 
   // 🔥 确保窗口可以正常关闭 + 添加日志
-  win.on("close", () => {
+  // Close → hide. The user can re-open from the tray icon or topbar menu.
+  // Only actually destroy the window when the app is quitting (set by the
+  // tray "Quit" item / "before-quit" handler in main.js).
+  win.on("close", (event) => {
     log.info(`[Window ${win.id}] Close event triggered: ${win.getTitle()}`);
+    if (!app.isQuitting) {
+      event.preventDefault();
+      win.hide();
+    }
   });
 
   // 🔥 全局下载处理 - 自动保存到 ~/Downloads/electron/
@@ -360,13 +367,18 @@ if (app) {
 }
 
 function showOpenLinkDialog(parentWin, url) {
+  const i18n = require("../i18n");
   dialog
     .showMessageBox(parentWin, {
       type: "question",
-      buttons: ["Open in Browser", "Open in App", "Cancel"],
+      buttons: [
+        i18n.t("dialog.openLink.openInBrowser"),
+        i18n.t("dialog.openLink.openInApp"),
+        i18n.t("dialog.openLink.cancel"),
+      ],
       defaultId: 0,
-      title: "Open Link",
-      message: "How would you like to open this link?",
+      title: i18n.t("dialog.openLink.title"),
+      message: i18n.t("dialog.openLink.message"),
       detail: url,
     })
     .then(({ response }) => {

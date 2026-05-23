@@ -1,0 +1,53 @@
+{
+  "app": {
+    "name": "CiCy Desktop",
+    "apiTitle": "CiCy Desktop API"
+  },
+  "tray": {
+    "openHomepage": "打开 CiCy Desktop",
+    "quit": "退出",
+    "tooltip": "CiCy Desktop"
+  },
+  "menu": {
+    "backends": "Backends",
+    "showHomepage": "显示主页",
+    "newLocalWindow": "新建本地窗口"
+  },
+  "dialog": {
+    "openLink": {
+      "title": "打开链接",
+      "message": "你想用哪种方式打开此链接？",
+      "openInBrowser": "在浏览器中打开",
+      "openInApp": "在应用中打开",
+      "cancel": "取消"
+    }
+  },
+  "homepage": {
+    "title": "CiCy Desktop",
+    "addBackend": "添加后端",
+    "name": "名称",
+    "url": "URL",
+    "token": "Token",
+    "save": "保存",
+    "cancel": "取消",
+    "test": "测试",
+    "open": "打开",
+    "remove": "移除",
+    "copyUrl": "复制 URL",
+    "copied": "URL 已复制",
+    "removed": "已移除 {{name}}",
+    "removeConfirm": "确定移除 {{name}}？",
+    "opened": "已打开 {{name}}",
+    "focused": "已切换到 {{name}}",
+    "openFailed": "打开失败：{{error}}",
+    "unknown": "未知",
+    "noBackendsYet": "暂无后端，点上方「添加后端」",
+    "statusUp": "在线",
+    "statusDown": "离线",
+    "statusWarn": "异常"
+  },
+  "cli": {
+    "controllerTitle": "cicy - CiCy Desktop 控制器",
+    "usage": "用法: cicy [命令] [选项]"
+  }
+}

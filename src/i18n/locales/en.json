@@ -1,0 +1,53 @@
+{
+  "app": {
+    "name": "CiCy Desktop",
+    "apiTitle": "CiCy Desktop API"
+  },
+  "tray": {
+    "openHomepage": "Open CiCy Desktop",
+    "quit": "Quit",
+    "tooltip": "CiCy Desktop"
+  },
+  "menu": {
+    "backends": "Backends",
+    "showHomepage": "Show Homepage",
+    "newLocalWindow": "New Local Window"
+  },
+  "dialog": {
+    "openLink": {
+      "title": "Open Link",
+      "message": "How would you like to open this link?",
+      "openInBrowser": "Open in Browser",
+      "openInApp": "Open in App",
+      "cancel": "Cancel"
+    }
+  },
+  "homepage": {
+    "title": "CiCy Desktop",
+    "addBackend": "Add backend",
+    "name": "Name",
+    "url": "URL",
+    "token": "Token",
+    "save": "Save",
+    "cancel": "Cancel",
+    "test": "Test",
+    "open": "Open",
+    "remove": "Remove",
+    "copyUrl": "Copy URL",
+    "copied": "URL copied",
+    "removed": "Removed {{name}}",
+    "removeConfirm": "Remove {{name}}?",
+    "opened": "Opened {{name}}",
+    "focused": "Focused {{name}}",
+    "openFailed": "Open failed: {{error}}",
+    "unknown": "unknown",
+    "noBackendsYet": "No backends yet — click \"Add backend\" above",
+    "statusUp": "Up",
+    "statusDown": "Down",
+    "statusWarn": "Warning"
+  },
+  "cli": {
+    "controllerTitle": "cicy - CiCy Desktop Controller",
+    "usage": "Usage: cicy [command] [options]"
+  }
+}

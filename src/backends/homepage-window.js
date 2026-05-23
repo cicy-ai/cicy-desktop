@@ -1,15 +1,25 @@
 // Homepage window — primary CiCy Desktop window. Singleton; closing it
-// does NOT quit the app. During UI iteration set CICY_HOMEPAGE_URL to a
-// Vite dev URL (e.g. https://g-8173.cicy-ai.com/) so refreshes happen
-// without rebuilding the .app; packaged production builds fall through to
-// the bundled homepage.html.
+// does NOT quit the app. The homepage is now a React app built from
+// workers/desktop-render and copied to ./homepage-react/.
+//
+// Override priority:
+//   1. CICY_HOMEPAGE_URL env (Vite dev server, e.g. http://localhost:8173)
+//   2. ./homepage-react/index.html  (production React build)
+//   3. ./homepage.html              (legacy vanilla — kept as fallback)
 
 const path = require("path");
+const fs = require("fs");
 const { BrowserWindow } = require("electron");
 
 const DEV_URL = process.env.CICY_HOMEPAGE_URL || "";
 
 let homepage = null;
+
+function pickHtml() {
+  const reactBuild = path.join(__dirname, "homepage-react", "index.html");
+  if (fs.existsSync(reactBuild)) return reactBuild;
+  return path.join(__dirname, "homepage.html");
+}
 
 function openHomepage() {
   if (homepage && !homepage.isDestroyed()) {
@@ -21,10 +31,10 @@ function openHomepage() {
   homepage = new BrowserWindow({
     width: 940,
     height: 720,
-    minWidth: 760,
-    minHeight: 520,
+    minWidth: 360,
+    minHeight: 480,
     title: "CiCy Desktop",
-    backgroundColor: "#0f1115",
+    backgroundColor: "#0d1117",
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     webPreferences: {
       preload: path.join(__dirname, "homepage-preload.js"),
@@ -36,7 +46,7 @@ function openHomepage() {
   if (DEV_URL) {
     homepage.loadURL(DEV_URL);
   } else {
-    homepage.loadFile(path.join(__dirname, "homepage.html"));
+    homepage.loadFile(pickHtml());
   }
   homepage.on("closed", () => { homepage = null; });
   return homepage;

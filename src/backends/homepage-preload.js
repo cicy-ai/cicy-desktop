@@ -20,11 +20,26 @@
 
 const { contextBridge, ipcRenderer, shell } = require("electron");
 
+// Wrap ipcRenderer.invoke so every renderer→main IPC call logs the channel,
+// args, and the reply (or error) to the console. Skip noisy channels that
+// fire on every render tick to avoid drowning the console.
+const __noisy = new Set(["backends:list", "backends:health-all"]);
+let __ipcSeq = 0;
+function logInvoke(channel, ...args) {
+  const id = ++__ipcSeq;
+  const noisy = __noisy.has(channel);
+  if (!noisy) console.log(`[ipc#${id}] call`, channel, ...args);
+  return ipcRenderer.invoke(channel, ...args).then(
+    (res) => { if (!noisy) console.log(`[ipc#${id}] reply`, channel, res); return res; },
+    (err) => { console.error(`[ipc#${id}] error`, channel, err); throw err; },
+  );
+}
+
 // Sugar wrappers all route through the generic `rpc` channel which dispatches
 // to any tool registered in src/tools/index.js. New capabilities = new RPC
 // tool registration on the main side; renderer doesn't need new preload
 // methods.
-const rpc = (tool, args) => ipcRenderer.invoke("rpc", tool, args || {});
+const rpc = (tool, args) => logInvoke("rpc", tool, args || {});
 
 // Parse the standard `{ content: [{ type:"text", text:"..." }, ...], isError }`
 // response from the tool layer.
@@ -45,6 +60,20 @@ async function execShell(command, opts = {}) {
 
 contextBridge.exposeInMainWorld("electronRPC", (tool, args) => rpc(tool, args));
 
+// i18n: expose t(key, opts) and current locale to render. Resources are
+// loaded once in the main process and shipped synchronously over IPC. Since
+// preload runs in the main process for context-isolated windows, we can
+// require the i18n module directly.
+let __i18n;
+try { __i18n = require("../i18n"); } catch (e) { __i18n = null; }
+contextBridge.exposeInMainWorld("cicyI18n", {
+  t: (key, opts) => {
+    if (!__i18n) return key;
+    return __i18n.t(key, opts);
+  },
+  locale: __i18n ? __i18n.i18next.language : "en",
+});
+
 contextBridge.exposeInMainWorld("cicy", {
   // ------- platform meta (sync) -------
   platform: process.platform,         // "darwin" | "linux" | "win32"
@@ -52,40 +81,52 @@ contextBridge.exposeInMainWorld("cicy", {
 
   // ------- existing namespaces -------
   backends: {
-    list:           ()      => ipcRenderer.invoke("backends:list"),
-    add:            (input) => ipcRenderer.invoke("backends:add", input),
-    remove:         (id)    => ipcRenderer.invoke("backends:remove", id),
-    probe:          (input) => ipcRenderer.invoke("backends:probe", input),
-    open:           (id)    => ipcRenderer.invoke("backends:open", id),
-    health:         (id)    => ipcRenderer.invoke("backends:health", id),
-    healthAll:      ()      => ipcRenderer.invoke("backends:health-all"),
-    restartSidecar: ()      => ipcRenderer.invoke("backends:restart-sidecar"),
+    list:           ()      => logInvoke("backends:list"),
+    add:            (input) => logInvoke("backends:add", input),
+    remove:         (id)    => logInvoke("backends:remove", id),
+    probe:          (input) => logInvoke("backends:probe", input),
+    open:           (id)    => logInvoke("backends:open", id),
+    health:         (id)    => logInvoke("backends:health", id),
+    healthAll:      ()      => logInvoke("backends:health-all"),
+    restartSidecar: ()      => logInvoke("backends:restart-sidecar"),
+  },
+  sidecar: {
+    status:      ()  => logInvoke("sidecar:status"),
+    wslStatus:   ()  => logInvoke("sidecar:wsl-status"),
+    checkLatest: ()  => logInvoke("sidecar:check-latest"),
+    install:     ()  => logInvoke("sidecar:install"),
+    cancel:      ()  => logInvoke("sidecar:cancel"),
+    onProgress:  (cb) => {
+      const handler = (_e, payload) => { try { cb(payload); } catch {} };
+      ipcRenderer.on("sidecar:progress", handler);
+      return () => ipcRenderer.removeListener("sidecar:progress", handler);
+    },
   },
   windows: {
-    list:  ()   => ipcRenderer.invoke("windows:list"),
-    focus: (id) => ipcRenderer.invoke("windows:focus", id),
+    list:  ()   => logInvoke("windows:list"),
+    focus: (id) => logInvoke("windows:focus", id),
   },
   updates: {
-    check:            ()    => ipcRenderer.invoke("updates:check"),
-    openReleasePage:  (url) => ipcRenderer.invoke("updates:open-release-page", url),
+    check:            ()    => logInvoke("updates:check"),
+    openReleasePage:  (url) => logInvoke("updates:open-release-page", url),
   },
   clipboard: {
-    write: (text) => ipcRenderer.invoke("clipboard:write", text),
+    write: (text) => logInvoke("clipboard:write", text),
   },
 
   // ------- new bridges (last rebuild!) -------
   app: {
-    quit: () => ipcRenderer.invoke("app:quit"),
+    quit: () => logInvoke("app:quit"),
   },
   shell: {
-    openExternal: (url) => ipcRenderer.invoke("shell:open-external", url),
+    openExternal: (url) => logInvoke("shell:open-external", url),
   },
   tos: {
-    get:    ()        => ipcRenderer.invoke("tos:get"),
-    accept: (version) => ipcRenderer.invoke("tos:accept", version),
+    get:    ()        => logInvoke("tos:get"),
+    accept: (version) => logInvoke("tos:accept", version),
   },
   logs: {
-    tail: (name, lines = 200) => ipcRenderer.invoke("logs:tail", { name, lines }),
+    tail: (name, lines = 200) => logInvoke("logs:tail", { name, lines }),
   },
 
   // ------- system probes (sugar over exec_shell) -------

@@ -9,6 +9,7 @@ const { openHomepage } = require("./backends/homepage-window");
 const backendsRegistry = require("./backends/registry");
 const { openWindowForBackend } = require("./backends/window-manager");
 const { Menu } = require("electron");
+const { setupAppIcons } = require("./tray");
 
 // 🎯 添加右键上下文菜单
 contextMenu({
@@ -88,6 +89,39 @@ const { getChromeRuntimeRegistry } = require("./chrome/runtime-registry");
 // Setup
 // setupElectronFlags(); // Already done above
 setupErrorHandlers();
+
+// i18n: initialize as early as possible so menus / tray / dialogs use the
+// detected locale. app.getLocale() works after Electron is ready, but for the
+// initial label fallback we use process.env.LANG so the first burst of
+// console output / tray template still falls back to English when locale
+// detection fails.
+const i18n = require("./i18n");
+const __initialLocale = (() => {
+  try { return electronApp.getLocale ? electronApp.getLocale() : (process.env.LANG || ""); }
+  catch { return process.env.LANG || ""; }
+})();
+i18n.init(__initialLocale);
+
+// Single-instance lock: only one cicy-desktop process can hold the primary
+// instance. A second launch sends `second-instance` with argv to the primary
+// and exits itself. The primary focuses its homepage so the user sees the
+// running app instead of nothing happening.
+const __singleLock = electronApp.requestSingleInstanceLock();
+if (!__singleLock) {
+  electronApp.exit(0);
+}
+electronApp.on("second-instance", () => {
+  try {
+    const { openHomepage } = require("./backends/homepage-window");
+    openHomepage();
+  } catch {}
+  const { BrowserWindow } = require("electron");
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (w.isMinimized()) w.restore();
+    w.show();
+    w.focus();
+  }
+});
 
 // Parse arguments
 const {
@@ -509,6 +543,7 @@ function ensureWindowsDesktopLauncher() {
 }
 
 electronApp.whenReady().then(() => {
+  setupAppIcons();
   ensureDesktopLauncher();
   // Start bundled cicy-code daemon as a sidecar. Reuses an existing
   // instance on :8008 if one is already running; no-op on Windows.
@@ -520,15 +555,16 @@ electronApp.whenReady().then(() => {
   // Backend launcher: app menu + IPC handlers. Menu adds a Backends top-level
   // entry; IPC powers the launcher window (src/backends/launcher.html).
   backendsIPC.register({ sidecarLogPath: path.join(os.homedir(), "logs", "cicy-code-sidecar.log") });
+  require("./backends/sidecar-ipc").register({ sidecarLogPath: path.join(os.homedir(), "logs", "cicy-code-sidecar.log") });
   const menuTemplate = [
     ...(process.platform === "darwin" ? [{ role: "appMenu" }] : []),
     {
-      label: "Backends",
+      label: i18n.t("menu.backends"),
       submenu: [
-        { label: "Show Homepage", accelerator: "CmdOrCtrl+Shift+H", click: () => openHomepage() },
+        { label: i18n.t("menu.showHomepage"), accelerator: "CmdOrCtrl+Shift+H", click: () => openHomepage() },
         { type: "separator" },
         {
-          label: "New Local Window",
+          label: i18n.t("menu.newLocalWindow"),
           accelerator: "CmdOrCtrl+N",
           click: async () => {
             const local = backendsRegistry.get(backendsRegistry.LOCAL_ID);
@@ -598,17 +634,49 @@ electronApp.on("window-all-closed", () => {
 });
 
 function cleanup() {
-  log.info("[MCP] Server shutting down");
+  log.info("[Cleanup] shutting down child services");
   try { cicyCodeSidecar.stop(); } catch (e) { /* best-effort */ }
+
+  // Kill cicy-code, all tmux servers, gotty/ttyd, and code-server processes
+  // that the cicy-code sidecar may have spawned. best-effort, sync, cross-platform.
+  try {
+    const { execSync } = require("child_process");
+    const targets = ["cicy-code", "ttyd", "gotty", "code-server"];
+
+    if (process.platform === "win32") {
+      // Windows: taskkill /F /IM <name>.exe (and base name in case extension differs)
+      for (const t of targets) {
+        try { execSync(`taskkill /F /IM ${t}.exe`, { stdio: "ignore", windowsHide: true }); } catch {}
+        try { execSync(`taskkill /F /IM ${t}`, { stdio: "ignore", windowsHide: true }); } catch {}
+      }
+      // Windows has no tmux by default; nothing to do.
+    } else {
+      // macOS / Linux: pkill matches by command line.
+      for (const t of targets) {
+        try { execSync(`pkill -f ${t}`, { stdio: "ignore" }); } catch {}
+      }
+      try { execSync(`tmux kill-server`, { stdio: "ignore" }); } catch {}
+    }
+  } catch (e) {
+    log.warn(`[Cleanup] kill children failed: ${e.message}`);
+  }
+
   if (workerClient) {
     workerClient.stop();
   }
-  server.close();
-  electronApp.quit();
+  try { server.close(); } catch {}
 }
 
-process.on("SIGTERM", cleanup);
-process.on("SIGINT", cleanup);
+let __isCleaningUp = false;
+electronApp.on("before-quit", () => {
+  electronApp.isQuitting = true;
+  if (__isCleaningUp) return;
+  __isCleaningUp = true;
+  cleanup();
+});
+
+process.on("SIGTERM", () => { electronApp.isQuitting = true; cleanup(); electronApp.quit(); });
+process.on("SIGINT",  () => { electronApp.isQuitting = true; cleanup(); electronApp.quit(); });
 
 // 为所有 session（包括 webview partition）设置代理
 electronApp.on("session-created", (session) => {

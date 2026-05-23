@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FB923C"/>
+      <stop offset="1" stop-color="#EA580C"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background: orange gradient rounded square (same palette as cicy.svg) -->
+  <rect x="80" y="80" width="864" height="864" rx="200" fill="url(#bg)"/>
+
+  <!-- Bold rounded "C" in soft cream/white (matches cicy.svg's #FFF7ED) -->
+  <path d="M716 372
+           C 670 320, 600 290, 520 290
+           C 380 290, 280 392, 280 512
+           C 280 632, 380 734, 520 734
+           C 600 734, 670 704, 716 652"
+        stroke="#FFF7ED"
+        stroke-width="120"
+        stroke-linecap="round"
+        fill="none"/>
+</svg>

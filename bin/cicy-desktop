@@ -89,7 +89,7 @@ if (runUpdate) {
 }
 
 function showHelp() {
-  console.log(`cicy - Electron MCP Controller
+  console.log(`cicy - CiCy Desktop Controller
 
 Usage: cicy [command] [options]
 
