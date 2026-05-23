@@ -209,7 +209,14 @@ function downloadFile(url, destPath, { signal, onProgress, timeoutMs = 30000 } =
               // some systems raise ETXTBSY. Unlinking the old file first
               // ensures we always get a fresh inode.
               try { fs.unlinkSync(destPath); } catch {}
-              fs.renameSync(tmp, destPath);
+              try {
+                fs.renameSync(tmp, destPath);
+              } catch {
+                // Last resort: copy bytes (works even if rename fails across
+                // filesystems or when the old file is still locked).
+                fs.copyFileSync(tmp, destPath);
+                try { fs.unlinkSync(tmp); } catch {}
+              }
               resolve({ destPath, total });
             } catch (e) { reject(e); }
           });
@@ -367,9 +374,15 @@ async function install({ onProgress } = {}) {
     if (!check.ok) throw new Error(check.error);
 
     if (check.installedVersion === check.latest) {
-      const ev = { phase: "done", message: `已是最新版本 v${check.latest}`, version: check.latest, network, alreadyUpToDate: true };
-      emit(ev);
-      return ev;
+      const bin = userBinary();
+      const binaryExists = bin && bin !== "wsl:cicy-code" && fs.existsSync(bin);
+      if (binaryExists) {
+        const ev = { phase: "done", message: `已是最新版本 v${check.latest}`, version: check.latest, network, alreadyUpToDate: true };
+        emit(ev);
+        return ev;
+      }
+      // version file says up-to-date but binary is missing — re-download
+      log.info(`[installer] version=${check.latest} but binary missing, re-downloading`);
     }
 
     // ── Windows: install via WSL (linux-amd64 binary inside the distro) ──
@@ -434,7 +447,26 @@ async function install({ onProgress } = {}) {
     if (process.platform !== "win32") {
       try { fs.chmodSync(dest, 0o755); } catch (e) { log.warn(`[installer] chmod failed: ${e.message}`); }
     }
-    try { fs.writeFileSync(path.join(path.dirname(dest), "version"), check.latest, "utf8"); } catch {}
+
+    // Verify the downloaded binary reports the expected version. Mirrors
+    // sometimes serve stale cached content.  If the version doesn't match
+    // we have already retried all sources; record the mismatch in the log
+    // and update the version file to what the binary actually is so the next
+    // checkLatest() round will re-download if still behind.
+    let installedVersion = check.latest;
+    try {
+      const { execFileSync } = require("child_process");
+      const out = execFileSync(dest, ["--version"], { timeout: 5000, encoding: "utf8" }).trim();
+      const m = out.match(/(\d+\.\d+\.\d+)/);
+      if (m && m[1] !== check.latest) {
+        log.warn(`[installer] downloaded binary reports v${m[1]}, expected v${check.latest} — mirror likely cached stale content`);
+        installedVersion = m[1]; // update version file to real version
+      }
+    } catch (e) {
+      log.warn(`[installer] version verify failed: ${e.message}`);
+    }
+
+    try { fs.writeFileSync(path.join(path.dirname(dest), "version"), installedVersion, "utf8"); } catch {}
 
     const final = { phase: "done", message: `已安装 v${check.latest}`, version: check.latest, network };
     emit(final);

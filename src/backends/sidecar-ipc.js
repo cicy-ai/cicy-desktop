@@ -70,50 +70,52 @@ function register({ sidecarLogPath } = {}) {
 
   ipcMain.handle("sidecar:install", async () => {
     try {
-      const final = await installer.install({ onProgress: broadcast });
-
-      // ── Restart with new binary ──────────────────────────────────────────
-      // Strategy: kill the process holding :8008 by PID (lsof), not by name.
-      // This works if it's our process (same user). If the port belongs to an
-      // external user (e.g. 'cicy-code' on a shared mac), kill will fail with
-      // EPERM — in that case we leave it running; the new binary is already on
-      // disk and will be used next time the external process restarts.
       const { execFile } = require("child_process");
       const port = 8008;
 
+      // ── Step 1: kill the process holding :8008 before downloading ────────
+      // The old binary must not be running when we overwrite it on disk.
+      // lsof by port → get exact PID → kill (fails with EPERM for other-user
+      // processes, which is fine: copyFileSync handles locked-file overwrite).
       const portPid = await new Promise(resolve => {
-        execFile("lsof", ["-ti", `:${port}`], (err, out) => {
+        execFile("lsof", ["-ti", `:${port}`], (_, out) => {
           const pid = parseInt((out || "").trim().split("\n")[0], 10);
           resolve(isNaN(pid) ? null : pid);
         });
       });
-
-      let killed = false;
+      let killedBefore = false;
       if (portPid) {
-        killed = await new Promise(resolve => {
-          process.kill(portPid, 0); // test if it exists
-          try {
-            process.kill(portPid, 9);
-            resolve(true);
-          } catch {
-            resolve(false); // EPERM — different user
-          }
-        });
+        try { process.kill(portPid, 9); killedBefore = true; } catch {}
+      }
+      if (killedBefore) {
+        // Wait for port to actually free before downloading
+        const deadline = Date.now() + 3000;
+        while (Date.now() < deadline && (await sidecar.probeExisting(port))) {
+          await new Promise(r => setTimeout(r, 200));
+        }
       }
 
+      // ── Step 2: download + install ────────────────────────────────────────
+      const final = await installer.install({ onProgress: broadcast });
+
+      // ── Step 3: start the new binary ─────────────────────────────────────
+      // Kill anything that snuck onto the port during the download (shouldn't
+      // happen but defensive). Then force-start.
+      await new Promise(resolve => {
+        execFile("lsof", ["-ti", `:${port}`], (_, out) => {
+          const pid = parseInt((out || "").trim().split("\n")[0], 10);
+          if (pid) { try { process.kill(pid, 9); } catch {} }
+          resolve();
+        });
+      });
+      await new Promise(r => setTimeout(r, 600));
+
       let restartedPid = null;
-      if (killed || !portPid) {
-        // Port should be free, wait briefly then start new binary
-        await new Promise(r => setTimeout(r, 800));
-        try {
-          const ch = await sidecar.start({ logPath: sidecarLogPath, force: true });
-          if (ch?.pid) restartedPid = ch.pid;
-        } catch (e) {
-          log.warn(`[sidecar-ipc] restart failed: ${e.message}`);
-        }
-      } else {
-        // External process we can't kill — binary replaced, takes effect on next restart
-        log.warn(`[sidecar-ipc] :${port} owned by pid ${portPid} (different user) — binary updated, restart externally to apply`);
+      try {
+        const ch = await sidecar.start({ logPath: sidecarLogPath, force: true });
+        if (ch?.pid) restartedPid = ch.pid;
+      } catch (e) {
+        log.warn(`[sidecar-ipc] restart failed: ${e.message}`);
       }
 
       const reply = { ok: true, ...final, restartedPid };
