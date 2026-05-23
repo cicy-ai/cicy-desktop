@@ -557,15 +557,8 @@ electronApp.whenReady().then(() => {
   // entry; IPC powers the launcher window (src/backends/launcher.html).
   backendsIPC.register({ sidecarLogPath: path.join(os.homedir(), "logs", "cicy-code-sidecar.log") });
   require("./backends/sidecar-ipc").register({ sidecarLogPath: path.join(os.homedir(), "logs", "cicy-code-sidecar.log") });
-  // Build menu with explicit i18n labels for every item. Electron's role-based
-  // menus (`role: "fileMenu"` etc.) follow the system locale, which can diverge
-  // from our app locale — e.g. system in en-US but app in zh-CN would mix
-  // English macOS menu items with Chinese app strings. We use roles for the
-  // *behavior* (so accelerators + commands work natively) but always provide
-  // an explicit `label` from i18n.t() so the displayed text is consistent.
-  const isMac = process.platform === "darwin";
   const menuTemplate = [
-    ...(isMac ? [{ role: "appMenu" }] : []),
+    ...(process.platform === "darwin" ? [{ role: "appMenu" }] : []),
     {
       label: i18n.t("menu.backends"),
       submenu: [
@@ -581,53 +574,10 @@ electronApp.whenReady().then(() => {
         },
       ],
     },
-    {
-      label: i18n.t("menu.file"),
-      submenu: [
-        isMac
-          ? { label: i18n.t("menu.close"), accelerator: "CmdOrCtrl+W", role: "close" }
-          : { label: i18n.t("menu.quit"), accelerator: "CmdOrCtrl+Q", role: "quit" },
-      ],
-    },
-    {
-      label: i18n.t("menu.edit"),
-      submenu: [
-        { label: i18n.t("menu.undo"),      accelerator: "CmdOrCtrl+Z",       role: "undo" },
-        { label: i18n.t("menu.redo"),      accelerator: "Shift+CmdOrCtrl+Z", role: "redo" },
-        { type: "separator" },
-        { label: i18n.t("menu.cut"),       accelerator: "CmdOrCtrl+X",       role: "cut" },
-        { label: i18n.t("menu.copy"),      accelerator: "CmdOrCtrl+C",       role: "copy" },
-        { label: i18n.t("menu.paste"),     accelerator: "CmdOrCtrl+V",       role: "paste" },
-        { label: i18n.t("menu.selectAll"), accelerator: "CmdOrCtrl+A",       role: "selectAll" },
-      ],
-    },
-    {
-      label: i18n.t("menu.view"),
-      submenu: [
-        { label: i18n.t("menu.reload"),           accelerator: "CmdOrCtrl+R",       role: "reload" },
-        { label: i18n.t("menu.forceReload"),      accelerator: "Shift+CmdOrCtrl+R", role: "forceReload" },
-        { label: i18n.t("menu.toggleDevTools"),   accelerator: isMac ? "Alt+Cmd+I" : "Ctrl+Shift+I", role: "toggleDevTools" },
-        { type: "separator" },
-        { label: i18n.t("menu.actualSize"),       accelerator: "CmdOrCtrl+0",       role: "resetZoom" },
-        { label: i18n.t("menu.zoomIn"),           accelerator: "CmdOrCtrl+Plus",    role: "zoomIn" },
-        { label: i18n.t("menu.zoomOut"),          accelerator: "CmdOrCtrl+-",       role: "zoomOut" },
-        { type: "separator" },
-        { label: i18n.t("menu.toggleFullscreen"), accelerator: isMac ? "Ctrl+Cmd+F" : "F11", role: "togglefullscreen" },
-      ],
-    },
-    {
-      label: i18n.t("menu.window"),
-      submenu: [
-        { label: i18n.t("menu.minimize"), accelerator: "CmdOrCtrl+M", role: "minimize" },
-        { label: i18n.t("menu.zoom"),     role: "zoom" },
-        ...(isMac ? [
-          { type: "separator" },
-          { label: i18n.t("menu.front"),  role: "front" },
-        ] : [
-          { label: i18n.t("menu.close"),  accelerator: "CmdOrCtrl+W", role: "close" },
-        ]),
-      ],
-    },
+    { role: "fileMenu" },
+    { role: "editMenu" },
+    { role: "viewMenu" },
+    { role: "windowMenu" },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate));
 
