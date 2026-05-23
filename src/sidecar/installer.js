@@ -203,6 +203,12 @@ function downloadFile(url, destPath, { signal, onProgress, timeoutMs = 30000 } =
           out.close((closeErr) => {
             if (closeErr) return reject(closeErr);
             try {
+              // On macOS/Linux the old binary may still be running.
+              // rename() over a running binary replaces the dir entry but
+              // the running process keeps the old inode — safe. However
+              // some systems raise ETXTBSY. Unlinking the old file first
+              // ensures we always get a fresh inode.
+              try { fs.unlinkSync(destPath); } catch {}
               fs.renameSync(tmp, destPath);
               resolve({ destPath, total });
             } catch (e) { reject(e); }

@@ -71,8 +71,13 @@ function register({ sidecarLogPath } = {}) {
   ipcMain.handle("sidecar:install", async () => {
     try {
       const final = await installer.install({ onProgress: broadcast });
-      // Restart sidecar with the freshly-installed binary.
-      try { await sidecar.stop(); } catch (e) { log.warn(`[sidecar-ipc] stop failed: ${e.message}`); }
+      // Hard-kill any running cicy-code (the old binary may not be tracked
+      // by our child handle if it was started externally or survived a crash).
+      const { execFile } = require("child_process");
+      await new Promise(resolve => {
+        execFile("pkill", ["-9", "-f", "cicy-code"], () => resolve());
+      });
+      await new Promise(r => setTimeout(r, 600));
       let restartedPid = null;
       try {
         const ch = await sidecar.start({ logPath: sidecarLogPath });
