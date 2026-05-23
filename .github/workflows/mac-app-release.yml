@@ -132,6 +132,7 @@ jobs:
             --title "CiCy Desktop v${{ steps.meta.outputs.version }}" \
             --target "$GITHUB_SHA" \
             --generate-notes \
+            --latest \
             2>/dev/null || echo "release already exists, continuing"
 
       - name: Publish macOS assets (dmg + zip + latest-mac.yml)
