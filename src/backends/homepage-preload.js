@@ -94,6 +94,7 @@ contextBridge.exposeInMainWorld("cicy", {
   sidecar: {
     status:      ()  => logInvoke("sidecar:status"),
     wslStatus:   ()  => logInvoke("sidecar:wsl-status"),
+    installWsl:  ()  => logInvoke("sidecar:wsl-install"),
     checkLatest: ()  => logInvoke("sidecar:check-latest"),
     install:     ()  => logInvoke("sidecar:install"),
     cancel:      ()  => logInvoke("sidecar:cancel"),
