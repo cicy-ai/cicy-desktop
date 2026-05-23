@@ -544,6 +544,15 @@ function ensureWindowsDesktopLauncher() {
 }
 
 electronApp.whenReady().then(() => {
+  // Re-init i18n now that app is ready — getLocale() returns reliable values
+  // only after the ready event. The module-load init may have picked English
+  // on platforms (e.g. Windows) where LANG env is unset.
+  try {
+    const realLocale = electronApp.getLocale && electronApp.getLocale();
+    if (realLocale) i18n.i18next.changeLanguage(i18n.pickLocale(realLocale));
+    log.info(`[i18n] locale = ${i18n.i18next.language} (raw: ${realLocale})`);
+  } catch (e) { log.warn(`[i18n] ready-time relocale failed: ${e.message}`); }
+
   setupAppIcons();
   ensureDesktopLauncher();
   // Start bundled cicy-code daemon as a sidecar. Reuses an existing
@@ -557,23 +566,9 @@ electronApp.whenReady().then(() => {
   // entry; IPC powers the launcher window (src/backends/launcher.html).
   backendsIPC.register({ sidecarLogPath: path.join(os.homedir(), "logs", "cicy-code-sidecar.log") });
   require("./backends/sidecar-ipc").register({ sidecarLogPath: path.join(os.homedir(), "logs", "cicy-code-sidecar.log") });
+
   const menuTemplate = [
     ...(process.platform === "darwin" ? [{ role: "appMenu" }] : []),
-    {
-      label: i18n.t("menu.backends"),
-      submenu: [
-        { label: i18n.t("menu.showHomepage"), accelerator: "CmdOrCtrl+Shift+H", click: () => openHomepage() },
-        { type: "separator" },
-        {
-          label: i18n.t("menu.newLocalWindow"),
-          accelerator: "CmdOrCtrl+N",
-          click: async () => {
-            const local = backendsRegistry.get(backendsRegistry.LOCAL_ID);
-            if (local) await openWindowForBackend(local, { sidecarLogPath: path.join(os.homedir(), "logs", "cicy-code-sidecar.log") });
-          },
-        },
-      ],
-    },
     { role: "fileMenu" },
     { role: "editMenu" },
     { role: "viewMenu" },
