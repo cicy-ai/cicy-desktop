@@ -71,12 +71,127 @@ async function checkStatus() {
 
 // ---- install commands ----
 
-// Trigger `wsl --install -d Ubuntu`. Requires Administrator on Windows 10/11.
-// Returns the same shape as wslRun. UI should show the user the command to
-// run in an elevated terminal if this fails with permission error.
-async function installWsl() {
-  log.info("[wsl] running: wsl --install -d Ubuntu");
-  return wslRun(["--install", "-d", "Ubuntu"], { timeoutMs: 5 * 60 * 1000 });
+// Run a wsl command and stream stdout/stderr lines to onLine. Used by the
+// long-running --install flow so the UI can show real-time progress.
+function wslSpawn(args, { onLine, timeoutMs = 15 * 60 * 1000 } = {}) {
+  return new Promise((resolve) => {
+    const { spawn } = require("child_process");
+    const child = spawn("wsl", args, { windowsHide: true });
+    let stdout = "";
+    let stderr = "";
+    let timer = setTimeout(() => {
+      try { child.kill(); } catch {}
+    }, timeoutMs);
+
+    const handle = (buf, isErr) => {
+      // wsl.exe emits UTF-16LE on Windows. Strip null bytes for ASCII parsing.
+      const s = String(buf).replace(/\u0000/g, "");
+      if (isErr) stderr += s; else stdout += s;
+      for (const line of s.split(/\r?\n/)) {
+        if (line.trim() && onLine) {
+          try { onLine(line.trim()); } catch {}
+        }
+      }
+    };
+    child.stdout.on("data", b => handle(b, false));
+    child.stderr.on("data", b => handle(b, true));
+    child.on("error", (e) => { clearTimeout(timer); resolve({ ok: false, error: e.message, stdout, stderr }); });
+    child.on("exit", (code) => {
+      clearTimeout(timer);
+      resolve({ ok: code === 0, code, stdout: stdout.trim(), stderr: stderr.trim() });
+    });
+  });
+}
+
+// Install WSL2 kernel + Ubuntu distro in one shot.
+//
+// Strategy:
+//   1. CN or unknown network → try `wsl --install --web-download` first.
+//      This bypasses Microsoft Store (often slow/unreachable from CN) and
+//      pulls the distro tarball from GitHub instead, which is reachable
+//      via ghproxy mirrors at the network layer.
+//   2. Fall back to plain `wsl --install` (Microsoft Store path) if
+//      web-download fails — e.g. on older Windows 10 where the flag is
+//      not supported.
+//
+// `--no-launch` skips the interactive "create UNIX user" wizard so we can
+// install non-interactively. The user can launch the distro later if they
+// want to set up a non-default username; cicy-code itself just runs as the
+// distro's default user.
+//
+// Requires Administrator privileges. If the user isn't elevated, Windows
+// will pop a UAC prompt; if they decline, exit code is 740 / "elevation".
+async function installWsl({ network = "unknown", onProgress } = {}) {
+  const emit = (e) => { try { onProgress && onProgress(e); } catch {} };
+  const onLine = (line) => emit({ phase: "wsl-installing", message: line });
+
+  // CN-first: web-download avoids Microsoft Store and is faster in CN since
+  // GitHub-hosted distro tarballs are mirror-able.
+  const preferWebDownload = network === "cn" || network === "unknown";
+
+  if (preferWebDownload) {
+    log.info("[wsl] trying: wsl --install --web-download --no-launch -d Ubuntu");
+    emit({ phase: "wsl-installing", message: "正在通过网络下载安装 WSL2 + Ubuntu…" });
+    const r = await wslSpawn(["--install", "--web-download", "--no-launch", "-d", "Ubuntu"], { onLine });
+    if (r.ok) {
+      log.info("[wsl] installed via web-download");
+      return { ok: true, method: "web-download" };
+    }
+    log.warn(`[wsl] web-download failed (code=${r.code}): ${r.stderr}`);
+    // Fall through to Microsoft Store path
+  }
+
+  log.info("[wsl] trying: wsl --install --no-launch -d Ubuntu");
+  emit({ phase: "wsl-installing", message: "正在通过 Microsoft Store 安装 WSL2 + Ubuntu…" });
+  const r = await wslSpawn(["--install", "--no-launch", "-d", "Ubuntu"], { onLine });
+  if (r.ok) {
+    log.info("[wsl] installed via store");
+    return { ok: true, method: "store" };
+  }
+
+  log.warn(`[wsl] install failed (code=${r.code}): ${r.stderr}`);
+  return {
+    ok: false,
+    code: r.code,
+    error: r.stderr || `wsl --install exit ${r.code}`,
+    needElevation: r.code === 740 || /elevat|administrat|denied/i.test(r.stderr || ""),
+  };
+}
+
+// One-click Windows setup: WSL → Ubuntu → cicy-code in a single flow.
+// The caller passes a host-side staged binary; we install WSL if needed,
+// wait until the distro is ready, then copy in the binary.
+//
+// Each phase emits a progress event so the React UI can show a step indicator.
+async function setupAll({ network, hostStagePath, version, onProgress }) {
+  const emit = (e) => { try { onProgress && onProgress(e); } catch {} };
+
+  // Phase 1: Check WSL state
+  emit({ phase: "checking-wsl", message: "检查 WSL 状态…" });
+  let status = await checkStatus();
+
+  // Phase 2: Install WSL+Ubuntu if needed
+  if (!status.installed || !status.hasDistro) {
+    emit({ phase: "installing-wsl", message: "需要安装 WSL2 + Ubuntu (5-10 分钟，需管理员权限)…" });
+    const r = await installWsl({ network, onProgress });
+    if (!r.ok) {
+      const hint = r.needElevation
+        ? "需要管理员权限。请关闭 cicy-desktop，右键以管理员身份重新启动后再试。"
+        : (r.error || "安装失败");
+      throw new Error(`WSL 安装失败: ${hint}`);
+    }
+    // Re-check
+    status = await checkStatus();
+    if (!status.installed || !status.hasDistro) {
+      throw new Error("WSL 安装后仍然检测不到发行版，可能需要重启 Windows");
+    }
+  }
+
+  // Phase 3: Install cicy-code from staged file
+  emit({ phase: "installing-cicy-code", message: `安装 cicy-code v${version} 到 WSL (${status.distro})…` });
+  const r = await installFromHostFile({ hostPath: hostStagePath, version });
+  emit({ phase: "done", message: `已安装 v${r.version}`, version: r.version });
+  return r;
 }
 
 // ---- cicy-code lifecycle inside WSL ----
@@ -177,6 +292,7 @@ async function stop() {
 module.exports = {
   checkStatus,
   installWsl,
+  setupAll,
   userInstalled,
   userVersion,
   installFromHostFile,

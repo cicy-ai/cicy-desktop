@@ -465,16 +465,15 @@ async function install({ onProgress } = {}) {
     }
 
     // ── Windows: download on host (parallel race + progress + verify),
-    // then hand the file to WSL to copy into the distro. This shares all
-    // the network logic with macOS/Linux instead of curl-ing inside bash.
+    // then hand the file to WSL. setupAll() also handles WSL/Ubuntu install
+    // if needed, fully automatic with CN-aware mirrors. Network detection is
+    // already done; we pass it through so wsl.installWsl picks --web-download
+    // first when in CN (avoids slow Microsoft Store).
     if (process.platform === "win32") {
       const wsl = require("./wsl");
-      const status = await wsl.checkStatus();
-      if (!status.installed)  throw new Error("WSL 未安装。请在管理员 PowerShell 运行: wsl --install -d Ubuntu");
-      if (!status.hasDistro)  throw new Error("WSL 未配置发行版。请运行: wsl --install -d Ubuntu");
 
-      // Stage to userData/cicy-code/wsl-stage on the Windows side. Path is
-      // accessible from WSL via /mnt/c/... (wslpath translates).
+      // Stage to userData/cicy-code/wsl-stage. Path is accessible from WSL
+      // via /mnt/c/... (translated by wslpath in installFromHostFile).
       const stageDir = path.join(app.getPath("userData"), "cicy-code", "wsl-stage");
       const stagePath = path.join(stageDir, "cicy-code-staged");
 
@@ -490,8 +489,14 @@ async function install({ onProgress } = {}) {
         outerSignal: ac.signal,
       });
 
-      emit({ phase: "installing", message: `安装到 WSL (${status.distro})…`, version: check.latest, network, progress: 1 });
-      const result = await wsl.installFromHostFile({ hostPath: stagePath, version: check.latest });
+      // setupAll handles the rest: install WSL+Ubuntu if needed, then
+      // copy the staged binary into the distro. Each step streams progress.
+      const result = await wsl.setupAll({
+        network,
+        hostStagePath: stagePath,
+        version: check.latest,
+        onProgress: emit,
+      });
       const installedVersion = result.version || check.latest;
       if (installedVersion !== check.latest) {
         log.warn(`[installer] WSL binary reports v${installedVersion}, expected v${check.latest} — mirror likely cached stale content`);
@@ -504,7 +509,6 @@ async function install({ onProgress } = {}) {
         fs.writeFileSync(path.join(cacheDir, "wsl-version"), installedVersion, "utf8");
       } catch {}
 
-      // Cleanup stage file
       try { fs.unlinkSync(stagePath); } catch {}
 
       const final = { phase: "done", message: `已安装 v${installedVersion}`, version: installedVersion, network };

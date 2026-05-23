@@ -66,16 +66,16 @@ function register({ sidecarLogPath } = {}) {
     }
   });
 
-  // Windows-only: trigger `wsl --install -d Ubuntu`. Requires Administrator —
-  // if the user isn't elevated, Windows will pop a UAC prompt. The install
-  // can take 5+ min and may require a reboot. We surface the same status
-  // shape as wsl-status so the UI can poll until it becomes ready.
+  // Windows-only: trigger `wsl --install`. CN-aware: when network is CN
+  // we prefer --web-download (skips Microsoft Store, GitHub-mirror friendly).
+  // Requires Administrator — UAC may pop. Streams progress via sidecar:progress.
   ipcMain.handle("sidecar:wsl-install", async () => {
     if (process.platform !== "win32") return { ok: false, error: "not windows" };
     try {
       const wsl = require("../sidecar/wsl");
-      const r = await wsl.installWsl();
-      return { ok: r.ok, stdout: r.stdout, stderr: r.stderr };
+      const network = await require("../sidecar/net-detect").detect();
+      const r = await wsl.installWsl({ network, onProgress: broadcast });
+      return r;
     } catch (e) {
       return { ok: false, error: e.message };
     }
