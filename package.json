@@ -105,7 +105,8 @@
       "oneClick": true,
       "perMachine": false,
       "allowElevation": true
-    }
+    },
+    "electronVersion": "41.0.3"
   },
   "keywords": [
     "cicy",
