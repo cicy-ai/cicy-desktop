@@ -36,7 +36,7 @@ async function applyFeedUrl() {
 
 autoUpdater.logger = log;
 autoUpdater.autoDownload = true;
-autoUpdater.autoInstallOnAppQuit = true;
+autoUpdater.autoInstallOnAppQuit = false; // we call quitAndInstall() ourselves
 
 let _win = null;
 let _state = { status: "idle", progress: null, error: null, info: null };
@@ -63,7 +63,18 @@ function init(mainWin) {
   autoUpdater.on("update-not-available", (i) => broadcast({ status: "up-to-date", info: i }));
   autoUpdater.on("update-available",     (i) => broadcast({ status: "available", info: i }));
   autoUpdater.on("download-progress",    (p) => broadcast({ status: "downloading", progress: p }));
-  autoUpdater.on("update-downloaded",    (i) => broadcast({ status: "ready", info: i }));
+  autoUpdater.on("update-downloaded",    (i) => {
+    broadcast({ status: "ready", info: i });
+    // Auto-install: kill current process and launch the new version immediately.
+    // On Windows this is the NSIS installer running silently + re-launching.
+    // On macOS (unsigned) this will throw — caught and logged, no crash.
+    log.info("[app-updater] update downloaded, applying now");
+    setTimeout(() => {
+      try { autoUpdater.quitAndInstall(true, true); } catch (e) {
+        log.warn("[app-updater] quitAndInstall failed:", e.message);
+      }
+    }, 1500); // brief delay so the UI can show "ready" state
+  });
   autoUpdater.on("error", (err) => {
     log.warn("[app-updater] error:", err.message);
     broadcast({ status: "error", error: err.message });
