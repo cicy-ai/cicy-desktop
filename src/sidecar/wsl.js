@@ -197,12 +197,93 @@ async function installWsl({ network = "unknown", onProgress } = {}) {
   if (r.ok) return { ok: true, method: "store" };
 
   log.warn(`[wsl] install failed (code=${r.code}): ${r.stderr.slice(0, 200)}`);
+
+  // Last resort: download Ubuntu rootfs directly from cloud-images mirrors
+  // and `wsl --import`. Bypasses raw.githubusercontent.com (which Microsoft
+  // hits to fetch DistributionInfo.json) and Microsoft Store. This works
+  // even when both `wsl --install` paths fail (common in restricted networks
+  // like Myanmar/CN where raw.githubusercontent.com is unreliable).
+  const githubBlocked = /raw\.githubusercontent|0x800|connect|��|��Ӧ/.test(r.stderr || "");
+  if (githubBlocked) {
+    log.info("[wsl] falling back to direct rootfs import");
+    emit({ phase: "wsl-installing", message: "Direct GitHub blocked — falling back to rootfs import…" });
+    try {
+      const ir = await importUbuntuFromRootfs({ network, onProgress });
+      if (ir.ok) return { ok: true, method: "rootfs-import" };
+    } catch (e) {
+      log.warn(`[wsl] rootfs-import failed: ${e.message}`);
+    }
+  }
+
   return {
     ok: false,
     code: r.code,
     error: r.stderr || `wsl --install exit ${r.code}`,
     needElevation: r.code === 740 || /elevat|administrat|denied/i.test(r.stderr || ""),
   };
+}
+
+// Fallback when `wsl --install -d Ubuntu` cannot fetch its distro manifest
+// (raw.githubusercontent.com unreachable). We download an Ubuntu rootfs
+// directly from a reachable cloud-images mirror and `wsl --import` it.
+async function importUbuntuFromRootfs({ network = "unknown", onProgress } = {}) {
+  const emit = (e) => { try { onProgress && onProgress(e); } catch {} };
+  const baseMirrors = network === "cn"
+    ? [
+        "https://mirror.nju.edu.cn/ubuntu-cloud-images/wsl/jammy/current",
+        "https://mirrors.ustc.edu.cn/ubuntu-cloud-images/wsl/jammy/current",
+        "https://mirrors.tuna.tsinghua.edu.cn/ubuntu-cloud-images/wsl/jammy/current",
+        "https://cloud-images.ubuntu.com/wsl/jammy/current",
+      ]
+    : [
+        "https://cloud-images.ubuntu.com/wsl/jammy/current",
+        "https://mirror.nju.edu.cn/ubuntu-cloud-images/wsl/jammy/current",
+        "https://mirrors.ustc.edu.cn/ubuntu-cloud-images/wsl/jammy/current",
+      ];
+  const fileName = "ubuntu-jammy-wsl-amd64-ubuntu22.04lts.rootfs.tar.gz";
+
+  // Pick fastest reachable mirror via HEAD probe.
+  emit({ phase: "wsl-installing", message: "Picking fastest Ubuntu rootfs mirror…" });
+  const winTmp = process.env.TEMP || path.join(os.tmpdir());
+  const tarPath = path.join(winTmp, "ubuntu-jammy-wsl.tar.gz");
+  const dstDir = path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "WSL", "Ubuntu");
+  fs.mkdirSync(dstDir, { recursive: true });
+
+  let chosen = null;
+  for (const m of baseMirrors) {
+    const url = `${m}/${fileName}`;
+    const r = await new Promise((res) => {
+      execFile("powershell", [
+        "-NoProfile", "-Command",
+        `try { $sw = [Diagnostics.Stopwatch]::StartNew(); Invoke-WebRequest '${url}' -Method Head -UseBasicParsing -TimeoutSec 5 | Out-Null; $sw.Stop(); Write-Output $sw.ElapsedMilliseconds } catch { Write-Output -1 }`,
+      ], { timeout: 8_000 }, (_e, stdout) => res(parseInt(String(stdout).trim(), 10)));
+    });
+    if (r >= 0) { chosen = url; log.info(`[wsl] rootfs mirror chosen: ${url} (${r}ms HEAD)`); break; }
+  }
+  if (!chosen) return { ok: false, error: "no reachable rootfs mirror" };
+
+  emit({ phase: "wsl-installing", message: `Downloading Ubuntu rootfs (~350MB)…` });
+  const dl = await new Promise((res) => {
+    execFile("powershell", [
+      "-NoProfile", "-Command",
+      `$ProgressPreference='SilentlyContinue'; try { Invoke-WebRequest '${chosen}' -OutFile '${tarPath}' -UseBasicParsing -TimeoutSec 1800; Write-Output ((Get-Item '${tarPath}').Length) } catch { Write-Output ('ERR ' + $_.Exception.Message); exit 1 }`,
+    ], { timeout: 30 * 60_000, maxBuffer: 4 * 1024 * 1024 }, (e, stdout, stderr) => {
+      const out = String(stdout || "").trim();
+      if (e || out.startsWith("ERR")) return res({ ok: false, error: out || stderr });
+      res({ ok: true, size: parseInt(out, 10) || 0 });
+    });
+  });
+  if (!dl.ok) return dl;
+  if (dl.size < 50_000_000) return { ok: false, error: `rootfs too small: ${dl.size} bytes` };
+  log.info(`[wsl] downloaded ${dl.size} bytes to ${tarPath}`);
+
+  emit({ phase: "wsl-installing", message: "Importing as Ubuntu distro…" });
+  const imp = await wslRun(["--import", "Ubuntu", dstDir, tarPath, "--version", "2"], { timeoutMs: 5 * 60_000 });
+  if (!imp.ok) return { ok: false, error: imp.stderr || "wsl --import failed" };
+
+  // Cleanup tarball after successful import.
+  try { fs.unlinkSync(tarPath); } catch {}
+  return { ok: true, method: "rootfs-import" };
 }
 
 async function waitForDistroReady(distro, { timeoutMs = 90_000 } = {}) {
