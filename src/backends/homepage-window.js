@@ -48,6 +48,14 @@ function openHomepage() {
   } else {
     homepage.loadFile(pickHtml());
   }
+  // Pipe renderer console + load failures to main-process stdout so we can
+  // diagnose blank-page bugs from logs without opening DevTools.
+  homepage.webContents.on("console-message", (_e, level, msg, line, source) => {
+    if (level >= 1) console.log(`[homepage:console L${line}] ${msg}  (${source})`);
+  });
+  homepage.webContents.on("did-fail-load", (_e, code, desc, url) => {
+    console.error(`[homepage] did-fail-load ${code} ${desc} ${url}`);
+  });
   homepage.on("closed", () => { homepage = null; });
   return homepage;
 }
