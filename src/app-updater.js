@@ -6,6 +6,7 @@
 
 const { autoUpdater } = require("electron-updater");
 const { app } = require("electron");
+const path = require("path");
 const log = require("electron-log");
 
 autoUpdater.logger = log;
@@ -23,6 +24,19 @@ function broadcast(patch) {
 }
 
 function init(mainWin) {
+  if (!app.isPackaged) {
+    // Dev mode: point at the real GitHub repo so we can test the full
+    // check → download → ready flow without a packaged build.
+    // Install won't work (no ASAR to replace), but state transitions will.
+    const devCfg = path.join(__dirname, "..", "dev-app-update.yml");
+    if (!require("fs").existsSync(devCfg)) {
+      log.info("[app-updater] dev mode — no dev-app-update.yml, skipping");
+      return;
+    }
+    autoUpdater.updateConfigPath = devCfg;
+    autoUpdater.forceDevUpdateConfig = true;
+    log.info("[app-updater] dev mode — using dev-app-update.yml");
+  }
   _win = mainWin;
 
   autoUpdater.on("checking-for-update",    () => broadcast({ status: "checking" }));

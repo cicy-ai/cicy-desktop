@@ -29,11 +29,6 @@ jobs:
         run: npm install --save-dev --no-audit electron@41.0.2 electron-builder@26.7.0
 
       - name: Prepare Windows icon
-        # cicy-ai.com sometimes returns 522 (origin unreachable). Don't let
-        # an icon-asset hiccup kill the release — we fall back to the default
-        # Electron icon if anything in the fetch + convert chain fails. The
-        # build step downstream checks `build/logo.ico` and conditionally
-        # passes --config.win.icon.
         shell: powershell
         continue-on-error: true
         run: |
@@ -52,18 +47,37 @@ jobs:
             exit 0
           }
 
-      - name: Build Windows EXE
+      - name: Resolve release version
+        id: meta
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release (idempotent)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.meta.outputs.tag }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "CiCy Desktop v${{ steps.meta.outputs.version }}" \
+            --target "$GITHUB_SHA" \
+            --generate-notes \
+            2>/dev/null || echo "release already exists, continuing"
+
+      - name: Build Windows EXE and publish assets
+        # --publish always uploads .exe + latest.yml to the release created above.
         shell: powershell
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if (Test-Path dist) {
-            Remove-Item -Recurse -Force dist
-          }
+          if (Test-Path dist) { Remove-Item -Recurse -Force dist }
           if (Test-Path "build\logo.ico") {
             npm run build:win -- --config.win.icon=build/logo.ico --publish always
           } else {
-            Write-Host "::warning::build/logo.ico missing - using default Electron icon"
+            Write-Host "::warning::no icon, using default"
             npm run build:win -- --publish always
           }
 
@@ -73,20 +87,3 @@ jobs:
           name: cicy-desktop-windows-exe
           path: dist/*.exe
           if-no-files-found: error
-
-      - name: Resolve release version
-        id: release_meta
-        shell: bash
-        run: |
-          version="$(node -p "require('./package.json').version")"
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
-
-      - name: Publish release assets
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.release_meta.outputs.tag }}
-          target_commitish: ${{ github.sha }}
-          name: CiCy Desktop v${{ steps.release_meta.outputs.version }}
-          files: dist/*.exe
-          generate_release_notes: true
