@@ -123,19 +123,6 @@ function register({ sidecarLogPath } = {}) {
       return { ok: false, error: e.message };
     }
   });
-      try {
-        const ch = await sidecar.start({ logPath: sidecarLogPath });
-        if (ch && ch.pid) restartedPid = ch.pid;
-      } catch (e) {
-        log.warn(`[sidecar-ipc] restart failed: ${e.message}`);
-      }
-      const reply = { ok: true, ...final, restartedPid };
-      broadcast({ ...final, restartedPid });
-      return reply;
-    } catch (e) {
-      return { ok: false, error: e.message };
-    }
-  });
 
   ipcMain.handle("sidecar:cancel", () => {
     installer.cancel();
