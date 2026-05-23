@@ -10,8 +10,31 @@
   },
   "menu": {
     "backends": "Backends",
-    "showHomepage": "Show Homepage",
-    "newLocalWindow": "New Local Window"
+    "showHomepage": "ホームを表示",
+    "newLocalWindow": "新しいローカルウィンドウ",
+    "file": "ファイル",
+    "edit": "編集",
+    "view": "表示",
+    "window": "ウィンドウ",
+    "help": "ヘルプ",
+    "close": "閉じる",
+    "quit": "終了",
+    "undo": "元に戻す",
+    "redo": "やり直し",
+    "cut": "切り取り",
+    "copy": "コピー",
+    "paste": "貼り付け",
+    "selectAll": "すべて選択",
+    "reload": "再読み込み",
+    "forceReload": "強制再読み込み",
+    "toggleDevTools": "開発者ツール",
+    "actualSize": "実際のサイズ",
+    "zoomIn": "拡大",
+    "zoomOut": "縮小",
+    "toggleFullscreen": "全画面表示",
+    "minimize": "最小化",
+    "zoom": "ズーム",
+    "front": "すべてを手前に"
   },
   "dialog": {
     "openLink": {

@@ -10,8 +10,31 @@
   },
   "menu": {
     "backends": "Backends",
-    "showHomepage": "Show Homepage",
-    "newLocalWindow": "New Local Window"
+    "showHomepage": "Afficher l'accueil",
+    "newLocalWindow": "Nouvelle fenêtre locale",
+    "file": "Fichier",
+    "edit": "Édition",
+    "view": "Affichage",
+    "window": "Fenêtre",
+    "help": "Aide",
+    "close": "Fermer",
+    "quit": "Quitter",
+    "undo": "Annuler",
+    "redo": "Rétablir",
+    "cut": "Couper",
+    "copy": "Copier",
+    "paste": "Coller",
+    "selectAll": "Tout sélectionner",
+    "reload": "Recharger",
+    "forceReload": "Forcer le rechargement",
+    "toggleDevTools": "Outils de développement",
+    "actualSize": "Taille réelle",
+    "zoomIn": "Zoom avant",
+    "zoomOut": "Zoom arrière",
+    "toggleFullscreen": "Plein écran",
+    "minimize": "Réduire",
+    "zoom": "Zoom",
+    "front": "Tout au premier plan"
   },
   "dialog": {
     "openLink": {

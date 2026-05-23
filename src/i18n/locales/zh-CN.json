@@ -11,7 +11,30 @@
   "menu": {
     "backends": "Backends",
     "showHomepage": "显示主页",
-    "newLocalWindow": "新建本地窗口"
+    "newLocalWindow": "新建本地窗口",
+    "file": "文件",
+    "edit": "编辑",
+    "view": "视图",
+    "window": "窗口",
+    "help": "帮助",
+    "close": "关闭",
+    "quit": "退出",
+    "undo": "撤销",
+    "redo": "重做",
+    "cut": "剪切",
+    "copy": "复制",
+    "paste": "粘贴",
+    "selectAll": "全选",
+    "reload": "重新加载",
+    "forceReload": "强制重新加载",
+    "toggleDevTools": "开发者工具",
+    "actualSize": "实际大小",
+    "zoomIn": "放大",
+    "zoomOut": "缩小",
+    "toggleFullscreen": "全屏",
+    "minimize": "最小化",
+    "zoom": "缩放",
+    "front": "前置全部窗口"
   },
   "dialog": {
     "openLink": {

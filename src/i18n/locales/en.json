@@ -11,7 +11,30 @@
   "menu": {
     "backends": "Backends",
     "showHomepage": "Show Homepage",
-    "newLocalWindow": "New Local Window"
+    "newLocalWindow": "New Local Window",
+    "file": "File",
+    "edit": "Edit",
+    "view": "View",
+    "window": "Window",
+    "help": "Help",
+    "close": "Close",
+    "quit": "Quit",
+    "undo": "Undo",
+    "redo": "Redo",
+    "cut": "Cut",
+    "copy": "Copy",
+    "paste": "Paste",
+    "selectAll": "Select All",
+    "reload": "Reload",
+    "forceReload": "Force Reload",
+    "toggleDevTools": "Toggle Developer Tools",
+    "actualSize": "Actual Size",
+    "zoomIn": "Zoom In",
+    "zoomOut": "Zoom Out",
+    "toggleFullscreen": "Toggle Full Screen",
+    "minimize": "Minimize",
+    "zoom": "Zoom",
+    "front": "Bring All to Front"
   },
   "dialog": {
     "openLink": {
