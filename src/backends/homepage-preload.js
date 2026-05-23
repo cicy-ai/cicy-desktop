@@ -118,6 +118,7 @@ contextBridge.exposeInMainWorld("cicy", {
   // ------- new bridges (last rebuild!) -------
   app: {
     quit:          ()  => logInvoke("app:quit"),
+    getVersion:    ()  => logInvoke("app:get-version"),
     updateState:   ()  => logInvoke("app:update-state"),
     checkUpdate:   ()  => logInvoke("app:check-update"),
     installUpdate: ()  => logInvoke("app:install-update"),

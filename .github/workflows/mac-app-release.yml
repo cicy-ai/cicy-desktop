@@ -30,7 +30,16 @@ jobs:
       - name: Read cicy-code ref pin
         id: cicy_code_ref
         shell: bash
-        run: echo "ref=$(cat .cicy-code-ref | tr -d '[:space:]')" >> "$GITHUB_OUTPUT"
+        run: |
+          ref="$(cat .cicy-code-ref | tr -d '[:space:]')"
+          echo "ref=${ref}" >> "$GITHUB_OUTPUT"
+          # Enforce: ref must be a tagged release (vX.Y.Z), not a branch.
+          # This guarantees a deterministic build and lets the homepage
+          # display the same version it shipped with.
+          if ! [[ "$ref" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "::error::.cicy-code-ref must be a release tag (vX.Y.Z), got: $ref"
+            exit 1
+          fi
 
       - name: Checkout cicy-code as sibling
         uses: actions/checkout@v4

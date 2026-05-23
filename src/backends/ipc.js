@@ -164,6 +164,24 @@ function register(opts = {}) {
   ipcMain.handle("app:check-update",    async () => { await appUpdater.check(); return appUpdater.getState(); });
   ipcMain.handle("app:install-update",  () => { appUpdater.installNow(); return true; });
 
+  // Static version info: cicy-desktop's own version + the cicy-code tag
+  // we shipped with (`.cicy-code-ref` content from build time). Used by the
+  // homepage footer to show "CiCy Desktop vX.Y · cicy-code vA.B".
+  ipcMain.handle("app:get-version", () => {
+    let cicyCodeRef = "";
+    try {
+      const refPath = path.join(app.getAppPath(), ".cicy-code-ref");
+      cicyCodeRef = require("fs").readFileSync(refPath, "utf8").trim();
+    } catch {}
+    return {
+      desktop: app.getVersion(),
+      cicyCodeRef,                            // e.g. "v2.0.11" — what we *intended* to ship
+      electron: process.versions.electron,
+      node:     process.versions.node,
+      chrome:   process.versions.chrome,
+    };
+  });
+
   // --- clipboard ---
   ipcMain.handle("clipboard:write", (_e, text) => {
     clipboard.writeText(String(text || ""));
