@@ -71,14 +71,58 @@ function register({ sidecarLogPath } = {}) {
   ipcMain.handle("sidecar:install", async () => {
     try {
       const final = await installer.install({ onProgress: broadcast });
-      // Hard-kill any running cicy-code (the old binary may not be tracked
-      // by our child handle if it was started externally or survived a crash).
+
+      // ── Restart with new binary ──────────────────────────────────────────
+      // Strategy: kill the process holding :8008 by PID (lsof), not by name.
+      // This works if it's our process (same user). If the port belongs to an
+      // external user (e.g. 'cicy-code' on a shared mac), kill will fail with
+      // EPERM — in that case we leave it running; the new binary is already on
+      // disk and will be used next time the external process restarts.
       const { execFile } = require("child_process");
-      await new Promise(resolve => {
-        execFile("pkill", ["-9", "-f", "cicy-code"], () => resolve());
+      const port = 8008;
+
+      const portPid = await new Promise(resolve => {
+        execFile("lsof", ["-ti", `:${port}`], (err, out) => {
+          const pid = parseInt((out || "").trim().split("\n")[0], 10);
+          resolve(isNaN(pid) ? null : pid);
+        });
       });
-      await new Promise(r => setTimeout(r, 600));
+
+      let killed = false;
+      if (portPid) {
+        killed = await new Promise(resolve => {
+          process.kill(portPid, 0); // test if it exists
+          try {
+            process.kill(portPid, 9);
+            resolve(true);
+          } catch {
+            resolve(false); // EPERM — different user
+          }
+        });
+      }
+
       let restartedPid = null;
+      if (killed || !portPid) {
+        // Port should be free, wait briefly then start new binary
+        await new Promise(r => setTimeout(r, 800));
+        try {
+          const ch = await sidecar.start({ logPath: sidecarLogPath, force: true });
+          if (ch?.pid) restartedPid = ch.pid;
+        } catch (e) {
+          log.warn(`[sidecar-ipc] restart failed: ${e.message}`);
+        }
+      } else {
+        // External process we can't kill — binary replaced, takes effect on next restart
+        log.warn(`[sidecar-ipc] :${port} owned by pid ${portPid} (different user) — binary updated, restart externally to apply`);
+      }
+
+      const reply = { ok: true, ...final, restartedPid };
+      broadcast({ ...final, restartedPid });
+      return reply;
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
       try {
         const ch = await sidecar.start({ logPath: sidecarLogPath });
         if (ch && ch.pid) restartedPid = ch.pid;
