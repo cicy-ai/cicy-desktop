@@ -22,16 +22,9 @@ const http = require("http");
 const { app } = require("electron");
 const log = require("electron-log");
 const netDetect = require("./net-detect");
+const { buildUrlList } = require("./mirrors");
 
 const REPO = "cicy-ai/cicy-code";
-// CN mirrors that proxy github.com/.../releases/download/... URLs.
-// Tried in order; first that responds wins. Direct github.com is tried first
-// since it sometimes works in CN networks too.
-const CN_MIRRORS = [
-  "https://gh.llkk.cc/",
-  "https://ghproxy.net/",
-  "https://gh-proxy.com/",
-];
 
 // Arch aliases — release artifacts often use Go's "amd64" while Node's
 // process.arch reports "x64".
@@ -228,8 +221,7 @@ const MANIFEST_DIRECT = `https://github.com/${MANIFEST_PATH}`;
 async function fetchManifest() {
   const network = await netDetect.detect();
   const urls = network === "cn"
-    ? [...CN_MIRRORS.map(m => m + MANIFEST_DIRECT), MANIFEST_DIRECT]
-    : [MANIFEST_DIRECT, ...CN_MIRRORS.map(m => m + MANIFEST_DIRECT)];
+    buildUrlList(MANIFEST_DIRECT, network);
   return new Promise((resolve, reject) => {
     let done = 0;
     let lastErr;
@@ -288,8 +280,7 @@ async function fetchLatestReleaseLegacy() {
   for (const version of versions.slice(0, 6)) {
     const directUrl = `https://github.com/${REPO}/releases/download/v${version}/cicy-code-${plat}-${archAlias}`;
     const probeOrder = network === "cn"
-      ? [...CN_MIRRORS.map(m => m + directUrl), directUrl]
-      : [directUrl, ...CN_MIRRORS.map(m => m + directUrl)];
+      buildUrlList(directUrl, network);
     log.info(`[installer] probing v${version} (legacy, network=${network})`);
     const found = await new Promise(resolve => {
       let done = 0;
@@ -378,7 +369,7 @@ async function install({ onProgress } = {}) {
         version: check.latest,
         assetUrl: check.assetUrl,
         network,
-        mirrors: CN_MIRRORS,
+        mirrors: require('./mirrors').MIRRORS.map(m => m.url),
         onProgress: emit,
       });
       // Mirror the version into a Windows-side cache so userVersion() can
@@ -398,8 +389,7 @@ async function install({ onProgress } = {}) {
     // CN: try mirrors before direct (direct often slow/blocked). Global:
     // direct first since mirrors add an unnecessary hop.
     const order = (network === "cn")
-      ? [...CN_MIRRORS.map(m => m + check.assetUrl), check.assetUrl]
-      : [check.assetUrl, ...CN_MIRRORS.map(m => m + check.assetUrl)];
+      buildUrlList(check.assetUrl, network);
 
     const dest = userBinary();
     if (!dest) throw new Error(`unsupported platform ${process.platform}-${process.arch}`);
@@ -407,7 +397,7 @@ async function install({ onProgress } = {}) {
     let lastErr;
     let downloaded = false;
     for (const url of order) {
-      const isMirror = CN_MIRRORS.some(m => url.startsWith(m));
+      const { MIRRORS } = require('./mirrors'); const isMirror = MIRRORS.some(m => url.startsWith(m.url));
       try {
         emit({ phase: "downloading", message: `下载中 (${isMirror ? "镜像" : "直连"})…`, version: check.latest, network, progress: 0 });
         await downloadFile(url, dest, {
