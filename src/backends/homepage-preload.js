@@ -116,7 +116,15 @@ contextBridge.exposeInMainWorld("cicy", {
 
   // ------- new bridges (last rebuild!) -------
   app: {
-    quit: () => logInvoke("app:quit"),
+    quit:          ()  => logInvoke("app:quit"),
+    updateState:   ()  => logInvoke("app:update-state"),
+    checkUpdate:   ()  => logInvoke("app:check-update"),
+    installUpdate: ()  => logInvoke("app:install-update"),
+    onUpdateState: (cb) => {
+      const handler = (_e, state) => { try { cb(state); } catch {} };
+      ipcRenderer.on("app:update-state", handler);
+      return () => ipcRenderer.removeListener("app:update-state", handler);
+    },
   },
   shell: {
     openExternal: (url) => logInvoke("shell:open-external", url),

@@ -94,14 +94,15 @@ jobs:
         env:
           CICY_CODE_DIST_DIR: ${{ github.workspace }}/cicy-code/dist
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           rm -rf dist
           if [ -f build/logo.icns ]; then
-            npm run build:mac -- --config.mac.icon=build/logo.icns
+            npm run build:mac -- --config.mac.icon=build/logo.icns --publish always
           else
             echo "::warning::build/logo.icns missing — using default Electron icon"
-            npm run build:mac
+            npm run build:mac -- --publish always
           fi
 
       - name: Upload macOS artifacts

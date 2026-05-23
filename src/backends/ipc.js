@@ -157,6 +157,12 @@ function register(opts = {}) {
   });
   ipcMain.handle("updates:open-release-page", (_e, url) => updater.openReleaseInBrowser(url));
 
+  // App-level (electron-updater) — check status, trigger install
+  const appUpdater = require("../app-updater");
+  ipcMain.handle("app:update-state",    () => appUpdater.getState());
+  ipcMain.handle("app:check-update",    async () => { await appUpdater.check(); return appUpdater.getState(); });
+  ipcMain.handle("app:install-update",  () => { appUpdater.installNow(); return true; });
+
   // --- clipboard ---
   ipcMain.handle("clipboard:write", (_e, text) => {
     clipboard.writeText(String(text || ""));

@@ -1,6 +1,6 @@
 {
   "name": "cicy-desktop",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "CiCy - AI-powered operating system browser",
   "main": "src/main.js",
   "bin": {
@@ -93,6 +93,17 @@
           "to": "cicy-code/cicy-code"
         }
       ]
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "cicy-ai",
+      "repo": "cicy-desktop"
+    },
+    "nsis": {
+      "allowToChangeInstallationDirectory": false,
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": true
     }
   },
   "keywords": [
@@ -117,7 +128,8 @@
     "serve-index": "^1.9.2",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
-    "zod": "3.25"
+    "zod": "3.25",
+    "electron-updater": "6.6.2"
   },
   "devDependencies": {
     "@babel/core": "^7.29.0",

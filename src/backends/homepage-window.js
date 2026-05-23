@@ -56,4 +56,4 @@ function isOpen() {
   return !!(homepage && !homepage.isDestroyed());
 }
 
-module.exports = { openHomepage, isOpen };
+module.exports = { openHomepage, isOpen, getHomepageWindow: () => homepage };

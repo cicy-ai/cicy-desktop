@@ -10,6 +10,7 @@ const backendsRegistry = require("./backends/registry");
 const { openWindowForBackend } = require("./backends/window-manager");
 const { Menu } = require("electron");
 const { setupAppIcons } = require("./tray");
+const appUpdater = require("./app-updater");
 
 // 🎯 添加右键上下文菜单
 contextMenu({
@@ -586,6 +587,10 @@ electronApp.whenReady().then(() => {
   if (!START_URL) {
     openHomepage();
   }
+  // Start background update checks (Windows: silent download+install on quit;
+  // macOS: unsigned — will error silently and fall back to manual download).
+  const hw = require("./backends/homepage-window");
+  appUpdater.init(hw.getHomepageWindow && hw.getHomepageWindow());
 
   // 为 webview partition 设置代理
   if (config.proxy) {
