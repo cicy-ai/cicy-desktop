@@ -84,6 +84,7 @@ contextBridge.exposeInMainWorld("cicy", {
     list:           ()      => logInvoke("backends:list"),
     add:            (input) => logInvoke("backends:add", input),
     remove:         (id)    => logInvoke("backends:remove", id),
+    update:         (input) => logInvoke("backends:update", input),
     probe:          (input) => logInvoke("backends:probe", input),
     open:           (id)    => logInvoke("backends:open", id),
     health:         (id)    => logInvoke("backends:health", id),

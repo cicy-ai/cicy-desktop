@@ -97,6 +97,27 @@ function remove(id) {
   return true;
 }
 
+// Update a cloud backend's name/url/token. Returns the updated entry or null.
+// `local` is read-only — refuse silently. Token "" or null clears it.
+function update({ id, name, url, token }) {
+  if (!id || id === LOCAL_ID) return null;
+  const data = load();
+  const i = data.backends.findIndex(b => b.id === id);
+  if (i < 0) return null;
+  const prev = data.backends[i];
+  const next = {
+    ...prev,
+    name: name !== undefined ? (String(name).trim() || prev.name) : prev.name,
+    url:  url  !== undefined ? String(url).trim() : prev.url,
+    token: token === "" || token === null ? undefined : (token !== undefined ? String(token).trim() : prev.token),
+    updatedAt: new Date().toISOString(),
+  };
+  data.backends[i] = next;
+  save(data);
+  invalidateTrustCache();
+  return next;
+}
+
 function get(id) {
   const data = load();
   ensureLocal(data);
@@ -111,4 +132,4 @@ function markUsed(id) {
   save(data);
 }
 
-module.exports = { LOCAL_ID, list, add, remove, get, markUsed, storePath };
+module.exports = { LOCAL_ID, list, add, remove, update, get, markUsed, storePath };

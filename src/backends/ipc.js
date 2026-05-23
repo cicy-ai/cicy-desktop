@@ -83,6 +83,7 @@ function register(opts = {}) {
   });
   ipcMain.handle("backends:add", (_e, input) => registry.add(input || {}));
   ipcMain.handle("backends:remove", (_e, id) => registry.remove(id));
+  ipcMain.handle("backends:update", (_e, input) => registry.update(input || {}));
   ipcMain.handle("backends:probe", (_e, input) => probeArbitrary(input || {}));
   ipcMain.handle("backends:open", async (_e, id) => {
     try {
