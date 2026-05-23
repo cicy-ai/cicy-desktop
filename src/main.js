@@ -543,6 +543,110 @@ function ensureWindowsDesktopLauncher() {
   log.info(`[Launcher] Created desktop launcher at ${WINDOWS_LAUNCHER_TARGET}`);
 }
 
+// ── Open at login ─────────────────────────────────────────────────────
+// Register cicy-desktop to auto-start when the user signs in. Critical for
+// Windows because cicy-code lives inside WSL — the daemon doesn't survive
+// a Windows reboot, so we need cicy-desktop running to (a) trigger WSL boot
+// and (b) start cicy-code via wsl.start().
+//
+// Honors `prefs.openAtLogin` if present; defaults to true on first run.
+function ensureAutoLaunch() {
+  try {
+    if (!electronApp.isPackaged) return; // dev mode: don't touch login items
+    const prefs = readPrefs();
+    const want = prefs.openAtLogin !== false; // default true
+    if (process.platform === "darwin" || process.platform === "win32") {
+      const cur = electronApp.getLoginItemSettings();
+      if (cur.openAtLogin !== want) {
+        electronApp.setLoginItemSettings({
+          openAtLogin: want,
+          // Windows: pass --hidden so the app starts to the tray, not foreground.
+          args: process.platform === "win32" ? ["--hidden"] : undefined,
+        });
+        log.info(`[autostart] openAtLogin → ${want}`);
+      }
+    } else if (process.platform === "linux") {
+      ensureLinuxAutostart(want);
+    }
+  } catch (e) {
+    log.warn(`[autostart] ensureAutoLaunch failed: ${e.message}`);
+  }
+}
+
+function readPrefs() {
+  try {
+    const p = path.join(electronApp.getPath("userData"), "prefs.json");
+    if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, "utf8"));
+  } catch {}
+  return {};
+}
+
+function ensureLinuxAutostart(want) {
+  const dir = path.join(os.homedir(), ".config", "autostart");
+  const file = path.join(dir, "cicy-desktop.desktop");
+  if (!want) {
+    try { fs.unlinkSync(file); } catch {}
+    return;
+  }
+  fs.mkdirSync(dir, { recursive: true });
+  if (fs.existsSync(file)) return;
+  const exec = process.execPath;
+  fs.writeFileSync(file, `[Desktop Entry]
+Type=Application
+Name=CiCy Desktop
+Exec=${exec} --hidden
+X-GNOME-Autostart-enabled=true
+`, "utf8");
+  log.info(`[autostart] wrote ${file}`);
+}
+
+// ── Sidecar health watchdog ───────────────────────────────────────────
+// Periodically probe the cicy-code daemon at :8008. If it stops responding
+// for two consecutive checks, attempt to restart it. Handles:
+//   - Windows wakes from sleep: WSL2 distro stays up but cicy-code may have
+//     been killed by the Linux kernel.
+//   - WSL2 manual `wsl --shutdown`.
+//   - Daemon crash.
+//
+// On macOS/Linux the watchdog respawns the bundled binary; on Windows it
+// re-runs wsl.start() which re-launches cicy-code inside WSL.
+let _sidecarWatchdogTimer = null;
+function startSidecarWatchdog({ intervalMs = 30_000 } = {}) {
+  if (_sidecarWatchdogTimer) return;
+  let consecutiveFailures = 0;
+  let restartInFlight = false;
+
+  const tick = async () => {
+    try {
+      const ok = await cicyCodeSidecar.probeExisting();
+      if (ok) { consecutiveFailures = 0; return; }
+      consecutiveFailures++;
+      if (consecutiveFailures < 2) return;          // tolerate one transient failure
+      if (restartInFlight) return;
+      restartInFlight = true;
+      log.warn(`[watchdog] sidecar unreachable for ${consecutiveFailures} ticks — restarting`);
+      try {
+        await cicyCodeSidecar.start({
+          logPath: path.join(os.homedir(), "logs", "cicy-code-sidecar.log"),
+          force: true,
+        });
+        consecutiveFailures = 0;
+        log.info(`[watchdog] sidecar restarted`);
+      } catch (e) {
+        log.warn(`[watchdog] restart failed: ${e.message}`);
+      } finally {
+        restartInFlight = false;
+      }
+    } catch (e) {
+      log.warn(`[watchdog] tick error: ${e.message}`);
+    }
+  };
+
+  // First tick after a short warm-up so initial cicy-code start has time.
+  setTimeout(tick, 15_000);
+  _sidecarWatchdogTimer = setInterval(tick, intervalMs);
+}
+
 electronApp.whenReady().then(() => {
   // Re-init i18n now that app is ready — getLocale() returns reliable values
   // only after the ready event. The module-load init may have picked English
@@ -555,12 +659,14 @@ electronApp.whenReady().then(() => {
 
   setupAppIcons();
   ensureDesktopLauncher();
+  ensureAutoLaunch();
   // Start bundled cicy-code daemon as a sidecar. Reuses an existing
   // instance on :8008 if one is already running; no-op on Windows.
   cicyCodeSidecar
     .start({ logPath: path.join(os.homedir(), "logs", "cicy-code-sidecar.log") })
     .then((c) => { if (c) log.info(`[Sidecar] cicy-code spawned pid=${c.pid}`); })
     .catch((e) => log.warn(`[Sidecar] cicy-code start failed: ${e.message}`));
+  startSidecarWatchdog();
 
   // Backend launcher: app menu + IPC handlers. Menu adds a Backends top-level
   // entry; IPC powers the launcher window (src/backends/launcher.html).
@@ -579,9 +685,12 @@ electronApp.whenReady().then(() => {
   // No START_URL (typical .app double-click): land on the homepage. With
   // START_URL set (bin/cicy-desktop --url …) the existing createWindow path
   // below still fires, preserving the legacy power-user entry point.
-  if (!START_URL) {
+  // Skip homepage open when launched at login with --hidden (auto-start).
+  const hidden = process.argv.includes("--hidden");
+  if (!START_URL && !hidden) {
     openHomepage();
   }
+  if (hidden) log.info("[startup] --hidden: launched at login, staying in tray");
   // Start background update checks (Windows: silent download+install on quit;
   // macOS: unsigned — will error silently and fall back to manual download).
   const hw = require("./backends/homepage-window");

@@ -384,6 +384,75 @@ async function userVersion() {
   } catch { return ""; }
 }
 
+// Ensure /etc/wsl.conf inside the distro has a [boot] command that
+// auto-launches cicy-code whenever the distro is started. Combined with
+// %USERPROFILE%/.wslconfig (vmIdleTimeout=-1) this means:
+//   - Windows reboot → user signs in → cicy-desktop auto-launches (--hidden)
+//     → wsl.start() probes WSL → triggers distro boot → boot.command starts
+//     cicy-code under the default user → :8008 is up.
+//   - cicy-desktop killed/crashed: distro stays alive (vmIdleTimeout=-1) and
+//     cicy-code with it.
+//   - User runs `wsl --shutdown`: next time anything touches WSL, distro
+//     boots and boot.command starts cicy-code automatically.
+async function ensureDistroBootCommand(distro) {
+  if (!distro) return false;
+  // Probe default user — boot.command runs as root, we need to su to the
+  // distro's default user (the one cicy-code was installed under).
+  const u = await wslBash(`grep -m1 '^default=' /etc/wsl.conf 2>/dev/null | cut -d= -f2 | tr -d ' \\t' || echo ""`, { distro, timeoutMs: 5_000 });
+  let user = (u.ok ? u.stdout : "").trim();
+  if (!user) {
+    // Fallback: user with uid 1000.
+    const fb = await wslBash(`getent passwd 1000 | cut -d: -f1`, { distro, timeoutMs: 5_000 });
+    user = (fb.ok ? fb.stdout : "").trim();
+  }
+  if (!user) {
+    log.warn(`[wsl] no default user found in ${distro}; skipping boot.command setup`);
+    return false;
+  }
+
+  const bootCmd = `su - ${user} -c 'pgrep -f cicy-code >/dev/null 2>&1 || setsid -f $HOME/.local/bin/cicy-code </dev/null >>$HOME/.cicy-code.log 2>&1'`;
+  // Idempotent rewrite: if [boot] command already matches, skip.
+  const r = await wslBash(`set -e
+TARGET='${bootCmd.replace(/'/g, `'\\''`)}'
+if [ -f /etc/wsl.conf ] && grep -qF "$TARGET" /etc/wsl.conf 2>/dev/null; then
+  echo unchanged
+  exit 0
+fi
+write() {
+  if [ -w /etc/wsl.conf ] || [ ! -e /etc/wsl.conf ]; then "$@" /etc/wsl.conf; return $?; fi
+  if command -v sudo >/dev/null 2>&1; then sudo "$@" /etc/wsl.conf; return $?; fi
+  return 1
+}
+TMP=$(mktemp)
+if [ -f /etc/wsl.conf ]; then cp /etc/wsl.conf "$TMP"; fi
+# Replace any existing [boot] section, else append.
+python3 - "$TMP" "$TARGET" <<'PYEOF'
+import re, sys
+path, cmd = sys.argv[1], sys.argv[2]
+try:
+    with open(path) as f: content = f.read()
+except FileNotFoundError:
+    content = ""
+new_section = "[boot]\\nsystemd=false\\ncommand=" + cmd + "\\n"
+if re.search(r'^\\[boot\\]', content, re.M):
+    content = re.sub(r'^\\[boot\\][^\\[]*', new_section, content, flags=re.M)
+else:
+    if content and not content.endswith("\\n"): content += "\\n"
+    content += "\\n" + new_section
+with open(path, "w") as f: f.write(content)
+PYEOF
+if [ -w /etc/wsl.conf ] || [ ! -e /etc/wsl.conf ]; then
+  cp "$TMP" /etc/wsl.conf
+elif command -v sudo >/dev/null 2>&1; then
+  sudo cp "$TMP" /etc/wsl.conf
+fi
+rm -f "$TMP"
+echo updated`, { distro, timeoutMs: 15_000 });
+  if (!r.ok) { log.warn(`[wsl] ensureDistroBootCommand failed: ${r.stderr}`); return false; }
+  log.info(`[wsl] /etc/wsl.conf [boot] command: ${r.stdout.trim()} (user=${user})`);
+  return true;
+}
+
 async function installFromHostFile({ hostPath, version }) {
   if (!hostPath || !version) throw new Error("installFromHostFile requires hostPath + version");
   const distro = await resolveUsableDistro();
@@ -406,16 +475,22 @@ echo "INSTALLED:$ACT"`, { distro, timeoutMs: 60_000 });
   const m = r.stdout.match(/INSTALLED:([0-9.]+)/);
   const actual = m ? m[1] : version;
   log.info(`[wsl] installed cicy-code v${actual} into ${distro}`);
+  // After install, also wire up boot.command so cicy-code auto-starts on
+  // future distro boots (Windows reboot, wsl --shutdown, etc.)
+  await ensureDistroBootCommand(distro);
   return { ok: true, version: actual };
 }
 
-// Start cicy-code as a detached background process inside WSL. Use
-// `setsid nohup ... </dev/null >log 2>&1 &` so the daemon survives the
-// `wsl -- bash` parent exiting (otherwise WSL2 vmIdleTimeout would kill it
-// 60s after our wsl shellout returns; .wslconfig handles that for us).
+// Start cicy-code as a detached background process inside WSL. Tested
+// pattern: `nohup ... </dev/null >>LOG 2>&1 & disown`. setsid was found to
+// make the process exit silently in some Ubuntu rootfs builds, so we use
+// plain nohup + disown which works across distros.
 async function start({ port = PORT_DEFAULT, force = false } = {}) {
   ensureWslConfig();
   const distro = await resolveUsableDistro();
+  // Make sure boot.command is in place — best-effort.
+  ensureDistroBootCommand(distro).catch(() => {});
+
   const guard = force
     ? "pkill -9 -f cicy-code 2>/dev/null || true; sleep 1"
     : `if pgrep -f cicy-code >/dev/null 2>&1; then echo "already running"; exit 0; fi`;
@@ -423,7 +498,8 @@ async function start({ port = PORT_DEFAULT, force = false } = {}) {
 LOG="$HOME/.cicy-code.log"
 [ -x "${CICY_BIN}" ] || { echo "binary missing" >&2; exit 1; }
 ${guard}
-setsid nohup "${CICY_BIN}" </dev/null >"$LOG" 2>&1 &
+cd "$HOME"
+setsid -f "${CICY_BIN}" </dev/null >>"$LOG" 2>&1
 sleep 1
 pgrep -f cicy-code | head -1`, { distro, timeoutMs: 10_000 });
   if (!r.ok) throw new Error(r.stderr || "wsl start failed");
@@ -500,4 +576,5 @@ module.exports = {
   stop,
   unregisterDistro,
   ensureWslConfig,
+  ensureDistroBootCommand,
 };
