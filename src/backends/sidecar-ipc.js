@@ -83,8 +83,12 @@ function register({ sidecarLogPath } = {}) {
       // lsof → get PID → attempt SIGKILL. If it succeeds we own it and can
       // start fresh. If it throws EPERM the daemon is externally managed;
       // the new binary will be used on its next restart.
+      // Find the PID *listening* on :8008 (not clients connecting to it).
+      // Without -sTCP:LISTEN, lsof also returns processes that have open
+      // connections TO port 8008 — including cicy-desktop's own health
+      // probe connections — which would cause us to kill ourselves.
       const portPid = await new Promise(resolve => {
-        execFile("lsof", ["-ti", `:${port}`], (_, out) => {
+        execFile("lsof", ["-ti", `tcp:${port}`, "-sTCP:LISTEN"], (_, out) => {
           const pid = parseInt((out || "").trim().split("\n")[0], 10);
           resolve(isNaN(pid) ? null : pid);
         });

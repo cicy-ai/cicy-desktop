@@ -114,7 +114,7 @@ function register(opts = {}) {
           execFile("taskkill", ["/F", "/IM", "cicy-code.exe"], () => resolve(true));
           return;
         }
-        execFile("lsof", ["-ti", `:${port}`], (_, out) => {
+        execFile("lsof", ["-ti", `tcp:${port}`, "-sTCP:LISTEN"], (_, out) => {
           const pid = parseInt((out || "").trim().split("\n")[0], 10);
           if (!pid) return resolve(false);
           try { process.kill(pid, 9); resolve(true); } catch { resolve(false); }
