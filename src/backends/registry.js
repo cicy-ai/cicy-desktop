@@ -41,11 +41,14 @@ function ensureLocal(data) {
   const prev = i >= 0 ? data.backends[i] : null;
   const entry = {
     id: LOCAL_ID,
-    name: "Local (bundled)",
+    // Preserve user-edited name across reloads. Default to "Local (bundled)"
+    // for first-run / never-edited installs.
+    name: prev?.name || "Local (bundled)",
     kind: "local",
     url: "",
     addedAt: prev?.addedAt || new Date().toISOString(),
     lastUsedAt: prev?.lastUsedAt,
+    updatedAt: prev?.updatedAt,
   };
   if (i >= 0) {
     data.backends[i] = entry;
@@ -97,19 +100,22 @@ function remove(id) {
   return true;
 }
 
-// Update a cloud backend's name/url/token. Returns the updated entry or null.
-// `local` is read-only — refuse silently. Token "" or null clears it.
+// Update a backend's metadata. For cloud backends: name/url/token are all
+// editable. For local: only name is editable — URL and token are managed
+// internally (window-manager.buildLocalUrl reads token live from global.json).
 function update({ id, name, url, token }) {
-  if (!id || id === LOCAL_ID) return null;
+  if (!id) return null;
   const data = load();
   const i = data.backends.findIndex(b => b.id === id);
   if (i < 0) return null;
   const prev = data.backends[i];
+  const isLocal = id === LOCAL_ID;
   const next = {
     ...prev,
     name: name !== undefined ? (String(name).trim() || prev.name) : prev.name,
-    url:  url  !== undefined ? String(url).trim() : prev.url,
-    token: token === "" || token === null ? undefined : (token !== undefined ? String(token).trim() : prev.token),
+    // Local: ignore url/token writes. Cloud: accept them.
+    url:   isLocal ? prev.url   : (url   !== undefined ? String(url).trim() : prev.url),
+    token: isLocal ? prev.token : (token === "" || token === null ? undefined : (token !== undefined ? String(token).trim() : prev.token)),
     updatedAt: new Date().toISOString(),
   };
   data.backends[i] = next;
