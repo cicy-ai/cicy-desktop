@@ -365,6 +365,23 @@ async function install({ onProgress } = {}) {
     }
   };
 
+  // Throttled progress emitter — max 1 update per 80ms to prevent
+  // rapid parallel-download events from causing UI flicker.
+  let pendingProg = null;
+  let progTimer = null;
+  const emitProgress = (event) => {
+    pendingProg = event;
+    if (!progTimer) {
+      progTimer = setTimeout(() => {
+        progTimer = null;
+        if (pendingProg) {
+          emit(pendingProg);
+          pendingProg = null;
+        }
+      }, 80);
+    }
+  };
+
   try {
     emit({ phase: "detecting", message: "检测网络…" });
     const network = await netDetect.detect();
@@ -452,7 +469,7 @@ async function install({ onProgress } = {}) {
           onProgress: ({ received, total }) => {
             if (settled) return;
             const pct = total ? received / total : null;
-            emit({ phase: "downloading", message: `下载中 (${isMirror ? "镜像" : "直连"})`, progress: pct, version: check.latest, network, received, total });
+            emitProgress({ phase: "downloading", message: `下载中 (${isMirror ? "镜像" : "直连"})`, progress: pct, version: check.latest, network, received, total });
           },
         }).then(({ destPath }) => {
           if (settled) { try { fs.unlinkSync(destPath); } catch {} return; }
