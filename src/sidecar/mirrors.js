@@ -9,7 +9,9 @@
 // All current mirrors are prepend-style. Add domain-style entries as needed.
 
 const MIRRORS = [
-  { url: "https://gh.llkk.cc/",      type: "prepend" },
+  // gh.llkk.cc was removed — confirmed unreachable from APAC (Myanmar tested);
+  // its TCP connect times out, slowing the parallel race when other mirrors
+  // are healthy. Re-add only after re-validating reachability.
   { url: "https://ghproxy.net/",     type: "prepend" },
   { url: "https://gh-proxy.com/",    type: "prepend" },
   // { url: "hub.gitmirror.com",     type: "domain"  },  // example domain-replace

@@ -249,7 +249,23 @@ async function setupAll({ network, hostStagePath, version, onProgress }) {
     }
   }
 
-  // Phase 3: Install cicy-code from staged file
+  // Phase 3: Make sure apt mirror is reachable BEFORE installing cicy-code.
+  // cicy-code's setup.go runs `apt install` for missing deps (unzip/jq/node)
+  // on first start — if the distro's preconfigured mirror is unreachable
+  // (e.g. tuna outside CN), the daemon hangs forever waiting on apt.
+  emit({ phase: "configuring-apt", message: "配置 apt 镜像…" });
+  try {
+    const aptResult = await ensureAptSourcesReachable({ network });
+    if (aptResult.ok) {
+      log.info(`[wsl] apt mirror: ${aptResult.mirror}${aptResult.changed ? " (rewritten)" : ""}`);
+    } else {
+      log.warn(`[wsl] apt mirror probe failed: ${aptResult.error} — install may stall`);
+    }
+  } catch (e) {
+    log.warn(`[wsl] ensureAptSourcesReachable threw: ${e.message}`);
+  }
+
+  // Phase 4: Install cicy-code from staged file
   emit({ phase: "installing-cicy-code", message: `安装 cicy-code v${version} 到 WSL (${status.usableDistro})…` });
   const r = await installFromHostFile({ hostPath: hostStagePath, version });
   emit({ phase: "done", message: `已安装 v${r.version}`, version: r.version });
@@ -293,6 +309,80 @@ async function userInstalled() {
     const r = await userBash(`test -x ${CICY_BIN_PATH} && echo ok || echo no`);
     return r.ok && r.stdout === "ok";
   } catch { return false; }
+}
+
+// Ensure apt sources.list inside the distro points at a reachable mirror.
+// WSL Ubuntu rootfs is sometimes preconfigured with a regional mirror (e.g.
+// mirrors.tuna.tsinghua.edu.cn from a previous CN install) which is then
+// unreachable from outside CN. cicy-code's setup.go runs `apt install` to
+// fetch missing deps (unzip/jq/node) on first start — that hangs forever
+// if apt can't reach its mirror. We probe the current mirror; if dead,
+// switch to the first reachable one from a network-aware list.
+async function ensureAptSourcesReachable({ network = "unknown" } = {}) {
+  const distro = await resolveUsableDistro();
+
+  // Probe current sources.list — does its mirror still resolve?
+  const probeCurrent = await wslBash(
+    `MIRROR=$(grep -m1 -oE 'https?://[^ /]+' /etc/apt/sources.list 2>/dev/null | head -1) || true
+     if [ -n "$MIRROR" ]; then
+       if curl -fsI --max-time 5 "$MIRROR" >/dev/null 2>&1; then echo "ok:$MIRROR"; else echo "fail:$MIRROR"; fi
+     else
+       echo "none"
+     fi`,
+    { distro, timeoutMs: 12_000 }
+  );
+  if (probeCurrent.ok && probeCurrent.stdout.startsWith("ok:")) {
+    log.info(`[wsl] apt sources already reachable: ${probeCurrent.stdout}`);
+    return { ok: true, mirror: probeCurrent.stdout.slice(3), changed: false };
+  }
+  log.info(`[wsl] current apt mirror unreachable (${probeCurrent.stdout || "n/a"}), probing alternatives`);
+
+  // CN-first or global-first based on detected network
+  const candidates = network === "cn"
+    ? ["https://mirrors.aliyun.com/ubuntu", "https://mirrors.tuna.tsinghua.edu.cn/ubuntu", "http://archive.ubuntu.com/ubuntu"]
+    : ["http://archive.ubuntu.com/ubuntu", "https://mirrors.aliyun.com/ubuntu", "https://mirrors.tuna.tsinghua.edu.cn/ubuntu"];
+
+  // Pick first reachable from inside WSL
+  const probeScript = candidates
+    .map(c => `if curl -fsI --max-time 5 "${c}/dists/jammy/Release" >/dev/null 2>&1; then echo "${c}"; exit 0; fi`)
+    .join("\n");
+  const pick = await wslBash(probeScript + "\nexit 1", { distro, timeoutMs: 30_000 });
+  if (!pick.ok || !pick.stdout) {
+    log.warn(`[wsl] no apt mirror reachable from distro — apt install will likely fail`);
+    return { ok: false, error: "no reachable mirror" };
+  }
+  const mirror = pick.stdout.split(/\r?\n/).filter(Boolean).pop();
+  log.info(`[wsl] picked apt mirror: ${mirror}`);
+
+  const codename = (await wslBash(". /etc/os-release; echo $VERSION_CODENAME", { distro, timeoutMs: 5000 })).stdout || "jammy";
+  const newSources = [
+    `deb ${mirror} ${codename} main restricted universe multiverse`,
+    `deb ${mirror} ${codename}-updates main restricted universe multiverse`,
+    `deb ${mirror} ${codename}-backports main restricted universe multiverse`,
+    `deb ${mirror} ${codename}-security main restricted universe multiverse`,
+  ].join("\n");
+
+  // Rewrite sources.list. Use sudo if /etc/apt is not user-writable.
+  const writeScript = `
+set -e
+CONTENT='${newSources.replace(/'/g, `'\\''`)}'
+if [ -w /etc/apt/sources.list ]; then
+  echo "$CONTENT" > /etc/apt/sources.list
+elif command -v sudo >/dev/null 2>&1; then
+  echo "$CONTENT" | sudo tee /etc/apt/sources.list >/dev/null
+else
+  echo "no-write-access" >&2
+  exit 1
+fi
+echo updated
+`.trim();
+  const w = await wslBash(writeScript, { distro, timeoutMs: 8_000 });
+  if (!w.ok) {
+    log.warn(`[wsl] could not rewrite sources.list: ${w.stderr}`);
+    return { ok: false, error: w.stderr || "write failed" };
+  }
+  log.info(`[wsl] rewrote sources.list → ${mirror}`);
+  return { ok: true, mirror, changed: true };
 }
 
 // Install cicy-code into WSL by copying a pre-downloaded binary from the
