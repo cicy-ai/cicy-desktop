@@ -34,7 +34,12 @@
     "toggleFullscreen": "Toggle Full Screen",
     "minimize": "Minimize",
     "zoom": "Zoom",
-    "front": "Bring All to Front"
+    "front": "Bring All to Front",
+    "checkForUpdates": "Check for Updates…",
+    "checkingForUpdates": "Checking for updates…",
+    "updateAvailable": "New version {{version}} found, downloading…",
+    "upToDate": "You're up to date (v{{version}})",
+    "updateError": "Update check failed: {{error}}"
   },
   "dialog": {
     "openLink": {

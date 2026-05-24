@@ -9,6 +9,7 @@ const { openHomepage } = require("./backends/homepage-window");
 const backendsRegistry = require("./backends/registry");
 const { openWindowForBackend } = require("./backends/window-manager");
 const { Menu } = require("electron");
+const { dialog } = require("electron");
 const { setupAppIcons } = require("./tray");
 const appUpdater = require("./app-updater");
 
@@ -159,6 +160,7 @@ electronApp.on("browser-window-created", (_e, win) => {
 });
 
 function handleDeepLink(url) {
+  log.info(`[deeplink] handleDeepLink got: ${url}`);
   if (!url || !url.startsWith("cicy://")) return;
   try {
     // cicy://addTeam?title=My+Team&url=https://...&token=xxx
@@ -186,6 +188,7 @@ function handleDeepLink(url) {
 
 // macOS: fired when app is already running OR cold-launched via cicy:// URL.
 electronApp.on("open-url", (_e, url) => {
+  log.info(`[deeplink] open-url event fired url=${url}`);
   _e.preventDefault();
   handleDeepLink(url);
 });
@@ -643,11 +646,42 @@ electronApp.whenReady().then(async () => {
   backendsIPC.register({ sidecarLogPath: path.join(os.homedir(), "logs", "cicy-code-sidecar.log") });
   require("./backends/sidecar-ipc").register({ sidecarLogPath: path.join(os.homedir(), "logs", "cicy-code-sidecar.log") });
 
+  // Click handler for the "Check for Updates…" menu item. Triggers a fresh
+  // update check; shows a dialog with the result. Auto-download + auto-install
+  // already run via the existing event handlers in app-updater.init() — we
+  // just surface the verdict so the user knows their click had effect.
+  async function onCheckForUpdatesClicked() {
+    const result = await appUpdater.checkInteractive();
+    const currentVersion = electronApp.getVersion();
+    if (result.status === "available") {
+      const v = (result.info && result.info.version) || "?";
+      dialog.showMessageBox({
+        type: "info",
+        message: i18n.t("menu.updateAvailable", { version: v }),
+        buttons: ["OK"],
+      });
+    } else if (result.status === "up-to-date") {
+      dialog.showMessageBox({
+        type: "info",
+        message: i18n.t("menu.upToDate", { version: currentVersion }),
+        buttons: ["OK"],
+      });
+    } else {
+      dialog.showMessageBox({
+        type: "warning",
+        message: i18n.t("menu.updateError", { error: result.error || "unknown" }),
+        buttons: ["OK"],
+      });
+    }
+  }
+
   const menuTemplate = [
     ...(process.platform === "darwin" ? [{ role: "appMenu" }] : []),
     {
       label: i18n.t("menu.file"),
       submenu: [
+        { label: i18n.t("menu.checkForUpdates"), click: onCheckForUpdatesClicked },
+        { type: "separator" },
         { label: i18n.t("menu.close"), role: "close" },
         { label: i18n.t("menu.quit"), role: "quit" },
       ],

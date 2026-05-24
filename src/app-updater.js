@@ -99,4 +99,33 @@ function installNow() {
 
 function getState() { return _state; }
 
-module.exports = { init, check, installNow, getState };
+// One-shot interactive check: triggers a fresh update check and resolves with
+// the terminal state ({ status: "available" | "up-to-date" | "error", info,
+// error }). Wraps autoUpdater's event-based flow so menu code can await a
+// single result and show a dialog. Does not interfere with the periodic
+// background check.
+function checkInteractive(timeoutMs = 30_000) {
+  return new Promise(async (resolve) => {
+    const { autoUpdater } = require("electron-updater");
+    let done = false;
+    const finish = (payload) => {
+      if (done) return;
+      done = true;
+      autoUpdater.removeListener("update-available",      onAvailable);
+      autoUpdater.removeListener("update-not-available",  onUpToDate);
+      autoUpdater.removeListener("error",                 onError);
+      resolve(payload);
+    };
+    const onAvailable = (info) => finish({ status: "available", info });
+    const onUpToDate  = (info) => finish({ status: "up-to-date", info });
+    const onError     = (err)  => finish({ status: "error", error: err.message });
+    autoUpdater.on("update-available",     onAvailable);
+    autoUpdater.on("update-not-available", onUpToDate);
+    autoUpdater.on("error",                onError);
+    setTimeout(() => finish({ status: "error", error: "timeout" }), timeoutMs);
+    try { await applyFeedUrl(); await autoUpdater.checkForUpdates(); }
+    catch (e) { finish({ status: "error", error: e.message }); }
+  });
+}
+
+module.exports = { init, check, installNow, getState, checkInteractive };

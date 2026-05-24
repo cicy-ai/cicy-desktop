@@ -34,7 +34,12 @@
     "toggleFullscreen": "全画面表示",
     "minimize": "最小化",
     "zoom": "ズーム",
-    "front": "すべてを手前に"
+    "front": "すべてを手前に",
+    "checkForUpdates": "アップデートを確認…",
+    "checkingForUpdates": "アップデートを確認中…",
+    "updateAvailable": "新バージョン {{version}} を検出、ダウンロード中…",
+    "upToDate": "最新バージョンです（v{{version}}）",
+    "updateError": "アップデート確認に失敗しました：{{error}}"
   },
   "dialog": {
     "openLink": {

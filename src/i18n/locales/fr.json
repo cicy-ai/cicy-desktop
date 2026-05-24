@@ -34,7 +34,12 @@
     "toggleFullscreen": "Plein écran",
     "minimize": "Réduire",
     "zoom": "Zoom",
-    "front": "Tout au premier plan"
+    "front": "Tout au premier plan",
+    "checkForUpdates": "Rechercher les mises à jour…",
+    "checkingForUpdates": "Recherche de mises à jour…",
+    "updateAvailable": "Nouvelle version {{version}} détectée, téléchargement…",
+    "upToDate": "Vous êtes à jour (v{{version}})",
+    "updateError": "Échec de la vérification : {{error}}"
   },
   "dialog": {
     "openLink": {
