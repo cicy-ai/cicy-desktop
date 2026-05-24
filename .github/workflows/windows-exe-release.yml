@@ -55,7 +55,9 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "tag=v${version}" >> "$GITHUB_OUTPUT"
 
-      - name: Create GitHub release (idempotent)
+      - name: Create GitHub release as draft (idempotent)
+        # Draft so autoUpdater doesn't pick it up before .exe + latest.yml are
+        # uploaded. Promoted to non-draft + latest in the final step.
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -65,7 +67,7 @@ jobs:
             --title "CiCy Desktop v${{ steps.meta.outputs.version }}" \
             --target "$GITHUB_SHA" \
             --generate-notes \
-            --latest \
+            --draft \
             2>/dev/null || echo "release already exists, continuing"
 
       - name: Build Windows EXE and publish assets
@@ -88,3 +90,15 @@ jobs:
           name: cicy-desktop-windows-exe
           path: dist/*.exe
           if-no-files-found: error
+
+      - name: Publish release (drop draft, mark latest)
+        # Only promote AFTER all assets uploaded successfully. autoUpdater on
+        # existing clients will pick up the new version on its next poll.
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit "${{ steps.meta.outputs.tag }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft=false \
+            --latest
