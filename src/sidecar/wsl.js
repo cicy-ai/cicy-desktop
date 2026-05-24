@@ -83,10 +83,14 @@ function pickUsableDistro(distros) {
 
 async function checkStatus() {
   const status = await wslRun(["--status"], { timeoutMs: 5_000 });
-  if (!status.ok) return { installed: false };
+  // ENOENT means wsl.exe itself is not on PATH (old Windows build or 32-bit).
+  if (!status.ok) {
+    const noExe = /ENOENT|not found|not recognized/i.test(status.error || "");
+    return { supported: !noExe, installed: false };
+  }
 
   const list = await wslRun(["-l", "-v"], { timeoutMs: 5_000 });
-  if (!list.ok || !list.stdout) return { installed: true, hasDistro: false };
+  if (!list.ok || !list.stdout) return { supported: true, installed: true, hasDistro: false };
 
   const distros = [];
   let defaultDistro = null;
@@ -100,10 +104,11 @@ async function checkStatus() {
     distros.push({ name, state, version });
     if (isDefault) defaultDistro = name;
   }
-  if (!distros.length) return { installed: true, hasDistro: false };
+  if (!distros.length) return { supported: true, installed: true, hasDistro: false };
 
   const usableDistro = pickUsableDistro(distros);
   return {
+    supported: true,
     installed: true,
     hasDistro: usableDistro !== null,
     distros,
