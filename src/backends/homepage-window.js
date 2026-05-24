@@ -28,10 +28,10 @@ function pickHtml() {
   return path.join(__dirname, "homepage.html");
 }
 
-// HEAD probe — ~2s timeout. If the remote URL is reachable, we use it; if
+// HEAD probe — ~8s timeout. If the remote URL is reachable, we use it; if
 // the user is offline, network is blocking us, or the host is down, we fall
 // back to the bundled React build so the app still works.
-function probeRemote(url, timeoutMs = 2500) {
+function probeRemote(url, timeoutMs = 8000) {
   return new Promise((resolve) => {
     try {
       const lib = url.startsWith("https:") ? https : http;
