@@ -305,10 +305,8 @@ function createWindow(options = {}, accountIdx = 0, forceNew = false) {
   });
 
   function getTitlePrefix() {
-    return `${config.port}:${accountIdx}-${win.id} | `;
+    return `F${win.id}`;
   }
-
-  const titlePrefix = getTitlePrefix();
 
   win.webContents.on("page-title-updated", (event, title) => {
     win.setTitle(`${getTitlePrefix()} | ${title}`);
