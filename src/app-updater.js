@@ -81,7 +81,7 @@ function init(mainWin) {
   });
 
   setTimeout(() => check(), 15_000);
-  setInterval(() => check(), 4 * 60 * 60 * 1000);
+  setInterval(() => check(), 10 * 60 * 1000);
 }
 
 async function check() {
