@@ -82,6 +82,8 @@ function pickUsableDistro(distros) {
 }
 
 async function checkStatus() {
+  // TEMP: simulate wsl.exe not found for UI testing
+  return { supported: false, installed: false };
   const status = await wslRun(["--status"], { timeoutMs: 5_000 });
   // ENOENT means wsl.exe itself is not on PATH (old Windows build or 32-bit).
   if (!status.ok) {
