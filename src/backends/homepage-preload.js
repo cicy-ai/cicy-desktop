@@ -140,6 +140,16 @@ contextBridge.exposeInMainWorld("cicy", {
     tail: (name, lines = 200) => logInvoke("logs:tail", { name, lines }),
   },
 
+  deeplink: {
+    // Listen for cicy://addTeam?title=&url=&token= activations.
+    // Returns an unsubscribe function. cb({ title, url, token })
+    onAddTeam: (cb) => {
+      const handler = (_e, payload) => { try { cb(payload); } catch {} };
+      ipcRenderer.on("deeplink:addTeam", handler);
+      return () => ipcRenderer.removeListener("deeplink:addTeam", handler);
+    },
+  },
+
   // ------- system probes (sugar over exec_shell) -------
   system: {
     async checkNode() {

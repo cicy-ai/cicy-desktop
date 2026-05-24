@@ -111,7 +111,45 @@ const __singleLock = electronApp.requestSingleInstanceLock();
 if (!__singleLock) {
   electronApp.exit(0);
 }
-electronApp.on("second-instance", () => {
+
+// Register cicy:// as a custom URL protocol handler. On macOS the OS calls
+// open-url; on Windows/Linux the URL arrives as a command-line argument in
+// a second instance (caught by second-instance below).
+if (!electronApp.isDefaultProtocolClient("cicy")) {
+  electronApp.setAsDefaultProtocolClient("cicy");
+}
+
+function handleDeepLink(url) {
+  if (!url || !url.startsWith("cicy://")) return;
+  try {
+    // cicy://addTeam?title=My+Team&url=https://...&token=xxx
+    const u = new URL(url);
+    if (u.hostname === "addteam" || u.hostname === "addTeam") {
+      const payload = {
+        title: u.searchParams.get("title") || "",
+        url:   u.searchParams.get("url")   || "",
+        token: u.searchParams.get("token") || "",
+      };
+      // Broadcast to all BrowserWindows via IPC
+      const { BrowserWindow } = require("electron");
+      for (const w of BrowserWindow.getAllWindows()) {
+        try { w.webContents.send("deeplink:addTeam", payload); } catch {}
+      }
+    }
+  } catch (e) { log.warn(`[deeplink] parse error: ${e.message}`); }
+}
+
+// macOS: fired when app is already running and OS activates it via cicy:// URL
+electronApp.on("open-url", (_e, url) => {
+  _e.preventDefault();
+  handleDeepLink(url);
+});
+
+electronApp.on("second-instance", (_e, argv) => {
+  // argv may include cicy:// URL on Windows/Linux
+  const cicyUrl = argv.find(a => a.startsWith("cicy://"));
+  if (cicyUrl) handleDeepLink(cicyUrl);
+
   try {
     const { openHomepage } = require("./backends/homepage-window");
     openHomepage();
