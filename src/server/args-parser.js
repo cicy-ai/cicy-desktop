@@ -34,7 +34,6 @@ function parseArgs() {
   }
 
   const oneWindow = args.includes("--one-window");
-  const enableHttpRpc = args.includes("--http-rpc");
   const enableMcp    = args.includes("--mcp");
 
   let ACCOUNT = args.find((arg) => arg.startsWith("--account="))?.split("=")[1];
@@ -82,7 +81,6 @@ function parseArgs() {
     START_URL,
     PROXY,
     oneWindow,
-    enableHttpRpc,
     enableMcp,
     ACCOUNT,
     chromeBinary,
