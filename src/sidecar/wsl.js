@@ -35,7 +35,7 @@ const PREFERRED_DISTROS = [
 // takes effect.
 const APT_MIRRORS = {
   cn:     ["https://mirrors.aliyun.com/ubuntu", "https://mirrors.tuna.tsinghua.edu.cn/ubuntu", "http://archive.ubuntu.com/ubuntu"],
-  global: ["http://archive.ubuntu.com/ubuntu", "https://mirrors.aliyun.com/ubuntu"],
+  global: ["https://mirrors.aliyun.com/ubuntu", "https://mirrors.tuna.tsinghua.edu.cn/ubuntu", "http://archive.ubuntu.com/ubuntu"],
 };
 
 // Cached usable distro — resolved on first call to resolveUsableDistro().
@@ -82,8 +82,6 @@ function pickUsableDistro(distros) {
 }
 
 async function checkStatus() {
-  // TEMP: simulate wsl.exe not found for UI testing
-  return { supported: false, installed: false };
   const status = await wslRun(["--status"], { timeoutMs: 5_000 });
   // ENOENT means wsl.exe itself is not on PATH (old Windows build or 32-bit).
   if (!status.ok) {
@@ -323,11 +321,11 @@ fi`, { distro, timeoutMs: 25_000 });
   const env = Object.fromEntries(probe.stdout.split("\n").map(l => {
     const i = l.indexOf("="); return i < 0 ? [l, ""] : [l.slice(0, i), l.slice(i + 1)];
   }));
-  if (env.REACHABLE === "1") {
-    log.info(`[wsl] apt mirror reachable: ${env.CUR}`);
+  if (env.REACHABLE === "1" && env.CUR && candidates[0] && env.CUR.startsWith(candidates[0])) {
+    log.info(`[wsl] apt mirror already optimal: ${env.CUR}`);
     return { ok: true, mirror: env.CUR, changed: false };
   }
-  log.info(`[wsl] current apt mirror unreachable (${env.CUR || "n/a"}), probing alternatives`);
+  log.info(`[wsl] selecting fastest apt mirror (current: ${env.CUR || "n/a"})`);
 
   const candidates = APT_MIRRORS[network] || APT_MIRRORS.global;
   const codename = env.CODENAME || "jammy";
