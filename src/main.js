@@ -168,6 +168,8 @@ const {
   START_URL,
   PROXY,
   oneWindow,
+  enableHttpRpc,
+  enableMcp,
   ACCOUNT,
   chromeBinary,
   chromeUserDataRoot,
@@ -228,8 +230,11 @@ Array.from(toolCatalog.toolsByName.values()).forEach((tool) => {
   );
 });
 
-// Setup MCP routes
-setupMcpRoutes(app, mcpServer, authMiddleware);
+// Setup MCP routes (only when --mcp flag is passed)
+if (enableMcp) {
+  setupMcpRoutes(app, mcpServer, authMiddleware);
+  log.info("[MCP] MCP routes enabled");
+}
 
 function parseYamlBody(req) {
   return new Promise((resolve, reject) => {
@@ -359,7 +364,9 @@ app.use(
   })
 );
 
-// RPC endpoint with hot reload
+// HTTP RPC routes (only when --http-rpc flag is passed)
+if (enableHttpRpc) {
+  log.info("[MCP] HTTP RPC routes enabled");
 app.post("/rpc/tools/call", authMiddleware, async (req, res) => {
   let body = req.body;
 
@@ -485,6 +492,7 @@ app.post(
     }
   }
 );
+} // end if (enableHttpRpc)
 
 // Start server
 const server = http.createServer(app);
@@ -685,7 +693,7 @@ function startSidecarWatchdog({ intervalMs = 30_000 } = {}) {
   _sidecarWatchdogTimer = setInterval(tick, intervalMs);
 }
 
-electronApp.whenReady().then(() => {
+electronApp.whenReady().then(async () => {
   // Re-init i18n now that app is ready — getLocale() returns reliable values
   // only after the ready event. The module-load init may have picked English
   // on platforms (e.g. Windows) where LANG env is unset.
