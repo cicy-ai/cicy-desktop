@@ -1,6 +1,6 @@
 {
   "name": "cicy-desktop",
-  "version": "2.1.18",
+  "version": "2.1.19",
   "description": "CiCy - AI-powered operating system browser",
   "main": "src/main.js",
   "bin": {
@@ -28,6 +28,12 @@
   "build": {
     "appId": "com.cicy.desktop",
     "productName": "CiCy Desktop",
+    "protocols": [
+      {
+        "name": "CiCy URL",
+        "schemes": ["cicy"]
+      }
+    ],
     "directories": {
       "output": "dist",
       "buildResources": "build"

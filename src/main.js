@@ -114,36 +114,88 @@ if (!__singleLock) {
 
 // Register cicy:// as a custom URL protocol handler. On macOS the OS calls
 // open-url; on Windows/Linux the URL arrives as a command-line argument in
-// a second instance (caught by second-instance below).
+// a second instance (caught by second-instance below) or in process.argv on
+// cold start.
 if (!electronApp.isDefaultProtocolClient("cicy")) {
   electronApp.setAsDefaultProtocolClient("cicy");
 }
+
+// Deep links can arrive before any BrowserWindow exists (cold start via
+// `cicy://` on macOS fires `open-url` before whenReady; same for Windows/
+// Linux when the URL is in argv). Queue them and flush whenever a window
+// finishes loading. The renderer subscribes via window.cicy.deeplink.onAddTeam.
+const __pendingDeepLinks = [];
+function broadcastDeepLink(channel, payload) {
+  const { BrowserWindow } = require("electron");
+  const wins = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed());
+  if (wins.length === 0) {
+    __pendingDeepLinks.push({ channel, payload });
+    return;
+  }
+  for (const w of wins) {
+    try { w.webContents.send(channel, payload); } catch {}
+  }
+}
+
+// Replays any queued deep links to all currently-loaded renderers. Wired up
+// to `did-finish-load` on the homepage window so the SPA always sees them
+// even when it was the URL that started the app in the first place.
+function flushPendingDeepLinks() {
+  if (__pendingDeepLinks.length === 0) return;
+  const { BrowserWindow } = require("electron");
+  const wins = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed());
+  if (wins.length === 0) return;
+  const drained = __pendingDeepLinks.splice(0, __pendingDeepLinks.length);
+  for (const { channel, payload } of drained) {
+    for (const w of wins) {
+      try { w.webContents.send(channel, payload); } catch {}
+    }
+  }
+}
+electronApp.on("browser-window-created", (_e, win) => {
+  win.webContents.on("did-finish-load", () => {
+    setTimeout(flushPendingDeepLinks, 0);
+  });
+});
 
 function handleDeepLink(url) {
   if (!url || !url.startsWith("cicy://")) return;
   try {
     // cicy://addTeam?title=My+Team&url=https://...&token=xxx
     const u = new URL(url);
-    if (u.hostname === "addteam" || u.hostname === "addTeam") {
+    const action = (u.hostname || "").toLowerCase();
+    if (action === "addteam") {
       const payload = {
         title: u.searchParams.get("title") || "",
         url:   u.searchParams.get("url")   || "",
         token: u.searchParams.get("token") || "",
       };
-      // Broadcast to all BrowserWindows via IPC
-      const { BrowserWindow } = require("electron");
-      for (const w of BrowserWindow.getAllWindows()) {
-        try { w.webContents.send("deeplink:addTeam", payload); } catch {}
+      broadcastDeepLink("deeplink:addTeam", payload);
+      // Make sure SOMETHING is on screen for the user to see the result.
+      // Safe to call before whenReady — openHomepage waits for the app
+      // internally via BrowserWindow construction.
+      if (electronApp.isReady()) {
+        try {
+          const { openHomepage } = require("./backends/homepage-window");
+          openHomepage();
+        } catch {}
       }
     }
   } catch (e) { log.warn(`[deeplink] parse error: ${e.message}`); }
 }
 
-// macOS: fired when app is already running and OS activates it via cicy:// URL
+// macOS: fired when app is already running OR cold-launched via cicy:// URL.
 electronApp.on("open-url", (_e, url) => {
   _e.preventDefault();
   handleDeepLink(url);
 });
+
+// Cold start on Windows/Linux: protocol URL is the last argv element. macOS
+// also gets the argv copy on some launchers, so this is harmless there.
+{
+  const coldUrl = process.argv.find(a => typeof a === "string" && a.startsWith("cicy://"));
+  if (coldUrl) handleDeepLink(coldUrl);
+}
 
 electronApp.on("second-instance", (_e, argv) => {
   // argv may include cicy:// URL on Windows/Linux
