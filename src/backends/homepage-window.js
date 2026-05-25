@@ -34,6 +34,10 @@ async function openHomepage() {
     title: "CiCy Desktop",
     backgroundColor: "#0d1117",
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
+    // Auto-hide the native menu bar on win/linux. The bar reappears when
+    // the user presses Alt; otherwise the SPA's own topbar is the only
+    // chrome the user sees.
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, "homepage-preload.js"),
       contextIsolation: true,

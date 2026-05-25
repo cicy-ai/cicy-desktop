@@ -81,6 +81,14 @@ function register(opts = {}) {
     const { resolveBackendUrl } = require("./window-manager");
     return registry.list().map(b => ({ ...b, resolvedUrl: resolveBackendUrl(b) }));
   });
+  // Resolve a single backend URL on demand (e.g. just before open_window so
+  // the token is always fresh rather than stale from the last loadBackends).
+  ipcMain.handle("backends:resolve-url", (_e, id) => {
+    const { resolveBackendUrl } = require("./window-manager");
+    const b = registry.get(id);
+    if (!b) return null;
+    return resolveBackendUrl(b);
+  });
   ipcMain.handle("backends:add", (_e, input) => registry.add(input || {}));
   ipcMain.handle("backends:remove", (_e, id) => registry.remove(id));
   ipcMain.handle("backends:update", (_e, input) => registry.update(input || {}));

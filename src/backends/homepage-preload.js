@@ -90,6 +90,7 @@ contextBridge.exposeInMainWorld("cicy", {
     health:         (id)    => logInvoke("backends:health", id),
     healthAll:      ()      => logInvoke("backends:health-all"),
     restartSidecar: ()      => logInvoke("backends:restart-sidecar"),
+    resolveUrl:     (id)    => logInvoke("backends:resolve-url", id),
   },
   sidecar: {
     status:      ()  => logInvoke("sidecar:status"),

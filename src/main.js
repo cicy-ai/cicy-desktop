@@ -724,12 +724,9 @@ electronApp.whenReady().then(async () => {
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate));
 
-  // No START_URL (typical .app double-click): land on the homepage. With
-  // START_URL set (bin/cicy-desktop --url …) the existing createWindow path
-  // below still fires, preserving the legacy power-user entry point.
-  // Skip homepage open when launched at login with --hidden (auto-start).
+  // Always open the homepage unless launched at login with --hidden.
   const hidden = process.argv.includes("--hidden");
-  if (!START_URL && !hidden) {
+  if (!hidden) {
     openHomepage();
   }
   if (hidden) log.info("[startup] --hidden: launched at login, staying in tray");
@@ -753,12 +750,20 @@ electronApp.whenReady().then(async () => {
         log.error("[Proxy] persist:main partition 设置代理失败:", err);
       });
   }
-  server.listen(PORT, async () => {
-    log.info(`[MCP] Log file: ${config.logFilePath}`);
-    log.info(`[MCP] Server listening on http://localhost:${PORT}`);
-    log.info(`[MCP] SSE endpoint: http://localhost:${PORT}/mcp`);
-    log.info(`[MCP] REST API docs: http://localhost:${PORT}/docs`);
-    log.info(`[MCP] Remote debugger: http://localhost:9221`);
+  // The HTTP server on PORT (default 8101) only matters for: (a) external
+  // RPC clients hitting /rpc/*, (b) the master→worker bridge in cluster
+  // mode, (c) the MCP/SSE endpoint when --mcp is enabled. None of these
+  // are required for the homepage UI itself, which talks to the main
+  // process via Electron IPC. So skip the listen by default; opt in with
+  // CICY_DESKTOP_HTTP=1 (or CICY_DESKTOP_HTTP_PORT set explicitly).
+  const httpEnabled = process.env.CICY_DESKTOP_HTTP === "1"
+                   || enableMcp
+                   || !!process.env.CICY_MASTER_URL;
+
+  // Code that used to live inside server.listen(...) — startup work that
+  // needs to happen after whenReady. Pulled out so we can run it whether
+  // or not we end up listening on PORT.
+  const onAppStarted = async () => {
     if (START_URL) {
       createWindow({ url: START_URL }, ACCOUNT);
     }
@@ -770,14 +775,30 @@ electronApp.whenReady().then(async () => {
         log.error(`[Cluster] Worker registration failed: ${error.message}`);
       }
     }
-  }).on("error", (err) => {
-    if (err.code === "EADDRINUSE") {
-      log.error(`[MCP] Port ${PORT} is already in use`);
-    } else {
-      log.error("[MCP] Server error:", err);
-    }
-    electronApp.quit();
-  });
+  };
+
+  if (!httpEnabled) {
+    log.info(`[MCP] HTTP server skipped (set CICY_DESKTOP_HTTP=1 or pass --mcp to enable)`);
+    log.info(`[MCP] Remote debugger: http://localhost:9221`);
+    onAppStarted();
+  } else {
+    server.listen(PORT, async () => {
+      log.info(`[MCP] Log file: ${config.logFilePath}`);
+      log.info(`[MCP] Server listening on http://localhost:${PORT}`);
+      log.info(`[MCP] SSE endpoint: http://localhost:${PORT}/mcp`);
+      log.info(`[MCP] REST API docs: http://localhost:${PORT}/docs`);
+      log.info(`[MCP] Remote debugger: http://localhost:9221`);
+      await onAppStarted();
+    }).on("error", (err) => {
+      if (err.code === "EADDRINUSE") {
+        log.error(`[MCP] Port ${PORT} is already in use — continuing without HTTP server`);
+        // Don't exit; the homepage doesn't need this port. Run startup anyway.
+        onAppStarted();
+      } else {
+        log.error("[MCP] Server error:", err);
+      }
+    });
+  }
 });
 
 electronApp.on("window-all-closed", () => {

@@ -1,6 +1,6 @@
 {
   "name": "cicy-desktop",
-  "version": "2.1.22",
+  "version": "2.1.23",
   "description": "CiCy - AI-powered operating system browser",
   "main": "src/main.js",
   "bin": {
@@ -31,7 +31,9 @@
     "protocols": [
       {
         "name": "CiCy URL",
-        "schemes": ["cicy"]
+        "schemes": [
+          "cicy"
+        ]
       }
     ],
     "directories": {

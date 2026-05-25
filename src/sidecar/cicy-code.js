@@ -113,7 +113,10 @@ async function start({ logPath, port = DEFAULT_PORT, force = false } = {}) {
     stdio = ["ignore", fd, fd];
   }
 
-  const env = { ...process.env, CICY_CODE_PORT: String(port) };
+  // cicy-code reads `PORT` env var. Strip the parent's PORT (set by the
+  // worker process to its own listen port, e.g. 8101) so it doesn't leak
+  // into the sidecar and clash with the worker's HTTP server.
+  const env = { ...process.env, CICY_CODE_PORT: String(port), PORT: String(port) };
   child = spawn(bin, [], { stdio, detached: false, env });
   console.log(`[cicy-code-sidecar] spawned ${bin} pid=${child.pid} port=${port} log=${logPath || "(none)"}`);
 

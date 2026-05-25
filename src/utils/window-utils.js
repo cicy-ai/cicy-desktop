@@ -246,6 +246,10 @@ function createWindow(options = {}, accountIdx = 0, forceNew = false) {
     height: winHeight,
     x: posX,
     y: posY,
+    // Native menu bar collapses by default on win/linux; press Alt to
+    // peek. Same UX as the homepage window — keeps the chrome out of
+    // the way for backend pages.
+    autoHideMenuBar: true,
     webPreferences: {
       webviewTag: true,
       offscreen: false, // 确保不是离屏渲染

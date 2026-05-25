@@ -275,6 +275,27 @@ async function fetchLatestReleaseSmart() {
     const m = await fetchManifest();
     const assetUrl = m.assets && m.assets[key];
     if (!assetUrl) throw new Error(`no asset for ${key} in manifest`);
+
+    // The manifest can be uploaded before the binary asset on GitHub
+    // Releases (Actions uploads files sequentially). Verify the binary
+    // is actually reachable before declaring this version "available" —
+    // otherwise an "update available" indicator points at a 404.
+    const network = await netDetect.detect();
+    const probeUrls = buildUrlList(assetUrl, network);
+    const reachable = await new Promise((resolve) => {
+      let pending = probeUrls.length;
+      let done = false;
+      probeUrls.forEach((u) =>
+        headCheck(u, { timeoutMs: 5000 }).then((ok) => {
+          if (ok && !done) { done = true; resolve(true); }
+          if (--pending === 0 && !done) resolve(false);
+        })
+      );
+    });
+    if (!reachable) {
+      log.warn(`[installer] manifest v${m.version} present but binary asset not reachable yet`);
+      throw new Error(`RELEASE_NOT_READY:${m.version}`);
+    }
     return {
       version: m.version,
       htmlUrl: `https://github.com/${REPO}/releases/tag/v${m.version}`,
@@ -283,6 +304,9 @@ async function fetchLatestReleaseSmart() {
       sizeBytes: (m.sizes && m.sizes[key]) || null,
     };
   } catch (manifestErr) {
+    // RELEASE_NOT_READY is a real signal — propagate to caller so the UI
+    // can show "wait a few minutes" instead of fallback-probing.
+    if (/^RELEASE_NOT_READY:/.test(manifestErr.message)) throw manifestErr;
     // Fallback path: older releases (before manifest.json existed) still use
     // jsdelivr tag list + HEAD probe. Will be removed once all live releases
     // ship a manifest.json.
