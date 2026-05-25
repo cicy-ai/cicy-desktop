@@ -84,7 +84,8 @@
           "from": "vendor/cicy-code/linux-${arch}/cicy-code",
           "to": "cicy-code/cicy-code"
         }
-      ]
+      ],
+      "maintainer": "cicybot <support@cicy-ai.com>"
     },
     "mac": {
       "icon": "build/icon.icns",
@@ -123,7 +124,10 @@
     "electron",
     "mcp"
   ],
-  "author": "cicybot",
+  "author": {
+    "name": "cicybot",
+    "email": "support@cicy-ai.com"
+  },
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.3",
