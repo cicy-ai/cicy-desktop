@@ -4,7 +4,7 @@ const path = require("path");
 
 const { getChromeRuntimeRegistry } = require("./runtime-registry");
 
-const PRIVATE_CHROME_JSON = path.join(os.homedir(), "Private", "chrome.json");
+const PRIVATE_CHROME_JSON = path.join(os.homedir(), "cicy-ai", "db", "chrome.json");
 
 function readPrivateChromeConfig() {
   if (!fs.existsSync(PRIVATE_CHROME_JSON)) return {};

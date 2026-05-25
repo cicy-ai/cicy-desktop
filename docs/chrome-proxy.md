@@ -21,7 +21,7 @@
 
 与现有 `/rpc` 工具行为对齐，优先级如下：
 
-1. 若 `~/Private/chrome.json` 中存在 `account_<idx>.port`，优先使用该 port
+1. 若 `~/cicy-ai/db/chrome.json` 中存在 `account_<idx>.port`，优先使用该 port
 2. 否则回退到 `runtime-registry` 中 `registry.get(accountIdx)?.debuggerPort`
 3. 都没有则返回错误（HTTP 404）
 

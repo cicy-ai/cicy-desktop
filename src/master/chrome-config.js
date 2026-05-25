@@ -5,7 +5,7 @@ const path = require("path");
 const { getDefaultDebuggerPort } = require("../chrome/chrome-launcher");
 const { config } = require("../config");
 
-const PRIVATE_CHROME_JSON = path.join(os.homedir(), "Private", "chrome.json");
+const PRIVATE_CHROME_JSON = path.join(os.homedir(), "cicy-ai", "db", "chrome.json");
 
 class ChromeProfileResolutionError extends Error {
   constructor(message) {

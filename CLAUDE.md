@@ -151,18 +151,18 @@ The hot path is `POST /api/rpc/:toolName`:
 
 ### Chrome profile dispatch
 
-Chrome profile handling is split between master and worker. The source-of-truth `chrome.json` lives on the **master** at `~/Private/chrome.json`; workers don't need a local one.
+Chrome profile handling is split between master and worker. The source-of-truth `chrome.json` lives on the **master** at `~/cicy-ai/db/chrome.json`; workers don't need a local one.
 
 Master-side:
 
-- `src/master/chrome-config.js` reads master-local `~/Private/chrome.json`
+- `src/master/chrome-config.js` reads master-local `~/cicy-ai/db/chrome.json`
 - `src/master/master-routes.js` injects `effectiveChromeProfile` for forwarded chrome tool calls when `accountIdx` is present
 - injection covers `chrome_launch_profile`, `chrome_get_profile`, `chrome_get_targets`, `chrome_cdp_call`
 
 Worker-side launch (`src/tools/chrome-tools.js::chrome_launch_profile`):
 
 - prefers injected `effectiveChromeProfile`
-- falls back to local `~/Private/chrome.json` for backward compat
+- falls back to local `~/cicy-ai/db/chrome.json` for backward compat
 - if neither exists → clear error
 - if target user-data-dir doesn't exist → initialize from `~/chrome/_tmp` (or just `mkdir`)
 - `orgPath -> Default` copy is best-effort if the path exists
@@ -314,4 +314,4 @@ When touching any of these, expect ripple effects:
 - changing trust criteria → changes `nodeIntegration` for whole classes of windows; verify with the cicy-code bridge still works
 - changing the homepage entry flow → check that cold-launch and "back to launcher" paths both behave (history.length / sessionStorage gates)
 - changing the sidecar packaging → verify `dist/mac/CiCy Desktop.app/Contents/Resources/cicy-code/cicy-code` is present and executable after build
-- changing `chrome_*` tools → both master injection (`effectiveChromeProfile`) and worker fallback (`~/Private/chrome.json`) paths still need to work
+- changing `chrome_*` tools → both master injection (`effectiveChromeProfile`) and worker fallback (`~/cicy-ai/db/chrome.json`) paths still need to work

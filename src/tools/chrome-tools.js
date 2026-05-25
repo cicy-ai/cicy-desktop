@@ -17,7 +17,7 @@ const { getVersion, getTargets, createTarget, activateTarget, callCdp } = requir
 const { resolveChromeDebuggerPort } = require("../chrome/debugger-port-resolver");
 const { config } = require("../config");
 
-const PRIVATE_CHROME_JSON = path.join(os.homedir(), "Private", "chrome.json");
+const PRIVATE_CHROME_JSON = path.join(os.homedir(), "cicy-ai", "db", "chrome.json");
 const PRIVATE_CHROME_TMP_DIR = path.join(os.homedir(), "chrome", "_tmp");
 const PRIVATE_CHROME_ADD_TEMPLATE_DIR = path.join(os.homedir(), "chrome", "__tmp");
 const DEFAULT_ADD_ORG_PATH = "~/Library/Application Support/Google/Chrome/Profile 9";
@@ -395,7 +395,7 @@ async function launchOrActivateProfile({
 function registerChromeTools(registerTool) {
   registerTool(
     "chrome_list_profiles",
-    "列出 ~/Private/chrome.json 中全部 Chrome profiles，并附带 runtime + live 状态",
+    "列出 ~/cicy-ai/db/chrome.json 中全部 Chrome profiles，并附带 runtime + live 状态",
     z.object({
       includeHidden: z.boolean().optional().describe("是否包含 __* 隐藏项（默认 false）"),
     }),
@@ -437,7 +437,7 @@ function registerChromeTools(registerTool) {
 
   registerTool(
     "chrome_list_gmails",
-    "列出 ~/Private/chrome.json 中全部 profile 的 gmail",
+    "列出 ~/cicy-ai/db/chrome.json 中全部 profile 的 gmail",
     z.object({
       includeHidden: z.boolean().optional().describe("是否包含 __* 隐藏项（默认 false）"),
     }),
@@ -453,7 +453,7 @@ function registerChromeTools(registerTool) {
 
   registerTool(
     "chrome_list_github_accounts",
-    "列出 ~/Private/chrome.json 中全部 profile 的 GitHub 账号信息（platform.github）",
+    "列出 ~/cicy-ai/db/chrome.json 中全部 profile 的 GitHub 账号信息（platform.github）",
     z.object({
       includeHidden: z.boolean().optional().describe("是否包含 __* 隐藏项（默认 false）"),
     }),
@@ -477,7 +477,7 @@ function registerChromeTools(registerTool) {
 
   registerTool(
     "chrome_list_kiro_accounts",
-    "列出 ~/Private/chrome.json 中全部 profile 的 Kiro 绑定状态（platform.kiro）",
+    "列出 ~/cicy-ai/db/chrome.json 中全部 profile 的 Kiro 绑定状态（platform.kiro）",
     z.object({
       includeHidden: z.boolean().optional().describe("是否包含 __* 隐藏项（默认 false）"),
     }),
@@ -507,7 +507,7 @@ function registerChromeTools(registerTool) {
     "chrome_get_profile",
     "获取指定 accountIdx 的 profile：privateConfig + runtime + liveStatus（脚本心智）",
     z.object({
-      accountIdx: z.number().describe("账户索引，映射到 ~/Private/chrome.json 的 account_<idx>"),
+      accountIdx: z.number().describe("账户索引，映射到 ~/cicy-ai/db/chrome.json 的 account_<idx>"),
     }),
     async ({ accountIdx }) => {
       const registry = getChromeRuntimeRegistry();
@@ -566,7 +566,7 @@ function registerChromeTools(registerTool) {
 
   registerTool(
     "chrome_add_profile",
-    "新增账号（等价于 chrome-rpa.sh add）：从 ~/chrome/__tmp 创建 ~/chrome/account_N 并写回 ~/Private/chrome.json",
+    "新增账号（等价于 chrome-rpa.sh add）：从 ~/chrome/__tmp 创建 ~/chrome/account_N 并写回 ~/cicy-ai/db/chrome.json",
     z.object({
       gmail: z.string().optional().describe("可选：新账号 gmail"),
       orgPath: z.string().optional().describe("可选：orgPath（默认 Profile 9）"),
@@ -631,7 +631,7 @@ function registerChromeTools(registerTool) {
 
   registerTool(
     "chrome_set_profile_proxy",
-    "设置 ~/Private/chrome.json 中指定 accountIdx 的 proxy（脚本对齐；下次启动生效）",
+    "设置 ~/cicy-ai/db/chrome.json 中指定 accountIdx 的 proxy（脚本对齐；下次启动生效）",
     z.object({
       accountIdx: z.number().describe("账户索引"),
       proxy: z.string().optional().describe("代理 URL；留空则清空"),
