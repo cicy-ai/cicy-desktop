@@ -105,6 +105,22 @@ function getStatus() {
   };
 }
 
+// Quick "is the daemon listening on :8008?" probe used by the homepage to
+// decide between showing a "Start" or an "Open" button on the local card.
+// Returns true on any 2xx/3xx/4xx response — we just want to know that
+// something is binding the port and answering HTTP.
+function isRunning(port = 8008) {
+  return new Promise((resolve) => {
+    const req = http.request(
+      { host: "127.0.0.1", port, path: "/", method: "HEAD", timeout: 1500 },
+      (res) => { res.resume(); resolve(true); }
+    );
+    req.on("error",   () => resolve(false));
+    req.on("timeout", () => { req.destroy(); resolve(false); });
+    req.end();
+  });
+}
+
 // ---- HTTP helpers ----
 function headCheck(url, { timeoutMs = 6000 } = {}) {
   return new Promise((resolve) => {
@@ -602,6 +618,7 @@ function cancel() {
 
 module.exports = {
   getStatus,
+  isRunning,
   checkLatest,
   install,
   cancel,

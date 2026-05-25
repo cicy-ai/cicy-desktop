@@ -31,6 +31,7 @@ function register({ sidecarLogPath } = {}) {
 
   ipcMain.handle("sidecar:status", async () => {
     const s = installer.getStatus();
+    const running = await installer.isRunning();
     // On Windows the version cache might be stale; probe WSL for truth.
     if (process.platform === "win32") {
       try {
@@ -45,11 +46,32 @@ function register({ sidecarLogPath } = {}) {
           userInstalled: wslInstalled,
           userVersion: wslVer || s.userVersion,
           wsl: wslStatus,
+          running,
           lastProgress,
         };
       } catch {}
     }
-    return { ...s, lastProgress };
+    return { ...s, running, lastProgress };
+  });
+
+  // Start the bundled cicy-code daemon without re-installing anything.
+  // Used when the binary exists locally but the process isn't running yet
+  // (e.g. user closed cicy-desktop, came back, daemon never auto-restarted).
+  ipcMain.handle("sidecar:start", async () => {
+    try {
+      // Already up? Skip the spawn.
+      if (await installer.isRunning()) return { ok: true, alreadyRunning: true };
+      const child = await sidecar.start({ logPath: sidecarLogPath, force: false });
+      // Wait briefly for the daemon to bind :8008 so the homepage's poll
+      // sees the "running" flip on the very next tick.
+      for (let i = 0; i < 20; i++) {
+        if (await installer.isRunning()) return { ok: true, pid: child?.pid || null };
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      return { ok: true, pid: child?.pid || null, warning: "spawned but did not bind :8008 within 5s" };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
   });
 
   // Windows-only: expose WSL detection so the homepage can surface the right

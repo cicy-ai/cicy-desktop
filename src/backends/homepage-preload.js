@@ -98,6 +98,7 @@ contextBridge.exposeInMainWorld("cicy", {
     installWsl:  ()  => logInvoke("sidecar:wsl-install"),
     checkLatest: ()  => logInvoke("sidecar:check-latest"),
     install:     ()  => logInvoke("sidecar:install"),
+    start:       ()  => logInvoke("sidecar:start"),
     cancel:      ()  => logInvoke("sidecar:cancel"),
     onProgress:  (cb) => {
       const handler = (_e, payload) => { try { cb(payload); } catch {} };
