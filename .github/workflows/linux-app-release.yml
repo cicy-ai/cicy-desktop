@@ -1,0 +1,77 @@
+name: Build Linux App Release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux-app:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Setup Go (for cicy-code sidecar build)
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Read cicy-code ref pin
+        id: cicy_code_ref
+        shell: bash
+        run: |
+          ref="$(cat .cicy-code-ref | tr -d '[:space:]')"
+          echo "ref=${ref}" >> "$GITHUB_OUTPUT"
+          if ! [[ "$ref" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "::error::.cicy-code-ref must be a release tag (vX.Y.Z), got: $ref"
+            exit 1
+          fi
+
+      - name: Checkout cicy-code as sibling
+        uses: actions/checkout@v4
+        with:
+          repository: cicy-ai/cicy-code
+          ref: ${{ steps.cicy_code_ref.outputs.ref }}
+          path: cicy-code
+
+      - name: Build cicy-code sidecar binaries (linux amd64 + arm64)
+        shell: bash
+        working-directory: cicy-code
+        run: |
+          SKIP_TTYD_ASSET=1 SKIP_SKILLS_EMBED=1 bash build.sh all
+          ls -lh dist/
+
+      - name: Install project dependencies
+        run: npm install --no-audit
+
+      - name: Install Electron build dependencies
+        run: npm install --save-dev --no-audit electron@41.0.2 electron-builder@26.7.0
+
+      - name: Build Linux app (deb + AppImage)
+        shell: bash
+        env:
+          CICY_CODE_DIST_DIR: ${{ github.workspace }}/cicy-code/dist
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          npm run build:linux -- --publish always
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cicy-desktop-linux
+          path: |
+            dist/*.deb
+            dist/*.AppImage
+            dist/latest-linux.yml

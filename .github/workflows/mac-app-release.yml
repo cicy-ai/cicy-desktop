@@ -114,15 +114,6 @@ jobs:
             npm run build:mac -- --publish always
           fi
 
-      - name: Build Linux app (deb + AppImage, amd64 + arm64)
-        shell: bash
-        env:
-          CICY_CODE_DIST_DIR: ${{ github.workspace }}/cicy-code/dist
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          npm run build:linux -- --publish always
-
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
