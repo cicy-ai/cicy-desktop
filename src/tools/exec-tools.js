@@ -5,9 +5,30 @@ const execPromise = util.promisify(exec);
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const { config } = require("../config");
 
 const TMP = path.join(os.homedir(), "tmp");
 if (!fs.existsSync(TMP)) fs.mkdirSync(TMP, { recursive: true });
+
+// Build a child_process env that propagates the Electron --proxy=URL
+// flag to spawned shells via HTTP(S)_PROXY. PowerShell's
+// Invoke-WebRequest and curl both auto-honor these vars, so the
+// installer's GitHub / mirror fetches go through cicy-mihomo (or
+// whatever proxy the user passed) without us touching every shell
+// command. No-op when proxy isn't configured.
+function envWithProxy() {
+  if (!config.proxy) return process.env;
+  // Electron's session.setProxy accepts shapes like
+  //   "http=127.0.0.1:9001;https=127.0.0.1:9001" or "127.0.0.1:9001".
+  // child_process expects a real URL (http://...), so we normalise.
+  let url = String(config.proxy).trim();
+  // Strip the "http=" / "https=" prefix block — take whichever side
+  // exists; if both, prefer https.
+  const httpsRule = url.match(/https?=([^;]+)/i);
+  if (httpsRule) url = httpsRule[1];
+  if (!/^https?:\/\//i.test(url)) url = "http://" + url;
+  return { ...process.env, HTTP_PROXY: url, HTTPS_PROXY: url, http_proxy: url, https_proxy: url };
+}
 
 function writeTemp(name, content) {
   const p = path.join(TMP, name);
@@ -39,7 +60,7 @@ function registerTools(registerTool) {
     }),
     async ({ command, cwd }) => {
       try {
-        const { stdout, stderr } = await execPromise(command, { cwd: cwd || process.cwd(), maxBuffer: 1024 * 1024 * 10 });
+        const { stdout, stderr } = await execPromise(command, { cwd: cwd || process.cwd(), maxBuffer: 1024 * 1024 * 10, env: envWithProxy() });
         return result(stdout, stderr);
       } catch (e) { return errorResult(e); }
     },
@@ -56,7 +77,7 @@ function registerTools(registerTool) {
     async ({ code, cwd }) => {
       try {
         const py = process.platform === "win32" ? "python" : "python3";
-        const { stdout, stderr } = await execPromise(`${py} -c ${JSON.stringify(code)}`, { cwd: cwd || process.cwd(), maxBuffer: 1024 * 1024 * 10 });
+        const { stdout, stderr } = await execPromise(`${py} -c ${JSON.stringify(code)}`, { cwd: cwd || process.cwd(), maxBuffer: 1024 * 1024 * 10, env: envWithProxy() });
         return result(stdout, stderr);
       } catch (e) { return errorResult(e); }
     },
@@ -72,7 +93,7 @@ function registerTools(registerTool) {
     }),
     async ({ code, cwd }) => {
       try {
-        const { stdout, stderr } = await execPromise(`node -e ${JSON.stringify(code)}`, { cwd: cwd || process.cwd(), maxBuffer: 1024 * 1024 * 10 });
+        const { stdout, stderr } = await execPromise(`node -e ${JSON.stringify(code)}`, { cwd: cwd || process.cwd(), maxBuffer: 1024 * 1024 * 10, env: envWithProxy() });
         return result(stdout, stderr);
       } catch (e) { return errorResult(e); }
     },
@@ -91,7 +112,7 @@ function registerTools(registerTool) {
       try {
         const resolved = resolveFile(file, content, ".bat");
         const cmd = process.platform === "win32" ? `"${resolved}"` : `bash "${resolved}"`;
-        const { stdout, stderr } = await execPromise(cmd, { cwd: cwd || process.cwd(), maxBuffer: 1024 * 1024 * 10 });
+        const { stdout, stderr } = await execPromise(cmd, { cwd: cwd || process.cwd(), maxBuffer: 1024 * 1024 * 10, env: envWithProxy() });
         return result(stdout, stderr);
       } catch (e) { return errorResult(e); }
     },
@@ -110,7 +131,7 @@ function registerTools(registerTool) {
       try {
         const resolved = resolveFile(file, content, ".py");
         const py = process.platform === "win32" ? "python" : "python3";
-        const { stdout, stderr } = await execPromise(`${py} "${resolved}"`, { cwd: cwd || process.cwd(), maxBuffer: 1024 * 1024 * 10 });
+        const { stdout, stderr } = await execPromise(`${py} "${resolved}"`, { cwd: cwd || process.cwd(), maxBuffer: 1024 * 1024 * 10, env: envWithProxy() });
         return result(stdout, stderr);
       } catch (e) { return errorResult(e); }
     },
@@ -128,7 +149,7 @@ function registerTools(registerTool) {
     async ({ file, content, cwd }) => {
       try {
         const resolved = resolveFile(file, content, ".js");
-        const { stdout, stderr } = await execPromise(`node "${resolved}"`, { cwd: cwd || process.cwd(), maxBuffer: 1024 * 1024 * 10 });
+        const { stdout, stderr } = await execPromise(`node "${resolved}"`, { cwd: cwd || process.cwd(), maxBuffer: 1024 * 1024 * 10, env: envWithProxy() });
         return result(stdout, stderr);
       } catch (e) { return errorResult(e); }
     },
