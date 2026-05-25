@@ -11,6 +11,7 @@ const {
   getProfileDirectory,
   launchChrome,
   closeChromeProcess,
+  bringChromeAppToForeground,
 } = require("../chrome/chrome-launcher");
 const { isPortOpen } = require("../utils/process-utils");
 const { getVersion, getTargets, createTarget, activateTarget, callCdp } = require("../chrome/chrome-cdp-client");
@@ -297,6 +298,7 @@ async function launchOrActivateProfile({
       url,
       activateIfRunning,
     });
+    if (activateIfRunning) bringChromeAppToForeground();
 
     const nextRuntime = registry.upsert(accountIdx, {
       status: "running",

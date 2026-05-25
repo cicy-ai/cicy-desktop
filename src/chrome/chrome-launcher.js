@@ -161,6 +161,7 @@ async function launchChrome({
   child.unref();
 
   const version = await waitForDebugger(debuggerPort, "127.0.0.1", 15000);
+  bringChromeAppToForeground(binaryPath);
 
   return {
     pid: child.pid,
@@ -182,6 +183,38 @@ function closeChromeProcess(pid) {
   } catch (_) {}
 }
 
+// macOS / Windows focus-stealing prevention keeps the spawning Electron
+// app on top after we launch Chrome, so the user's keystrokes go into
+// Electron. Nudge the OS to bring Chrome forward.
+function bringChromeAppToForeground(binaryPath) {
+  try {
+    if (process.platform === "darwin") {
+      let resolved = binaryPath;
+      if (!resolved || !fs.existsSync(resolved)) {
+        try { resolved = resolveChromeBinary(); } catch (_) { return; }
+      }
+      const match = resolved && resolved.match(/^(.+\.app)\//);
+      if (!match) return;
+      spawn("open", ["-a", match[1]], { stdio: "ignore", detached: true }).unref();
+      return;
+    }
+    if (process.platform === "win32") {
+      const ps =
+        "$p = Get-Process chrome -ErrorAction SilentlyContinue | " +
+        "Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1; " +
+        "if ($p) { (New-Object -ComObject WScript.Shell).AppActivate($p.Id) | Out-Null }";
+      spawn("powershell", ["-NoProfile", "-WindowStyle", "Hidden", "-Command", ps], {
+        stdio: "ignore",
+        detached: true,
+        windowsHide: true,
+      }).unref();
+      return;
+    }
+  } catch (_) {
+    // best-effort; never fail the launch over a focus nudge
+  }
+}
+
 module.exports = {
   DEFAULT_USER_DATA_BASE_ROOT,
   getDefaultUserDataDirRoot,
@@ -192,4 +225,5 @@ module.exports = {
   buildChromeArgs,
   launchChrome,
   closeChromeProcess,
+  bringChromeAppToForeground,
 };
