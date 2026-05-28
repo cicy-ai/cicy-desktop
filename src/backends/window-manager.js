@@ -38,18 +38,55 @@ function findCicyCodeDaemonHome() {
 }
 
 function readCicyAiApiToken() {
-  // On Windows, cicy-code runs inside WSL, so its global.json lives under
-  // \\wsl$\<distro>\home\<user>\cicy-ai\global.json. Try WSL paths first.
+  // STEP 1 — Docker mode (preferred on every platform): cicy-code runs
+  // inside a container named "cicy", so its global.json (the SOURCE OF
+  // TRUTH for the cicy-code web UI token) lives in the container, NOT
+  // on the host. Critically: the host's ~/cicy-ai/global.json contains
+  // a DIFFERENT token — cicy-desktop's own master token, which cicy-code
+  // does NOT accept. We must read the container token FIRST and only
+  // fall back when no container is running.
+  try {
+    const { execFileSync } = require("child_process");
+    // Probe common docker CLI locations across platforms. Electron GUI
+    // apps don't always inherit the same PATH as the user's shell.
+    const dockerBins = process.platform === "win32"
+      ? [
+          "docker.exe",
+          "docker",
+          "C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe",
+          "C:\\Program Files\\Docker\\Docker\\resources\\docker.exe",
+        ]
+      : [
+          "docker",
+          "/usr/local/bin/docker",
+          "/opt/homebrew/bin/docker",
+          "/Applications/Docker.app/Contents/Resources/bin/docker",
+        ];
+    let raw = "";
+    for (const bin of dockerBins) {
+      try {
+        raw = execFileSync(bin, ["exec", "cicy", "cat", "/home/cicy/cicy-ai/global.json"],
+          { encoding: "utf8", timeout: 4000, stdio: ["ignore", "pipe", "ignore"] }).trim();
+        if (raw) break;
+      } catch {}
+    }
+    if (raw) {
+      const data = JSON.parse(raw);
+      const t = typeof data.api_token === "string" ? data.api_token : "";
+      if (t) return t;
+    }
+  } catch {}
+
+  // STEP 2 — WSL fallback (Windows legacy): pre-Docker installs ran
+  // cicy-code natively inside a WSL2 distro. Read its global.json via
+  // \\wsl$\<distro>\home\<user>\cicy-ai\global.json.
   if (process.platform === "win32") {
     try {
       const { execFileSync } = require("child_process");
-      // Ask WSL for the actual path
       const wslPath = execFileSync(
         "wsl.exe", ["-e", "bash", "-c", "echo $HOME/cicy-ai/global.json"],
         { encoding: "utf8", timeout: 3000 }
       ).trim();
-      // Convert WSL path to Windows UNC: /home/cicy/... → \\wsl$\Ubuntu\home\cicy\...
-      // wslpath -w gives us the Windows path directly
       const winPath = execFileSync(
         "wsl.exe", ["-e", "wslpath", "-w", wslPath],
         { encoding: "utf8", timeout: 3000 }
@@ -61,6 +98,12 @@ function readCicyAiApiToken() {
       }
     } catch {}
   }
+
+  // STEP 3 — Host-filesystem fallback: covers native installs (cicy-code
+  // daemon running directly on the host as the same or a different user),
+  // or pre-Docker deployments. May return cicy-desktop's own master
+  // token on Docker setups where the container isn't reachable — that's
+  // wrong for the cicy-code web UI but is the best we can do.
   for (const home of [findCicyCodeDaemonHome(), os.homedir()]) {
     const p = path.join(home, "cicy-ai", "global.json");
     try {
@@ -68,34 +111,6 @@ function readCicyAiApiToken() {
       const data = JSON.parse(raw);
       const t = typeof data.api_token === "string" ? data.api_token : "";
       if (t) return t;
-    } catch {}
-  }
-  // On Mac/Linux, cicy-code may run inside a Docker container named "cicy",
-  // so global.json lives in the container, not on the host filesystem.
-  // Try docker exec as a synchronous fallback before giving up.
-  if (process.platform !== "win32") {
-    try {
-      const { execFileSync } = require("child_process");
-      // Probe common docker CLI locations on Mac (GUI app PATH may omit /usr/local/bin)
-      const dockerBins = [
-        "docker",
-        "/usr/local/bin/docker",
-        "/opt/homebrew/bin/docker",
-        "/Applications/Docker.app/Contents/Resources/bin/docker",
-      ];
-      let raw = "";
-      for (const bin of dockerBins) {
-        try {
-          raw = execFileSync(bin, ["exec", "cicy", "cat", "/home/cicy/cicy-ai/global.json"],
-            { encoding: "utf8", timeout: 4000 }).trim();
-          if (raw) break;
-        } catch {}
-      }
-      if (raw) {
-        const data = JSON.parse(raw);
-        const t = typeof data.api_token === "string" ? data.api_token : "";
-        if (t) return t;
-      }
     } catch {}
   }
   return "";
