@@ -70,6 +70,34 @@ function readCicyAiApiToken() {
       if (t) return t;
     } catch {}
   }
+  // On Mac/Linux, cicy-code may run inside a Docker container named "cicy",
+  // so global.json lives in the container, not on the host filesystem.
+  // Try docker exec as a synchronous fallback before giving up.
+  if (process.platform !== "win32") {
+    try {
+      const { execFileSync } = require("child_process");
+      // Probe common docker CLI locations on Mac (GUI app PATH may omit /usr/local/bin)
+      const dockerBins = [
+        "docker",
+        "/usr/local/bin/docker",
+        "/opt/homebrew/bin/docker",
+        "/Applications/Docker.app/Contents/Resources/bin/docker",
+      ];
+      let raw = "";
+      for (const bin of dockerBins) {
+        try {
+          raw = execFileSync(bin, ["exec", "cicy", "cat", "/home/cicy/cicy-ai/global.json"],
+            { encoding: "utf8", timeout: 4000 }).trim();
+          if (raw) break;
+        } catch {}
+      }
+      if (raw) {
+        const data = JSON.parse(raw);
+        const t = typeof data.api_token === "string" ? data.api_token : "";
+        if (t) return t;
+      }
+    } catch {}
+  }
   return "";
 }
 

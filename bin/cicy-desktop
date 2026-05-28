@@ -560,12 +560,12 @@ async function focusExistingWorker(worker, workerBaseUrl, workerUiUrl) {
 
 async function startWorker({ workerPort, masterBaseUrl, token, workerUiUrl }) {
   const workerChild = spawn(
-    isWindows ? "npx.cmd" : "npx",
+    isWindows ? "npx.cmd" : path.join(PACKAGE_ROOT, "node_modules", ".bin", "electron"),
     // Don't pass --url here. cicy-desktop now always opens the homepage
     // (https://desktop.cicy-ai.com/) as the first window. The cicy-code
     // console (workerUiUrl) is reachable from the homepage's local card,
     // not at startup — having both pop up was confusing.
-    ["electron", PACKAGE_ROOT, "--port", String(workerPort)],
+    [PACKAGE_ROOT, "--port", String(workerPort)],
     {
       cwd: PACKAGE_ROOT,
       shell: isWindows,
@@ -604,12 +604,12 @@ async function startWorkerOnly({ workerPort }) {
   console.log("🛑 Press Ctrl+C to stop processes started by this command");
 
   const workerChild = spawn(
-    isWindows ? "npx.cmd" : "npx",
+    isWindows ? "npx.cmd" : path.join(PACKAGE_ROOT, "node_modules", ".bin", "electron"),
     // Don't pass --url here. cicy-desktop now always opens the homepage
     // (https://desktop.cicy-ai.com/) as the first window. The cicy-code
     // console (workerUiUrl) is reachable from the homepage's local card,
     // not at startup — having both pop up was confusing.
-    ["electron", PACKAGE_ROOT, "--port", String(workerPort)],
+    [PACKAGE_ROOT, "--port", String(workerPort)],
     {
       cwd: PACKAGE_ROOT,
       shell: isWindows,
