@@ -14,6 +14,18 @@ const STATE_FILE = path.join(HOME, ".cicy-cluster.json");
 const LOGS_DIR = path.join(HOME, "logs");
 const PACKAGE_ROOT = path.join(__dirname, "..");
 const MASTER_ENTRY = path.join(PACKAGE_ROOT, "src", "master", "master-main.js");
+
+// Resolve the electron binary to spawn. Prefers the project-local copy
+// (node_modules/.bin/electron) when present; falls back to the global
+// `electron` on PATH (npm i -g electron), and finally to `npx electron`.
+// Windows uses `npx.cmd electron` to handle the shim correctly.
+function resolveElectronSpawn() {
+  if (isWindows) return { cmd: "npx.cmd", prefixArgs: ["electron"] };
+  const local = path.join(PACKAGE_ROOT, "node_modules", ".bin", "electron");
+  if (fs.existsSync(local)) return { cmd: local, prefixArgs: [] };
+  // Fall back to a globally-installed electron resolved via PATH.
+  return { cmd: "npx", prefixArgs: ["electron"] };
+}
 const PROJECT_COMMAND_FILE = path.join(PACKAGE_ROOT, "cicy-dektop.command");
 const DESKTOP_COMMAND_FILE = path.join(DESKTOP_DIR, "cicy-dektop.command");
 const DEFAULT_MASTER_PORT = 8100;
@@ -559,13 +571,14 @@ async function focusExistingWorker(worker, workerBaseUrl, workerUiUrl) {
 }
 
 async function startWorker({ workerPort, masterBaseUrl, token, workerUiUrl }) {
+  const electronSpawn = resolveElectronSpawn();
   const workerChild = spawn(
-    isWindows ? "npx.cmd" : path.join(PACKAGE_ROOT, "node_modules", ".bin", "electron"),
+    electronSpawn.cmd,
     // Don't pass --url here. cicy-desktop now always opens the homepage
     // (https://desktop.cicy-ai.com/) as the first window. The cicy-code
     // console (workerUiUrl) is reachable from the homepage's local card,
     // not at startup — having both pop up was confusing.
-    [PACKAGE_ROOT, "--port", String(workerPort)],
+    [...electronSpawn.prefixArgs, PACKAGE_ROOT, "--port", String(workerPort)],
     {
       cwd: PACKAGE_ROOT,
       shell: isWindows,
@@ -603,13 +616,14 @@ async function startWorkerOnly({ workerPort }) {
   console.log(`📄 Token file: ${tokenManager.getConfigPath()}`);
   console.log("🛑 Press Ctrl+C to stop processes started by this command");
 
+  const electronSpawn = resolveElectronSpawn();
   const workerChild = spawn(
-    isWindows ? "npx.cmd" : path.join(PACKAGE_ROOT, "node_modules", ".bin", "electron"),
+    electronSpawn.cmd,
     // Don't pass --url here. cicy-desktop now always opens the homepage
     // (https://desktop.cicy-ai.com/) as the first window. The cicy-code
     // console (workerUiUrl) is reachable from the homepage's local card,
     // not at startup — having both pop up was confusing.
-    [PACKAGE_ROOT, "--port", String(workerPort)],
+    [...electronSpawn.prefixArgs, PACKAGE_ROOT, "--port", String(workerPort)],
     {
       cwd: PACKAGE_ROOT,
       shell: isWindows,
