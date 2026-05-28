@@ -7,7 +7,7 @@ const yaml = require('js-yaml');
 // 从服务器获取工具列表和 schemas
 async function getToolsWithSchemas() {
   const http = require('http');
-  const tokenPath = path.join(require('os').homedir(), 'global.json');
+  const tokenPath = path.join(require('os').homedir(), 'cicy-ai', 'global.json');
   const config = JSON.parse(fs.readFileSync(tokenPath, 'utf8'));
   const token = config.api_token || '';
   

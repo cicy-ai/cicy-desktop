@@ -6,7 +6,7 @@ const { readGlobalConfig, updateGlobalConfig } = require("../utils/global-json")
 
 class MasterTokenManager {
   constructor() {
-    this.configPath = path.join(os.homedir(), "global.json");
+    this.configPath = path.join(os.homedir(), "cicy-ai", "global.json");
     this.token = this.getOrCreateToken();
   }
 

@@ -10,11 +10,14 @@ const { readGlobalConfig, updateGlobalConfig } = require("./global-json");
  */
 class AuthManager {
   constructor() {
-    this.globalJsonPath = path.join(os.homedir(), "global.json");
+    this.globalJsonPath = path.join(os.homedir(), "cicy-ai", "global.json");
+    // Legacy locations we migrate from so existing users don't lose their token:
+    // the old ~/global.json (pre cicy-ai unification) and the even older token.txt.
+    this.legacyGlobalJsonPath = path.join(os.homedir(), "global.json");
     this.legacyTokenPath = path.join(os.homedir(), "data", "electron", "token.txt");
     this.authToken = this.getOrGenerateToken();
     log.info("[MCP] Auth token enabled");
-    log.info("[MCP] Token stored in ~/global.json");
+    log.info("[MCP] Token stored in ~/cicy-ai/global.json");
   }
 
   /**
@@ -24,20 +27,32 @@ class AuthManager {
    */
   getOrGenerateToken() {
     try {
-      // 1. Try ~/global.json first
+      // 1. Try ~/cicy-ai/global.json first
       if (fs.existsSync(this.globalJsonPath)) {
         const config = readGlobalConfig(this.globalJsonPath);
         if (config.api_token) {
-          log.info("[MCP] Using token from ~/global.json");
+          log.info("[MCP] Using token from ~/cicy-ai/global.json");
           return config.api_token;
         }
+      }
+
+      // 1b. Migrate from legacy ~/global.json (pre cicy-ai unification)
+      if (fs.existsSync(this.legacyGlobalJsonPath)) {
+        try {
+          const legacy = readGlobalConfig(this.legacyGlobalJsonPath);
+          if (legacy.api_token) {
+            log.info("[MCP] Migrating token from legacy ~/global.json → ~/cicy-ai/global.json");
+            this._saveToGlobalJson(legacy.api_token);
+            return legacy.api_token;
+          }
+        } catch (e) { log.warn("[MCP] legacy ~/global.json read failed:", e.message); }
       }
 
       // 2. Migrate from legacy token.txt
       if (fs.existsSync(this.legacyTokenPath)) {
         const token = fs.readFileSync(this.legacyTokenPath, "utf8").trim();
         if (token) {
-          log.info("[MCP] Migrating token from legacy token.txt → ~/global.json");
+          log.info("[MCP] Migrating token from legacy token.txt → ~/cicy-ai/global.json");
           this._saveToGlobalJson(token);
           return token;
         }
@@ -46,7 +61,7 @@ class AuthManager {
       // 3. Generate new token
       const newToken = crypto.randomBytes(32).toString("hex");
       this._saveToGlobalJson(newToken);
-      log.info("[MCP] Generated new token → ~/global.json");
+      log.info("[MCP] Generated new token → ~/cicy-ai/global.json");
       return newToken;
     } catch (error) {
       log.error("[MCP] Token management error:", error);

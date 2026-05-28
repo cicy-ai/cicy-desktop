@@ -4,7 +4,7 @@ const path = require("path");
 const yaml = require("js-yaml");
 
 const HOME = os.homedir();
-const GLOBAL_CONFIG_FILE = path.join(HOME, "global.json");
+const GLOBAL_CONFIG_FILE = path.join(HOME, "cicy-ai", "global.json");
 const PRIVATE_CICY_DESKTOP_FILE = path.join(HOME, "Private", "cicy-desktop.json");
 const PRIVATE_CICY_DESKTOP_AUDIT_LOG = path.join(HOME, "Private", "cicy-desktop.audit.log");
 const DEFAULT_WORKER_PORT = 8101;

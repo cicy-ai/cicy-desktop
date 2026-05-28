@@ -45,7 +45,7 @@ function getNodeConfigPath() {
   return path.join(os.homedir(), "Private", "cicy-desktop.json");
 }
 
-function readGlobalConfig(configPath = path.join(os.homedir(), "global.json")) {
+function readGlobalConfig(configPath = path.join(os.homedir(), "cicy-ai", "global.json")) {
   return readJson(configPath);
 }
 
