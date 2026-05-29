@@ -1,14 +1,13 @@
 // Homepage window — primary CiCy Desktop window. Singleton; closing it
-// does NOT quit the app. The homepage is the React SPA hosted on
-// https://desktop.cicy-ai.com — we always load it remotely so UI changes
-// ship without rebuilding cicy-desktop.
+// does NOT quit the app.
 //
-// URL priority:
-//   1. CICY_HOMEPAGE_URL env (Vite dev server, e.g. http://localhost:8173)
-//   2. https://desktop.cicy-ai.com (production)
-//
-// No local fallback — if the remote URL is unreachable, the window will
-// surface the error so the user knows to check connectivity.
+// URL selection:
+//   1. CICY_HOMEPAGE_URL env (Vite dev server) — wins everywhere if set
+//   2. Windows: remote https://desktop.cicy-ai.com — keeps Win shipping
+//      without rebuilding (Win release cadence is slower than render's)
+//   3. Mac/Linux: bundled local SPA file:// — works offline, no mixed-
+//      content concerns when embedding the team-assistant webview
+//      (the cicy-desktop preload's IPC bridge still attaches).
 
 const path = require("path");
 const { BrowserWindow } = require("electron");
@@ -16,6 +15,13 @@ const log = require("electron-log");
 
 const REMOTE_URL = "https://desktop.cicy-ai.com/";
 const DEV_URL = process.env.CICY_HOMEPAGE_URL || "";
+const LOCAL_INDEX = path.join(__dirname, "homepage-react", "index.html");
+
+function pickHomepageURL() {
+  if (DEV_URL) return DEV_URL;
+  if (process.platform === "win32") return REMOTE_URL;
+  return `file://${LOCAL_INDEX}`;
+}
 
 let homepage = null;
 
@@ -27,8 +33,8 @@ async function openHomepage() {
     return homepage;
   }
   homepage = new BrowserWindow({
-    width: 940,
-    height: 720,
+    width: 1320,
+    height: 800,
     minWidth: 360,
     minHeight: 480,
     title: "CiCy Desktop",
@@ -43,10 +49,30 @@ async function openHomepage() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      // Embed the 团队助手 right-drawer (helper SPA at http://43.99.56.150:8011/).
+      // webviewTag enables <webview> in the renderer; allowRunningInsecureContent
+      // lets the HTTPS homepage load the HTTP helper as a child resource.
+      // Without these the renderer's drawer either has no webview element at
+      // all (webviewTag default false) or its iframe loads chrome-error://
+      // due to mixed-content blocking.
+      webviewTag: true,
+      allowRunningInsecureContent: true,
     },
   });
 
-  const target = DEV_URL || REMOTE_URL;
+  // Mac hiddenInset titlebar overlays the traffic-light buttons into the
+  // window content area, so the renderer needs to reserve ~78px on the left
+  // of its topbar. In fullscreen the buttons hide and we want that gutter
+  // back. Emit window:fullscreen → renderer toggles a data-attr → CSS swaps
+  // the padding.
+  homepage.on("enter-full-screen", () => {
+    try { homepage.webContents.send("window:fullscreen", true); } catch {}
+  });
+  homepage.on("leave-full-screen", () => {
+    try { homepage.webContents.send("window:fullscreen", false); } catch {}
+  });
+
+  const target = pickHomepageURL();
   log.info(`[homepage] loading ${target}`);
   homepage.loadURL(target);
 

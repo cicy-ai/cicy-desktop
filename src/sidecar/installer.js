@@ -1,5 +1,5 @@
-// cicy-code installer — downloads the sidecar binary into the user-data
-// directory, with CN-network awareness and double-source retry.
+// cicy-code installer — downloads the sidecar binary into ~/.local/bin/,
+// with CN-network awareness and double-source retry.
 //
 // Public surface:
 //   getStatus() → { userInstalled, userVersion, binaryPath, installing }
@@ -7,9 +7,19 @@
 //   install({ onProgress, signal }) → final state event
 //   cancel() → cancels the in-flight install
 //
-// Layout on disk:
-//   <userData>/cicy-code/<platform>-<arch>/cicy-code   (binary, +x)
-//   <userData>/cicy-code/<platform>-<arch>/version     (plain text)
+// Layout on disk (2026-05-29 — versioned + symlink):
+//   ~/.local/bin/cicy-code-<version>   actual binary, +x
+//   ~/.local/bin/cicy-code             symlink → cicy-code-<version>
+//
+// The current version is read by `fs.readlink(~/.local/bin/cicy-code)` and
+// parsing the basename — no separate version file. Upgrading is "drop
+// cicy-code-<newver> + atomic-rename a new symlink over the old one".
+// Old versions stay on disk for rollback; future GC may trim them.
+//
+// Windows path is unchanged — the daemon lives inside WSL2 at
+// `$HOME/.local/bin/cicy-code` from the distro's POV, and a separate
+// `<userData>/cicy-code/wsl-version` cache mirrors the version for fast
+// Windows-side reads.
 //
 // Progress event shape:
 //   { phase, message, progress?, version?, network?, error? }
@@ -52,9 +62,8 @@ function archDir() {
        : null;
 }
 function userDir() {
-  const p = platformDir(), a = archDir();
-  if (!p || !a) return null;
-  return path.join(app.getPath("userData"), "cicy-code", `${p}-${a}`);
+  if (process.platform === "win32") return null; // WSL-managed
+  return path.join(require("os").homedir(), ".local", "bin");
 }
 function userBinary() {
   // Windows: cicy-code lives inside WSL at $HOME/.local/bin/cicy-code, which
@@ -62,9 +71,17 @@ function userBinary() {
   // marker path so callers can still test "is something installed?" — actual
   // existence is checked via wsl.userInstalled() in cicy-code.js.
   if (process.platform === "win32") return "wsl:cicy-code";
+
   const dir = userDir();
   if (!dir) return null;
+  // ~/.local/bin/cicy-code — symlink to the active version on disk.
   return path.join(dir, "cicy-code");
+}
+// Resolve the versioned binary path for a given semver string.
+function versionedBinaryPath(version) {
+  const dir = userDir();
+  if (!dir || !version) return null;
+  return path.join(dir, `cicy-code-${version}`);
 }
 function userVersion() {
   if (process.platform === "win32") {
@@ -75,10 +92,22 @@ function userVersion() {
       return fs.readFileSync(cache, "utf8").trim() || null;
     } catch { return null; }
   }
-  const dir = userDir();
-  if (!dir) return null;
-  try { return fs.readFileSync(path.join(dir, "version"), "utf8").trim() || null; }
-  catch { return null; }
+  const bin = userBinary();
+  if (!bin) return null;
+  // Preferred: read the symlink target and parse `cicy-code-<version>`.
+  try {
+    const target = fs.readlinkSync(bin);
+    const m = path.basename(target).match(/^cicy-code-(\d+\.\d+\.\d+)$/);
+    if (m) return m[1];
+  } catch {}
+  // Fallback: if some legacy install wrote a `version` file next to the
+  // binary, honour it. Lets older installs upgrade cleanly.
+  try {
+    const legacy = path.join(path.dirname(bin), "version");
+    const v = fs.readFileSync(legacy, "utf8").trim();
+    if (/^\d+\.\d+\.\d+$/.test(v)) return v;
+  } catch {}
+  return null;
 }
 
 // ---- state ----
@@ -559,7 +588,10 @@ async function install({ onProgress } = {}) {
     emit({ phase: "downloading", message: `下载 cicy-code v${check.latest}…`, version: check.latest, network, progress: 0 });
 
     const order = buildUrlList(check.assetUrl, network);
-    const dest = userBinary();
+    // Download straight to ~/.local/bin/cicy-code-<assumed version>. We re-
+    // verify the version after by execing --version; if the mirror served a
+    // stale binary the file may end up renamed.
+    let dest = versionedBinaryPath(check.latest);
     if (!dest) throw new Error(`unsupported platform ${process.platform}-${process.arch}`);
 
     await raceDownload({
@@ -574,15 +606,11 @@ async function install({ onProgress } = {}) {
 
     emit({ phase: "installing", message: "正在安装…", version: check.latest, network, progress: 1 });
 
-    if (process.platform !== "win32") {
-      try { fs.chmodSync(dest, 0o755); } catch (e) { log.warn(`[installer] chmod failed: ${e.message}`); }
-    }
+    try { fs.chmodSync(dest, 0o755); } catch (e) { log.warn(`[installer] chmod failed: ${e.message}`); }
 
     // Verify the downloaded binary reports the expected version. Mirrors
-    // sometimes serve stale cached content.  If the version doesn't match
-    // we have already retried all sources; record the mismatch in the log
-    // and update the version file to what the binary actually is so the next
-    // checkLatest() round will re-download if still behind.
+    // sometimes serve stale cached content. If `--version` disagrees, rename
+    // the file onto the real version so the symlink we point at is honest.
     let installedVersion = check.latest;
     try {
       const { execFileSync } = require("child_process");
@@ -590,15 +618,32 @@ async function install({ onProgress } = {}) {
       const m = out.match(/(\d+\.\d+\.\d+)/);
       if (m && m[1] !== check.latest) {
         log.warn(`[installer] downloaded binary reports v${m[1]}, expected v${check.latest} — mirror likely cached stale content`);
-        installedVersion = m[1]; // update version file to real version
+        const realDest = versionedBinaryPath(m[1]);
+        if (realDest && realDest !== dest) {
+          try { fs.unlinkSync(realDest); } catch {}
+          fs.renameSync(dest, realDest);
+          dest = realDest;
+        }
+        installedVersion = m[1];
       }
     } catch (e) {
       log.warn(`[installer] version verify failed: ${e.message}`);
     }
 
-    try { fs.writeFileSync(path.join(path.dirname(dest), "version"), installedVersion, "utf8"); } catch {}
+    // Atomic-replace the `cicy-code` symlink to point at the new versioned
+    // binary. Write the new link at a tmp name + rename = atomic on POSIX,
+    // so a concurrent reader either sees the old version or the new one,
+    // never a missing file.
+    const link = userBinary();                        // ~/.local/bin/cicy-code
+    const linkDir = path.dirname(link);
+    fs.mkdirSync(linkDir, { recursive: true });
+    const tmpLink = `${link}.new-${process.pid}-${Date.now()}`;
+    try { fs.unlinkSync(tmpLink); } catch {}
+    fs.symlinkSync(path.basename(dest), tmpLink);     // relative → cicy-code-<ver>
+    fs.renameSync(tmpLink, link);
 
-    const final = { phase: "done", message: `已安装 v${check.latest}`, version: check.latest, network };
+    log.info(`[installer] linked ~/.local/bin/cicy-code → cicy-code-${installedVersion}`);
+    const final = { phase: "done", message: `已安装 v${installedVersion}`, version: installedVersion, network };
     emit(final);
     return final;
   } catch (e) {

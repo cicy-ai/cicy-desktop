@@ -1,6 +1,6 @@
 // Homepage preload — last sweep. After this we should not need another
 // .app rebuild for routine UI work; everything new lands in the Vite
-// project at cicy-code/workers/desktop-render/src/ and HMRs in.
+// project at cicy-desktop/workers/render/src/ and HMRs in.
 //
 // Exposed surface:
 //   window.electronRPC(tool, args)  — raw passthrough to ALL ~50 tools
@@ -78,6 +78,15 @@ contextBridge.exposeInMainWorld("cicy", {
   // ------- platform meta (sync) -------
   platform: process.platform,         // "darwin" | "linux" | "win32"
   arch: process.arch,                 // "x64" | "arm64"
+  // Absolute path to this preload file. (Legacy — kept for compatibility
+  // with any caller that might still reference it.)
+  preloadPath: __filename,
+  // Absolute path to the dedicated <webview> preload (webview-preload.js).
+  // homepage-preload itself can't be reused inside the helper <webview>
+  // because it requires non-electron modules (../i18n) that throw in the
+  // webview's sandboxed context, and because exposing the full cicy.*
+  // surface to a remote SPA is unnecessary attack surface.
+  webviewPreloadPath: require("path").join(__dirname, "webview-preload.js"),
 
   // ------- existing namespaces -------
   backends: {
@@ -140,6 +149,62 @@ contextBridge.exposeInMainWorld("cicy", {
   },
   logs: {
     tail: (name, lines = 200) => logInvoke("logs:tail", { name, lines }),
+  },
+
+  // Browser-login loopback. loginStart kicks the flow (opens browser +
+  // listens 127.0.0.1:<random>/cb). onComplete subscribes to the
+  // result; payload is { token, state, reused, accessToken } on success
+  // or { error } on mismatch / no-token / timeout. Returns an unsubscribe.
+  auth: {
+    loginStart:  ()  => logInvoke("auth:login-start"),
+    loginCancel: ()  => logInvoke("auth:login-cancel"),
+    onComplete:  (cb) => {
+      const handler = (_e, payload) => { try { cb(payload); } catch {} };
+      ipcRenderer.on("auth:complete", handler);
+      return () => ipcRenderer.removeListener("auth:complete", handler);
+    },
+  },
+
+  // Local-only teams (cicyDesktopNodes in ~/cicy-ai/global.json). list()
+  // returns each node with a fresh /api/health probe; open(id) loads the
+  // team's web UI in a new BrowserWindow.
+  localTeams: {
+    list:    (opts)        => logInvoke("localTeams:list", opts),
+    open:    (id)          => logInvoke("localTeams:open", id),
+    add:     (spec)        => logInvoke("localTeams:add", spec),
+    remove:  (id)          => logInvoke("localTeams:remove", id),
+    update:  (id, patch)   => logInvoke("localTeams:update", { id, patch }),
+    upgrade: (id)          => logInvoke("localTeams:upgrade", id),
+    // Subscribe to relay requests forwarded from a child <webview>
+    // (the Team Helper webview, via webview-preload.js). Each fire
+    // delivers {reqId, msg:{type, ...payload}}; the renderer is
+    // expected to do the work and call replyWebviewRelay(reqId, result).
+    onWebviewRelay: (cb) => {
+      const handler = (_e, payload) => { try { cb(payload); } catch {} };
+      ipcRenderer.on("webview:relay", handler);
+      return () => ipcRenderer.removeListener("webview:relay", handler);
+    },
+    replyWebviewRelay: (reqId, result) =>
+      ipcRenderer.send("webview:relay-reply", { reqId, result }),
+  },
+
+  // Cross-origin fetch proxy. Renderer can't talk to cicy-ai.com directly
+  // because the API doesn't CORS-allow file:// or localhost:8173. Main
+  // does the request in Node (no CORS) and returns {ok, status, body}.
+  cloud: {
+    fetch: (url, opts) => logInvoke("cloud:fetch", { url, ...(opts || {}) }),
+  },
+
+  // Homepage window state. onFullscreen fires (bool) whenever the user
+  // enter/leaves macOS native fullscreen — renderer toggles a data-attr
+  // so CSS can hide the left gutter that's normally reserved for the
+  // hiddenInset traffic-light buttons.
+  window: {
+    onFullscreen: (cb) => {
+      const h = (_e, isFs) => { try { cb(!!isFs); } catch {} };
+      ipcRenderer.on("window:fullscreen", h);
+      return () => ipcRenderer.removeListener("window:fullscreen", h);
+    },
   },
 
   deeplink: {

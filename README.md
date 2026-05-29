@@ -90,6 +90,54 @@ cicy-rpc tools open_window
 cicy-rpc open_window url=https://example.com
 ```
 
+## Homepage renderer (`workers/render`)
+
+The cicy-desktop homepage UI lives in `workers/render` — a Vite + React app that
+the Electron main process loads into the primary BrowserWindow.
+
+### Where it's served from
+
+- **Windows**: remote `https://desktop.cicy-ai.com` (CF Worker hosts the
+  prod bundle; UI changes ship without rebuilding cicy-desktop).
+- **Mac/Linux**: local `file:///.../src/backends/homepage-react/index.html`
+  (a synced copy of `workers/render/dist/`, lets the homepage embed the
+  HTTP team-assistant webview without mixed-content issues).
+- **Dev**: set `CICY_HOMEPAGE_URL=http://localhost:8173` to load the live
+  vite dev server instead. See "Dev workflow" below.
+
+### Build → ship layout
+
+```bash
+# build the SPA
+cd workers/render && npm run build
+# copy into the file:// SPA folder cicy-desktop's main process loads from
+rsync -av --delete dist/ ../../src/backends/homepage-react/
+# deploy CF Worker (Windows users hit this URL)
+npx wrangler deploy
+```
+
+### Dev workflow (Mac BrowserWindow → Vite dev server on Linux)
+
+1. Start vite dev on this Linux box:
+   ```bash
+   cd workers/render && npm run dev   # serves on 0.0.0.0:8173
+   ```
+2. Tunnel the port to your Mac (so Mac's BrowserWindow can reach it):
+   ```bash
+   ssh -R 8173:127.0.0.1:8173 mac
+   ```
+3. On Mac, launch cicy-desktop with the dev URL env:
+   ```bash
+   CICY_HOMEPAGE_URL=http://localhost:8173 npm start
+   ```
+4. HMR works through Electron — edits in `workers/render/src/` hot-reload in the
+   cicy-desktop window without rebuilding the .app.
+
+`src/backends/homepage-window.js` selects URL like:
+- `CICY_HOMEPAGE_URL` if set (dev or override)
+- Windows → `https://desktop.cicy-ai.com`
+- Mac/Linux → bundled `file://`
+
 ## Canonical config
 
 `cicy-rpc` reads `~/global.json`.

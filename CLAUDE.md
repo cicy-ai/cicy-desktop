@@ -6,20 +6,99 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Development workflow rules (read first)
 
-**This repo is edited in exactly one place.** Code changes happen on the main dev machine (Linux). The Mac is a **build host only** — it compiles and the user launches the resulting `.app`. Windows builds are produced by **GitHub Actions**, never on a local Windows checkout.
+**This repo is edited in exactly one place** — the Linux dev machine. Mac is a runtime mirror; Windows builds happen in CI. There are **two iteration loops**: a fast one for React UI work and a slow one for packaged-build validation. Pick whichever matches what you're touching.
 
-1. **Edit only on the main dev machine** (this Linux checkout at `~/projects/cicy-desktop`). Never `ssh mac` to edit `src/...`; that creates two-master divergence (the kind of issue rebase had to clean up in earlier sessions).
-2. **Sync to Mac with `rsync`** before each Mac build:
+### Loop A — fast (Vite + ssh -R + electron from source)
 
-   ```bash
-   rsync -avz --delete \
-     --exclude=node_modules --exclude=dist --exclude=.git \
-     ~/projects/cicy-desktop/ mac:~/projects/cicy-desktop/
-   ```
+Use this for anything in `workers/render/src/` (React UI, CSS, App.jsx). React + Vite **HMRs** without restarting Electron.
 
-   Then on Mac: `cd ~/projects/cicy-desktop && npm install && npm run build:mac`. The user opens the resulting `.app` — the agent does NOT auto-launch it.
-3. **Windows builds: GitHub Actions only.** Do not attempt local Windows builds. The workflow is already wired (see `.github/workflows/build-windows*.yml` / equivalents); just push to `main` and let CI produce the artifact.
-4. **Commits / pushes happen on the Linux side.** Mac stays as a working-tree mirror; nothing committed there should be the source of truth. If Mac diverges, rsync overwrites.
+```bash
+# 1. On Linux dev: start the Vite dev server
+cd ~/projects/cicy-desktop/workers/render && npm install && npm run dev
+# Vite listens on 0.0.0.0:8173
+
+# 2. Reverse-tunnel :8173 so the Mac's Electron can reach it
+ssh -fNR 8173:127.0.0.1:8173 mac
+
+# 3. rsync the source tree to Mac (no node_modules)
+rsync -avz --delete \
+  --exclude=node_modules --exclude=dist --exclude=.git \
+  ~/projects/cicy-desktop/ mac:~/projects/cicy-desktop/
+
+# 4. On Mac: install once, then run Electron directly from source
+#    Pointing CICY_HOMEPAGE_URL at the tunneled Vite makes Electron load
+#    the dev bundle (HMR enabled) instead of the bundled file:// one.
+ssh mac
+cd ~/projects/cicy-desktop && npm install
+CICY_HOMEPAGE_URL=http://localhost:8173 node ./bin/cicy-desktop
+```
+
+Now: edit `workers/render/src/App.jsx` on Linux → Mac sees it instantly via HMR. **No Electron restart needed** for React/CSS changes.
+
+### Loop B — packaged build (only for release validation)
+
+```bash
+# Linux: full sync
+rsync -avz --delete \
+  --exclude=node_modules --exclude=dist --exclude=.git \
+  ~/projects/cicy-desktop/ mac:~/projects/cicy-desktop/
+
+# Mac: build the .app (electron-builder won't overwrite a running one)
+ssh mac
+cd ~/projects/cicy-desktop
+pkill -f "MacOS/CiCy Desktop" 2>/dev/null
+CICY_CODE_BIN_PATH=<path-to-cicy-code-binary> npm run build:mac
+open "dist/mac/CiCy Desktop.app"
+```
+
+### The ssh -R tunnel will drop on you — keep it healthy
+
+The fast loop only works while the `ssh -R 8173:127.0.0.1:8173 mac` tunnel is alive. If it drops mid-session (network blip, sleep, idle timeout), the Mac's Electron renderer tries to load `http://localhost:8173/` and gets connection refused → **blank white page** with no error in the UI. Preload still injects (you'll see `window.cicy` populated over CDP), which makes it look like everything's healthy at the IPC layer, hiding the real failure.
+
+Recovery:
+
+```bash
+# 1. Verify from Mac that the port is unreachable (definitive)
+ssh mac "curl -sI http://localhost:8173/ -m 4 | head -1"
+# Connection refused → tunnel down. 200 OK → tunnel fine, look elsewhere.
+
+# 2. Reopen with keep-alive so it doesn't silently die again
+ssh -O exit mac 2>/dev/null
+ssh -fN -R 8173:127.0.0.1:8173 \
+  -o ServerAliveInterval=30 -o ExitOnForwardFailure=yes mac
+
+# 3. Reload the renderer over CDP — Electron won't auto-retry the dead URL
+node -e '
+import("node:http").then(async ({default: http}) => {
+  const targets = await new Promise(r =>
+    http.get("http://127.0.0.1:9221/json/list", res => {
+      let b=""; res.on("data",c=>b+=c); res.on("end",()=>r(JSON.parse(b)));
+    }));
+  const t = targets.find(x => (x.url||"").startsWith("http://localhost:8173"));
+  const ws = new WebSocket(t.webSocketDebuggerUrl);
+  await new Promise((ok,f)=>{ws.onopen=ok;ws.onerror=f;});
+  ws.send(JSON.stringify({id:1,method:"Page.reload",params:{ignoreCache:true}}));
+  setTimeout(()=>ws.close(), 1500);
+});'
+```
+
+### The three reload classes (the trap that wastes hours)
+
+Electron has three independent execution contexts. **Each has its own reload rule**, and they don't share. Knowing which class your file belongs to is the difference between a 2-second iteration and a 30-second one.
+
+| Class | Files | Reload trigger |
+|---|---|---|
+| **Vite render** | `workers/render/src/**` — App.jsx, App.css, any imported JS | ✅ **HMR**. Save → instant. No Electron restart. |
+| **Preload** | `src/backends/homepage-preload.js`, `src/backends/webview-preload.js` | ❌ **Full Electron restart**. Preloads load once at BrowserWindow creation. `⌘+R`/devtools reload does NOT re-read them. |
+| **Main process** | `src/main.js`, `src/backends/*.js` required by main (e.g. `local-teams.js`), IPC handler registration, any tool module | ❌ **Full Electron restart**. Main runs in Node and is never reloaded by the renderer. |
+
+**The silent failure pattern**: React (Vite) HMRs to a new App.jsx that calls `window.cicy.someNewField`. If the **preload** still exposes the old surface, `someNewField` is `undefined` and your code paths silently misbehave. Always check that preload changes have actually landed by inspecting `window.cicy` over CDP (see [Debugging](#debugging-via-remote-debugging-port-9221)).
+
+### Where edits go
+
+- **Edit only on Linux** at `~/projects/cicy-desktop`. Never `ssh mac` to edit `src/...` — that creates two-master divergence (the kind of mess earlier rebases had to clean up).
+- **Commits / pushes from Linux.** Mac is a working-tree mirror; nothing committed there should be the source of truth.
+- **Windows builds: GitHub Actions only** (see `.github/workflows/build-windows*.yml`). Don't try local Windows builds.
 
 ## Common commands
 
@@ -182,17 +261,110 @@ Cross-platform Chrome discovery (`chrome-launcher.js::getBinaryCandidates`):
 
 When none are present, launch errors with `"Chrome/Chromium binary not found"` — user must install Chrome first.
 
-### Backends launcher (post-2.0.2)
+### Homepage UI (Vite + React subproject)
 
-The app no longer auto-loads a remote URL at startup. The first window shows a dashboard at `src/backends/homepage.html` listing configured backends.
+The first window's UI is a **Vite + React subproject** at `workers/render/`, **not** the older `src/backends/homepage.html`. Treat them as independent codebases that happen to live in the same repo.
 
-- registry file: `<userData>/backends.json` — created on demand by `src/backends/registry.js`
-- backend kinds: `local` (the bundled sidecar — see [Sidecar cicy-code daemon](#sidecar-cicy-code-daemon)) and `manual` (URLs added via the Add form, with optional token)
-- preload bridge: `src/backends/homepage-preload.js` exposes
-  - `cicy.backends.{list, add, remove, probe, open, health, healthAll, restartSidecar}`
-  - `cicy.windows.*` for spawned backend windows
-- IPC handlers: `src/backends/ipc.js`
-- on cold load, `homepage.html` auto-opens the backend with the most-recent `lastUsedAt`. Skipped when `history.length > 1` (user navigated *back*), `?stay=1` URL param, or `sessionStorage["cicy-auto-opened"]` is set (per-session one-shot).
+- entry: `workers/render/src/App.jsx` + `App.css`
+- dev server: `workers/render/vite.config.js` → `0.0.0.0:8173`
+- prod bundle: `workers/render/dist/index.html` (Electron loads via `file://` fallback when `CICY_HOMEPAGE_URL` is unset — see `src/backends/homepage-window.js:pickHomepageURL`)
+- BrowserWindow config (`src/backends/homepage-window.js`):
+  - `preload: src/backends/homepage-preload.js`
+  - `webviewTag: true` + `allowRunningInsecureContent: true` (the right-side Team Helper drawer is a `<webview>` loading a remote http:// SPA)
+  - `sandbox: false` + `contextIsolation: true`
+
+Day-to-day UI work happens entirely here. The Linux dev machine runs `npm run dev` in this subproject; the Mac's Electron loads from it via `CICY_HOMEPAGE_URL=http://localhost:8173` (see [Loop A](#loop-a--fast-vite--ssh--r--electron-from-source)).
+
+### Preload bridges — `homepage-preload.js` vs `webview-preload.js`
+
+Two distinct preload files because they run in different webContents with different security needs:
+
+`src/backends/homepage-preload.js` — loaded into the **main BrowserWindow**'s renderer (the Vite/React UI). Exposes the full host surface the React app needs:
+
+- `window.electronRPC(tool, args)` — generic dispatch into the worker tool registry (any tool from `src/tools/*.js`)
+- `window.cicy.localTeams.{list, open, add, remove, update, upgrade, onWebviewRelay, replyWebviewRelay}`
+- `window.cicy.cloud.fetch(url, opts)` — main-process `fetch` proxy (sidesteps CORS for `cicy-ai.com` calls; renderer's `localhost:8173` / `file://` origins aren't on the cloud's CORS allowlist)
+- `window.cicy.auth.{loginStart, loginCancel, onComplete}` — browser-loopback login flow (`src/backends/auth-loopback.js`)
+- `window.cicy.app.*`, `window.cicy.windows.*`, `window.cicy.shell.openExternal`, etc.
+- `window.cicy.preloadPath` (legacy) and `window.cicy.webviewPreloadPath` — absolute paths the React code reads to wire the right-drawer `<webview preload={...}>`
+
+`src/backends/webview-preload.js` — loaded into the **right-drawer `<webview>`** that hosts the cloud Team Helper SPA. Deliberately **TINY** because the webview loads a remote (third-party) SPA:
+
+- `window.electronRPC(tool, args)` — same generic dispatch (the cloud helper's `agent-desktop` skill needs it to run shell commands on the user's machine)
+- `window.cicy.localTeams.{list, add, remove, update, upgrade}` — all five go through `webview:relay` (next section), not directly to main
+
+We don't reuse `homepage-preload.js` here because (1) it `require()`s non-electron modules (`../i18n`) that throw in the webview's sandboxed context, half-killing the preload before any contextBridge runs, and (2) exposing `cicy.backends.*` / `cicy.sidecar.*` / `cicy.auth.*` to a cloud SPA is unnecessary attack surface.
+
+### `webview:relay` — webview ↔ host renderer authority pattern
+
+The Team Helper webview can't be allowed to mutate `~/cicy-ai/global.json` directly — that's the host renderer's UX decision. So `webview-preload.js`'s `cicy.localTeams.*` methods relay through main to the host renderer (App.jsx), wait for its reply, and return the result to the webview's awaited promise.
+
+```
+webview                          main process              host renderer (App.jsx)
+  │                                  │                          │
+  ipcRenderer.invoke                 │                          │
+  ("webview:relay", msg)             │                          │
+  ──────────────────────────────▶  ipcMain.handle               │
+                                     │                          │
+                                     host.send                  │
+                                     ("webview:relay",          │
+                                      {reqId, msg})             │
+                                     ─────────────────────────▶ onWebviewRelay handler
+                                                                  │
+                                                                  await window.cicy.localTeams.add(spec)
+                                                                  fetchLocalTeams()         ← UI refresh
+                                                                  │
+                                                                  ipcRenderer.send
+                                     ◀────────────────────────── ("webview:relay-reply",
+                                                                  {reqId, result})
+                                     resolve(result)              │
+  ◀──────────────────────────────  │                          │
+  promise resolves                   │                          │
+```
+
+15s timeout in main if the host renderer never replies. The host renderer is the only place that actually calls `localTeams:add/remove/update/upgrade` IPCs against `local-teams.js`. This keeps add/remove/upgrade authoritative for the UX (it can confirm/deny + refresh state) while still giving the webview real awaitable promises.
+
+### Team Helper drawer (cloud SPA in `<webview>`)
+
+The right-side drawer in App.jsx hosts a cloud-trial agent that walks new users through installing a local `cicy-code` backend, then hands them off to their own local helper:
+
+- `HELPER_URL_BASE` (App.jsx constant): URL of the cloud helper container — currently `http://43.99.56.150:8011`. The container is built from `cicy-cloud/workers/helper/` (separate repo).
+- `HELPER_SHARED_TOKEN`: the cloud container's `api_token`. Regenerated on every container restart; must be re-pasted into App.jsx whenever the cloud helper is rebuilt.
+- `HELPER_PANE_ID = "w-6002:main.0"` — the `Team Helper` opencode pane the cloud `cicy-code --helper=1` mode pins.
+
+The webview `src` is `${HELPER_URL_BASE}/?token=${token}#/agent/w-6002`. Once `agent-webpage helper-init` returns the user's OS / arch / network reachability, the cloud agent downloads `cicy-code` to the user's machine and registers the new team via `await window.cicy.localTeams.add({...install_source: "helper-mac-linux"...})`. App.jsx detects `install_source` starting with `helper-` and **auto-swaps `helperUrl`** 2.5 s later to `<new team base_url>/?token=...#/agent/w-6002`. From that point the drawer is the user's own long-lived local Team Helper — no 30-min cap, same task surface (install / upgrade / token-rotate / remove / open).
+
+The "send `start`" centered modal in the drawer is a manual fallback for when the server-side helper-kick goroutine (cicy-code's `watchHelperOpencodeReadyAndKick`) didn't fire — e.g. the user reopened the drawer too quickly. Local-storage key `helper_modal_suppressed` records "Don't show again".
+
+#### Helper token rotation workflow
+
+Every cloud-helper rebuild generates a fresh `api_token`. `HELPER_SHARED_TOKEN` in App.jsx must be updated to match, otherwise the drawer's `<webview src=…?token=…>` and the renderer's `cloud.fetch` calls 401 against the helper. Standard loop (already proven against both local-Docker and the remote `43.99.56.150` helper, which accepts the same token):
+
+```bash
+# 1. Grab the new token straight out of the helper container's global.json
+docker exec cicy-helper grep api_token /home/cicy/cicy-ai/global.json
+#   "api_token": "cicy_XXXXXXXX…",
+
+# 2. Paste it into workers/render/src/App.jsx HELPER_SHARED_TOKEN
+#    Vite HMR's the constant change into the running renderer immediately,
+#    no Electron restart needed for THIS step (the webview keys off helperUrl
+#    so it remounts with the new token).
+
+# 3. rsync to Mac so its source matches Linux (vite-dev tunnel still works,
+#    but explicit sync prevents drift if you later switch loops).
+rsync -avz --delete \
+  --exclude=node_modules --exclude=dist --exclude=.git \
+  --exclude=workers/render/node_modules --exclude=workers/render/dist \
+  ~/projects/cicy-desktop/ mac:~/projects/cicy-desktop/
+```
+
+Only the **token** HMRs cleanly. If you also rebuilt the helper image with new AGENTS.md / new preload-relevant code, the cloud SPA in the webview is fine to reload (it's served by the container), but anything on the Electron side (homepage-preload, webview-preload, main, local-teams.js) is a full `⌘+Q` + reopen as usual.
+
+`HELPER_URL_BASE` (App.jsx) is the **other** half of the pairing. It currently points at `http://43.99.56.150:8011` (a long-running shared helper). If you want to swap to a locally rebuilt container, change it to `http://localhost:8011` and `ssh -fNR 8011:127.0.0.1:8011 mac` so the Mac can reach your dev box's helper. Same token-grab step still applies.
+
+### Backends launcher (legacy `src/backends/`)
+
+`src/backends/homepage.html` + `cicy.backends.{list, add, remove, …}` is the **pre-Vite** launcher. It still ships and still works (the bundled sidecar and Add-by-URL flow live here), but it is **not** what new users see — `pickHomepageURL` prefers the Vite/React entry. Touch this only when you're working on the old launcher path. Registry file: `<userData>/backends.json` (`src/backends/registry.js`). IPC handlers: `src/backends/ipc.js`.
 
 ### Trust gate (`isTrustedUrl`)
 
@@ -226,19 +398,56 @@ Why this exists: `agent-webpage exec-js` runs synchronously via `window.eval` an
 
 Implication: anything that calls `window.electronRPC` from outside the cicy-code React tree must run inside a renderer where `isTrustedUrl` granted `nodeIntegration`, or where `homepage-preload.js` is the preload.
 
-### Sidecar cicy-code daemon
+### On-disk layout — `~/.local/bin/cicy-code` symlink → versioned binary
 
-`npm run build` runs `scripts/prepare-cicy-code-sidecar.js`, which copies the platform-matching `cicy-code` binary into `vendor/cicy-code/<platform>-<arch>/`. electron-builder bundles it as `extraResources`, ending up at `Contents/Resources/cicy-code/cicy-code` inside the `.app`.
+Both the in-app installer (`src/sidecar/installer.js`) and the cloud Team Helper agent write the daemon into the user's `~/.local/bin/` with this shape:
 
-Source resolution (first hit wins):
+```
+~/.local/bin/cicy-code-2.1.8      (actual binary, +x)
+~/.local/bin/cicy-code-2.1.9      (next version after upgrade)
+~/.local/bin/cicy-code            (symlink → cicy-code-2.1.9, atomic-swapped on upgrade)
+```
 
-1. `CICY_CODE_BIN_PATH` — single binary, dev shortcut for the current host's platform/arch
-2. `CICY_CODE_DIST_DIR` — directory with all four `cicy-code-{darwin,linux}-{amd64,arm64}` files from `bash build.sh all` in the cicy-code repo (CI path)
-3. `../cicy-code/dist` — sibling checkout fallback
+Rationale:
 
-On macOS the copied binary is ad-hoc signed (`codesign --sign -`) so it loads on Apple Silicon without a Developer ID. Real signing happens in electron-builder's signing pass when configured.
+- **Atomic upgrade**: `ln -sfn cicy-code-<new> ~/.local/bin/cicy-code` is a POSIX-atomic relink. A long-running daemon spawned via the symlink keeps its current inode open; future re-spawns pick up the new target.
+- **Rollback**: old versioned binaries stay on disk. Rolling back is one symlink swap.
+- **Version-from-disk**: `fs.readlinkSync(~/.local/bin/cicy-code)` and parsing the basename gives the current version — no separate `version` file to keep in sync. Legacy fallback to a `<binDir>/version` file is kept in `installer.userVersion()` for older installs.
 
-The "Local (bundled)" entry in the Backends launcher uses this sidecar — the homepage spawns it as a child to provide a fully-offline backend.
+Upgrade flow inside `src/backends/local-teams.js::upgradeNative`:
+
+1. `fetchManifestVersion()` learns the upcoming version (so the download filename is `cicy-code-<ver>` from the start).
+2. `downloadFile(directURL → mirrorURL, ~/.local/bin/cicy-code-<ver>)`.
+3. `chmod 0o755`.
+4. `--version` round-trip verifies the bytes; if mirror served stale, rename the file onto the real version.
+5. `pkill -f ~/.local/bin/cicy-code` (and the previously stored `install_path` if it differs) kills the old daemon.
+6. `ln -sfn cicy-code-<ver> ~/.local/bin/cicy-code` (written at a tmp name + renamed = atomic).
+7. Re-spawn via the symlink (`spawn(linkPath, [], { detached: true })`).
+8. `waitForHealth(/api/health)` up to 30 s; on success, `updateTeam(id, {install_path: linkPath})` so older team rows that stored a versioned path migrate to the symlink.
+
+The cloud helper agent uses the **same layout** when it does the initial install (`AGENTS.md` step 1A.2/1A.3 in `cicy-cloud/workers/helper/`). It writes `cicy-code-<ver>` + `ln -sfn` + spawns via the symlink, then registers the team with `install_path=~/.local/bin/cicy-code`. This way the agent's install path and the desktop's upgrade path are identical — no special-case wiring needed.
+
+### Sidecar cicy-code daemon — **NOT bundled** (2026-05-29 principle)
+
+`cicy-desktop` no longer ships a `cicy-code` binary in the `.app`. The daemon is acquired one of three ways:
+
+1. **Already running on `:8008`** — left over from a previous session, started by the user, or installed by the cloud Team Helper. `src/sidecar/cicy-code.js::probeExisting` detects it and `start()` reuses without re-spawning.
+2. **In-app installer** — `src/sidecar/installer.js` downloads the platform-matching binary from `cicy-ai/cicy-code` GitHub releases into `<userData>/cicy-code/<platform>-<arch>/cicy-code`. Triggered from the homepage when no daemon is running. `userBinary()` returns this path; `bundledBinaryPath()` only checks this single source — there is intentionally no `<App>/Contents/Resources/cicy-code` fallback.
+3. **Cloud Team Helper** — the trial helper container walks the user through installing cicy-code on their own machine, then registers it via `window.cicy.localTeams.add({...})`. Today the helper writes to `~/Downloads/cicy-code`; the in-app installer location is preferred (`<userData>/cicy-code/...`) so `userBinary()` discovers it on the next desktop launch with no extra wiring.
+
+Removed in this principle change:
+- `package.json` no longer has `extraResources` entries for `vendor/cicy-code/*/cicy-code`
+- `package.json` no longer runs `prepare:sidecar` in `prebuild*`
+- `scripts/prepare-cicy-code-sidecar.js` is dormant (kept for reference; can be deleted)
+- `vendor/cicy-code/` directory is no longer touched by the build
+
+`sidecar/cicy-code.js::start()` therefore returns `null` whenever no `userBinary()` is present AND no daemon is on `:8008`. The homepage's Team Helper card is the surface that gets the user from "no daemon" to "daemon running" — either by triggering the in-app installer (for the legacy single-click path) or by walking the cloud-helper onboarding flow.
+
+Windows path is unchanged — `src/sidecar/wsl.js` runs the daemon inside WSL2 because cicy-code is POSIX-only.
+
+#### What broke that motivated the principle (2026-05-29)
+
+Bundled `cicy-code` was pinned at `v2.1.2`. The trial helper installs `releases/latest` (now `v2.1.8`). On every cicy-desktop start the bundled `v2.1.2` raced ahead and bound `:8008`; when the helper later tried to launch `~/Downloads/cicy-code` it hit "address in use" and silently exited. Worse: `localTeams.list()` saw `:8008` healthy and added a "running" team card pointing at `w-6002`, which the `v2.1.2` daemon doesn't know how to spawn (the built-in pane only exists in `v2.1.8+`). End result: drawer swap → 404, version churn, hours wasted. The principle removes the bundled copy entirely — there's exactly one acquisition path and one source of truth at any time.
 
 ### CLI/config split
 
@@ -306,6 +515,61 @@ The master uses `CICY_MASTER_TOKEN` directly or falls back to `MasterTokenManage
 | sidecar packaging | `scripts/prepare-cicy-code-sidecar.js` |
 | RPC test files | `tests/rpc/master-routes.test.js`, `tests/rpc/cicy-rpc.test.js` |
 
+## Debugging via remote-debugging-port 9221
+
+Electron renderers in dev are launched with `--remote-debugging-port=9221`. Use it instead of guessing.
+
+```bash
+# Open the tunnel once per session
+ssh -fNR 9221:127.0.0.1:9221 mac        # if your dev → Mac
+# or
+ssh -fNL 9221:127.0.0.1:9221 mac        # if you're on Linux looking at Mac
+
+# Enumerate targets (homepage + every <webview>)
+curl -s http://127.0.0.1:9221/json/list | jq '.[] | {type, url, webSocketDebuggerUrl}'
+```
+
+Each target has a `webSocketDebuggerUrl`. Connect and send any `Runtime.evaluate` to inspect window state from outside Electron:
+
+```js
+// /tmp/cdp-probe.mjs
+import http from 'node:http';
+const targets = await new Promise(r =>
+  http.get('http://127.0.0.1:9221/json/list', res => {
+    let b=''; res.on('data',c=>b+=c); res.on('end',()=>r(JSON.parse(b)));
+  }));
+const target = targets.find(t => t.type === 'webview');   // or 'page' for homepage
+const ws = new WebSocket(target.webSocketDebuggerUrl);
+await new Promise((ok, fail) => { ws.onopen = ok; ws.onerror = fail; });
+
+let id = 0;
+function call(method, params={}) {
+  const reqId = ++id;
+  return new Promise(res => {
+    ws.addEventListener('message', function h(e) {
+      const m = JSON.parse(e.data);
+      if (m.id === reqId) { ws.removeEventListener('message', h); res(m); }
+    });
+    ws.send(JSON.stringify({ id: reqId, method, params }));
+  });
+}
+
+for (const expr of [
+  'typeof window.electronRPC',
+  'typeof window.cicy',
+  'window.cicy && Object.keys(window.cicy.localTeams || {})',
+  '(window.cicy && window.cicy.webviewPreloadPath) || null',
+]) {
+  const r = await call('Runtime.evaluate', { expression: expr, returnByValue: true });
+  console.log(expr, '→', JSON.stringify(r.result?.result?.value));
+}
+ws.close();
+```
+
+Typical pattern after editing a preload: this probe **must** show your new field on the homepage target before you assume the change landed. If it shows the old surface, you forgot to `⌘+Q` + reopen Electron.
+
+For the Team Helper webview specifically: its `webSocketDebuggerUrl` lives in the same `/json/list` output, typed `webview`. Probing it confirms whether the `<webview preload={file://...}>` attribute actually loaded `webview-preload.js`.
+
 ## Mental model checklist
 
 When touching any of these, expect ripple effects:
@@ -315,3 +579,7 @@ When touching any of these, expect ripple effects:
 - changing the homepage entry flow → check that cold-launch and "back to launcher" paths both behave (history.length / sessionStorage gates)
 - changing the sidecar packaging → verify `dist/mac/CiCy Desktop.app/Contents/Resources/cicy-code/cicy-code` is present and executable after build
 - changing `chrome_*` tools → both master injection (`effectiveChromeProfile`) and worker fallback (`~/cicy-ai/db/chrome.json`) paths still need to work
+- changing **any preload file** → `⌘+Q` + reopen Electron is mandatory; HMR / `⌘+R` won't reload it. Confirm via CDP `Runtime.evaluate` on the target window
+- changing **`src/backends/local-teams.js`** → it's `require`d by main; full Electron restart needed. Don't forget to also expose any new methods through both `homepage-preload.js` (full surface) and `webview-preload.js` (relay)
+- changing the `<webview>` preload surface → also update `webview:relay` handlers in main + App.jsx so the new methods route correctly. Webview can't call IPCs directly; everything funnels through `webview:relay`
+- changing the cloud Team Helper container → rebuild + restart copies a NEW `api_token`. Re-paste `HELPER_SHARED_TOKEN` in `workers/render/src/App.jsx` (HMRs) but if you also changed `HELPER_URL_BASE` you've effectively repointed the drawer — verify the new URL is reachable from the user's machine, not just yours

@@ -8,6 +8,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .env
+.env.dev
 .env.local
 .env.*.local
 .vscode/
@@ -22,3 +23,14 @@ yarn-error.log*
 # by CI from logo.svg, kept). The workflow re-generates if missing, but we
 # keep what's checked-in as a fallback.
 build/*.svg.bak
+
+# Vite/React render subproject — source ships, build artefacts do not.
+workers/render/node_modules/
+workers/render/dist/
+
+# Manual snapshot of workers/render kept locally for rollback; not part of
+# the release.
+workers/render.bak.*
+
+# Legacy render dir moved out of cicy-code; not part of cicy-desktop releases.
+workers/desktop-render/

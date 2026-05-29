@@ -1,16 +1,17 @@
-// Spawn + manage the bundled cicy-code daemon as a side process of the
-// Electron app. Lifecycle owned by src/main.js.
+// Discover / probe / spawn the cicy-code daemon for the Electron app.
 //
-// Layout assumptions:
-//   - Packaged: <App>/Contents/Resources/cicy-code/cicy-code (set in
-//     package.json build.mac.extraResources / build.linux.extraResources)
-//   - Dev:      <repo>/vendor/cicy-code/<platform>-<arch>/cicy-code
-//     (populated by scripts/prepare-cicy-code-sidecar.js before `npm start`)
+// Principle (2026-05-29): cicy-desktop does NOT bundle cicy-code. The
+// daemon is acquired three ways, in priority order:
+//   1. An already-running instance on :8008 (helper-installed, user-run,
+//      or surviving from a previous launch). probeExisting wins → reuse.
+//   2. <userData>/cicy-code/<platform>-<arch>/cicy-code — written by
+//      src/sidecar/installer.js when the user clicks the in-app installer
+//      OR by the cloud Team Helper agent when it finishes onboarding.
+//   3. (no-op) if neither, return null — the homepage's Team Helper card
+//      will guide the user through install. No "bundled" fallback exists.
 //
-// Windows is not bundled — cicy-code only cross-compiles for darwin / linux
-// because its tmux/pty layer is POSIX-only. start() returns null on Windows
-// after logging a "use Docker" hint, and the rest of the app continues
-// (it can still talk to an externally-running cicy-code at :8008).
+// Windows is not bundled either — the daemon is WSL2-hosted via
+// src/sidecar/wsl.js. start() delegates there on win32.
 
 const fs = require("fs");
 const http = require("http");
@@ -34,21 +35,15 @@ function bundledBinaryPath() {
   const plat = platformDir();
   const arch = archDir();
   if (!plat || !arch) return null;
-  // 1. User-installed via in-app installer (preferred — freshest version)
+  // Only the user-installed copy is considered. There is intentionally
+  // no <App>/Contents/Resources/cicy-code fallback — cicy-desktop no
+  // longer bundles the daemon (2026-05-29 principle).
   try {
     const installer = require("./installer");
     const userBin = installer.userBinary();
     if (userBin && fs.existsSync(userBin)) return userBin;
   } catch {}
-  // 2. Detect packaged via process.resourcesPath. In dev mode resourcesPath
-  // points into electron's own .app, which doesn't contain our sidecar dir,
-  // so fall through to the repo vendor/ path.
-  if (process.resourcesPath) {
-    const packaged = path.join(process.resourcesPath, "cicy-code", "cicy-code");
-    if (fs.existsSync(packaged)) return packaged;
-  }
-  // 3. Dev mode — repo vendor dir
-  return path.resolve(__dirname, "..", "..", "vendor", "cicy-code", `${plat}-${arch}`, "cicy-code");
+  return null;
 }
 
 function probeExisting(port = DEFAULT_PORT, timeoutMs = 500) {
@@ -102,7 +97,7 @@ async function start({ logPath, port = DEFAULT_PORT, force = false } = {}) {
 
   const bin = bundledBinaryPath();
   if (!bin || !fs.existsSync(bin)) {
-    console.warn(`[cicy-code-sidecar] no bundled binary at ${bin || "(unknown path)"} — did prepare:sidecar run?`);
+    console.warn(`[cicy-code-sidecar] no daemon binary found (user has not run the in-app installer or the cloud Team Helper); homepage's Team Helper card will guide install`);
     return null;
   }
 

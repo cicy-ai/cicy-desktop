@@ -1,6 +1,6 @@
 {
   "name": "cicy-desktop",
-  "version": "2.1.28",
+  "version": "2.1.29",
   "description": "CiCy - AI-powered operating system browser",
   "main": "src/main.js",
   "bin": {
@@ -17,13 +17,9 @@
     "test:ls": "node tests/test-ls.js",
     "build": "electron-builder --publish never",
     "build:ui": "cd packages/ui-react && npm install && npm run build",
-    "prepare:sidecar": "node scripts/prepare-cicy-code-sidecar.js",
     "build:win": "electron-builder --win",
     "build:mac": "electron-builder --mac",
-    "build:linux": "electron-builder --linux",
-    "prebuild": "npm run prepare:sidecar",
-    "prebuild:mac": "npm run prepare:sidecar",
-    "prebuild:linux": "npm run prepare:sidecar"
+    "build:linux": "electron-builder --linux"
   },
   "build": {
     "appId": "com.cicy.desktop",
@@ -79,12 +75,6 @@
         "AppImage"
       ],
       "category": "Development",
-      "extraResources": [
-        {
-          "from": "vendor/cicy-code/linux-${arch}/cicy-code",
-          "to": "cicy-code/cicy-code"
-        }
-      ],
       "maintainer": "cicybot <support@cicy-ai.com>"
     },
     "mac": {
@@ -95,13 +85,7 @@
       ],
       "category": "public.app-category.developer-tools",
       "identity": null,
-      "hardenedRuntime": false,
-      "extraResources": [
-        {
-          "from": "vendor/cicy-code/darwin-${arch}/cicy-code",
-          "to": "cicy-code/cicy-code"
-        }
-      ]
+      "hardenedRuntime": false
     },
     "publish": {
       "provider": "github",

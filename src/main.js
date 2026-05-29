@@ -50,6 +50,10 @@ contextMenu({
 
 // Setup Electron flags IMMEDIATELY after require
 electronApp.commandLine.appendSwitch("ignore-certificate-errors");
+// Allow CDP WebSocket connections from any origin so we can drive Page.reload
+// remotely (HMR-fallback when CSS / a renderer-side change needs a hard refresh).
+// Without this Electron rejects CDP WS handshakes with HTTP 403.
+electronApp.commandLine.appendSwitch("remote-allow-origins", "*");
 if (process.platform === "linux") {
   process.env["ELECTRON_DISABLE_SECURITY_WARNINGS"] = "true";
   // electronApp.commandLine.appendSwitch("disable-setuid-sandbox");
@@ -645,6 +649,106 @@ electronApp.whenReady().then(async () => {
   // entry; IPC powers the launcher window (src/backends/launcher.html).
   backendsIPC.register({ sidecarLogPath: path.join(os.homedir(), "logs", "cicy-code-sidecar.log") });
   require("./backends/sidecar-ipc").register({ sidecarLogPath: path.join(os.homedir(), "logs", "cicy-code-sidecar.log") });
+
+  // Browser-login loopback listener. Renderer calls auth:login-start when
+  // the user clicks Login; main opens a 127.0.0.1 server + the browser,
+  // and broadcasts auth:complete back to the homepage window once the
+  // callback fires (or times out / fails).
+  {
+    const auth = require("./backends/auth-loopback");
+    const { ipcMain: __ipcMainAuth } = require("electron");
+    __ipcMainAuth.handle("auth:login-start", async () => {
+      try {
+        await auth.startLogin({
+          onResult: (payload) => {
+            const hw = require("./backends/homepage-window");
+            const w = hw.getHomepageWindow && hw.getHomepageWindow();
+            if (w && !w.isDestroyed()) {
+              try { w.webContents.send("auth:complete", payload); } catch {}
+            }
+          },
+        });
+        return { ok: true };
+      } catch (e) {
+        log.warn(`[auth] login-start failed: ${e.message}`);
+        return { ok: false, error: e.message };
+      }
+    });
+    __ipcMainAuth.handle("auth:login-cancel", () => { auth.cancel(); return { ok: true }; });
+  }
+
+  // Local-team discovery — reads ~/cicy-ai/global.json's cicyDesktopNodes
+  // and probes each via /api/health. Pure local, never talks to the cloud
+  // and never runs docker shells.
+  {
+    const lt = require("./backends/local-teams");
+    const { ipcMain: __ipcLT } = require("electron");
+    __ipcLT.handle("localTeams:list",    (_e, opts) => lt.list(opts || {}));
+    __ipcLT.handle("localTeams:open",    (_e, id)   => lt.openTeam(id));
+    __ipcLT.handle("localTeams:add",     (_e, spec)    => lt.addTeam(spec || {}));
+    __ipcLT.handle("localTeams:remove",  (_e, id)      => lt.removeTeam(id));
+    __ipcLT.handle("localTeams:update",  (_e, payload) => lt.updateTeam(payload?.id, payload?.patch || {}));
+    __ipcLT.handle("localTeams:upgrade", (_e, id)      => lt.upgradeTeam(id));
+
+    // Webview → host-renderer relay. The Team Helper <webview> can't
+    // directly mutate localTeams: instead its preload (webview-preload.js)
+    // invokes "webview:relay" with {type, ...payload}; we forward to the
+    // host BrowserWindow's renderer (App.jsx subscribes), wait for its
+    // reply on "webview:relay-reply", and return that result to the
+    // webview. This keeps the homepage renderer authoritative for UX
+    // (it can confirm/deny + refresh state) while still giving the
+    // webview a real awaitable promise.
+    __ipcLT.handle("webview:relay", async (e, msg) => {
+      const host = e.sender.hostWebContents;
+      if (!host) return { ok: false, error: "no host webContents (not a webview?)" };
+      const reqId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      return await new Promise((resolve) => {
+        const { ipcMain } = require("electron");
+        let settled = false;
+        const onReply = (_e, payload) => {
+          if (!payload || payload.reqId !== reqId) return;
+          if (settled) return;
+          settled = true;
+          ipcMain.removeListener("webview:relay-reply", onReply);
+          resolve(payload.result);
+        };
+        ipcMain.on("webview:relay-reply", onReply);
+        host.send("webview:relay", { reqId, msg });
+        setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          ipcMain.removeListener("webview:relay-reply", onReply);
+          resolve({ ok: false, error: "host renderer did not respond in 15s" });
+        }, 15_000);
+      });
+    });
+  }
+
+  // Cloud-fetch proxy. Renderer hits this instead of fetch() directly because
+  // (a) vite-dev origin localhost:8173 isn't on cicy-ai.com's CORS allowlist,
+  // (b) file:// origin sends `Origin: null` which most APIs reject too. Node's
+  // global fetch in main doesn't go through Chromium's CORS at all, so this
+  // sidesteps both. Renderer→main IPC is the trust boundary; main forwards
+  // anything the renderer asks for.
+  {
+    const { ipcMain: __ipcCloud } = require("electron");
+    __ipcCloud.handle("cloud:fetch", async (_e, req) => {
+      const { url, method = "GET", headers = {}, body = null } = req || {};
+      if (!url) return { ok: false, status: 0, error: "no url" };
+      try {
+        const r = await fetch(url, { method, headers, body, cache: "no-store" });
+        const text = await r.text();
+        return {
+          ok: r.ok,
+          status: r.status,
+          statusText: r.statusText,
+          body: text,
+        };
+      } catch (e) {
+        return { ok: false, status: 0, error: e.message || String(e) };
+      }
+    });
+  }
 
   // Click handler for the "Check for Updates…" menu item. Triggers a fresh
   // update check; shows a dialog with the result. Auto-download + auto-install

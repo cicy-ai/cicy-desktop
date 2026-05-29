@@ -25,6 +25,18 @@ cd "$PROJECT_DIR" || {
 }
 
 echo "📁 Project: $PROJECT_DIR"
+
+# Dev override: if .env.dev exists in the project root, source it before
+# npm start. Useful for CICY_HOMEPAGE_URL=http://localhost:8173 to load
+# the workers/render vite dev server (HMR) into the BrowserWindow instead
+# of the production CF Worker / bundled file://.
+if [ -f "$PROJECT_DIR/.env.dev" ]; then
+  echo "🧪 .env.dev detected — loading dev overrides"
+  set -a
+  . "$PROJECT_DIR/.env.dev"
+  set +a
+fi
+
 echo "🚀 Running: npm start"
 echo "⚠️  关闭此窗口将停止 Master 和 Worker"
 echo "========================================="
