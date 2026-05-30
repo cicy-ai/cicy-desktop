@@ -52,33 +52,20 @@ export default function App() {
       (t) => t && t.status === "running" && t.base_url && t.api_token,
     ) || null;
   }, [localTeams]);
-  // localHelperState — five-way. Drives both the Helper card and onStart.
+  // localHelperState — four-way. Drives both the Helper card and onStart.
   //
-  //   "unknown"        : first list() probe hasn't returned. Don't decide.
-  //   "local-ready"    : at least one local team is healthy → use it.
-  //   "local-pending"  : probe done, no healthy team yet, BUT user has
-  //                      local nodes configured (cicy-code starting up,
-  //                      wrong token, transient error, …). Wait.
-  //   "cloud-only"     : probe done AND no local nodes configured AND the
-  //                      user hasn't seen the cloud-trial onboarding card
-  //                      before. This is the only state that opens the
-  //                      30-min cloud helper, and only on first-launch.
-  //   "install-prompt" : probe done, no local nodes configured, but the
-  //                      cloud-trial card has already been shown once.
-  //                      Don't keep nagging with cloud — show an
-  //                      "install cicy-code" placeholder instead.
-  //
-  // CLOUD_SHOWN_KEY persists across sessions so the cloud onboarding
-  // shows up exactly once per device. We mark it the moment the user
-  // commits to opening the cloud webview (cloud-only branch in onStart).
-  const CLOUD_SHOWN_KEY = "cicy_cloud_helper_shown_once";
-  const [cloudHelperShownOnce, setCloudHelperShownOnce] = useState(() => {
-    try { return localStorage.getItem(CLOUD_SHOWN_KEY) === "1"; } catch { return false; }
-  });
-  const markCloudHelperShown = useCallback(() => {
-    try { localStorage.setItem(CLOUD_SHOWN_KEY, "1"); } catch {}
-    setCloudHelperShownOnce(true);
-  }, []);
+  //   "unknown"       : first list() probe hasn't returned. Don't decide.
+  //   "local-ready"   : at least one local team is healthy → use it.
+  //   "local-pending" : probe done, no healthy team yet, BUT user has
+  //                     local nodes configured (cicy-code starting up,
+  //                     wrong token, transient error, …). Wait.
+  //   "cloud-only"    : probe done AND no local nodes configured. Always
+  //                     show the cloud-trial helper — it's the one that
+  //                     walks users through installing Docker + cicy-code
+  //                     on Windows, so we need to be able to summon it
+  //                     every launch until the install completes (then
+  //                     cicyDesktopNodes lands an entry and state flips
+  //                     to local-ready / local-pending).
   const hasLocalConfigured = useMemo(() => {
     // Any configured node counts — even "stopped" or "auth_error" — because
     // the user has signaled intent to use a local instance. The only state
@@ -89,9 +76,8 @@ export default function App() {
     if (!localTeamsFetched) return "unknown";
     if (localHelperTeam)    return "local-ready";
     if (hasLocalConfigured) return "local-pending";
-    if (!cloudHelperShownOnce) return "cloud-only";
-    return "install-prompt";
-  }, [localTeamsFetched, localHelperTeam, hasLocalConfigured, cloudHelperShownOnce]);
+    return "cloud-only";
+  }, [localTeamsFetched, localHelperTeam, hasLocalConfigured]);
   const localHelperUrl = useMemo(() => {
     if (!localHelperTeam) return null;
     const base = String(localHelperTeam.base_url).replace(/\/$/, "");
@@ -490,16 +476,11 @@ export default function App() {
                 setHelperUrl(localHelperUrl);
               } else if (localHelperState === "cloud-only") {
                 setHelperUrl(cloudHelperUrl);
-                // Commit: the cloud onboarding has been used. We never show
-                // the cloud trial card on subsequent launches — if the user
-                // didn't install cicy-code, the next launch lands on
-                // install-prompt (a stay-here placeholder) instead.
-                markCloudHelperShown();
               } else {
-                // unknown / local-pending / install-prompt — open the drawer
-                // but leave helperUrl null so HelperPlaceholder renders.
-                // For local-pending the effect below upgrades to
-                // localHelperUrl as soon as cicy-code comes up.
+                // unknown / local-pending — open the drawer but leave
+                // helperUrl null so HelperPlaceholder renders. For
+                // local-pending the effect below upgrades to localHelperUrl
+                // as soon as cicy-code comes up.
                 setHelperUrl(null);
               }
               setHelperOpen(true);
@@ -625,17 +606,17 @@ export default function App() {
 }
 
 function HelperOnboardCard({ onStart, state = "unknown" }) {
-  // state: "unknown" | "local-ready" | "local-pending" | "cloud-only" | "install-prompt"
-  //   local-ready    : open helper drawer pointing at local w-6002
-  //   local-pending  : has local config, cicy-code not healthy yet → wait
-  //   unknown        : first probe in flight → behave like local-pending
-  //   cloud-only     : first launch, no local installed → onboarding via cloud
-  //   install-prompt : already shown cloud once, still no local → nudge user
-  //                    to install cicy-code instead of pushing cloud again
-  const isLocal     = state === "local-ready";
-  const isPending   = state === "unknown" || state === "local-pending";
-  const isCloud     = state === "cloud-only";
-  const isInstall   = state === "install-prompt";
+  // state: "unknown" | "local-ready" | "local-pending" | "cloud-only"
+  //   local-ready   : open helper drawer pointing at local w-6002
+  //   local-pending : has local config, cicy-code not healthy yet → wait
+  //   unknown       : first probe in flight → behave like local-pending
+  //   cloud-only    : no local installed → always-available cloud helper that
+  //                   walks the user through installing Docker + cicy-code.
+  //                   Shown on every launch until install lands a team in
+  //                   cicyDesktopNodes (then state flips to local-ready/-pending).
+  const isLocal   = state === "local-ready";
+  const isPending = state === "unknown" || state === "local-pending";
+  const isCloud   = state === "cloud-only";
   return (
     <div className="bcard bcard--helper">
       <div className="bcard__accent" />
@@ -648,10 +629,8 @@ function HelperOnboardCard({ onStart, state = "unknown" }) {
           <span className="bcard__badge bcard__badge--local">本地常驻</span>
         ) : isPending ? (
           <span className="bcard__badge bcard__badge--local">本地启动中</span>
-        ) : isCloud ? (
-          <span className="bcard__badge bcard__badge--trial">30 分钟试用</span>
         ) : (
-          <span className="bcard__badge bcard__badge--local">待安装</span>
+          <span className="bcard__badge bcard__badge--trial">30 分钟试用</span>
         )}
       </div>
       <div className="bcard__body">
@@ -660,17 +639,15 @@ function HelperOnboardCard({ onStart, state = "unknown" }) {
           <p className="bcard__desc">管理本地团队 · 升级 / 加新团队</p>
         ) : isPending ? (
           <p className="bcard__desc">本地小助手准备中，请稍候…</p>
-        ) : isCloud ? (
+        ) : (
           <>
             <p className="bcard__desc">协助您完成本地私有化团队部署</p>
             <p className="bcard__fineprint">过期后需购买会员</p>
           </>
-        ) : (
-          <p className="bcard__desc">尚未安装本地 cicy-code，请先完成安装</p>
         )}
       </div>
       <button type="button" className="bcard__cta bcard__cta--helper" onClick={onStart}>
-        <span>{isLocal ? "打开助手" : isPending ? "等待本地" : isCloud ? "召唤助手" : "查看安装说明"}</span>
+        <span>{isLocal ? "打开助手" : isPending ? "等待本地" : "召唤助手"}</span>
       </button>
     </div>
   );
@@ -678,7 +655,6 @@ function HelperOnboardCard({ onStart, state = "unknown" }) {
 
 function HelperPlaceholder({ state = "unknown" }) {
   const pending = state === "unknown" || state === "local-pending";
-  const install = state === "install-prompt";
   return (
     <div className="helper-placeholder">
       <div className="helper-placeholder__mark">🤖</div>
@@ -687,11 +663,6 @@ function HelperPlaceholder({ state = "unknown" }) {
         <p className="helper-placeholder__sub">
           正在等待本地小助手就绪…<br />
           确保 cicy-code 已启动并监听 8008。就绪后会自动连接，无需刷新。
-        </p>
-      ) : install ? (
-        <p className="helper-placeholder__sub">
-          尚未检测到本地 cicy-code。<br />
-          请先到 GitHub release 下载并安装 cicy-code，本地小助手就绪后会自动出现。
         </p>
       ) : (
         <p className="helper-placeholder__sub">
