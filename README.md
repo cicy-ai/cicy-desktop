@@ -116,27 +116,43 @@ rsync -av --delete dist/ ../../src/backends/homepage-react/
 npx wrangler deploy
 ```
 
-### Dev workflow (Mac BrowserWindow → Vite dev server on Linux)
+### Dev workflow
 
-1. Start vite dev on this Linux box:
-   ```bash
-   cd workers/render && npm run dev   # serves on 0.0.0.0:8173
-   ```
-2. Tunnel the port to your Mac (so Mac's BrowserWindow can reach it):
-   ```bash
-   ssh -R 8173:127.0.0.1:8173 mac
-   ```
-3. On Mac, launch cicy-desktop with the dev URL env:
-   ```bash
-   CICY_HOMEPAGE_URL=http://localhost:8173 npm start
-   ```
-4. HMR works through Electron — edits in `workers/render/src/` hot-reload in the
-   cicy-desktop window without rebuilding the .app.
+#### Option A — Vite directly on Mac (recommended, no tunnel needed)
 
-`src/backends/homepage-window.js` selects URL like:
-- `CICY_HOMEPAGE_URL` if set (dev or override)
-- Windows → `https://desktop.cicy-ai.com`
-- Mac/Linux → bundled `file://`
+1. Start Vite dev server on Mac:
+   ```bash
+   cd workers/render
+   npm install        # first time only
+   npm run dev        # serves http://localhost:8173
+   ```
+2. Launch cicy-desktop (`.env.dev` already sets `CICY_HOMEPAGE_URL=http://localhost:8173`):
+   ```bash
+   # double-click cicy-dektop.command, or:
+   npm start
+   ```
+   HMR works — edits in `workers/render/src/` hot-reload in the Electron window.
+
+#### Option B — Vite on Linux, tunnel to Mac
+
+1. Start Vite on Linux:
+   ```bash
+   cd workers/render && npm run dev   # serves 0.0.0.0:8173
+   ```
+2. Open SSH reverse tunnel so Mac's BrowserWindow can reach it:
+   ```bash
+   ssh -R 8173:127.0.0.1:8173 -o ServerAliveInterval=30 -o ExitOnForwardFailure=yes mac
+   ```
+3. Launch cicy-desktop on Mac (same `.env.dev` / `CICY_HOMEPAGE_URL` as above).
+
+> **Fallback**: if `CICY_HOMEPAGE_URL` is set but the server is unreachable (tunnel
+> dropped, Vite not started), `homepage-window.js` automatically falls back to the
+> bundled `file://` SPA — the window never stays blank.
+
+`src/backends/homepage-window.js` URL priority:
+1. `CICY_HOMEPAGE_URL` env (dev override) → falls back to `file://` on load failure
+2. Windows → `https://desktop.cicy-ai.com`
+3. Mac/Linux → bundled `file://src/backends/homepage-react/index.html`
 
 ## Canonical config
 

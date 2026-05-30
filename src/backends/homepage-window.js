@@ -2,7 +2,9 @@
 // does NOT quit the app.
 //
 // URL selection:
-//   1. CICY_HOMEPAGE_URL env (Vite dev server) — wins everywhere if set
+//   1. CICY_HOMEPAGE_URL env (Vite dev server) — wins everywhere if set;
+//      if the URL fails to load (tunnel down, server not running) the window
+//      automatically falls back to the local file:// SPA.
 //   2. Windows: remote https://desktop.cicy-ai.com — keeps Win shipping
 //      without rebuilding (Win release cadence is slower than render's)
 //   3. Mac/Linux: bundled local SPA file:// — works offline, no mixed-
@@ -81,8 +83,15 @@ async function openHomepage() {
   homepage.webContents.on("console-message", (_e, level, msg, line, source) => {
     if (level >= 1) console.log(`[homepage:console L${line}] ${msg}  (${source})`);
   });
+  // If the dev URL (Vite / SSH tunnel) is unreachable, fall back to the
+  // local bundled file:// SPA so the window never stays blank.
   homepage.webContents.on("did-fail-load", (_e, code, desc, url) => {
     console.error(`[homepage] did-fail-load ${code} ${desc} ${url}`);
+    const fallback = `file://${LOCAL_INDEX}`;
+    if (url && DEV_URL && url.startsWith(DEV_URL.replace(/\/$/, "")) && url !== fallback) {
+      log.warn(`[homepage] dev URL unreachable, falling back to ${fallback}`);
+      homepage.loadURL(fallback);
+    }
   });
   homepage.on("closed", () => { homepage = null; });
   return homepage;
