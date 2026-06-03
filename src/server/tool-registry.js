@@ -62,7 +62,18 @@ function registerTool(mcpServer, tools, title, description, schema, handler, opt
     tag,
   });
 
-  mcpServer.tool(title, description, inputSchema, async (args) => {
+  // MCP SDK ≥1.29 rejects a plain JSON-Schema object as the params arg
+  // ("expected a Zod schema or ToolAnnotations, but received an unrecognized
+  // object"). It wants the raw Zod shape (an object of Zod types) and does its
+  // own JSON-Schema conversion. The hand-rolled `inputSchema` above is still
+  // used for our own `tools` catalog (express tool listing). Pass the real
+  // Zod shape here; falls back to {} (a valid empty raw shape) when absent.
+  const rawShape =
+    schema && schema._def && typeof schema._def.shape === "function"
+      ? schema._def.shape()
+      : (schema && schema.shape) || {};
+
+  mcpServer.tool(title, description, rawShape, async (args) => {
     try {
       const { executeTool } = require("./tool-executor");
       return await executeTool(title, args, {
