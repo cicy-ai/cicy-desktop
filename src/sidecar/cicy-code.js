@@ -46,26 +46,21 @@ async function start({ logPath, port = DEFAULT_PORT, force = false } = {}) {
   }
 
   if (process.platform === "win32") {
-    // Windows uses WSL2 to host the linux-amd64 binary. The wsl module owns
-    // every wsl-touching command; here we just delegate.
+    // Windows runs cicy-code in Docker Desktop (the container's entrypoint
+    // npx-installs cicy-code). The docker module owns image-load-from-R2 +
+    // container run; here we just delegate. (Replaced the old WSL path.)
     try {
-      const wsl = require("./wsl");
-      const status = await wsl.checkStatus();
-      if (!status.installed || !status.hasDistro) {
-        console.warn(`[cicy-code-sidecar] WSL not ready (${JSON.stringify(status)}) — homepage will guide install`);
+      const docker = require("./docker");
+      const r = await docker.start({ port });
+      if (!r) {
+        console.warn("[cicy-code-sidecar] Docker not ready — homepage will guide install");
         return null;
       }
-      if (!(await wsl.userInstalled())) {
-        console.warn("[cicy-code-sidecar] cicy-code not installed in WSL yet — homepage will trigger install");
-        return null;
-      }
-      const r = await wsl.start({ port, force });
-      // Treat WSL-internal pid as the child token so the outer code knows we're up.
-      child = { wsl: true, pid: r.pid };
-      console.log(`[cicy-code-sidecar] started inside WSL pid=${r.pid}`);
+      child = r; // { docker:true, container, id }
+      console.log(`[cicy-code-sidecar] started in Docker container ${r.container} (${r.id})`);
       return child;
     } catch (e) {
-      console.warn(`[cicy-code-sidecar] WSL start failed: ${e.message}`);
+      console.warn(`[cicy-code-sidecar] Docker start failed: ${e.message}`);
       return null;
     }
   }
@@ -108,7 +103,12 @@ async function stop({ timeoutMs = 5000 } = {}) {
   if (!child) return;
   const p = child;
   child = null;
-  // WSL-launched: not a real ChildProcess, kill via wsl pkill instead.
+  // Docker-launched (win32): not a real ChildProcess — remove the container.
+  if (p && p.docker) {
+    try { await require("./docker").stop(); } catch {}
+    return;
+  }
+  // WSL-launched (legacy): not a real ChildProcess, kill via wsl pkill instead.
   if (p && p.wsl) {
     try { await require("./wsl").stop(); } catch {}
     return;
