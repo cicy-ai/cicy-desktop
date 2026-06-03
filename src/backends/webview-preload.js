@@ -46,15 +46,8 @@ contextBridge.exposeInMainWorld("cicy", {
     update:  (id, patch)    => relay("localTeams:update", { id, patch }),
     upgrade: (id)           => relay("localTeams:upgrade", { id }),
   },
-  // cicy-code daemon ("sidecar") install/update — distinct from
-  // localTeams.upgrade which is per-team. install() downloads the latest
-  // binary to ~/.local/bin/cicy-code-<ver> + atomic-relinks the
-  // ~/.local/bin/cicy-code symlink. checkLatest() reports {ok, latest,
-  // installedVersion, network} without writing anything.
-  sidecar: {
-    install:     ()         => relay("sidecar:install"),
-    checkLatest: ()         => relay("sidecar:checkLatest"),
-  },
+  // (sidecar install/checkLatest removed — cicy-code is installed via
+  // `npx cicy-code` by the sidecar, no in-app downloader.)
 });
 
 console.log("[webview-preload] electronRPC + cicy.localTeams ready");

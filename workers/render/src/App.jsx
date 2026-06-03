@@ -264,15 +264,9 @@ export default function App() {
           result = await window.cicy.localTeams.upgrade(msg.id);
         } else if (msg?.type === "localTeams:list") {
           result = { ok: true, teams: await window.cicy.localTeams.list({ refresh: true }) };
-        } else if (msg?.type === "sidecar:install") {
-          // Triggers the in-app installer: download latest cicy-code →
-          // ~/.local/bin/cicy-code-<ver> + atomic-relink symlink. Note: does
-          // NOT restart the running daemon. Pair with localTeams.upgrade for
-          // a full restart cycle.
-          result = await window.cicy.sidecar.install();
-        } else if (msg?.type === "sidecar:checkLatest") {
-          result = await window.cicy.sidecar.checkLatest();
         }
+        // (sidecar:install / sidecar:checkLatest removed — cicy-code is now
+        // installed via `npx cicy-code` by the sidecar, no in-app downloader.)
         // Force-refresh the team list so the new/removed/upgraded card
         // shows up before the next 30 s poll.
         fetchLocalTeams();

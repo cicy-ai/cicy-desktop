@@ -7,12 +7,11 @@
 //      previous launch). probeExisting wins → reuse, never double-spawn.
 //   2. Otherwise spawn `npx cicy-code` on mac/linux.
 //
-// This replaced the old src/sidecar/installer.js binary (~/.local/bin/
-// cicy-code), which raced the npx-launched daemon for :8008. The in-app
-// installer is no longer the daemon source.
+// This replaced the old in-app installer (downloaded binary at
+// ~/.local/bin/cicy-code), which raced the npx-launched daemon for :8008.
 //
-// Windows is WSL2-hosted via src/sidecar/wsl.js; start() delegates there on
-// win32 (npx-in-WSL migration tracked separately).
+// Windows runs cicy-code in Docker (src/sidecar/docker.js); start() delegates
+// there on win32. (The old WSL path was retired.)
 
 const fs = require("fs");
 const http = require("http");
@@ -106,11 +105,6 @@ async function stop({ timeoutMs = 5000 } = {}) {
   // Docker-launched (win32): not a real ChildProcess — remove the container.
   if (p && p.docker) {
     try { await require("./docker").stop(); } catch {}
-    return;
-  }
-  // WSL-launched (legacy): not a real ChildProcess, kill via wsl pkill instead.
-  if (p && p.wsl) {
-    try { await require("./wsl").stop(); } catch {}
     return;
   }
   try { p.kill("SIGTERM"); } catch {}

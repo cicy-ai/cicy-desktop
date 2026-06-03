@@ -101,19 +101,11 @@ contextBridge.exposeInMainWorld("cicy", {
     restartSidecar: ()      => logInvoke("backends:restart-sidecar"),
     resolveUrl:     (id)    => logInvoke("backends:resolve-url", id),
   },
+  // cicy-code is installed/run by the sidecar via `npx cicy-code` (mac/linux)
+  // or Docker (Windows) — no in-app downloader. Only lifecycle + status remain.
   sidecar: {
     status:      ()  => logInvoke("sidecar:status"),
-    wslStatus:   ()  => logInvoke("sidecar:wsl-status"),
-    installWsl:  ()  => logInvoke("sidecar:wsl-install"),
-    checkLatest: ()  => logInvoke("sidecar:check-latest"),
-    install:     ()  => logInvoke("sidecar:install"),
     start:       ()  => logInvoke("sidecar:start"),
-    cancel:      ()  => logInvoke("sidecar:cancel"),
-    onProgress:  (cb) => {
-      const handler = (_e, payload) => { try { cb(payload); } catch {} };
-      ipcRenderer.on("sidecar:progress", handler);
-      return () => ipcRenderer.removeListener("sidecar:progress", handler);
-    },
   },
   windows: {
     list:  ()   => logInvoke("windows:list"),

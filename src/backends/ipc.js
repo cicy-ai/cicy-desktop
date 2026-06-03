@@ -129,9 +129,8 @@ function register(opts = {}) {
         });
       });
 
-      if (process.platform === "win32") {
-        try { await require("../sidecar/wsl").stop(); } catch {}
-      }
+      // Windows: the daemon runs in Docker; sidecar.stop() removes the
+      // container. (Was wsl.stop() — WSL path retired.)
       await killByPort();
       try { await sidecar.stop({ timeoutMs: 500 }); } catch {}
 
