@@ -97,6 +97,10 @@ function normalizePrivateChromeEntry(profileKey, accountIdx, entry) {
   const port = typeof safeEntry.port === "number" ? safeEntry.port : null;
   const proxyUrl = normalizePrivateProxy(safeEntry.proxy);
   const platform = safeEntry.platform && typeof safeEntry.platform === "object" ? safeEntry.platform : {};
+  // Free-text label + account tags (e.g. ["github","gmail"]) for
+  // `list profile with <svc>` — written via chrome_set_profile_meta.
+  const note = typeof safeEntry.note === "string" ? safeEntry.note : "";
+  const accounts = Array.isArray(safeEntry.accounts) ? safeEntry.accounts : [];
 
   return {
     profileKey,
@@ -108,6 +112,8 @@ function normalizePrivateChromeEntry(profileKey, accountIdx, entry) {
     proxy: safeEntry.proxy,
     proxyUrl,
     platform,
+    note,
+    accounts,
     expanded: {
       orgPath: orgPath ? expandHome(orgPath) : null,
       rpaDir: rpaDir ? expandHome(rpaDir) : null,
@@ -647,6 +653,33 @@ function registerChromeTools(registerTool) {
       data[key] = {
         ...data[key],
         proxy: typeof proxy === "string" ? proxy : "",
+      };
+      writePrivateChromeConfig(data);
+      return toToolResult({ success: true, profileKey: key, privateConfig: data[key] });
+    },
+    { tag: "Chrome" }
+  );
+
+  registerTool(
+    "chrome_set_profile_meta",
+    "设置 ~/cicy-ai/db/chrome.json 中指定 accountIdx 的 note（备注）/ accounts（账号标签，用于 list profile with <svc>）",
+    z.object({
+      accountIdx: z.number().describe("账户索引"),
+      note: z.string().optional().describe("自由文本备注；省略则不动"),
+      accounts: z.array(z.string()).optional().describe("账号标签数组，如 ['github','gmail']；去重小写；省略则不动"),
+    }),
+    async ({ accountIdx, note, accounts } = {}) => {
+      const data = readPrivateChromeConfig();
+      const key = `account_${accountIdx}`;
+      if (!data[key]) {
+        return toToolResult({ error: `Missing chrome.json entry: ${key}` }, { isError: true });
+      }
+      data[key] = {
+        ...data[key],
+        ...(note !== undefined ? { note: String(note) } : {}),
+        ...(accounts !== undefined
+          ? { accounts: [...new Set(accounts.map((a) => String(a).trim().toLowerCase()).filter(Boolean))] }
+          : {}),
       };
       writePrivateChromeConfig(data);
       return toToolResult({ success: true, profileKey: key, privateConfig: data[key] });
