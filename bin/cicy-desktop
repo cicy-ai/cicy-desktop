@@ -346,14 +346,100 @@ function executeCommand(cmd) {
   }
 }
 
-function ensureDesktopCommandFile() {
-  if (!fs.existsSync(PROJECT_COMMAND_FILE)) {
-    return;
-  }
+// Drop a double-clickable, CiCy-icon desktop shortcut that relaunches via
+// `npx cicy-desktop`. GUI-launched shortcuts get a minimal PATH (no node), so
+// we bake the dir of the node running this launcher (process.execPath) in.
+function nodeBinDir() {
+  try { return path.dirname(process.execPath); } catch { return ""; }
+}
 
-  fs.copyFileSync(PROJECT_COMMAND_FILE, DESKTOP_COMMAND_FILE);
-  fs.chmodSync(DESKTOP_COMMAND_FILE, 0o755);
-  console.log(`📎 Synced launcher to ${DESKTOP_COMMAND_FILE}`);
+function ensureDesktopCommandFile() {
+  try {
+    if (process.platform === "darwin") return ensureMacDesktopApp();
+    if (process.platform === "linux")  return ensureLinuxDesktopEntry();
+    if (process.platform === "win32")  return ensureWindowsShortcut();
+  } catch (e) {
+    console.warn(`[shortcut] failed: ${e.message}`);
+  }
+}
+
+function ensureMacDesktopApp() {
+  // A minimal .app wrapper: real icon (icns) + Info.plist + a launcher that
+  // runs `npx cicy-desktop`. Created via the filesystem (not a browser
+  // download) so it carries no com.apple.quarantine → no Gatekeeper prompt.
+  const appDir = path.join(DESKTOP_DIR, "CiCy Desktop.app");
+  const macosDir = path.join(appDir, "Contents", "MacOS");
+  const resDir   = path.join(appDir, "Contents", "Resources");
+  fs.mkdirSync(macosDir, { recursive: true });
+  fs.mkdirSync(resDir, { recursive: true });
+
+  const icns = path.join(PACKAGE_ROOT, "build", "icon.icns");
+  if (fs.existsSync(icns)) fs.copyFileSync(icns, path.join(resDir, "icon.icns"));
+
+  fs.writeFileSync(path.join(appDir, "Contents", "Info.plist"),
+`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleName</key><string>CiCy Desktop</string>
+  <key>CFBundleDisplayName</key><string>CiCy Desktop</string>
+  <key>CFBundleIdentifier</key><string>com.cicy.desktop.launcher</string>
+  <key>CFBundleExecutable</key><string>launcher</string>
+  <key>CFBundleIconFile</key><string>icon</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>LSUIElement</key><true/>
+</dict></plist>
+`);
+
+  const launcher = path.join(macosDir, "launcher");
+  fs.writeFileSync(launcher,
+`#!/bin/sh
+export PATH="${nodeBinDir()}:/usr/local/bin:/opt/homebrew/bin:$PATH"
+exec npx -y cicy-desktop
+`);
+  fs.chmodSync(launcher, 0o755);
+  // Bump mtime so Finder refreshes the icon.
+  try { const t = new Date(); fs.utimesSync(appDir, t, t); } catch {}
+  console.log(`📎 Desktop shortcut: ${appDir}`);
+}
+
+function ensureLinuxDesktopEntry() {
+  const icon = path.join(PACKAGE_ROOT, "build", "icons", "icon-256.png");
+  const file = path.join(DESKTOP_DIR, "cicy-desktop.desktop");
+  fs.mkdirSync(DESKTOP_DIR, { recursive: true });
+  fs.writeFileSync(file,
+`[Desktop Entry]
+Type=Application
+Name=CiCy Desktop
+Exec=sh -c 'export PATH="${nodeBinDir()}:$PATH"; exec npx -y cicy-desktop'
+Icon=${icon}
+Terminal=false
+Categories=Development;
+`);
+  fs.chmodSync(file, 0o755);
+  console.log(`📎 Desktop shortcut: ${file}`);
+}
+
+function ensureWindowsShortcut() {
+  // A .cmd is icon-less; a proper .lnk with the CiCy icon is written via a
+  // throwaway PowerShell script (WScript.Shell CreateShortcut + IconLocation).
+  const ico = path.join(PACKAGE_ROOT, "build", "icon.ico");
+  const lnk = path.join(DESKTOP_DIR, "CiCy Desktop.lnk");
+  const nodeDir = nodeBinDir();
+  const ps = path.join(require("os").tmpdir(), `cicy-shortcut-${process.pid}.ps1`);
+  fs.writeFileSync(ps,
+`$ws = New-Object -ComObject WScript.Shell
+$s = $ws.CreateShortcut('${lnk.replace(/'/g, "''")}')
+$s.TargetPath = 'cmd.exe'
+$s.Arguments = '/c set PATH=${nodeDir};%PATH% && npx -y cicy-desktop'
+$s.IconLocation = '${ico.replace(/'/g, "''")}'
+$s.Save()
+`);
+  try {
+    execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${ps}"`, { stdio: "ignore" });
+    console.log(`📎 Desktop shortcut: ${lnk}`);
+  } finally {
+    try { fs.unlinkSync(ps); } catch {}
+  }
 }
 
 function prefixLines(prefix, text) {
