@@ -59,7 +59,11 @@ function writePrivateChromeConfig(nextConfig) {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  fs.writeFileSync(PRIVATE_CHROME_JSON, JSON.stringify(nextConfig || {}, null, 2));
+  // chrome.json now holds per-account passwords + TOTP secrets — keep it
+  // owner-only (0600). mode on writeFileSync only applies on create, so chmod
+  // explicitly to also tighten a pre-existing world/group-readable file.
+  fs.writeFileSync(PRIVATE_CHROME_JSON, JSON.stringify(nextConfig || {}, null, 2), { mode: 0o600 });
+  try { fs.chmodSync(PRIVATE_CHROME_JSON, 0o600); } catch {}
 }
 
 function listPrivateChromeEntries({ includeHidden = false } = {}) {
@@ -97,14 +101,19 @@ function normalizePrivateChromeEntry(profileKey, accountIdx, entry) {
   const port = typeof safeEntry.port === "number" ? safeEntry.port : null;
   const proxyUrl = normalizePrivateProxy(safeEntry.proxy);
   const platform = safeEntry.platform && typeof safeEntry.platform === "object" ? safeEntry.platform : {};
-  // Free-text note + a service→account map (e.g. {github:"octocat",
-  // gmail:"me@gmail.com"}) for `list profile with <svc>` — written via
-  // chrome_set_profile_meta. Legacy array values normalize to {}.
+  // Free-text note + a service→credentials map for `list profile with <svc>` —
+  // written via chrome_set_profile_meta. Each value is {account,password,totp}.
+  // Legacy normalization: array → {}; a bare string value → {account:<string>}.
   const note = typeof safeEntry.note === "string" ? safeEntry.note : "";
-  const accounts =
+  const rawAccounts =
     safeEntry.accounts && typeof safeEntry.accounts === "object" && !Array.isArray(safeEntry.accounts)
       ? safeEntry.accounts
       : {};
+  const accounts = {};
+  for (const [svc, val] of Object.entries(rawAccounts)) {
+    if (typeof val === "string") accounts[svc] = { account: val };
+    else if (val && typeof val === "object" && !Array.isArray(val)) accounts[svc] = val;
+  }
 
   return {
     profileKey,
@@ -666,14 +675,24 @@ function registerChromeTools(registerTool) {
 
   registerTool(
     "chrome_set_profile_meta",
-    "设置 ~/cicy-ai/db/chrome.json 中指定 accountIdx 的 note（备注）/ accounts（服务→账号 map，用于 list profile with <svc>）",
+    "设置 ~/cicy-ai/db/chrome.json 中指定 accountIdx 的 note（备注）/ accounts（服务→{account,password,totp} map，用于 list profile with <svc> + 自动 2FA）",
     z.object({
       accountIdx: z.number().describe("账户索引"),
       note: z.string().optional().describe("自由文本备注；省略则不动"),
       accounts: z
-        .record(z.string())
+        .record(
+          z
+            .object({
+              account: z.string().optional(),
+              password: z.string().optional(),
+              totp: z.string().optional(),
+            })
+            .partial()
+        )
         .optional()
-        .describe("服务→账号 map，如 {github:'octocat',gmail:'me@gmail.com'}；空值删除该服务；省略则整体不动；与现有合并"),
+        .describe(
+          "服务→{account,password,totp} map，如 {github:{account:'octocat',password:'..',totp:'BASE32'}}；字段级合并，字段空值删该字段，svc 清空则删该服务；省略则整体不动"
+        ),
     }),
     async ({ accountIdx, note, accounts } = {}) => {
       const data = readPrivateChromeConfig();
@@ -683,18 +702,27 @@ function registerChromeTools(registerTool) {
       }
       const patch = { ...data[key], ...(note !== undefined ? { note: String(note) } : {}) };
       if (accounts !== undefined) {
-        // Merge into the existing service→account map; empty value deletes a service.
-        const cur =
+        // Field-level merge into the existing service→credentials map.
+        // Empty field value deletes that field; a service with no fields left
+        // is removed entirely. Legacy string value normalizes to {account}.
+        const base =
           data[key].accounts && typeof data[key].accounts === "object" && !Array.isArray(data[key].accounts)
             ? data[key].accounts
             : {};
-        const next = { ...cur };
-        for (const [k, v] of Object.entries(accounts)) {
-          const svc = String(k).trim().toLowerCase();
-          const val = String(v ?? "").trim();
+        const next = { ...base };
+        for (const [rawSvc, fieldPatch] of Object.entries(accounts)) {
+          const svc = String(rawSvc).trim().toLowerCase();
           if (!svc) continue;
-          if (val === "") delete next[svc];
-          else next[svc] = val;
+          let cur = next[svc];
+          if (typeof cur === "string") cur = { account: cur }; // 1.3.0 compat
+          cur = cur && typeof cur === "object" && !Array.isArray(cur) ? { ...cur } : {};
+          for (const [f, v] of Object.entries(fieldPatch || {})) {
+            const val = String(v ?? "").trim();
+            if (val === "") delete cur[f];
+            else cur[f] = val;
+          }
+          if (Object.keys(cur).length === 0) delete next[svc];
+          else next[svc] = cur;
         }
         patch.accounts = next;
       }
