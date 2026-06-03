@@ -377,6 +377,12 @@ function ensureMacDesktopApp() {
   // via `do shell script`, then quits. Icon = the applet's applet.icns.
   const { execFileSync } = require("child_process");
   const appDir = path.join(DESKTOP_DIR, "CiCy Desktop.app");
+  // Idempotent — create only when missing. When the app is launched FROM this
+  // very applet (double-click), the old code's fs.rmSync(appDir) tries to
+  // delete the running bundle: the rmdir syscall blocks FOREVER (the app
+  // deleting itself), so startup hangs at "Cleaning up ports" and no window
+  // ever appears ("打不开"). Skip if it already exists.
+  if (fs.existsSync(appDir)) return;
   const nodeDir = nodeBinDir();
   // do shell script needs node on PATH (GUI launch has a minimal PATH); the
   // trailing & + nohup + </dev/null lets the shell return so the applet quits.
@@ -407,6 +413,7 @@ function ensureMacDesktopApp() {
 function ensureLinuxDesktopEntry() {
   const icon = path.join(PACKAGE_ROOT, "build", "icons", "icon-256.png");
   const file = path.join(DESKTOP_DIR, "cicy-desktop.desktop");
+  if (fs.existsSync(file)) return; // idempotent: create only when missing
   fs.mkdirSync(DESKTOP_DIR, { recursive: true });
   fs.writeFileSync(file,
 `[Desktop Entry]
@@ -433,6 +440,7 @@ function ensureWindowsShortcut() {
   // launches via the global bin (see README "Run via npx" / install one-liner).
   const ico = path.join(PACKAGE_ROOT, "build", "icon.ico");
   const lnk = path.join(DESKTOP_DIR, "CiCy Desktop.lnk");
+  if (fs.existsSync(lnk)) return; // idempotent: create only when missing (also avoids re-popping 360 each launch)
   const nodeDir = nodeBinDir();
   const ps = path.join(require("os").tmpdir(), `cicy-shortcut-${process.pid}.ps1`);
   fs.writeFileSync(ps,
