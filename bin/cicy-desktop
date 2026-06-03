@@ -13,6 +13,11 @@ const GLOBAL_CONFIG_FILE = path.join(HOME, "global.json");
 const STATE_FILE = path.join(HOME, ".cicy-cluster.json");
 const LOGS_DIR = path.join(HOME, "logs");
 const PACKAGE_ROOT = path.join(__dirname, "..");
+// CN defaults: a fresh machine has no cached electron binary, so npx's electron
+// postinstall would hit GitHub releases and fail (ECOMPROMISED). Mirror it +
+// the npm registry to npmmirror (overridable via the same-named env vars).
+const ELECTRON_MIRROR = process.env.ELECTRON_MIRROR || "https://npmmirror.com/mirrors/electron/";
+const NPM_REGISTRY = process.env.CICY_NPM_REGISTRY || process.env.npm_config_registry || "https://registry.npmmirror.com";
 const MASTER_ENTRY = path.join(PACKAGE_ROOT, "src", "master", "master-main.js");
 
 // Resolve the electron binary to spawn. Prefers the project-local copy
@@ -375,8 +380,13 @@ function ensureMacDesktopApp() {
   const nodeDir = nodeBinDir();
   // do shell script needs node on PATH (GUI launch has a minimal PATH); the
   // trailing & + nohup + </dev/null lets the shell return so the applet quits.
+  // ELECTRON_MIRROR + npmmirror: a fresh CN machine has no cached electron
+  // binary, so npx's electron postinstall would try GitHub releases and fail
+  // (ECOMPROMISED / lock-compromised). Point it at npmmirror's electron mirror.
+  // Harmless elsewhere — only consulted when electron actually (re)downloads.
   const ascript =
     `do shell script "export PATH=\\"${nodeDir}:/usr/local/bin:/opt/homebrew/bin:$PATH\\" ; ` +
+    `export ELECTRON_MIRROR=\\"${ELECTRON_MIRROR}\\" ; export npm_config_registry=\\"${NPM_REGISTRY}\\" ; ` +
     `nohup npx -y cicy-desktop > /tmp/cicy-desktop.log 2>&1 < /dev/null &"`;
   const tmp = path.join(os.tmpdir(), `cicy-launch-${process.pid}.applescript`);
   fs.writeFileSync(tmp, ascript);
@@ -402,7 +412,7 @@ function ensureLinuxDesktopEntry() {
 `[Desktop Entry]
 Type=Application
 Name=CiCy Desktop
-Exec=sh -c 'export PATH="${nodeBinDir()}:$PATH"; exec npx -y cicy-desktop'
+Exec=sh -c 'export PATH="${nodeBinDir()}:$PATH"; export ELECTRON_MIRROR="${ELECTRON_MIRROR}"; export npm_config_registry="${NPM_REGISTRY}"; exec npx -y cicy-desktop'
 Icon=${icon}
 Terminal=false
 Categories=Development;
@@ -422,7 +432,7 @@ function ensureWindowsShortcut() {
 `$ws = New-Object -ComObject WScript.Shell
 $s = $ws.CreateShortcut('${lnk.replace(/'/g, "''")}')
 $s.TargetPath = 'cmd.exe'
-$s.Arguments = '/c set PATH=${nodeDir};%PATH% && npx -y cicy-desktop'
+$s.Arguments = '/c set PATH=${nodeDir};%PATH%&& set ELECTRON_MIRROR=${ELECTRON_MIRROR}&& set npm_config_registry=${NPM_REGISTRY}&& npx -y cicy-desktop'
 $s.IconLocation = '${ico.replace(/'/g, "''")}'
 $s.Save()
 `);
