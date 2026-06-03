@@ -45,24 +45,35 @@ cicy-rpc open_window url=https://example.com
 cicy-rpc --json get_window_info win_id=1
 ```
 
-## Run via npx (end users, no clone)
+## Run (end users, no clone)
 
-`npx cicy-desktop` launches the Electron app and, on first run, drops a desktop
-shortcut (Windows `.lnk` / macOS `.app` / Linux `.desktop`, all with the CiCy
-icon). Double-click it afterwards.
+First run launches the Electron app and drops a desktop shortcut (Windows
+`.lnk` / macOS `.app` / Linux `.desktop`, all with the CiCy icon); double-click
+it afterwards.
 
-**CN first-install needs the electron mirror.** A fresh machine has no cached
-electron binary, so npx's electron postinstall would hit GitHub releases and
-fail (`npm ECOMPROMISED` / "Lock compromised"). Point it at npmmirror on the
-*first* run (the generated shortcut bakes these in for later launches):
+**CN needs the electron mirror.** A fresh machine has no cached electron
+binary, so electron's postinstall would hit GitHub releases and fail. Point
+`ELECTRON_MIRROR` + the npm registry at npmmirror.
+
+### Windows — global install (NOT npx)
+
+npx's libnpmexec lock false-positives as `ECOMPROMISED` / "Lock compromised" on
+Windows boxes with realtime antivirus (Defender touches `node_modules` mtimes
+mid-install → the lock heartbeat aborts). `npm i -g` has no such lock, so
+Windows installs globally and launches the global bin:
 
 ```cmd
-:: Windows (cmd) — the canonical CN entry point
-cmd /c "set ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/&& set npm_config_registry=https://registry.npmmirror.com&& npx -y cicy-desktop"
+cmd /c "set ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/&& npm i -g cicy-desktop --registry=https://registry.npmmirror.com&& cicy-desktop"
 ```
 
+Re-run the same line to update. The generated `.lnk` runs the global
+`cicy-desktop` bin (no npx).
+
+### macOS / Linux — npx
+
+npx's lock works fine here:
+
 ```bash
-# macOS / Linux
 ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm_config_registry=https://registry.npmmirror.com npx -y cicy-desktop
 ```
 

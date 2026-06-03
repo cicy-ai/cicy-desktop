@@ -424,6 +424,13 @@ Categories=Development;
 function ensureWindowsShortcut() {
   // A .cmd is icon-less; a proper .lnk with the CiCy icon is written via a
   // throwaway PowerShell script (WScript.Shell CreateShortcut + IconLocation).
+  //
+  // The shortcut runs the GLOBALLY-installed `cicy-desktop` bin, NOT
+  // `npx cicy-desktop`. npx's libnpmexec lock false-positives as
+  // "ECOMPROMISED / Lock compromised" on Windows boxes with realtime
+  // antivirus (Defender touches node_modules mtimes mid-install → the lock
+  // heartbeat aborts). `npm i -g` has no such lock, so Windows installs +
+  // launches via the global bin (see README "Run via npx" / install one-liner).
   const ico = path.join(PACKAGE_ROOT, "build", "icon.ico");
   const lnk = path.join(DESKTOP_DIR, "CiCy Desktop.lnk");
   const nodeDir = nodeBinDir();
@@ -432,7 +439,7 @@ function ensureWindowsShortcut() {
 `$ws = New-Object -ComObject WScript.Shell
 $s = $ws.CreateShortcut('${lnk.replace(/'/g, "''")}')
 $s.TargetPath = 'cmd.exe'
-$s.Arguments = '/c set PATH=${nodeDir};%PATH%&& set ELECTRON_MIRROR=${ELECTRON_MIRROR}&& set npm_config_registry=${NPM_REGISTRY}&& npx -y cicy-desktop'
+$s.Arguments = '/c set PATH=${nodeDir};%APPDATA%\\npm;%PATH%&& cicy-desktop'
 $s.IconLocation = '${ico.replace(/'/g, "''")}'
 $s.Save()
 `);
