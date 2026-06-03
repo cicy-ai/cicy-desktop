@@ -1,17 +1,18 @@
 // Discover / probe / spawn the cicy-code daemon for the Electron app.
 //
-// Principle (2026-05-29): cicy-desktop does NOT bundle cicy-code. The
-// daemon is acquired three ways, in priority order:
-//   1. An already-running instance on :8008 (helper-installed, user-run,
-//      or surviving from a previous launch). probeExisting wins → reuse.
-//   2. <userData>/cicy-code/<platform>-<arch>/cicy-code — written by
-//      src/sidecar/installer.js when the user clicks the in-app installer
-//      OR by the cloud Team Helper agent when it finishes onboarding.
-//   3. (no-op) if neither, return null — the homepage's Team Helper card
-//      will guide the user through install. No "bundled" fallback exists.
+// Principle (2026-06): the daemon is run via `npx cicy-code` — a single
+// source of truth. cicy-desktop neither bundles nor downloads a binary; the
+// per-version binary is fetched from npm by the launcher (CN: npmmirror).
+//   1. An already-running instance on :8008 (user-run, npx, surviving from a
+//      previous launch). probeExisting wins → reuse, never double-spawn.
+//   2. Otherwise spawn `npx cicy-code` on mac/linux.
 //
-// Windows is not bundled either — the daemon is WSL2-hosted via
-// src/sidecar/wsl.js. start() delegates there on win32.
+// This replaced the old src/sidecar/installer.js binary (~/.local/bin/
+// cicy-code), which raced the npx-launched daemon for :8008. The in-app
+// installer is no longer the daemon source.
+//
+// Windows is WSL2-hosted via src/sidecar/wsl.js; start() delegates there on
+// win32 (npx-in-WSL migration tracked separately).
 
 const fs = require("fs");
 const http = require("http");
@@ -19,32 +20,6 @@ const path = require("path");
 const { spawn } = require("child_process");
 
 const DEFAULT_PORT = Number(process.env.CICY_CODE_PORT || 8008);
-
-function platformDir() {
-  if (process.platform === "darwin") return "darwin";
-  if (process.platform === "linux") return "linux";
-  return null;
-}
-function archDir() {
-  if (process.arch === "arm64") return "arm64";
-  if (process.arch === "x64") return "x64";
-  return null;
-}
-
-function bundledBinaryPath() {
-  const plat = platformDir();
-  const arch = archDir();
-  if (!plat || !arch) return null;
-  // Only the user-installed copy is considered. There is intentionally
-  // no <App>/Contents/Resources/cicy-code fallback — cicy-desktop no
-  // longer bundles the daemon (2026-05-29 principle).
-  try {
-    const installer = require("./installer");
-    const userBin = installer.userBinary();
-    if (userBin && fs.existsSync(userBin)) return userBin;
-  } catch {}
-  return null;
-}
 
 function probeExisting(port = DEFAULT_PORT, timeoutMs = 500) {
   return new Promise(resolve => {
@@ -95,12 +70,6 @@ async function start({ logPath, port = DEFAULT_PORT, force = false } = {}) {
     }
   }
 
-  const bin = bundledBinaryPath();
-  if (!bin || !fs.existsSync(bin)) {
-    console.warn(`[cicy-code-sidecar] no daemon binary found (user has not run the in-app installer or the cloud Team Helper); homepage's Team Helper card will guide install`);
-    return null;
-  }
-
   let stdio = ["ignore", "ignore", "ignore"];
   if (logPath) {
     fs.mkdirSync(path.dirname(logPath), { recursive: true });
@@ -108,12 +77,25 @@ async function start({ logPath, port = DEFAULT_PORT, force = false } = {}) {
     stdio = ["ignore", fd, fd];
   }
 
-  // cicy-code reads `PORT` env var. Strip the parent's PORT (set by the
-  // worker process to its own listen port, e.g. 8101) so it doesn't leak
-  // into the sidecar and clash with the worker's HTTP server.
-  const env = { ...process.env, CICY_CODE_PORT: String(port), PORT: String(port) };
-  child = spawn(bin, [], { stdio, detached: false, env });
-  console.log(`[cicy-code-sidecar] spawned ${bin} pid=${child.pid} port=${port} log=${logPath || "(none)"}`);
+  // Run the daemon via `npx cicy-code` — no bundled/downloaded binary. The
+  // launcher fetches the per-version binary from npm (default npmmirror for
+  // CN; override with CICY_NPM_REGISTRY) and does its own :8008 port hygiene.
+  // cicy-code reads PORT; we also set CICY_CODE_PORT and override the parent's
+  // PORT (the worker sets it to its own listen port, e.g. 8101) so it doesn't
+  // leak in and clash with the worker's HTTP server.
+  const registry = process.env.CICY_NPM_REGISTRY || "https://registry.npmmirror.com";
+  const env = {
+    ...process.env,
+    CICY_CODE_PORT: String(port),
+    PORT: String(port),
+    npm_config_registry: registry,
+  };
+  const npxBin = process.platform === "win32" ? "npx.cmd" : "npx";
+  const spec = process.env.CICY_CODE_VERSION
+    ? `cicy-code@${process.env.CICY_CODE_VERSION}`
+    : "cicy-code";
+  child = spawn(npxBin, ["-y", spec], { stdio, detached: false, env });
+  console.log(`[cicy-code-sidecar] spawned npx ${spec} pid=${child.pid} port=${port} registry=${registry} log=${logPath || "(none)"}`);
 
   child.on("exit", (code, signal) => {
     console.log(`[cicy-code-sidecar] exited code=${code} signal=${signal}`);
@@ -141,4 +123,4 @@ async function stop({ timeoutMs = 5000 } = {}) {
   }
 }
 
-module.exports = { start, stop, probeExisting, bundledBinaryPath };
+module.exports = { start, stop, probeExisting };
