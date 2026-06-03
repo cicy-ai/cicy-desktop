@@ -45,7 +45,30 @@ cicy-rpc open_window url=https://example.com
 cicy-rpc --json get_window_info win_id=1
 ```
 
-## Quick start
+## Run via npx (end users, no clone)
+
+`npx cicy-desktop` launches the Electron app and, on first run, drops a desktop
+shortcut (Windows `.lnk` / macOS `.app` / Linux `.desktop`, all with the CiCy
+icon). Double-click it afterwards.
+
+**CN first-install needs the electron mirror.** A fresh machine has no cached
+electron binary, so npx's electron postinstall would hit GitHub releases and
+fail (`npm ECOMPROMISED` / "Lock compromised"). Point it at npmmirror on the
+*first* run (the generated shortcut bakes these in for later launches):
+
+```cmd
+:: Windows (cmd) — the canonical CN entry point
+cmd /c "set ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/&& set npm_config_registry=https://registry.npmmirror.com&& npx -y cicy-desktop"
+```
+
+```bash
+# macOS / Linux
+ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm_config_registry=https://registry.npmmirror.com npx -y cicy-desktop
+```
+
+Outside CN (or once electron is cached) a plain `npx -y cicy-desktop` is enough.
+
+## Quick start (development)
 
 ### 1. Install
 
@@ -118,41 +141,59 @@ npx wrangler deploy
 
 ### Dev workflow
 
-#### Option A — Vite directly on Mac (recommended, no tunnel needed)
+Vite runs **on Mac**. Source edits happen on Linux and are rsynced over —
+Linux itself never serves the SPA. There used to be a Linux-runs-Vite +
+`ssh -R` tunnel option; it was dropped because the tunnel silently dropped
+mid-session and the resulting blank page wasted hours.
 
-1. Start Vite dev server on Mac:
-   ```bash
-   cd workers/render
-   npm install        # first time only
-   npm run dev        # serves http://localhost:8173
-   ```
-2. Launch cicy-desktop (`.env.dev` already sets `CICY_HOMEPAGE_URL=http://localhost:8173`):
-   ```bash
-   # double-click cicy-dektop.command, or:
-   npm start
-   ```
-   HMR works — edits in `workers/render/src/` hot-reload in the Electron window.
+```bash
+# On Linux: sync source to Mac
+rsync -avz --delete \
+  --exclude=node_modules --exclude=dist --exclude=.git \
+  ~/projects/cicy-desktop/ mac:~/projects/cicy-desktop/
 
-#### Option B — Vite on Linux, tunnel to Mac
+# On Mac: start Vite + run source-mode Electron
+ssh mac
+cd ~/projects/cicy-desktop/workers/render
+npm install               # first time only
+npm run dev               # serves http://localhost:8173
 
-1. Start Vite on Linux:
-   ```bash
-   cd workers/render && npm run dev   # serves 0.0.0.0:8173
-   ```
-2. Open SSH reverse tunnel so Mac's BrowserWindow can reach it:
-   ```bash
-   ssh -R 8173:127.0.0.1:8173 -o ServerAliveInterval=30 -o ExitOnForwardFailure=yes mac
-   ```
-3. Launch cicy-desktop on Mac (same `.env.dev` / `CICY_HOMEPAGE_URL` as above).
+# In another shell on Mac
+cd ~/projects/cicy-desktop
+pkill -f "MacOS/CiCy Desktop" 2>/dev/null   # stop any installed .app first
+bash -c 'set -a; . ./.env.dev; set +a; npm start'
+# .env.dev sets CICY_HOMEPAGE_URL=http://localhost:8173 so Electron loads
+# the Vite bundle (HMR enabled) instead of the bundled file:// one.
+```
 
-> **Fallback**: if `CICY_HOMEPAGE_URL` is set but the server is unreachable (tunnel
-> dropped, Vite not started), `homepage-window.js` automatically falls back to the
-> bundled `file://` SPA — the window never stays blank.
+Now edit `workers/render/src/App.jsx` on Linux → `rsync` to Mac →
+Vite HMR picks it up instantly. No Electron restart for React/CSS edits.
+
+> **Fallback**: if `CICY_HOMEPAGE_URL` is set but unreachable (Vite not
+> started, port conflict), `homepage-window.js` falls back to the bundled
+> `file://` SPA so the window never stays blank.
 
 `src/backends/homepage-window.js` URL priority:
 1. `CICY_HOMEPAGE_URL` env (dev override) → falls back to `file://` on load failure
-2. Windows → `https://desktop.cicy-ai.com`
+2. Windows → `https://desktop.cicy-ai.com` (CF Worker `desktop-render`)
 3. Mac/Linux → bundled `file://src/backends/homepage-react/index.html`
+
+### Shipping SPA changes to Windows
+
+Win NSIS package main process loads `https://desktop.cicy-ai.com/` —
+the `desktop-render` Cloudflare Worker. To ship a SPA change to Win
+users without rebuilding the desktop package, redeploy the Worker:
+
+```bash
+cd workers/render && npm run build
+CLOUDFLARE_ACCOUNT_ID=$(jq -r .cf.prod.account_id ~/cicy-ai/global.json) \
+CLOUDFLARE_API_TOKEN=$(jq -r .cf.prod.api_token ~/cicy-ai/global.json) \
+  npx wrangler deploy
+# Mirror dist/ into the file:// folder so Mac packaged builds match
+rsync -av --delete dist/ ../../src/backends/homepage-react/
+```
+
+Win users see the new SPA on next cicy-desktop relaunch.
 
 ## Canonical config
 
