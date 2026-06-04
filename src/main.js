@@ -163,7 +163,7 @@ electronApp.on("browser-window-created", (_e, win) => {
   });
 });
 
-function handleDeepLink(url) {
+async function handleDeepLink(url) {
   log.info(`[deeplink] handleDeepLink got: ${url}`);
   if (!url || !url.startsWith("cicy://")) return;
   try {
@@ -176,6 +176,25 @@ function handleDeepLink(url) {
         url:   u.searchParams.get("url")   || "",
         token: u.searchParams.get("token") || "",
       };
+      // Add the team HERE in the main process — robust and independent of
+      // whether a renderer is loaded/listening. (The renderer never wired up
+      // window.cicy.deeplink.onAddTeam, so the old broadcast-only path silently
+      // dropped the team.) local-teams.addTeam upserts by base_url; the
+      // homepage polls localTeams:list every few seconds so the new team shows
+      // up on its own. We still broadcast for an instant refresh.
+      if (payload.url) {
+        try {
+          const lt = require("./backends/local-teams");
+          const r = await lt.addTeam({
+            base_url: payload.url,
+            api_token: payload.token || undefined,
+            name: payload.title || undefined,
+          });
+          log.info(`[deeplink] addTeam result: ${JSON.stringify(r)}`);
+        } catch (e) {
+          log.warn(`[deeplink] addTeam failed: ${e.message}`);
+        }
+      }
       broadcastDeepLink("deeplink:addTeam", payload);
       // Make sure SOMETHING is on screen for the user to see the result.
       // Safe to call before whenReady — openHomepage waits for the app
