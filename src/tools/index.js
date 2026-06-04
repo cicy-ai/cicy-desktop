@@ -17,4 +17,5 @@ module.exports = [
   require("./ipc-bridge"),
   require("./hook-gemini"),
   require("./chrome-tools"),
+  require("./list-tools"),
 ];
