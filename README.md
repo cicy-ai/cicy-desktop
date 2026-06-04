@@ -295,9 +295,8 @@ Current source of truth in code:
 - tool implementations: `src/tools/*`
 
 At a high level:
-- `src/main.js:242` exposes `POST /rpc/tools/call`
-- `src/main.js:267` exposes `GET /rpc/tools`
-- `src/main.js:294` exposes `POST /rpc/:toolName`
+- the **worker** dispatches tools two ways: in-process via `ipcMain.handle("rpc", …)` (`src/main.js`, what `window.electronRPC(tool, args)` rides) and over HTTP. The full, live tool index is `GET /openapi.json` (browse at `/docs`); call `list_tools` to enumerate from the RPC/IPC side.
+- REST tool invocation (`POST /rpc/:toolName`, used by `cicy-rpc`) is served by the **master** (`src/master/master-routes.js`), which forwards to the selected worker.
 - RPC routes are protected by auth and return `401 Unauthorized` when the token is wrong or missing
 - the desktop CLI starts a local master + worker cluster and provides status/log management
 

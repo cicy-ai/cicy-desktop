@@ -2,43 +2,56 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-`cicy-desktop` is an Electron app that exposes ~50 system tools (Chrome control, clipboard, screenshot, shell exec, system info, ...) over MCP and REST/RPC. The app runs in two roles — **worker** (the Electron process exposing tools) and **master** (a thin control plane that routes tool calls across workers) — and ships a bundled `cicy-code` sidecar daemon so the desktop is a fully offline-capable backend.
+`cicy-desktop` is an Electron app that exposes ~100+ system tools (Chrome control, CDP, clipboard, screenshot, shell/node/python exec, system info, file ops, ...) over MCP and REST/RPC. The app runs in two roles — **worker** (the Electron process exposing tools) and **master** (a thin control plane that routes tool calls across workers). It does **not** bundle a `cicy-code` binary — the sidecar daemon is acquired at runtime (`npx cicy-code` on mac/linux, Docker on Windows; see [Sidecar](#sidecar-cicy-code-daemon)).
+
+**Distribution (2026-06):** end users run via npm, not a packaged installer — `npx cicy-desktop` (mac/linux) / `npm i -g cicy-desktop && cicy-desktop` (Windows). First launch drops a desktop shortcut and auto-acquires the sidecar. CN needs `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/` so electron's binary postinstall doesn't hit GitHub. The electron-builder packaged build (dmg/NSIS) still exists but is secondary. To discover tools at runtime, call the `list_tools` meta-tool (`electronRPC("list_tools")` / `agent-desktop rpc list_tools`).
 
 ## Development workflow rules (read first)
 
-**This repo is edited in exactly one place** — the Linux dev machine. Mac is a runtime mirror; Windows builds happen in CI. There are **two iteration loops**: a fast one for React UI work and a slow one for packaged-build validation. Pick whichever matches what you're touching.
+**This repo is edited in exactly one place** — the Linux dev machine. Mac is a runtime mirror for macOS-side validation; Windows is a separate runtime mirror that always rides the production CF Worker. There are **two iteration loops**: a fast one for React UI work (Mac, HMR) and a slow one for packaged-build validation. Pick whichever matches what you're touching.
 
-### Loop A — fast (Vite + ssh -R + electron from source)
+### Platform routing
 
-Use this for anything in `workers/render/src/` (React UI, CSS, App.jsx). React + Vite **HMRs** without restarting Electron.
+| Role | Where the SPA comes from | When to use |
+|---|---|---|
+| **Mac dev** | Vite dev server on Mac (`localhost:8173`) loaded by source-mode Electron | Loop A — any edit to `workers/render/src/**` (React UI), HMR live |
+| **Mac packaged** | bundled `file://src/backends/homepage-react/` inside the .app | Loop B — release-shaped validation (main-process / preload / IPC changes) |
+| **Windows** | remote `https://desktop.cicy-ai.com/` (CF Worker `desktop-render`) | Always. Win NSIS package + electron-updater auto-pulls newer releases. SPA changes ship via `wrangler deploy`, no rebuild needed |
+
+Linux never runs Electron. Linux never serves the SPA to Mac. Edits + commits + the CF Worker deploy all happen here; the Mac and Win machines are pure runtime mirrors.
+
+### Loop A — fast (Mac-native Vite + source-mode Electron)
+
+Use this for anything in `workers/render/src/` (React UI, CSS, App.jsx). React + Vite **HMRs** without restarting Electron. No SSH tunnel involved — Vite and Electron both run on Mac, so the URL is genuinely local.
 
 ```bash
-# 1. On Linux dev: start the Vite dev server
-cd ~/projects/cicy-desktop/workers/render && npm install && npm run dev
-# Vite listens on 0.0.0.0:8173
-
-# 2. Reverse-tunnel :8173 so the Mac's Electron can reach it
-ssh -fNR 8173:127.0.0.1:8173 mac
-
-# 3. rsync the source tree to Mac (no node_modules)
+# 1. Linux dev: sync source to Mac
 rsync -avz --delete \
   --exclude=node_modules --exclude=dist --exclude=.git \
   ~/projects/cicy-desktop/ mac:~/projects/cicy-desktop/
 
-# 4. On Mac: install once, then run Electron directly from source
-#    Pointing CICY_HOMEPAGE_URL at the tunneled Vite makes Electron load
-#    the dev bundle (HMR enabled) instead of the bundled file:// one.
+# 2. Mac: start the Vite dev server (first time also: `npm install` in workers/render)
 ssh mac
-cd ~/projects/cicy-desktop && npm install
-CICY_HOMEPAGE_URL=http://localhost:8173 node ./bin/cicy-desktop
+cd ~/projects/cicy-desktop/workers/render && nohup npm run dev > /tmp/vite-dev.log 2>&1 &
+# Vite listens on localhost:8173
+
+# 3. Mac: kill any installed .app then run Electron from source
+#    .env.dev already sets CICY_HOMEPAGE_URL=http://localhost:8173, so
+#    source-mode Electron loads the live Vite bundle (HMR enabled) instead
+#    of the bundled file:// one.
+pkill -f "MacOS/CiCy Desktop" 2>/dev/null
+cd ~/projects/cicy-desktop && npm install   # first time only
+nohup bash -c 'set -a; . ./.env.dev; set +a; npm start' > /tmp/cicy-desktop-dev.log 2>&1 &
 ```
 
-Now: edit `workers/render/src/App.jsx` on Linux → Mac sees it instantly via HMR. **No Electron restart needed** for React/CSS changes.
+Now: edit `workers/render/src/App.jsx` on Linux → `rsync` to Mac → HMR picks it up instantly. **No Electron restart needed** for React/CSS changes.
+
+For continuous syncing during a session, run a one-shot rsync after each save, or set up `fswatch` / IDE-side sync. Whatever you do, the source of truth stays on Linux.
 
 ### Loop B — packaged build (only for release validation)
 
 ```bash
-# Linux: full sync
+# Linux: full sync (same as Loop A step 1)
 rsync -avz --delete \
   --exclude=node_modules --exclude=dist --exclude=.git \
   ~/projects/cicy-desktop/ mac:~/projects/cicy-desktop/
@@ -51,36 +64,49 @@ CICY_CODE_BIN_PATH=<path-to-cicy-code-binary> npm run build:mac
 open "dist/mac/CiCy Desktop.app"
 ```
 
-### The ssh -R tunnel will drop on you — keep it healthy
+### Windows side — CF Worker is the SPA delivery path
 
-The fast loop only works while the `ssh -R 8173:127.0.0.1:8173 mac` tunnel is alive. If it drops mid-session (network blip, sleep, idle timeout), the Mac's Electron renderer tries to load `http://localhost:8173/` and gets connection refused → **blank white page** with no error in the UI. Preload still injects (you'll see `window.cicy` populated over CDP), which makes it look like everything's healthy at the IPC layer, hiding the real failure.
-
-Recovery:
+Win never runs Vite or source-mode Electron. The Win NSIS package's main process loads `https://desktop.cicy-ai.com/`, which is the `desktop-render` Worker on Cloudflare serving `workers/render/dist/`. To ship a SPA change to Win users without releasing a new desktop package:
 
 ```bash
-# 1. Verify from Mac that the port is unreachable (definitive)
-ssh mac "curl -sI http://localhost:8173/ -m 4 | head -1"
-# Connection refused → tunnel down. 200 OK → tunnel fine, look elsewhere.
-
-# 2. Reopen with keep-alive so it doesn't silently die again
-ssh -O exit mac 2>/dev/null
-ssh -fN -R 8173:127.0.0.1:8173 \
-  -o ServerAliveInterval=30 -o ExitOnForwardFailure=yes mac
-
-# 3. Reload the renderer over CDP — Electron won't auto-retry the dead URL
-node -e '
-import("node:http").then(async ({default: http}) => {
-  const targets = await new Promise(r =>
-    http.get("http://127.0.0.1:9221/json/list", res => {
-      let b=""; res.on("data",c=>b+=c); res.on("end",()=>r(JSON.parse(b)));
-    }));
-  const t = targets.find(x => (x.url||"").startsWith("http://localhost:8173"));
-  const ws = new WebSocket(t.webSocketDebuggerUrl);
-  await new Promise((ok,f)=>{ws.onopen=ok;ws.onerror=f;});
-  ws.send(JSON.stringify({id:1,method:"Page.reload",params:{ignoreCache:true}}));
-  setTimeout(()=>ws.close(), 1500);
-});'
+# Linux dev: build + deploy SPA
+cd ~/projects/cicy-desktop/workers/render
+npm run build
+CLOUDFLARE_ACCOUNT_ID=$(jq -r .cf.prod.account_id ~/cicy-ai/global.json) \
+CLOUDFLARE_API_TOKEN=$(jq -r .cf.prod.api_token ~/cicy-ai/global.json) \
+  npx wrangler deploy
+# Also mirror into the file:// folder for Mac packaged builds
+rsync -av --delete dist/ ../../src/backends/homepage-react/
 ```
+
+Win users see the new SPA on next desktop relaunch (no auto-reload — they have to restart cicy-desktop). For main-process / preload changes Win needs an actual NSIS rebuild + electron-updater push (see `## Build & distribute`).
+
+### Loop A failure modes
+
+The Mac-native loop has no SSH tunnel to drop, but it has three other failure shapes:
+
+1. **Vite died** (terminal closed, OOM, port conflict)
+   ```bash
+   ssh mac "curl -sI http://localhost:8173/ -m 4 | head -1"
+   # Connection refused → Vite down. Restart with step 2 of Loop A.
+   ```
+
+2. **The bundled .app is running instead of source-mode Electron** (it'll happily load Vite at 8173 if `.env.dev` is sourced, but more often Mac auto-launches the .app and you forget to kill it)
+   ```bash
+   ssh mac 'ps -ef | grep "MacOS/CiCy Desktop" | grep -v grep'
+   # If you see /Applications/CiCy Desktop.app/... — that's the packaged one.
+   # pkill -f "MacOS/CiCy Desktop" then re-run Loop A step 3.
+   ```
+
+3. **Electron loaded a stale URL** (`.env.dev` not sourced, fallback to `file://` or `desktop.cicy-ai.com`). Inspect the live URL over CDP:
+   ```bash
+   ssh mac 'curl -s http://127.0.0.1:9221/json | python3 -c "
+   import sys, json
+   for t in json.load(sys.stdin):
+       print(t.get(\"type\"), t.get(\"url\",\"\")[:80])"'
+   # If url is anything other than http://localhost:8173/, source-mode wasn't
+   # picked up cleanly. Re-export CICY_HOMEPAGE_URL and restart Electron.
+   ```
 
 ### The three reload classes (the trap that wastes hours)
 
@@ -184,21 +210,17 @@ Supporting modules:
 - `src/cluster/worker-client.js` — worker registration + heartbeat to the master
 - `src/cluster/worker-identity.js` — identity payload advertised to the master
 
-Worker RPC surface:
+Worker tool surface (how the ~100 tools are reached):
 
-- `GET  /rpc/tools` — list registered tools
-- `POST /rpc/tools/call` — `{ name, arguments }` style invocation
-- `POST /rpc/:toolName` — direct REST entrypoint, what `cicy-rpc` uses after resolving the node
+- **IPC** — `ipcMain.handle("rpc", (e, toolName, args) => executeTool(...))` (`src/main.js`). This is what `window.electronRPC(tool, args)` and the cicy-code `desktop_event` bridge ride. No HTTP, no port.
+- **MCP** — every registered tool is exposed via the MCP server (`src/server/mcp-server.js`, `/mcp` + `/messages`).
+- **HTTP index** — `GET /openapi.json` (dynamic, every tool + inputSchema) and the Swagger UI at `/docs`.
+- **`list_tools`** — a meta-tool (`src/tools/list-tools.js`) that returns the live catalog over the IPC/RPC side, so callers that can't reach `/openapi.json` (renderer, `<webview>`, `agent-desktop rpc list_tools`) can still enumerate.
+- **REST `POST /rpc/:toolName`** — served by the **master** (`src/master/master-routes.js`), which forwards to a worker. The worker process itself does not mount `/rpc/*` execution routes.
 
 ### Tool system
 
-Tool implementations live in `src/tools/*.js` and are loaded via `require("../tools")` from `src/server/tool-catalog.js`. Each module exports a function receiving `registerTool(name, description, schema, handler, options)`. The catalog is grouped by `tag` and reused for:
-
-- MCP tool registration
-- `GET /rpc/tools`
-- OpenAPI generation in `/openapi.json`
-
-A tool definition change affects all three surfaces at once.
+Tool implementations live in `src/tools/*.js`, listed in `src/tools/index.js`, loaded via `require("../tools")` from `src/server/tool-catalog.js`. Each module exports a function receiving `registerTool(name, description, schema, handler, options)`. The catalog (grouped by `tag`) is reused for MCP registration, `list_tools`, and OpenAPI generation in `/openapi.json` — **a tool definition change affects all of them at once.**
 
 Tools use **CommonJS** and **Zod schemas**.
 
@@ -362,6 +384,18 @@ Only the **token** HMRs cleanly. If you also rebuilt the helper image with new A
 
 `HELPER_URL_BASE` (App.jsx) is the **other** half of the pairing. It currently points at `http://43.99.56.150:8011` (a long-running shared helper). If you want to swap to a locally rebuilt container, change it to `http://localhost:8011` and `ssh -fNR 8011:127.0.0.1:8011 mac` so the Mac can reach your dev box's helper. Same token-grab step still applies.
 
+### Deep links (`cicy://`) and local-team add/rename
+
+Protocol `cicy://` is registered (`package.json` build `protocols` + `setAsDefaultProtocolClient("cicy")` in `src/main.js`). The handler is `src/main.js::handleDeepLink(url)`, fed by `app.on("open-url")` (mac), `second-instance`, and cold-start `argv` (win/linux).
+
+`cicy://addTeam?title=<t>&url=<base_url>&token=<api_token>`:
+
+- **handleDeepLink adds the team directly in the main process** via `local-teams.addTeam({base_url, api_token, name})` — it does NOT rely on the renderer. (An earlier version only broadcast `deeplink:addTeam` to the renderer, but App.jsx never wired `window.cicy.deeplink.onAddTeam`, so the team was silently dropped.) The homepage polls `localTeams:list` every few seconds, so the new team shows up on its own.
+- **Upsert is keyed by `base_url`** (`local-teams.js::addTeam`): re-adding a known URL refreshes `api_token` + install meta but **keeps the existing (possibly user-renamed) name** — only a brand-new team takes the provided title. No-name → i18n default `localTeams.unnamed` (`Unnamed`/`未命名`/…).
+- The URL value must be **single** percent-encoded; raw CJK in `title` makes macOS `open` re-encode the whole thing (double-encoding → `bad base_url`).
+
+**Rename**: every local team is renamable. `LocalTeamCard` (App.jsx) has inline edit (double-click name / ✎) → `window.cicy.localTeams.update(id, {name})` → `local-teams.js::updateTeam` (whitelists `name`). Labels go through `window.cicyI18n.t` (preload-exposed i18n; keys in `src/i18n/locales/*.json` under `localTeams`).
+
 ### Backends launcher (legacy `src/backends/`)
 
 `src/backends/homepage.html` + `cicy.backends.{list, add, remove, …}` is the **pre-Vite** launcher. It still ships and still works (the bundled sidecar and Add-by-URL flow live here), but it is **not** what new users see — `pickHomepageURL` prefers the Vite/React entry. Touch this only when you're working on the old launcher path. Registry file: `<userData>/backends.json` (`src/backends/registry.js`). IPC handlers: `src/backends/ipc.js`.
@@ -400,7 +434,7 @@ Implication: anything that calls `window.electronRPC` from outside the cicy-code
 
 ### On-disk layout — `~/.local/bin/cicy-code` symlink → versioned binary
 
-Both the in-app installer (`src/sidecar/installer.js`) and the cloud Team Helper agent write the daemon into the user's `~/.local/bin/` with this shape:
+The cloud Team Helper agent writes the daemon into the user's `~/.local/bin/` with this shape (the npx sidecar path uses the npm cache instead, but a Helper-installed `~/.local/bin/cicy-code` on `:8008` is still reused first via `probeExisting`, and `upgradeNative` manages it):
 
 ```
 ~/.local/bin/cicy-code-2.1.8      (actual binary, +x)
@@ -427,23 +461,16 @@ Upgrade flow inside `src/backends/local-teams.js::upgradeNative`:
 
 The cloud helper agent uses the **same layout** when it does the initial install (`AGENTS.md` step 1A.2/1A.3 in `cicy-cloud/workers/helper/`). It writes `cicy-code-<ver>` + `ln -sfn` + spawns via the symlink, then registers the team with `install_path=~/.local/bin/cicy-code`. This way the agent's install path and the desktop's upgrade path are identical — no special-case wiring needed.
 
-### Sidecar cicy-code daemon — **NOT bundled** (2026-05-29 principle)
+### Sidecar cicy-code daemon
 
-`cicy-desktop` no longer ships a `cicy-code` binary in the `.app`. The daemon is acquired one of three ways:
+`cicy-desktop` never bundles a `cicy-code` binary. `src/sidecar/cicy-code.js::start()` acquires the daemon at runtime:
 
-1. **Already running on `:8008`** — left over from a previous session, started by the user, or installed by the cloud Team Helper. `src/sidecar/cicy-code.js::probeExisting` detects it and `start()` reuses without re-spawning.
-2. **In-app installer** — `src/sidecar/installer.js` downloads the platform-matching binary from `cicy-ai/cicy-code` GitHub releases into `<userData>/cicy-code/<platform>-<arch>/cicy-code`. Triggered from the homepage when no daemon is running. `userBinary()` returns this path; `bundledBinaryPath()` only checks this single source — there is intentionally no `<App>/Contents/Resources/cicy-code` fallback.
-3. **Cloud Team Helper** — the trial helper container walks the user through installing cicy-code on their own machine, then registers it via `window.cicy.localTeams.add({...})`. Today the helper writes to `~/Downloads/cicy-code`; the in-app installer location is preferred (`<userData>/cicy-code/...`) so `userBinary()` discovers it on the next desktop launch with no extra wiring.
+1. **Already running on `:8008`** — left over from a previous session, started by the user, or installed by the cloud Team Helper. `probeExisting()` detects it and `start()` reuses without re-spawning. This wins on every platform.
+2. **mac / linux → `npx cicy-code`** — `start()` spawns `npx -y cicy-code` (default registry npmmirror for CN; override with `CICY_NPM_REGISTRY`, pin with `CICY_CODE_VERSION`). The launcher fetches the per-version binary from npm and does its own `:8008` port hygiene. No download/installer code in cicy-desktop.
+3. **Windows → Docker** — `start()` delegates to `src/sidecar/docker.js` (`docker run` of the cicy-code image whose entrypoint `npx`-installs cicy-code). The image is loaded from R2 when absent.
+4. **Cloud Team Helper** — the trial helper container walks the user through installing cicy-code on their machine, then registers the team via `window.cicy.localTeams.add({...})`.
 
-Removed in this principle change:
-- `package.json` no longer has `extraResources` entries for `vendor/cicy-code/*/cicy-code`
-- `package.json` no longer runs `prepare:sidecar` in `prebuild*`
-- `scripts/prepare-cicy-code-sidecar.js` is dormant (kept for reference; can be deleted)
-- `vendor/cicy-code/` directory is no longer touched by the build
-
-`sidecar/cicy-code.js::start()` therefore returns `null` whenever no `userBinary()` is present AND no daemon is on `:8008`. The homepage's Team Helper card is the surface that gets the user from "no daemon" to "daemon running" — either by triggering the in-app installer (for the legacy single-click path) or by walking the cloud-helper onboarding flow.
-
-Windows path is unchanged — `src/sidecar/wsl.js` runs the daemon inside WSL2 because cicy-code is POSIX-only.
+**Retired (do not look for these):** the old in-app downloader `src/sidecar/installer.js` and the WSL path `src/sidecar/wsl.js` are **deleted**, along with their IPC handlers and the in-app install UI. There is no `bundledBinaryPath()`/`userBinary()`/`extraResources`/`vendor/cicy-code/` anymore. If no daemon is on `:8008` and the npx/Docker spawn can't run, `start()` returns `null` and the homepage's Team Helper card is the path from "no daemon" to "daemon running".
 
 #### What broke that motivated the principle (2026-05-29)
 
@@ -512,7 +539,10 @@ The master uses `CICY_MASTER_TOKEN` directly or falls back to `MasterTokenManage
 | backends launcher UI | `src/backends/homepage.html` |
 | backends preload bridge | `src/backends/homepage-preload.js` |
 | BrowserWindow trust + auto-inject | `src/utils/window-utils.js` |
-| sidecar packaging | `scripts/prepare-cicy-code-sidecar.js` |
+| sidecar acquisition (npx / docker) | `src/sidecar/cicy-code.js`, `src/sidecar/docker.js` |
+| desktop shortcut + deep links (`cicy://`) | `bin/cicy-desktop` (shortcut gen), `src/main.js` (handleDeepLink) |
+| local teams (add/upsert/rename) + i18n | `src/backends/local-teams.js`, `src/i18n/locales/*.json` |
+| tool list module | `src/tools/index.js`, `src/tools/list-tools.js` |
 | RPC test files | `tests/rpc/master-routes.test.js`, `tests/rpc/cicy-rpc.test.js` |
 
 ## Debugging via remote-debugging-port 9221
@@ -577,7 +607,7 @@ When touching any of these, expect ripple effects:
 - adding a tool → touches MCP server, REST/RPC, OpenAPI all at once via the catalog
 - changing trust criteria → changes `nodeIntegration` for whole classes of windows; verify with the cicy-code bridge still works
 - changing the homepage entry flow → check that cold-launch and "back to launcher" paths both behave (history.length / sessionStorage gates)
-- changing the sidecar packaging → verify `dist/mac/CiCy Desktop.app/Contents/Resources/cicy-code/cicy-code` is present and executable after build
+- changing the sidecar acquisition → there is no bundled binary; verify `npx cicy-code` (mac/linux) / Docker (win) actually spawns and binds `:8008`, and that `probeExisting` reuse still works
 - changing `chrome_*` tools → both master injection (`effectiveChromeProfile`) and worker fallback (`~/cicy-ai/db/chrome.json`) paths still need to work
 - changing **any preload file** → `⌘+Q` + reopen Electron is mandatory; HMR / `⌘+R` won't reload it. Confirm via CDP `Runtime.evaluate` on the target window
 - changing **`src/backends/local-teams.js`** → it's `require`d by main; full Electron restart needed. Don't forget to also expose any new methods through both `homepage-preload.js` (full surface) and `webview-preload.js` (relay)
