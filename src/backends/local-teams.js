@@ -288,7 +288,11 @@ async function addTeam(spec) {
     gNext.cicyDesktopNodes[id] = {
       ...prev,
       ...patch,
-      name: patch.name || prev.name || unnamedName(),
+      // Upsert by base_url: an EXISTING team keeps its (possibly user-renamed)
+      // name — never overwrite the title on re-add, even if the deeplink passes
+      // one. Everything else (token, install meta) DOES refresh. Only a brand-
+      // new team takes the provided title, falling back to the i18n Unnamed.
+      name: prev.name || patch.name || unnamedName(),
       added_at: prev.added_at || now,
       updated_at: now,
     };
