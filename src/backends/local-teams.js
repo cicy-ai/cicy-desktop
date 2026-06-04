@@ -19,6 +19,11 @@ const https = require("https");
 const { execFile } = require("child_process");
 const { spawn } = require("child_process");
 const { BrowserWindow } = require("electron");
+// i18n for the default team name ("Unnamed"/"未命名"/…). Resolved at create
+// time from the app locale; falls back to "Unnamed" if i18n isn't ready.
+let __t;
+try { __t = require("../i18n").t; } catch { __t = null; }
+const unnamedName = () => { try { return (__t && __t("localTeams.unnamed")) || "Unnamed"; } catch { return "Unnamed"; } };
 const log = require("electron-log");
 
 const GLOBAL_JSON = path.join(os.homedir(), "cicy-ai", "global.json");
@@ -264,7 +269,7 @@ async function addTeam(spec) {
 
   const now = new Date().toISOString();
   const patch = {
-    name:           spec.name           !== undefined ? String(spec.name || id) : undefined,
+    name:           spec.name           !== undefined ? String(spec.name || unnamedName()) : undefined,
     base_url:       baseUrl,
     api_token:      spec.api_token      !== undefined ? String(spec.api_token || "") : undefined,
     install_source: spec.install_source ?? undefined,
@@ -283,7 +288,7 @@ async function addTeam(spec) {
     gNext.cicyDesktopNodes[id] = {
       ...prev,
       ...patch,
-      name: patch.name || prev.name || id,
+      name: patch.name || prev.name || unnamedName(),
       added_at: prev.added_at || now,
       updated_at: now,
     };

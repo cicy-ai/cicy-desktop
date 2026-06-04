@@ -74,6 +74,11 @@
     "statusDown": "Down",
     "statusWarn": "Warning"
   },
+  "localTeams": {
+    "unnamed": "名称未設定",
+    "rename": "名前を変更",
+    "renameHint": "ダブルクリックまたは ✎ で名前を変更"
+  },
   "cli": {
     "controllerTitle": "cicy - CiCy Desktop Controller",
     "usage": "Usage: cicy [command] [options]"

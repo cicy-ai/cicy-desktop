@@ -74,6 +74,11 @@
     "statusDown": "离线",
     "statusWarn": "异常"
   },
+  "localTeams": {
+    "unnamed": "未命名",
+    "rename": "重命名",
+    "renameHint": "双击或点 ✎ 改名"
+  },
   "cli": {
     "controllerTitle": "cicy - CiCy Desktop 控制器",
     "usage": "用法: cicy [命令] [选项]"

@@ -74,6 +74,11 @@
     "statusDown": "Down",
     "statusWarn": "Warning"
   },
+  "localTeams": {
+    "unnamed": "Sans nom",
+    "rename": "Renommer",
+    "renameHint": "Double-cliquez ou ✎ pour renommer"
+  },
   "cli": {
     "controllerTitle": "cicy - CiCy Desktop Controller",
     "usage": "Usage: cicy [command] [options]"

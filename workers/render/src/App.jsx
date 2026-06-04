@@ -1,6 +1,14 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import "./App.css";
 
+// i18n bridge exposed by homepage-preload (window.cicyI18n.t, locale from
+// app.getLocale()). Returns the localized string, or `fallback` when the key
+// is missing or we're running outside Electron.
+const tr = (key, fallback) => {
+  try { const v = window.cicyI18n?.t?.(key); return v && v !== key ? v : fallback; }
+  catch { return fallback; }
+};
+
 const TOKEN_KEY = "cicy_token";
 const ACCESS_TOKEN_KEY = "cicy_access_token";
 const USER_ID_KEY = "cicy_user_id";
@@ -213,6 +221,15 @@ export default function App() {
       setLocalTeamsFetched(true);
     }
   }, []);
+  // Rename a local team: persist via localTeams.update then refresh the list.
+  // Empty name falls back to 未命名 (mirrors local-teams.addTeam default).
+  const renameLocalTeam = useCallback(async (id, name) => {
+    if (!window.cicy?.localTeams?.update) return;
+    try {
+      await window.cicy.localTeams.update(id, { name: String(name || "").trim() || tr("localTeams.unnamed", "未命名") });
+    } catch {}
+    await fetchLocalTeams();
+  }, [fetchLocalTeams]);
   useEffect(() => {
     let fastTimer;
     let slowTimer;
@@ -482,7 +499,7 @@ export default function App() {
           />
 
           {showLocal && localTeams && localTeams.map((t) => (
-            <LocalTeamCard key={"local:" + t.id} team={t} onOpen={() => openLocalTeam(t.id)} />
+            <LocalTeamCard key={"local:" + t.id} team={t} onOpen={() => openLocalTeam(t.id)} onRename={renameLocalTeam} />
           ))}
           {showCloud && teams && teams.map((t) => (
             <TeamCard
@@ -700,11 +717,21 @@ function Section({ title, subtitle, icon, children }) {
   );
 }
 
-function LocalTeamCard({ team, onOpen }) {
+function LocalTeamCard({ team, onOpen, onRename }) {
   const statusInfo = LOCAL_STATUS[team.status] || LOCAL_STATUS.error;
   const tone = statusInfo.tone;
+  // Inline rename: double-click the name or click ✎ → edit → Enter/blur saves.
+  // All local teams are renamable via window.cicy.localTeams.update(id,{name}).
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(team.name || "");
+  const startEdit = (e) => { e.stopPropagation(); setDraft(team.name || ""); setEditing(true); };
+  const commit = async () => {
+    setEditing(false);
+    const next = String(draft || "").trim();
+    if (onRename && next && next !== team.name) await onRename(team.id, next);
+  };
   return (
-    <div className={`bcard bcard--local${tone === "ok" ? " bcard--online" : ""}`}>
+    <div data-id="LocalTeamCard" className={`bcard bcard--local${tone === "ok" ? " bcard--online" : ""}`}>
       <div className="bcard__accent" />
       <div className="bcard__top">
         <div className="bcard__pill">
@@ -713,7 +740,29 @@ function LocalTeamCard({ team, onOpen }) {
         </div>
       </div>
       <div className="bcard__body">
-        <h3 className="bcard__name" title={team.name}>{team.name}</h3>
+        {editing ? (
+          <input
+            data-id="LocalTeamCard-rename-input"
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => { if (e.key === "Enter") commit(); else if (e.key === "Escape") setEditing(false); }}
+            style={{ width: "100%", font: "inherit", fontWeight: 600, padding: "2px 6px", border: "1px solid #3b82f6", borderRadius: 6, background: "#0d1117", color: "#e6edf3", boxSizing: "border-box" }}
+          />
+        ) : (
+          <h3 className="bcard__name" title={tr("localTeams.renameHint", "双击或点 ✎ 改名")} style={{ display: "flex", alignItems: "center", gap: 6 }} onDoubleClick={startEdit}>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{team.name}</span>
+            <button
+              type="button"
+              data-id="LocalTeamCard-rename-btn"
+              title={tr("localTeams.rename", "重命名")}
+              onClick={startEdit}
+              style={{ flex: "none", cursor: "pointer", border: "none", background: "transparent", color: "#8b949e", fontSize: 13, padding: 0, lineHeight: 1 }}
+            >✎</button>
+          </h3>
+        )}
         <div className="bcard__host">
           {team.base_url || "—"}
         </div>
