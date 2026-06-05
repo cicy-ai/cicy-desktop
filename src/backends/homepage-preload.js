@@ -150,6 +150,11 @@ contextBridge.exposeInMainWorld("cicy", {
   auth: {
     loginStart:  ()  => logInvoke("auth:login-start"),
     loginCancel: ()  => logInvoke("auth:login-cancel"),
+    // Durable, origin-independent login persisted in main (global.json).
+    // getSaved() restores it when this origin's localStorage is empty;
+    // logout() clears it (the only thing that should).
+    getSaved:    ()  => logInvoke("auth:get-saved"),
+    logout:      ()  => logInvoke("auth:logout"),
     onComplete:  (cb) => {
       const handler = (_e, payload) => { try { cb(payload); } catch {} };
       ipcRenderer.on("auth:complete", handler);

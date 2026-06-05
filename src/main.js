@@ -676,10 +676,38 @@ electronApp.whenReady().then(async () => {
   {
     const auth = require("./backends/auth-loopback");
     const { ipcMain: __ipcMainAuth } = require("electron");
+    const { readGlobalConfig, updateGlobalConfig } = require("./utils/global-json");
+    const GLOBAL_JSON = path.join(os.homedir(), "cicy-ai", "global.json");
+
+    // Persist the cloud login durably in the MAIN process (global.json),
+    // independent of the homepage renderer's origin. The renderer keeps the
+    // token in localStorage, which Chromium scopes to the homepage window's
+    // origin — and that origin drifts (file:// on mac, https://desktop.cicy-ai.com
+    // on Windows, http://<ip>:port or the team domain when CICY_HOMEPAGE_URL is
+    // set). A token saved under one origin is invisible after the URL changes,
+    // which forced the user to log in again and again. Storing it here and
+    // restoring it on every homepage load makes "logged in once" survive origin
+    // changes, restarts and public-URL switches. ONLY explicit logout clears it.
+    const saveDesktopAuth = (p) => {
+      try {
+        updateGlobalConfig(GLOBAL_JSON, (c) => {
+          c.desktopAuth = {
+            token: p.token || "",
+            accessToken: p.accessToken || "",
+            userId: p.userId != null ? String(p.userId) : "",
+            savedAt: Date.now(),
+          };
+          return c;
+        });
+        log.info("[auth] desktop login persisted to global.json (origin-independent)");
+      } catch (e) { log.warn(`[auth] persist failed: ${e.message}`); }
+    };
+
     __ipcMainAuth.handle("auth:login-start", async () => {
       try {
         await auth.startLogin({
           onResult: (payload) => {
+            if (payload && payload.token) saveDesktopAuth(payload);
             const hw = require("./backends/homepage-window");
             const w = hw.getHomepageWindow && hw.getHomepageWindow();
             if (w && !w.isDestroyed()) {
@@ -694,6 +722,29 @@ electronApp.whenReady().then(async () => {
       }
     });
     __ipcMainAuth.handle("auth:login-cancel", () => { auth.cancel(); return { ok: true }; });
+
+    // Origin-independent restore. The homepage SPA calls this on mount; if its
+    // own (origin-scoped) localStorage has no token, it adopts this one — so a
+    // homepage URL/origin change never forces a needless re-login.
+    __ipcMainAuth.handle("auth:get-saved", () => {
+      try {
+        const c = readGlobalConfig(GLOBAL_JSON);
+        const a = c && c.desktopAuth;
+        if (a && a.token) {
+          return { token: a.token, accessToken: a.accessToken || "", userId: a.userId || "" };
+        }
+      } catch (e) { log.warn(`[auth] get-saved failed: ${e.message}`); }
+      return null;
+    });
+
+    // Explicit logout is the ONLY thing that clears the durable store.
+    __ipcMainAuth.handle("auth:logout", () => {
+      try {
+        updateGlobalConfig(GLOBAL_JSON, (c) => { delete c.desktopAuth; return c; });
+        log.info("[auth] desktop login cleared (explicit logout)");
+      } catch (e) { log.warn(`[auth] logout clear failed: ${e.message}`); }
+      return { ok: true };
+    });
   }
 
   // Local-team discovery — reads ~/cicy-ai/global.json's cicyDesktopNodes

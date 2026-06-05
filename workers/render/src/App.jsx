@@ -34,6 +34,9 @@ export default function App() {
   // Required as `New-Api-User: <id>` header on every console-API call —
   // middleware.UserAuth() rejects requests without it.
   const [userId, setUserId] = useState(() => safeGet(USER_ID_KEY));
+  // True while we ask main for a durably-saved login (origin-independent).
+  // Prevents the login card from flashing on every launch before restore.
+  const [authRestoring, setAuthRestoring] = useState(() => !safeGet(TOKEN_KEY));
   const [loggingIn, setLoggingIn] = useState(false);
   const [error, setError] = useState("");
   const [welcome, setWelcome] = useState("");
@@ -338,6 +341,38 @@ export default function App() {
   // happens INSIDE the agent via `agent-webpage exec-js navigator.language`
   // against the same client — see AGENTS.md.)
 
+  // Restore login from the main-process durable store when THIS origin's
+  // localStorage has none. The homepage origin drifts (file:// / the team
+  // domain / an IP:port), and localStorage is origin-scoped, so without this a
+  // token saved under a previous origin would force a needless re-login. Main
+  // persists the login origin-independently (global.json); we adopt it here so
+  // "logged in once" stays valid until an explicit logout.
+  useEffect(() => {
+    if (safeGet(TOKEN_KEY)) { setAuthRestoring(false); return; }
+    if (!window.cicy?.auth?.getSaved) { setAuthRestoring(false); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const saved = await window.cicy.auth.getSaved();
+        if (cancelled) return;
+        if (saved?.token) {
+          try { localStorage.setItem(TOKEN_KEY, saved.token); } catch {}
+          setToken(saved.token);
+          if (saved.accessToken) {
+            try { localStorage.setItem(ACCESS_TOKEN_KEY, saved.accessToken); } catch {}
+            setAccessToken(saved.accessToken);
+          }
+          if (saved.userId) {
+            try { localStorage.setItem(USER_ID_KEY, String(saved.userId)); } catch {}
+            setUserId(String(saved.userId));
+          }
+        }
+      } catch {}
+      finally { if (!cancelled) setAuthRestoring(false); }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   // auth:complete from main.
   useEffect(() => {
     if (!window.cicy?.auth?.onComplete) return;
@@ -385,6 +420,9 @@ export default function App() {
       localStorage.removeItem(ACCESS_TOKEN_KEY);
       localStorage.removeItem(USER_ID_KEY);
     } catch {}
+    // Clear the durable main-process store too — explicit logout is the ONLY
+    // path that should invalidate the persisted login.
+    try { window.cicy?.auth?.logout?.(); } catch {}
     setToken(null);
     setAccessToken(null);
     setUserId(null);
@@ -392,6 +430,20 @@ export default function App() {
     setTeams(null);
     setError("");
     setProfileError("");
+  }
+
+  // Still checking the durable store — show a minimal splash, not the login
+  // card, so we never flash "please log in" before restore completes.
+  if (!token && authRestoring) {
+    return (
+      <div className="shell" data-id="AuthRestoringSplash">
+        <div className="glow" aria-hidden />
+        <div className="card">
+          <Brand />
+          <div className="spinner-row"><Spinner /><span>正在恢复登录…</span></div>
+        </div>
+      </div>
+    );
   }
 
   // Not logged in yet → centered login card.
