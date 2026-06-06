@@ -630,31 +630,53 @@ body {
   border-radius: 10px;
 }
 
-/* ---- 本地团队卡片上的 cicy-code 守护进程控制 (重启/更新/停止) ---- */
-.bcard__ops {
-  display: flex;
-  gap: 6px;
-  margin-top: 10px;
-}
-.bcard__op {
-  display: inline-flex; align-items: center; gap: 5px;
-  flex: 1;
-  justify-content: center;
-  border: 1px solid rgba(255,255,255,.12);
-  background: rgba(255,255,255,.03); color: #d1d5db;
-  border-radius: 7px; padding: 5px 8px; font-size: 11.5px;
+/* ---- 本地团队卡片：cicy-code 守护进程维护 (⋯ 菜单 + 新版提示) ---- */
+.bcard__menuwrap { position: relative; }
+.bcard__kebab {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px;
+  border: 1px solid transparent; border-radius: 8px;
+  background: transparent; color: #8b949e;
   cursor: pointer; transition: .15s;
 }
-.bcard__op:hover:not(:disabled) {
-  color: #fff; background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.2);
+.bcard__kebab:hover:not(:disabled) {
+  color: #e6edf3; background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.12);
 }
-.bcard__op:disabled { opacity: .4; cursor: default; }
-.bcard__op--danger { color: #f7a3a3; border-color: rgba(239,68,68,.25); }
-.bcard__op--danger:hover:not(:disabled) {
-  color: #fff; background: rgba(239,68,68,.18); border-color: rgba(239,68,68,.5);
+.bcard__kebab:disabled { opacity: .5; cursor: default; }
+/* amber dot on the ⋯ when an update is available */
+.bcard__kebab.has-dot { color: #e6edf3; }
+.bcard__kebab.has-dot::after {
+  content: ""; position: absolute; top: 3px; right: 3px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: #f59e0b; box-shadow: 0 0 0 2px #0f1115;
+}
+.bcard__menu {
+  position: absolute; top: 32px; right: 0; z-index: 20;
+  min-width: 150px; padding: 5px;
+  background: #1b2027; border: 1px solid rgba(255,255,255,.12);
+  border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.45);
+  display: flex; flex-direction: column; gap: 2px;
+}
+.bcard__menu-item {
+  text-align: left; width: 100%;
+  border: none; background: transparent; color: #d1d5db;
+  border-radius: 7px; padding: 7px 10px; font-size: 12.5px;
+  cursor: pointer; transition: .12s;
+}
+.bcard__menu-item:hover { background: rgba(255,255,255,.07); color: #fff; }
+.bcard__menu-item.is-accent { color: #fbbf24; font-weight: 600; }
+.bcard__menu-item.is-accent:hover { background: rgba(245,158,11,.15); color: #fcd34d; }
+.bcard__menu-item.is-danger { color: #f7a3a3; }
+.bcard__menu-item.is-danger:hover { background: rgba(239,68,68,.16); color: #fff; }
+/* "新版 vX.Y.Z" chip on the card face */
+.bcard__chip--new {
+  color: #fbbf24;
+  background: rgba(245,158,11,.12);
+  border-color: rgba(245,158,11,.3);
 }
 .bcard__opmsg {
-  margin-top: 8px;
-  font-size: 11px; color: #9ca3af;
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 9px;
+  font-size: 11.5px; color: #9ca3af;
   word-break: break-word;
 }

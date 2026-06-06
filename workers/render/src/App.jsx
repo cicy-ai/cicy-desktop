@@ -439,28 +439,58 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
     if (onRename && next && next !== team.name) await onRename(team.id, next);
   };
 
-  // Lifecycle of the local cicy-code daemon (the :8008 sidecar this card
-  // represents): 重启 / 更新 / 停止, inline on the card itself. Only shown when
-  // the bridge exists (desktop build that owns the daemon).
-  const [busy, setBusy] = useState("");   // "" | "restart" | "update" | "stop"
-  const [opMsg, setOpMsg] = useState("");
+  // The local cicy-code daemon (the :8008 sidecar) that backs this team:
+  // 启动 / 重启 / 更新 / 停止. 打开 stays the one primary action — daemon
+  // maintenance lives in a ⋯ menu so it never competes for attention. Only on
+  // a desktop build whose bridge owns the daemon.
   const hasOps = !!window.cicy?.sidecar?.restart;
-  const runOp = async (e, kind, fn, doneText) => {
-    e.stopPropagation();
+  const running = team.status === "running";
+  const [busy, setBusy] = useState("");   // "" | start | restart | update | stop
+  const [opMsg, setOpMsg] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [latest, setLatest] = useState(null); // newest cicy-code on the registry
+  const menuWrap = useRef(null);
+
+  // Look up the newest cicy-code once so we surface 更新 only when one actually
+  // exists (no nagging when current). Renderer-side via cloud.fetch — main
+  // proxies it, dodging CORS; no extra IPC needed.
+  useEffect(() => {
+    if (!hasOps || !window.cicy?.cloud?.fetch) return;
+    let alive = true;
+    window.cicy.cloud
+      .fetch("https://registry.npmmirror.com/cicy-code/latest")
+      .then((r) => { if (alive && r?.ok) { try { setLatest(JSON.parse(r.body)?.version || null); } catch {} } })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [hasOps]);
+
+  const updateAvailable = !!(latest && team.version && cmpVer(latest, team.version) > 0);
+  const showMenu = hasOps && (running || updateAvailable);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDoc = (e) => { if (menuWrap.current && !menuWrap.current.contains(e.target)) setMenuOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [menuOpen]);
+
+  const runOp = async (kind, fn, doneText) => {
+    setMenuOpen(false);
     if (busy) return;
     setBusy(kind); setOpMsg("");
     try {
       const r = await fn();
       setOpMsg(r?.ok
         ? (r.warning ? `${doneText}（${r.warning}）` : doneText)
-        : tr("sidecar.failed", "失败") + (r?.error ? `: ${r.error}` : ""));
+        : (tr("sidecar.failed", "操作失败") + (r?.error ? `: ${r.error}` : "")));
     } catch (err) {
-      setOpMsg(tr("sidecar.failed", "失败") + `: ${err?.message || err}`);
+      setOpMsg(tr("sidecar.failed", "操作失败") + `: ${err?.message || err}`);
     } finally {
       setBusy("");
       onRefresh?.(); // re-probe so the status dot/chip catches up
     }
   };
+  const BUSY_LABEL = { start: "启动中…", restart: "重启中…", update: "更新中…", stop: "停止中…" };
   return (
     <div data-id="LocalTeamCard" className={`bcard bcard--local${tone === "ok" ? " bcard--online" : ""}`}>
       <div className="bcard__accent" />
@@ -469,6 +499,54 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
           <span className="bcard__dot" data-tone={tone} />
           <LaptopIcon />
         </div>
+        {showMenu && (
+          <div className="bcard__menuwrap" ref={menuWrap} onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              data-id="LocalTeamCard-menu-btn"
+              className={`bcard__kebab${updateAvailable ? " has-dot" : ""}`}
+              title={tr("localTeams.manage", "管理本地 cicy-code")}
+              disabled={!!busy}
+              onClick={() => setMenuOpen((v) => !v)}
+            >
+              {busy ? <Spinner /> : <KebabIcon />}
+            </button>
+            {menuOpen && (
+              <div className="bcard__menu" data-id="LocalTeamCard-menu" role="menu">
+                {updateAvailable && (
+                  <button
+                    type="button"
+                    data-id="LocalTeamCard-update"
+                    className="bcard__menu-item is-accent"
+                    onClick={() => runOp("update", () => window.cicy.sidecar.update(), tr("sidecar.updated", "已更新到最新"))}
+                  >
+                    {tr("sidecar.updateTo", "更新到")} v{latest}
+                  </button>
+                )}
+                {running && (
+                  <>
+                    <button
+                      type="button"
+                      data-id="LocalTeamCard-restart"
+                      className="bcard__menu-item"
+                      onClick={() => runOp("restart", () => window.cicy.sidecar.restart(), tr("sidecar.restarted", "已重启"))}
+                    >
+                      {tr("sidecar.restart", "重启")}
+                    </button>
+                    <button
+                      type="button"
+                      data-id="LocalTeamCard-stop"
+                      className="bcard__menu-item is-danger"
+                      onClick={() => runOp("stop", () => window.cicy.sidecar.stop(), tr("sidecar.stoppedDone", "已停止"))}
+                    >
+                      {tr("sidecar.stop", "停止")}
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
       <div className="bcard__body">
         {editing ? (
@@ -500,54 +578,56 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
         <div className="bcard__meta">
           <span className="bcard__chip">{statusInfo.label}</span>
           {team.version && <span className="bcard__chip">v{team.version}</span>}
+          {updateAvailable && (
+            <span
+              className="bcard__chip bcard__chip--new"
+              data-id="LocalTeamCard-newbadge"
+              title={`${tr("sidecar.updateTo", "更新到")} v${latest}`}
+            >
+              {tr("sidecar.newVersion", "新版")} v{latest}
+            </span>
+          )}
         </div>
-        {hasOps && (
-          <div className="bcard__ops" data-id="LocalTeamCard-ops" onClick={(e) => e.stopPropagation()}>
-            <button
-              type="button"
-              data-id="LocalTeamCard-restart"
-              className="bcard__op"
-              disabled={!!busy}
-              title={tr("sidecar.restartHint", "重启本地 cicy-code")}
-              onClick={(e) => runOp(e, "restart", () => window.cicy.sidecar.restart(), tr("sidecar.restarted", "已重启"))}
-            >
-              {busy === "restart" ? <Spinner /> : null}{tr("sidecar.restart", "重启")}
-            </button>
-            <button
-              type="button"
-              data-id="LocalTeamCard-update"
-              className="bcard__op"
-              disabled={!!busy}
-              title={tr("sidecar.updateHint", "更新到最新版并重启")}
-              onClick={(e) => runOp(e, "update", () => window.cicy.sidecar.update(), tr("sidecar.updated", "已更新到最新"))}
-            >
-              {busy === "update" ? <Spinner /> : null}{tr("sidecar.update", "更新")}
-            </button>
-            <button
-              type="button"
-              data-id="LocalTeamCard-stop"
-              className="bcard__op bcard__op--danger"
-              disabled={!!busy || team.status !== "running"}
-              title={tr("sidecar.stopHint", "停止本地 cicy-code")}
-              onClick={(e) => runOp(e, "stop", () => window.cicy.sidecar.stop(), tr("sidecar.stoppedDone", "已停止"))}
-            >
-              {busy === "stop" ? <Spinner /> : null}{tr("sidecar.stop", "停止")}
-            </button>
+        {(busy || opMsg) && (
+          <div className="bcard__opmsg" data-id="LocalTeamCard-opmsg">
+            {busy ? <><Spinner />{BUSY_LABEL[busy] || tr("sidecar.working", "处理中…")}</> : opMsg}
           </div>
         )}
-        {opMsg && <div className="bcard__opmsg" data-id="LocalTeamCard-opmsg">{opMsg}</div>}
       </div>
-      <button
-        type="button"
-        className="bcard__cta"
-        onClick={onOpen}
-        disabled={team.status !== "running"}
-      >
-        <ArrowIcon />
-        <span>{team.status === "running" ? "打开" : statusInfo.cta}</span>
-      </button>
+      {running ? (
+        <button type="button" className="bcard__cta" onClick={onOpen}>
+          <ArrowIcon />
+          <span>{tr("localTeams.open", "打开")}</span>
+        </button>
+      ) : hasOps ? (
+        <button
+          type="button"
+          className="bcard__cta"
+          data-id="LocalTeamCard-start"
+          disabled={!!busy}
+          onClick={() => runOp("start", () => window.cicy.sidecar.start(), tr("sidecar.started", "已启动"))}
+        >
+          {busy === "start" ? <Spinner /> : <ArrowIcon />}
+          <span>{tr("sidecar.start", "启动")}</span>
+        </button>
+      ) : (
+        <button type="button" className="bcard__cta" onClick={onOpen} disabled>
+          <ArrowIcon />
+          <span>{statusInfo.cta}</span>
+        </button>
+      )}
     </div>
   );
+}
+
+// Compare dotted versions: >0 if a newer than b, <0 older, 0 equal.
+function cmpVer(a, b) {
+  const pa = String(a).split("."), pb = String(b).split(".");
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (parseInt(pa[i], 10) || 0) - (parseInt(pb[i], 10) || 0);
+    if (d) return d > 0 ? 1 : -1;
+  }
+  return 0;
 }
 
 const LOCAL_STATUS = {
@@ -645,6 +725,15 @@ function LaptopIcon() {
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <rect x="3" y="4" width="18" height="12" rx="2" />
       <line x1="2" y1="20" x2="22" y2="20" />
+    </svg>
+  );
+}
+function KebabIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <circle cx="12" cy="5" r="1.7" />
+      <circle cx="12" cy="12" r="1.7" />
+      <circle cx="12" cy="19" r="1.7" />
     </svg>
   );
 }
