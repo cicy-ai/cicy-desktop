@@ -20,15 +20,35 @@ const ELECTRON_MIRROR = process.env.ELECTRON_MIRROR || "https://npmmirror.com/mi
 const NPM_REGISTRY = process.env.CICY_NPM_REGISTRY || process.env.npm_config_registry || "https://registry.npmmirror.com";
 const MASTER_ENTRY = path.join(PACKAGE_ROOT, "src", "master", "master-main.js");
 
-// Resolve the electron binary to spawn. Prefers the project-local copy
-// (node_modules/.bin/electron) when present; falls back to the global
-// `electron` on PATH (npm i -g electron), and finally to `npx electron`.
+// Resolve a globally-installed electron (`npm i -g electron`), so the ~200MB
+// binary is downloaded once and SHARED across cicy tools / desktop versions
+// instead of one copy per package install. Returns null if not present.
+let _globalElectronBin; // memoized (avoid re-spawning `npm prefix -g`)
+function globalElectronBin() {
+  if (_globalElectronBin !== undefined) return _globalElectronBin;
+  _globalElectronBin = null;
+  try {
+    const prefix = execSync("npm prefix -g", { stdio: ["ignore", "pipe", "ignore"] })
+      .toString().trim();
+    if (prefix) {
+      const p = isWindows
+        ? path.join(prefix, "electron.cmd")
+        : path.join(prefix, "bin", "electron");
+      if (fs.existsSync(p)) _globalElectronBin = p;
+    }
+  } catch { /* keep null */ }
+  return _globalElectronBin;
+}
+
+// Resolve the electron binary to spawn. Order: (C) a shared GLOBAL electron,
+// then the project-local copy, then `npx electron` as a last resort.
 // Windows uses `npx.cmd electron` to handle the shim correctly.
 function resolveElectronSpawn() {
+  const g = globalElectronBin();
+  if (g) return { cmd: g, prefixArgs: [] };
   if (isWindows) return { cmd: "npx.cmd", prefixArgs: ["electron"] };
   const local = path.join(PACKAGE_ROOT, "node_modules", ".bin", "electron");
   if (fs.existsSync(local)) return { cmd: local, prefixArgs: [] };
-  // Fall back to a globally-installed electron resolved via PATH.
   return { cmd: "npx", prefixArgs: ["electron"] };
 }
 const PROJECT_COMMAND_FILE = path.join(PACKAGE_ROOT, "cicy-dektop.command");
@@ -358,6 +378,17 @@ function nodeBinDir() {
   try { return path.dirname(process.execPath); } catch { return ""; }
 }
 
+// npm's global bin dir (<npm prefix -g>[/bin]), where `npm i -g cicy-desktop`
+// installs the launcher. The GUI shortcut runs that global bin directly so
+// startup doesn't pay an npx registry round-trip on every launch.
+function npmGlobalBinDir() {
+  try {
+    const prefix = execSync("npm prefix -g", { stdio: ["ignore", "pipe", "ignore"] })
+      .toString().trim();
+    return prefix ? (isWindows ? prefix : path.join(prefix, "bin")) : "";
+  } catch { return ""; }
+}
+
 function ensureDesktopCommandFile() {
   try {
     if (process.platform === "darwin") return ensureMacDesktopApp();
@@ -373,8 +404,8 @@ function ensureMacDesktopApp() {
   // executable is a shell script triggers "CiCy Desktop is not responding"
   // (LaunchServices waits for the script to register as a Cocoa app and times
   // out). An osacompile applet's executable IS the AppleScript runtime — a
-  // proper Cocoa app — so it launches cleanly, backgrounds `npx cicy-desktop`
-  // via `do shell script`, then quits. Icon = the applet's applet.icns.
+  // proper Cocoa app — so it launches cleanly, backgrounds the global
+  // `cicy-desktop` bin via `do shell script`, then quits. Icon = applet.icns.
   const { execFileSync } = require("child_process");
   const appDir = path.join(DESKTOP_DIR, "CiCy Desktop.app");
   // Idempotent — create only when missing. When the app is launched FROM this
@@ -384,16 +415,21 @@ function ensureMacDesktopApp() {
   // ever appears ("打不开"). Skip if it already exists.
   if (fs.existsSync(appDir)) return;
   const nodeDir = nodeBinDir();
-  // do shell script needs node on PATH (GUI launch has a minimal PATH); the
-  // trailing & + nohup + </dev/null lets the shell return so the applet quits.
-  // ELECTRON_MIRROR + npmmirror: a fresh CN machine has no cached electron
-  // binary, so npx's electron postinstall would try GitHub releases and fail
-  // (ECOMPROMISED / lock-compromised). Point it at npmmirror's electron mirror.
-  // Harmless elsewhere — only consulted when electron actually (re)downloads.
+  const gbin = npmGlobalBinDir();
+  // Launch the globally-installed `cicy-desktop` bin DIRECTLY (npm i -g) — no
+  // per-launch `npx` registry round-trip. Use the absolute path when resolvable
+  // (GUI launch has a minimal PATH); fall back to the bare name otherwise.
+  const cicyBin = gbin && fs.existsSync(path.join(gbin, "cicy-desktop"))
+    ? path.join(gbin, "cicy-desktop")
+    : "cicy-desktop";
+  // do shell script needs node + the global bin on PATH (GUI launch has a
+  // minimal PATH); trailing & + nohup + </dev/null lets the shell return so the
+  // applet quits. ELECTRON_MIRROR + npmmirror only matter if electron ever
+  // (re)downloads — harmless otherwise.
   const ascript =
-    `do shell script "export PATH=\\"${nodeDir}:/usr/local/bin:/opt/homebrew/bin:$PATH\\" ; ` +
+    `do shell script "export PATH=\\"${nodeDir}:${gbin}:/usr/local/bin:/opt/homebrew/bin:$PATH\\" ; ` +
     `export ELECTRON_MIRROR=\\"${ELECTRON_MIRROR}\\" ; export npm_config_registry=\\"${NPM_REGISTRY}\\" ; ` +
-    `nohup npx -y cicy-desktop > /tmp/cicy-desktop.log 2>&1 < /dev/null &"`;
+    `nohup '${cicyBin}' > /tmp/cicy-desktop.log 2>&1 < /dev/null &"`;
   const tmp = path.join(os.tmpdir(), `cicy-launch-${process.pid}.applescript`);
   fs.writeFileSync(tmp, ascript);
   try {

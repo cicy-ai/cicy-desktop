@@ -1,26 +1,26 @@
 // Homepage window — primary CiCy Desktop window. Singleton; closing it
 // does NOT quit the app.
 //
-// URL selection:
-//   1. CICY_HOMEPAGE_URL env (Vite dev server) — wins everywhere if set;
-//      if the URL fails to load (tunnel down, server not running) the window
-//      automatically falls back to the local file:// SPA.
-//   2. Windows: remote https://desktop.cicy-ai.com — keeps Win shipping
-//      without rebuilding (Win release cadence is slower than render's)
-//   3. Mac/Linux: bundled local SPA file:// — works offline, no mixed-
-//      content concerns when embedding the team-assistant webview
-//      (the cicy-desktop preload's IPC bridge still attaches).
+// URL selection (HARDCODED — no env/dev-URL switch, no Vite):
+//   - Windows: the remote Cloudflare worker https://desktop.cicy-ai.com — keeps
+//     Win shipping without rebuilding (Win release cadence is slower than
+//     render's). Falls back to the local file:// SPA if unreachable.
+//   - Mac/Linux: the bundled local SPA file:// — works offline, fast, no remote
+//     dependency, no mixed-content concerns when embedding the team-assistant
+//     webview (the cicy-desktop preload's IPC bridge still attaches).
 
 const path = require("path");
 const { BrowserWindow } = require("electron");
 const log = require("electron-log");
 
-const REMOTE_URL = "https://desktop.cicy-ai.com/";
-const DEV_URL = process.env.CICY_HOMEPAGE_URL || "";
+// Hardcoded homepage source — no Vite / CICY_HOMEPAGE_URL dev-URL switch.
+//   - mac/linux: the bundled file:// SPA (offline, fast, no remote dependency).
+//   - Windows:   the remote Cloudflare worker (Win release cadence is slower
+//                than render's, so it loads the homepage remotely).
+const REMOTE_URL = "https://desktop.cicy-ai.com/"; // Cloudflare worker (remote homepage)
 const LOCAL_INDEX = path.join(__dirname, "homepage-react", "index.html");
 
 function pickHomepageURL() {
-  if (DEV_URL) return DEV_URL;
   if (process.platform === "win32") return REMOTE_URL;
   return `file://${LOCAL_INDEX}`;
 }
@@ -88,8 +88,10 @@ async function openHomepage() {
   homepage.webContents.on("did-fail-load", (_e, code, desc, url) => {
     console.error(`[homepage] did-fail-load ${code} ${desc} ${url}`);
     const fallback = `file://${LOCAL_INDEX}`;
-    if (url && DEV_URL && url.startsWith(DEV_URL.replace(/\/$/, "")) && url !== fallback) {
-      log.warn(`[homepage] dev URL unreachable, falling back to ${fallback}`);
+    // If the remote (Windows) Cloudflare homepage is unreachable, fall back to
+    // the bundled local SPA so the window never stays blank.
+    if (url && url.startsWith(REMOTE_URL.replace(/\/$/, "")) && url !== fallback) {
+      log.warn(`[homepage] remote homepage unreachable, falling back to ${fallback}`);
       homepage.loadURL(fallback);
     }
   });
