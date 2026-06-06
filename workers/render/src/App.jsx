@@ -491,6 +491,34 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
     }
   };
   const BUSY_LABEL = { start: "启动中…", restart: "重启中…", update: "更新中…", stop: "停止中…" };
+
+  // Can we bring this daemon up locally? Only the 127.0.0.1:8008 team is the
+  // sidecar we own — a remote node (or a non-8008 local port) can't be started
+  // from the desktop, so for those 打开 just opens the window and lets the
+  // loaded page show its own connecting/login/error UI.
+  const localSidecar = hasOps && isLocalSidecar(team.base_url);
+
+  // 打开 is NEVER gated on /api/health — openTeam() in main doesn't check it,
+  // it just opens the window. health is an indicator, not a gate. When a local
+  // daemon is down we start it first; otherwise we open and let the page cope.
+  const handleOpen = async () => {
+    if (busy) return;
+    if (!running && localSidecar && window.cicy?.sidecar?.start) {
+      setBusy("start"); setOpMsg("");
+      const r = await window.cicy.sidecar.start().catch((e) => ({ ok: false, error: e?.message || String(e) }));
+      setBusy(""); onRefresh?.();
+      if (!r?.ok || r?.warning) { // didn't come up — surface it, don't open a dead link
+        setOpMsg(tr("sidecar.startFailed", "启动失败") + (r?.error ? `: ${r.error}` : r?.warning ? `: ${r.warning}` : ""));
+        return;
+      }
+    }
+    onOpen(); // open regardless of health — the window/page handles the rest
+  };
+  const openLabel = running
+    ? tr("localTeams.open", "打开")
+    : localSidecar
+      ? tr("localTeams.startOpen", "启动并打开")
+      : tr("localTeams.open", "打开");
   return (
     <div data-id="LocalTeamCard" className={`bcard bcard--local${tone === "ok" ? " bcard--online" : ""}`}>
       <div className="bcard__accent" />
@@ -594,30 +622,28 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
           </div>
         )}
       </div>
-      {running ? (
-        <button type="button" className="bcard__cta" onClick={onOpen}>
-          <ArrowIcon />
-          <span>{tr("localTeams.open", "打开")}</span>
-        </button>
-      ) : hasOps ? (
-        <button
-          type="button"
-          className="bcard__cta"
-          data-id="LocalTeamCard-start"
-          disabled={!!busy}
-          onClick={() => runOp("start", () => window.cicy.sidecar.start(), tr("sidecar.started", "已启动"))}
-        >
-          {busy === "start" ? <Spinner /> : <ArrowIcon />}
-          <span>{tr("sidecar.start", "启动")}</span>
-        </button>
-      ) : (
-        <button type="button" className="bcard__cta" onClick={onOpen} disabled>
-          <ArrowIcon />
-          <span>{statusInfo.cta}</span>
-        </button>
-      )}
+      <button
+        type="button"
+        className="bcard__cta"
+        data-id="LocalTeamCard-open"
+        disabled={!!busy || !team.base_url}
+        onClick={handleOpen}
+      >
+        {busy === "start" ? <Spinner /> : <ArrowIcon />}
+        <span>{openLabel}</span>
+      </button>
     </div>
   );
+}
+
+// True only for the daemon the desktop actually owns — localhost on the
+// sidecar port (8008). Remote nodes / other ports can't be started from here.
+function isLocalSidecar(baseUrl) {
+  try {
+    const p = new URL(baseUrl);
+    const local = p.hostname === "127.0.0.1" || p.hostname === "localhost" || p.hostname === "::1";
+    return local && (p.port === "8008" || p.port === "");
+  } catch { return false; }
 }
 
 // Compare dotted versions: >0 if a newer than b, <0 older, 0 equal.
