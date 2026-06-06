@@ -547,17 +547,29 @@ function ensureWindowsDesktopLauncher() {
 // Honors `prefs.openAtLogin` if present; defaults to true on first run.
 function ensureAutoLaunch() {
   try {
-    if (!electronApp.isPackaged) return; // dev mode: don't touch login items
     const prefs = readPrefs();
     const want = prefs.openAtLogin !== false; // default true
-    if (process.platform === "darwin" || process.platform === "win32") {
+
+    if (process.platform === "darwin") {
+      // mac: register the STABLE Desktop applet as a login item — works for
+      // npx/global installs (isPackaged=false), not just packaged .apps. We
+      // register the applet (a fixed path that internally runs the global
+      // cicy-desktop bin) instead of process.execPath, which is a transient
+      // electron path that breaks on every version/cache change (the old auto-
+      // start bug). Skip a pure source checkout so devs aren't auto-added.
+      const installed = electronApp.isPackaged ||
+        __dirname.includes(`${path.sep}node_modules${path.sep}`);
+      if (!installed) return;
+      ensureMacLoginItem(want);
+      return;
+    }
+
+    // win/linux: unchanged — only manage login items for packaged builds.
+    if (!electronApp.isPackaged) return;
+    if (process.platform === "win32") {
       const cur = electronApp.getLoginItemSettings();
       if (cur.openAtLogin !== want) {
-        electronApp.setLoginItemSettings({
-          openAtLogin: want,
-          // Windows: pass --hidden so the app starts to the tray, not foreground.
-          args: process.platform === "win32" ? ["--hidden"] : undefined,
-        });
+        electronApp.setLoginItemSettings({ openAtLogin: want, args: ["--hidden"] });
         log.info(`[autostart] openAtLogin → ${want}`);
       }
     } else if (process.platform === "linux") {
@@ -565,6 +577,28 @@ function ensureAutoLaunch() {
     }
   } catch (e) {
     log.warn(`[autostart] ensureAutoLaunch failed: ${e.message}`);
+  }
+}
+
+// mac login item pointing at the Desktop applet (~/Desktop/CiCy Desktop.app).
+// The applet is created by the launcher (bin/cicy-desktop ensureMacDesktopApp)
+// BEFORE electron spawns, so it exists by the time this runs. Idempotent:
+// always clears a stale entry first, then (re)adds when wanted.
+function ensureMacLoginItem(want) {
+  const name = "CiCy Desktop";
+  const appletPath = path.join(os.homedir(), "Desktop", "CiCy Desktop.app");
+  try {
+    const { execFileSync } = require("child_process");
+    const osa = (script) => execFileSync("osascript", ["-e", script], { stdio: "ignore" });
+    osa(`tell application "System Events" to if login item "${name}" exists then delete login item "${name}"`);
+    if (want && fs.existsSync(appletPath)) {
+      osa(`tell application "System Events" to make login item at end with properties {name:"${name}", path:"${appletPath}", hidden:false}`);
+      log.info(`[autostart] mac login item → ${appletPath}`);
+    } else {
+      log.info(`[autostart] mac login item ${want ? "skipped (applet missing)" : "removed"}`);
+    }
+  } catch (e) {
+    log.warn(`[autostart] mac login item failed: ${e.message}`);
   }
 }
 
