@@ -13,18 +13,6 @@ const TOKEN_KEY = "cicy_token";
 const ACCESS_TOKEN_KEY = "cicy_access_token";
 const USER_ID_KEY = "cicy_user_id";
 const CLOUD_BASE = "https://cicy-ai.com";
-const HELPER_WIDTH_KEY = "cicy_helper_width";
-// v1 MVP: shared helper container on the cloud VM. All trial users hit
-// the same instance — will be replaced by per-user dynamic allocation
-// from /api/helper/start once w-10032 ships that endpoint.
-const HELPER_URL_BASE = "http://43.99.56.150:8011";
-const HELPER_SHARED_TOKEN = "cicy_9170fc02080e5d744cc4e80e423486ca";
-// Team Helper pane id — produced by cicy-code --helper=1, which spawns a
-// single OpenCode worker on port 6002 (see cicy-code setup.go
-// helperModeBuiltinWorker). The SPA uses hash routing #/agent/<session> to
-// land directly inside that pane.
-const HELPER_PANE_ID = "w-6002:main.0";
-const HELPER_AGENT_SESSION = "w-6002";
 
 export default function App() {
   // sk-xxx (LLM API). Used by /v1/chat/completions etc.
@@ -53,119 +41,8 @@ export default function App() {
   // Used to distinguish "not yet probed" (unknown) from "probed and empty"
   // (cloud-only) in localHelperState below.
   const [localTeamsFetched, setLocalTeamsFetched] = useState(false);
-  // Pick the team that backs the Team Helper drawer. Any running local team
-  // whose api_token is populated qualifies — `localTeams.list()` only marks
-  // status="running" when /api/health returned 200. Once one exists, the
-  // card switches from "30-min cloud trial" to "persistent local helper" and
-  // the drawer dials its own w-6002. Null until a real team comes online.
-  const localHelperTeam = useMemo(() => {
-    return (localTeams || []).find(
-      (t) => t && t.status === "running" && t.base_url && t.api_token,
-    ) || null;
-  }, [localTeams]);
-  // localHelperState — four-way. Drives both the Helper card and onStart.
-  //
-  //   "unknown"       : first list() probe hasn't returned. Don't decide.
-  //   "local-ready"   : at least one local team is healthy → use it.
-  //   "local-pending" : probe done, no healthy team yet, BUT user has
-  //                     local nodes configured (cicy-code starting up,
-  //                     wrong token, transient error, …). Wait.
-  //   "cloud-only"    : probe done AND no local nodes configured. Always
-  //                     show the cloud-trial helper — it's the one that
-  //                     walks users through installing Docker + cicy-code
-  //                     on Windows, so we need to be able to summon it
-  //                     every launch until the install completes (then
-  //                     cicyDesktopNodes lands an entry and state flips
-  //                     to local-ready / local-pending).
-  const hasLocalConfigured = useMemo(() => {
-    // Any configured node counts — even "stopped" or "auth_error" — because
-    // the user has signaled intent to use a local instance. The only state
-    // that means "no local intent" is an empty list.
-    return Array.isArray(localTeams) && localTeams.length > 0;
-  }, [localTeams]);
-  const localHelperState = useMemo(() => {
-    if (!localTeamsFetched) return "unknown";
-    if (localHelperTeam)    return "local-ready";
-    if (hasLocalConfigured) return "local-pending";
-    return "cloud-only";
-  }, [localTeamsFetched, localHelperTeam, hasLocalConfigured]);
-  const localHelperUrl = useMemo(() => {
-    if (!localHelperTeam) return null;
-    const base = String(localHelperTeam.base_url).replace(/\/$/, "");
-    return `${base}/?token=${encodeURIComponent(localHelperTeam.api_token)}#/agent/w-6002`;
-  }, [localHelperTeam]);
-  const cloudHelperUrl = useMemo(
-    () => `${HELPER_URL_BASE}/?token=${encodeURIComponent(HELPER_SHARED_TOKEN)}#/agent/${HELPER_AGENT_SESSION}`,
-    [],
-  );
-  // Tab + helper drawer state (the v1 layout: tabs row over a unified grid,
-  // right-edge full-height webview drawer for the team-helper agent).
-  const [tab, setTab] = useState("all"); // "all" | "local" | "cloud"
-  const [helperWidth, setHelperWidth] = useState(() => {
-    const saved = parseInt(safeGet(HELPER_WIDTH_KEY) || "0", 10);
-    if (saved > 0) return saved;
-    if (typeof window === "undefined") return 560;
-    return Math.round(window.innerWidth * 0.42);
-  });
-  const [helperResizing, setHelperResizing] = useState(false);
-  // Drawer is collapsed by default. Opens when the user clicks the "团队
-  // 小助手" onboarding card (or any future "summon helper" trigger).
-  const [helperOpen, setHelperOpen] = useState(false);
-  // Helper-instance URL — null until Phase 4 wires /api/helper/start.
-  const [helperUrl, setHelperUrl] = useState(null);
-  const helperWebviewRef = useRef(null);
-  // Auto-promote: if the drawer is open with a placeholder (helperUrl===null
-  // because we were in unknown/local-pending), and the local helper team
-  // becomes ready, swap in the local URL. Only when helperUrl is still
-  // null — once a webview (cloud or local) is loaded we never silently swap
-  // it out from under the user (they may be mid-conversation).
-  useEffect(() => {
-    if (helperOpen && helperUrl === null && localHelperUrl) {
-      setHelperUrl(localHelperUrl);
-    }
-  }, [helperOpen, helperUrl, localHelperUrl]);
-  // Centered modal asking the user to confirm sending "start". Shown each
-  // time the drawer opens unless the user picked "不再显示" (persisted in
-  // localStorage). Manual fallback for when server-side helper-kick didn't
-  // fire (drawer reopened too quickly, opencode dropped the first message).
-  const [helperModalShown, setHelperModalShown] = useState(false);
-  const [helperModalSuppressed, setHelperModalSuppressed] = useState(
-    () => { try { return localStorage.getItem("helper_modal_suppressed") === "1"; } catch { return false; } }
-  );
-  useEffect(() => {
-    // The "start" confirm modal is cloud-trial-specific (it posts to
-    // HELPER_URL_BASE/api/tmux/send to kick the cloud opencode). For
-    // local-ready (persistent w-6002 already has its intro queue) and
-    // unknown/local-pending (no webview yet) it's wrong to show it.
-    if (helperOpen && !helperModalSuppressed && localHelperState === "cloud-only") {
-      setHelperModalShown(true);
-    }
-    if (!helperOpen) setHelperModalShown(false);
-  }, [helperOpen, helperModalSuppressed, localHelperState]);
-  const suppressHelperModal = useCallback(() => {
-    try { localStorage.setItem("helper_modal_suppressed", "1"); } catch {}
-    setHelperModalSuppressed(true);
-    setHelperModalShown(false);
-  }, []);
-  const [helperSending, setHelperSending] = useState(false);
-  const sendHelperStart = useCallback(async () => {
-    if (helperSending) return;
-    setHelperSending(true);
-    try {
-      await window.cicy?.cloud?.fetch?.(`${HELPER_URL_BASE}/api/tmux/send`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${HELPER_SHARED_TOKEN}`,
-        },
-        body: JSON.stringify({ pane_id: HELPER_PANE_ID, text: "start", submit: true }),
-      });
-      setHelperModalShown(false);
-    } catch {} finally {
-      setHelperSending(false);
-    }
-  }, [helperSending]);
-  // (userContextSentRef gone — server-side --helper kick owns the trigger.)
+  // Tab state for the team grid: "all" | "local" | "cloud".
+  const [tab, setTab] = useState("all");
 
   // Pull /api/user/self + /api/teams in parallel using the access_token.
   // Goes through window.cicy.cloud.fetch — main does the actual request,
@@ -264,18 +141,6 @@ export default function App() {
       try {
         if (msg?.type === "localTeams:add") {
           result = await window.cicy.localTeams.add(msg.spec || {});
-          // Hand-off: when the cloud Team Helper registered our new local
-          // backend, swap the drawer's webview to that backend's own
-          // w-6002 pane after a short pause so the user can read the
-          // farewell message first. Heuristic: install_source starts
-          // with "helper-".
-          if (result?.ok && /^helper(-|$)/.test(msg.spec?.install_source || "") && result?.team?.base_url) {
-            const team = result.team;
-            setTimeout(() => {
-              const tok = team.api_token ? `?token=${encodeURIComponent(team.api_token)}` : "";
-              setHelperUrl(`${team.base_url}${tok}#/agent/w-6002`);
-            }, 2500);
-          }
         } else if (msg?.type === "localTeams:remove") {
           result = await window.cicy.localTeams.remove(msg.id);
         } else if (msg?.type === "localTeams:update") {
@@ -302,35 +167,6 @@ export default function App() {
     if (!window.cicy?.localTeams?.open) return;
     try { await window.cicy.localTeams.open(teamId); } catch {}
   }, []);
-
-  // Drag-resize the right helper drawer. Mousedown on the 6 px handle
-  // attaches window-level listeners so the drag survives the cursor leaving
-  // the handle. Webview captures its own mouse events in a child renderer
-  // process — without the fullscreen mask the host page loses mousemove
-  // the instant the cursor crosses into the webview.
-  const startHelperResize = useCallback((ev) => {
-    ev.preventDefault();
-    setHelperResizing(true);
-    const min = 320;
-    const onMove = (e) => {
-      const w = window.innerWidth - e.clientX;
-      const max = window.innerWidth - 320;
-      const clamped = Math.max(min, Math.min(max, w));
-      setHelperWidth(clamped);
-    };
-    const onUp = () => {
-      setHelperResizing(false);
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-      // Persist the final width so a relaunch keeps the user's layout.
-      try { localStorage.setItem(HELPER_WIDTH_KEY, String(parseInt(getComputedStyle(document.querySelector(".helper-aside") || document.body).getPropertyValue("width") || "0", 10) || 0)); } catch {}
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-  }, []);
-  useEffect(() => {
-    try { localStorage.setItem(HELPER_WIDTH_KEY, String(helperWidth)); } catch {}
-  }, [helperWidth]);
 
   // (USER_CONTEXT push retired — cicy-code 2.1.7's --helper mode fires the
   // open-protocol trigger server-side from watchHelperOpencodeReadyAndKick,
@@ -523,33 +359,6 @@ export default function App() {
         )}
 
         <div className="app__grid">
-          {/* Team Helper card — always rendered. Routing decision is the
-              three-way localHelperState (see useMemo above):
-                local-ready   → open local team's w-6002 (persistent, no trial cap)
-                local-pending → open drawer with placeholder, wait for cicy-code
-                                to come up; auto-promote to local URL when it
-                                does (effect below).
-                unknown       → same as local-pending: never silently fall
-                                through to cloud during the launch race.
-                cloud-only    → open the 30-min cloud trial. Only here. */}
-          <HelperOnboardCard
-            state={localHelperState}
-            onStart={() => {
-              if (localHelperState === "local-ready") {
-                setHelperUrl(localHelperUrl);
-              } else if (localHelperState === "cloud-only") {
-                setHelperUrl(cloudHelperUrl);
-              } else {
-                // unknown / local-pending — open the drawer but leave
-                // helperUrl null so HelperPlaceholder renders. For
-                // local-pending the effect below upgrades to localHelperUrl
-                // as soon as cicy-code comes up.
-                setHelperUrl(null);
-              }
-              setHelperOpen(true);
-            }}
-          />
-
           {showLocal && localTeams && localTeams.map((t) => (
             <LocalTeamCard key={"local:" + t.id} team={t} onOpen={() => openLocalTeam(t.id)} onRename={renameLocalTeam} />
           ))}
@@ -565,7 +374,7 @@ export default function App() {
           ))}
           {showLocal && (
             <button type="button" className="add-card" onClick={() => {
-              alert("Phase 3 待接：让小助手帮你装 / 自己 docker run cicy-code 后 add");
+              alert("装本地 cicy-code（npx cicy-code / docker run）后会自动出现，或在云端创建团队。");
             }}>
               <span className="add-card__plus">+</span>
               <span className="add-card__label">新建本地团队</span>
@@ -575,164 +384,11 @@ export default function App() {
 
         {!profileLoading && !profileError && teams && teams.length === 0 && !localTeams?.length && (
           <div className="empty" style={{ marginTop: 14 }}>
-            还没有团队 — 让小助手帮你装一个本地 team，或在云端创建。
+            还没有团队 — 安装本地 cicy-code 起一个本地 team，或在云端创建。
           </div>
         )}
       </main>
       </div>{/* /.shell__left */}
-
-      {/* Drag mask: during resize, fullscreen invisible div above the webview
-          so the host page keeps receiving mousemove (webview is a separate
-          renderer process that eats its own mouse events). */}
-      {helperResizing && (
-        <div
-          className="helper-mask"
-          style={{ position: "fixed", inset: 0, cursor: "ew-resize", background: "transparent", userSelect: "none", zIndex: 9999 }}
-        />
-      )}
-
-      {/* 🤖 团队助手 — 通栏右侧抽屉。默认收起，点 onboard card 才开。 */}
-      {helperOpen && (
-      <aside
-        className="helper-aside"
-        style={{ width: helperWidth }}
-      >
-        <div
-          onMouseDown={startHelperResize}
-          style={{ position: "absolute", left: -3, top: 0, bottom: 0, width: 6, cursor: "ew-resize", zIndex: 1 }}
-          title="拖动调整宽度"
-        />
-        {/* Top bar with close button. Subtle to not steal focus from the
-            assistant content below. */}
-        <div className="helper-aside__top">
-          <span className="helper-aside__title">🤖 团队小助手</span>
-          <button
-            type="button"
-            className="helper-aside__close"
-            onClick={() => setHelperOpen(false)}
-            aria-label="关闭"
-          >×</button>
-        </div>
-        {helperModalShown && (
-          <div
-            className="helper-modal__backdrop"
-            onClick={() => setHelperModalShown(false)}
-          >
-            <div
-              className="helper-modal"
-              role="dialog"
-              aria-modal="true"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="helper-modal__title">让小助手开始工作</div>
-              <div className="helper-modal__desc">
-                点击「确认发送」会向团队小助手发送 <code>start</code>，
-                它会探测您的系统并按需安装本地团队后端。
-              </div>
-              <div className="helper-modal__actions">
-                <button
-                  type="button"
-                  className="helper-modal__btn helper-modal__btn--ghost"
-                  onClick={suppressHelperModal}
-                >不再显示</button>
-                <button
-                  type="button"
-                  className="helper-modal__btn"
-                  onClick={() => setHelperModalShown(false)}
-                >关闭</button>
-                <button
-                  type="button"
-                  className="helper-modal__btn helper-modal__btn--primary"
-                  onClick={sendHelperStart}
-                  disabled={helperSending}
-                >{helperSending ? "发送中…" : "确认发送"}</button>
-              </div>
-            </div>
-          </div>
-        )}
-        {helperUrl ? (
-          <webview
-            ref={helperWebviewRef}
-            key={helperUrl}
-            src={helperUrl}
-            {...(window.cicy?.webviewPreloadPath ? { preload: `file://${window.cicy.webviewPreloadPath}` } : {})}
-            style={{ flex: 1, border: 0, width: "100%", height: "100%" }}
-            allowpopups="true"
-          />
-        ) : (
-          <HelperPlaceholder state={localHelperState} />
-        )}
-      </aside>
-      )}
-    </div>
-  );
-}
-
-function HelperOnboardCard({ onStart, state = "unknown" }) {
-  // state: "unknown" | "local-ready" | "local-pending" | "cloud-only"
-  //   local-ready   : open helper drawer pointing at local w-6002
-  //   local-pending : has local config, cicy-code not healthy yet → wait
-  //   unknown       : first probe in flight → behave like local-pending
-  //   cloud-only    : no local installed → always-available cloud helper that
-  //                   walks the user through installing Docker + cicy-code.
-  //                   Shown on every launch until install lands a team in
-  //                   cicyDesktopNodes (then state flips to local-ready/-pending).
-  const isLocal   = state === "local-ready";
-  const isPending = state === "unknown" || state === "local-pending";
-  const isCloud   = state === "cloud-only";
-  return (
-    <div className="bcard bcard--helper">
-      <div className="bcard__accent" />
-      <div className="bcard__top">
-        <div className="bcard__pill bcard__pill--helper">
-          <span className="bcard__helper-icon">🤖</span>
-          <span>小助手</span>
-        </div>
-        {isLocal ? (
-          <span className="bcard__badge bcard__badge--local">本地常驻</span>
-        ) : isPending ? (
-          <span className="bcard__badge bcard__badge--local">本地启动中</span>
-        ) : (
-          <span className="bcard__badge bcard__badge--trial">30 分钟试用</span>
-        )}
-      </div>
-      <div className="bcard__body">
-        <h3 className="bcard__name">团队小助手</h3>
-        {isLocal ? (
-          <p className="bcard__desc">管理本地团队 · 升级 / 加新团队</p>
-        ) : isPending ? (
-          <p className="bcard__desc">本地小助手准备中，请稍候…</p>
-        ) : (
-          <>
-            <p className="bcard__desc">协助您完成本地私有化团队部署</p>
-            <p className="bcard__fineprint">过期后需购买会员</p>
-          </>
-        )}
-      </div>
-      <button type="button" className="bcard__cta bcard__cta--helper" onClick={onStart}>
-        <span>{isLocal ? "打开助手" : isPending ? "等待本地" : "召唤助手"}</span>
-      </button>
-    </div>
-  );
-}
-
-function HelperPlaceholder({ state = "unknown" }) {
-  const pending = state === "unknown" || state === "local-pending";
-  return (
-    <div className="helper-placeholder">
-      <div className="helper-placeholder__mark">🤖</div>
-      <h3 className="helper-placeholder__title">团队助手</h3>
-      {pending ? (
-        <p className="helper-placeholder__sub">
-          正在等待本地小助手就绪…<br />
-          确保 cicy-code 已启动并监听 8008。就绪后会自动连接，无需刷新。
-        </p>
-      ) : (
-        <p className="helper-placeholder__sub">
-          点击「召唤助手」会启动 30 分钟试用版小助手，
-          引导你装 Docker + cicy-code，帮你跑起第一个本地团队。
-        </p>
-      )}
     </div>
   );
 }
