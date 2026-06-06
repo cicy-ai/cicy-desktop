@@ -75,6 +75,44 @@ function setupWindowHandlers(win) {
               console.log('[RPC] electronRPC ready');
             } catch(e) {}
           }
+          // window.cicy.artifact — remote control of the 产物 (artifact) <webview>
+          // guest webContents for cicy-code's artifactBridge.ts. Targets the
+          // element id 'cicy-artifact-webview'; round-trips to artifact-ipc.js.
+          (function(){
+            try {
+              if (window.cicy && window.cicy.artifact) return;
+              const { ipcRenderer } = require('electron');
+              window.cicy = window.cicy || {};
+              const guestId = () => {
+                const el = document.getElementById('cicy-artifact-webview');
+                if (!el || typeof el.getWebContentsId !== 'function')
+                  throw new Error('artifact webview not mounted (open the 产物 tab once)');
+                return el.getWebContentsId();
+              };
+              let _attached = false;
+              window.cicy.artifact = {
+                invoke: (method, args) =>
+                  ipcRenderer.invoke('artifact:invoke', { guestId: guestId(), method, args: args || [] }),
+                cdp: {
+                  attach: (protocolVersion) =>
+                    ipcRenderer.invoke('artifact:cdp-attach', { guestId: guestId(), protocolVersion })
+                      .then((r) => { _attached = true; return r; }),
+                  detach: () =>
+                    ipcRenderer.invoke('artifact:cdp-detach', { guestId: guestId() })
+                      .then((r) => { _attached = false; return r; }),
+                  isAttached: () => _attached,
+                  send: (method, params) =>
+                    ipcRenderer.invoke('artifact:cdp-send', { guestId: guestId(), method, params: params || {} }),
+                },
+              };
+              try { ipcRenderer.removeAllListeners('artifact:event'); } catch(e) {}
+              ipcRenderer.on('artifact:event', (_e, detail) => {
+                if (detail && detail.source === 'cdp' && detail.method === '__detached') _attached = false;
+                try { window.dispatchEvent(new CustomEvent('cicy-artifact-event', { detail: detail })); } catch(e) {}
+              });
+              console.log('[artifact] window.cicy.artifact ready');
+            } catch(e) { console.error('[artifact] bridge inject failed', e && e.message); }
+          })();
         `;
         if (win.webContents.debugger.isAttached()) {
           await win.webContents.debugger.sendCommand("Runtime.evaluate", { expression: rpcCode });

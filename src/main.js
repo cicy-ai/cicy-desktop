@@ -669,6 +669,10 @@ electronApp.whenReady().then(async () => {
   backendsIPC.register({ sidecarLogPath: path.join(os.homedir(), "logs", "cicy-code-sidecar.log") });
   require("./backends/sidecar-ipc").register({ sidecarLogPath: path.join(os.homedir(), "logs", "cicy-code-sidecar.log") });
 
+  // window.cicy.artifact bridge — CDP/webContents control of the cicy-code
+  // 产物 (artifact) <webview> guest. Injected renderer-side in window-utils.js.
+  require("./backends/artifact-ipc").register();
+
   // Browser-login loopback listener. Renderer calls auth:login-start when
   // the user clicks Login; main opens a 127.0.0.1 server + the browser,
   // and broadcasts auth:complete back to the homepage window once the
