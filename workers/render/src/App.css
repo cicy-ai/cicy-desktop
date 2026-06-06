@@ -530,7 +530,10 @@ body {
 
 .bcard__top {
   display: flex; align-items: center; justify-content: space-between;
-  position: relative; z-index: 1;
+  /* Above .bcard__body (which is also position:relative z-index:1) so the ⋯
+     dropdown menu, which lives in here, paints OVER the card body instead of
+     being covered by it. */
+  position: relative; z-index: 5;
 }
 .bcard__pill {
   display: inline-flex; align-items: center; gap: 6px;
