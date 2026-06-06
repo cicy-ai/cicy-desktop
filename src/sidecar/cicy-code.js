@@ -17,7 +17,7 @@ const fs = require("fs");
 const os = require("os");
 const http = require("http");
 const path = require("path");
-const { spawn } = require("child_process");
+const { spawn, execFileSync } = require("child_process");
 
 const DEFAULT_PORT = Number(process.env.CICY_CODE_PORT || 8008);
 
@@ -101,22 +101,65 @@ async function start({ logPath, port = DEFAULT_PORT, force = false, version = nu
   return child;
 }
 
-async function stop({ timeoutMs = 5000 } = {}) {
-  if (!child) return;
-  const p = child;
-  child = null;
-  // Docker-launched (win32): not a real ChildProcess — remove the container.
-  if (p && p.docker) {
-    try { await require("./docker").stop(); } catch {}
-    return;
+// PIDs currently LISTENing on `port`, via lsof. Tries a few common paths
+// because the GUI-launched Electron process often has a minimal PATH. Returns
+// [] when lsof is missing or nothing is listening.
+const LSOF_CANDIDATES = ["/usr/sbin/lsof", "/usr/bin/lsof", "lsof"];
+function listPortPids(port) {
+  for (const bin of LSOF_CANDIDATES) {
+    try {
+      const out = execFileSync(bin, ["-nP", `-tiTCP:${port}`, "-sTCP:LISTEN"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      return [...new Set(out.split(/\s+/).map(s => parseInt(s, 10)).filter(n => n > 0))];
+    } catch (e) {
+      if (e && e.code === "ENOENT") continue; // wrong path → try next candidate
+      return []; // lsof ran but matched nothing (non-zero exit)
+    }
   }
-  try { p.kill("SIGTERM"); } catch {}
-  const start = Date.now();
-  while (p.exitCode === null && Date.now() - start < timeoutMs) {
-    await new Promise(r => setTimeout(r, 100));
+  return [];
+}
+
+// Kill whatever is LISTENing on `port` — even a detached/orphan (PPID=1)
+// cicy-code from a prior launch that we never tracked as a child. SIGTERM,
+// wait for the port to free, then SIGKILL the stragglers.
+async function killPortListeners(port = DEFAULT_PORT, timeoutMs = 5000) {
+  const pids = listPortPids(port);
+  if (!pids.length) return 0;
+  for (const pid of pids) { try { process.kill(pid, "SIGTERM"); } catch {} }
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    if (!listPortPids(port).length) return pids.length;
+    await new Promise(r => setTimeout(r, 150));
   }
-  if (p.exitCode === null) {
-    try { p.kill("SIGKILL"); } catch {}
+  for (const pid of listPortPids(port)) { try { process.kill(pid, "SIGKILL"); } catch {} }
+  return pids.length;
+}
+
+async function stop({ timeoutMs = 5000, port = DEFAULT_PORT } = {}) {
+  // 1) The child we spawned this session (npx) or the Docker container.
+  if (child) {
+    const p = child;
+    child = null;
+    if (p.docker) {
+      try { await require("./docker").stop(); } catch {}
+      return;
+    }
+    try { p.kill("SIGTERM"); } catch {}
+    const t0 = Date.now();
+    while (p.exitCode === null && Date.now() - t0 < timeoutMs) {
+      await new Promise(r => setTimeout(r, 100));
+    }
+    if (p.exitCode === null) { try { p.kill("SIGKILL"); } catch {} }
+  }
+
+  // 2) Anything STILL on :port we didn't spawn — a detached npx from a prior
+  //    launch, a user-run daemon, a PPID=1 orphan. The homepage 停止/重启 must
+  //    act on the REAL listener; otherwise (no tracked child) it would no-op.
+  //    Docker (win32) owns its own lifecycle, so skip the port-kill there.
+  if (process.platform !== "win32") {
+    await killPortListeners(port, timeoutMs);
   }
 }
 
@@ -145,7 +188,7 @@ function clearNpxCache() {
 // Restart: stop the running daemon, let :8008 free, then force a fresh spawn
 // (reusing the same cached version — no registry round-trip).
 async function restart({ logPath, port = DEFAULT_PORT } = {}) {
-  await stop();
+  await stop({ port });
   await new Promise(r => setTimeout(r, 300));
   return start({ logPath, port, force: true });
 }
@@ -155,7 +198,7 @@ async function restart({ logPath, port = DEFAULT_PORT } = {}) {
 //   else   → clear the npx cache + spawn `cicy-code@latest` so npx re-resolves
 //            against the registry (npmmirror for CN) and pulls a newer build.
 async function update({ logPath, port = DEFAULT_PORT } = {}) {
-  await stop();
+  await stop({ port });
   if (process.platform === "win32") {
     try { await require("./docker").loadImage(); } catch (e) {
       console.warn(`[cicy-code-sidecar] docker image reload failed: ${e.message}`);

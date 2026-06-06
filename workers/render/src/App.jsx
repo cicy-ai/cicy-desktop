@@ -349,8 +349,6 @@ export default function App() {
           ))}
         </div>
 
-        {showLocal && <SidecarControl />}
-
         {profileError && (
           <div className="error" style={{ marginBottom: 12 }}>
             云端: {profileError}
@@ -362,7 +360,7 @@ export default function App() {
 
         <div className="app__grid">
           {showLocal && localTeams && localTeams.map((t) => (
-            <LocalTeamCard key={"local:" + t.id} team={t} onOpen={() => openLocalTeam(t.id)} onRename={renameLocalTeam} />
+            <LocalTeamCard key={"local:" + t.id} team={t} onOpen={() => openLocalTeam(t.id)} onRename={renameLocalTeam} onRefresh={fetchLocalTeams} />
           ))}
           {showCloud && teams && teams.map((t) => (
             <TeamCard
@@ -427,106 +425,7 @@ function Section({ title, subtitle, icon, children }) {
   );
 }
 
-// Lifecycle controls for the locally-run cicy-code daemon (the sidecar on
-// :8008). Polls sidecar.status and offers 重启 / 更新 / 停止. Only meaningful
-// on a desktop where this app owns the npx/Docker-launched daemon.
-function SidecarControl() {
-  const [running, setRunning] = useState(null); // null = unknown, then bool
-  const [busy, setBusy] = useState("");          // "" | "restart" | "update" | "stop"
-  const [msg, setMsg] = useState("");
-
-  const probe = useCallback(async () => {
-    if (!window.cicy?.sidecar?.status) return;
-    try {
-      const r = await window.cicy.sidecar.status();
-      setRunning(!!r?.running);
-    } catch { setRunning(false); }
-  }, []);
-
-  useEffect(() => {
-    probe();
-    const id = setInterval(probe, 4000);
-    return () => clearInterval(id);
-  }, [probe]);
-
-  // The bridge isn't there at all (old build / non-desktop) → render nothing.
-  if (!window.cicy?.sidecar?.restart) return null;
-
-  const run = async (kind, fn, doneText) => {
-    if (busy) return;
-    setBusy(kind);
-    setMsg("");
-    try {
-      const r = await fn();
-      if (r?.ok) {
-        setMsg(r.warning ? `${doneText}（${r.warning}）` : doneText);
-      } else {
-        setMsg(tr("sidecar.failed", "失败") + (r?.error ? `: ${r.error}` : ""));
-      }
-    } catch (e) {
-      setMsg(tr("sidecar.failed", "失败") + `: ${e?.message || e}`);
-    } finally {
-      setBusy("");
-      probe();
-    }
-  };
-
-  const dotClass = running == null ? "is-unknown" : running ? "is-on" : "is-off";
-  const stateText = running == null
-    ? tr("sidecar.checking", "检测中…")
-    : running ? tr("sidecar.running", "运行中") : tr("sidecar.stopped", "已停止");
-
-  return (
-    <div data-id="SidecarControl" className="sidecar-bar">
-      <div className="sidecar-bar__label">
-        <span className={`sidecar-dot ${dotClass}`} aria-hidden />
-        <span className="sidecar-bar__title">本地 cicy-code</span>
-        <span className="sidecar-bar__state">{stateText}</span>
-      </div>
-      <div className="sidecar-bar__actions">
-        <button
-          type="button"
-          data-id="SidecarControl-restart"
-          className="sidecar-btn"
-          disabled={!!busy}
-          onClick={() => run("restart",
-            () => window.cicy.sidecar.restart(),
-            tr("sidecar.restarted", "已重启"))}
-        >
-          {busy === "restart" ? <Spinner /> : null}
-          {tr("sidecar.restart", "重启")}
-        </button>
-        <button
-          type="button"
-          data-id="SidecarControl-update"
-          className="sidecar-btn"
-          disabled={!!busy}
-          onClick={() => run("update",
-            () => window.cicy.sidecar.update(),
-            tr("sidecar.updated", "已更新到最新"))}
-        >
-          {busy === "update" ? <Spinner /> : null}
-          {tr("sidecar.update", "更新")}
-        </button>
-        <button
-          type="button"
-          data-id="SidecarControl-stop"
-          className="sidecar-btn sidecar-btn--danger"
-          disabled={!!busy || running === false}
-          onClick={() => run("stop",
-            () => window.cicy.sidecar.stop(),
-            tr("sidecar.stoppedDone", "已停止"))}
-        >
-          {busy === "stop" ? <Spinner /> : null}
-          {tr("sidecar.stop", "停止")}
-        </button>
-      </div>
-      {msg && <span data-id="SidecarControl-msg" className="sidecar-bar__msg">{msg}</span>}
-    </div>
-  );
-}
-
-function LocalTeamCard({ team, onOpen, onRename }) {
+function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
   const statusInfo = LOCAL_STATUS[team.status] || LOCAL_STATUS.error;
   const tone = statusInfo.tone;
   // Inline rename: double-click the name or click ✎ → edit → Enter/blur saves.
@@ -538,6 +437,29 @@ function LocalTeamCard({ team, onOpen, onRename }) {
     setEditing(false);
     const next = String(draft || "").trim();
     if (onRename && next && next !== team.name) await onRename(team.id, next);
+  };
+
+  // Lifecycle of the local cicy-code daemon (the :8008 sidecar this card
+  // represents): 重启 / 更新 / 停止, inline on the card itself. Only shown when
+  // the bridge exists (desktop build that owns the daemon).
+  const [busy, setBusy] = useState("");   // "" | "restart" | "update" | "stop"
+  const [opMsg, setOpMsg] = useState("");
+  const hasOps = !!window.cicy?.sidecar?.restart;
+  const runOp = async (e, kind, fn, doneText) => {
+    e.stopPropagation();
+    if (busy) return;
+    setBusy(kind); setOpMsg("");
+    try {
+      const r = await fn();
+      setOpMsg(r?.ok
+        ? (r.warning ? `${doneText}（${r.warning}）` : doneText)
+        : tr("sidecar.failed", "失败") + (r?.error ? `: ${r.error}` : ""));
+    } catch (err) {
+      setOpMsg(tr("sidecar.failed", "失败") + `: ${err?.message || err}`);
+    } finally {
+      setBusy("");
+      onRefresh?.(); // re-probe so the status dot/chip catches up
+    }
   };
   return (
     <div data-id="LocalTeamCard" className={`bcard bcard--local${tone === "ok" ? " bcard--online" : ""}`}>
@@ -579,6 +501,41 @@ function LocalTeamCard({ team, onOpen, onRename }) {
           <span className="bcard__chip">{statusInfo.label}</span>
           {team.version && <span className="bcard__chip">v{team.version}</span>}
         </div>
+        {hasOps && (
+          <div className="bcard__ops" data-id="LocalTeamCard-ops" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              data-id="LocalTeamCard-restart"
+              className="bcard__op"
+              disabled={!!busy}
+              title={tr("sidecar.restartHint", "重启本地 cicy-code")}
+              onClick={(e) => runOp(e, "restart", () => window.cicy.sidecar.restart(), tr("sidecar.restarted", "已重启"))}
+            >
+              {busy === "restart" ? <Spinner /> : null}{tr("sidecar.restart", "重启")}
+            </button>
+            <button
+              type="button"
+              data-id="LocalTeamCard-update"
+              className="bcard__op"
+              disabled={!!busy}
+              title={tr("sidecar.updateHint", "更新到最新版并重启")}
+              onClick={(e) => runOp(e, "update", () => window.cicy.sidecar.update(), tr("sidecar.updated", "已更新到最新"))}
+            >
+              {busy === "update" ? <Spinner /> : null}{tr("sidecar.update", "更新")}
+            </button>
+            <button
+              type="button"
+              data-id="LocalTeamCard-stop"
+              className="bcard__op bcard__op--danger"
+              disabled={!!busy || team.status !== "running"}
+              title={tr("sidecar.stopHint", "停止本地 cicy-code")}
+              onClick={(e) => runOp(e, "stop", () => window.cicy.sidecar.stop(), tr("sidecar.stoppedDone", "已停止"))}
+            >
+              {busy === "stop" ? <Spinner /> : null}{tr("sidecar.stop", "停止")}
+            </button>
+          </div>
+        )}
+        {opMsg && <div className="bcard__opmsg" data-id="LocalTeamCard-opmsg">{opMsg}</div>}
       </div>
       <button
         type="button"

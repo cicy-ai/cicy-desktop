@@ -630,48 +630,31 @@ body {
   border-radius: 10px;
 }
 
-/* ---- 本地 cicy-code 守护进程的控制条 (SidecarControl) ---- */
-.sidecar-bar {
+/* ---- 本地团队卡片上的 cicy-code 守护进程控制 (重启/更新/停止) ---- */
+.bcard__ops {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 12px;
-  padding: 8px 12px;
-  background: rgba(20,24,32,.55);
-  border: 1px solid rgba(255,255,255,.08);
-  border-radius: 10px;
+  gap: 6px;
+  margin-top: 10px;
 }
-.sidecar-bar__label {
-  display: flex; align-items: center; gap: 8px;
-  font-size: 12.5px; color: #c7cdd6;
-}
-.sidecar-bar__title { font-weight: 600; }
-.sidecar-bar__state { color: #9ca3af; font-size: 11.5px; }
-.sidecar-dot {
-  width: 8px; height: 8px; border-radius: 50%;
-  background: #6b7280; flex: none;
-}
-.sidecar-dot.is-on  { background: #10b981; box-shadow: 0 0 0 3px rgba(16,185,129,.15); }
-.sidecar-dot.is-off { background: #ef4444; box-shadow: 0 0 0 3px rgba(239,68,68,.12); }
-.sidecar-dot.is-unknown { background: #6b7280; }
-.sidecar-bar__actions { display: flex; gap: 6px; margin-left: auto; }
-.sidecar-btn {
-  display: inline-flex; align-items: center; gap: 6px;
+.bcard__op {
+  display: inline-flex; align-items: center; gap: 5px;
+  flex: 1;
+  justify-content: center;
   border: 1px solid rgba(255,255,255,.12);
   background: rgba(255,255,255,.03); color: #d1d5db;
-  border-radius: 8px; padding: 5px 12px; font-size: 11.5px;
+  border-radius: 7px; padding: 5px 8px; font-size: 11.5px;
   cursor: pointer; transition: .15s;
 }
-.sidecar-btn:hover:not(:disabled) {
+.bcard__op:hover:not(:disabled) {
   color: #fff; background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.2);
 }
-.sidecar-btn:disabled { opacity: .4; cursor: default; }
-.sidecar-btn--danger { color: #f7a3a3; border-color: rgba(239,68,68,.25); }
-.sidecar-btn--danger:hover:not(:disabled) {
+.bcard__op:disabled { opacity: .4; cursor: default; }
+.bcard__op--danger { color: #f7a3a3; border-color: rgba(239,68,68,.25); }
+.bcard__op--danger:hover:not(:disabled) {
   color: #fff; background: rgba(239,68,68,.18); border-color: rgba(239,68,68,.5);
 }
-.sidecar-bar__msg {
-  flex-basis: 100%;
-  font-size: 11.5px; color: #9ca3af;
+.bcard__opmsg {
+  margin-top: 8px;
+  font-size: 11px; color: #9ca3af;
+  word-break: break-word;
 }
