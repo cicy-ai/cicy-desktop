@@ -106,6 +106,9 @@ contextBridge.exposeInMainWorld("cicy", {
   sidecar: {
     status:      ()  => logInvoke("sidecar:status"),
     start:       ()  => logInvoke("sidecar:start"),
+    stop:        ()  => logInvoke("sidecar:stop"),
+    restart:     ()  => logInvoke("sidecar:restart"),
+    update:      ()  => logInvoke("sidecar:update"),
   },
   windows: {
     list:  ()   => logInvoke("windows:list"),

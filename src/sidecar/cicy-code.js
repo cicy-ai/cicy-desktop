@@ -14,6 +14,7 @@
 // there on win32. (The old WSL path was retired.)
 
 const fs = require("fs");
+const os = require("os");
 const http = require("http");
 const path = require("path");
 const { spawn } = require("child_process");
@@ -36,7 +37,7 @@ function probeExisting(port = DEFAULT_PORT, timeoutMs = 500) {
 
 let child = null;
 
-async function start({ logPath, port = DEFAULT_PORT, force = false } = {}) {
+async function start({ logPath, port = DEFAULT_PORT, force = false, version = null } = {}) {
   if (child && !force) return child;
 
   if (!force && await probeExisting(port)) {
@@ -85,9 +86,11 @@ async function start({ logPath, port = DEFAULT_PORT, force = false } = {}) {
     npm_config_registry: registry,
   };
   const npxBin = process.platform === "win32" ? "npx.cmd" : "npx";
-  const spec = process.env.CICY_CODE_VERSION
-    ? `cicy-code@${process.env.CICY_CODE_VERSION}`
-    : "cicy-code";
+  // version arg (e.g. "latest" from update()) wins over the env pin; explicit
+  // `cicy-code@latest` makes npx re-resolve against the registry so an update
+  // actually pulls a newer build even when an older one is cached/global.
+  const pin = version || process.env.CICY_CODE_VERSION;
+  const spec = pin ? `cicy-code@${pin}` : "cicy-code";
   child = spawn(npxBin, ["-y", spec], { stdio, detached: false, env });
   console.log(`[cicy-code-sidecar] spawned npx ${spec} pid=${child.pid} port=${port} registry=${registry} log=${logPath || "(none)"}`);
 
@@ -117,4 +120,52 @@ async function stop({ timeoutMs = 5000 } = {}) {
   }
 }
 
-module.exports = { start, stop, probeExisting };
+// Remove npx's cached cicy-code installs so the next spawn re-fetches from the
+// registry. npx keys each temp install by a hash under ~/.npm/_npx; we only
+// nuke entries that actually contain cicy-code (leaving other npx packages
+// alone). Best-effort: missing dir / perms just yield 0 removed.
+function clearNpxCache() {
+  const npxRoot = path.join(os.homedir(), ".npm", "_npx");
+  let removed = 0;
+  try {
+    for (const ent of fs.readdirSync(npxRoot)) {
+      const cc = path.join(npxRoot, ent, "node_modules", "cicy-code");
+      if (fs.existsSync(cc)) {
+        try {
+          fs.rmSync(path.join(npxRoot, ent), { recursive: true, force: true });
+          removed++;
+        } catch {}
+      }
+    }
+  } catch {}
+  console.log(`[cicy-code-sidecar] cleared ${removed} npx cache entr${removed === 1 ? "y" : "ies"} for cicy-code`);
+  return removed;
+}
+
+// Restart: stop the running daemon, let :8008 free, then force a fresh spawn
+// (reusing the same cached version — no registry round-trip).
+async function restart({ logPath, port = DEFAULT_PORT } = {}) {
+  await stop();
+  await new Promise(r => setTimeout(r, 300));
+  return start({ logPath, port, force: true });
+}
+
+// Update: stop, then start the LATEST build.
+//   win32  → reload the Docker image (from R2) and re-run the container.
+//   else   → clear the npx cache + spawn `cicy-code@latest` so npx re-resolves
+//            against the registry (npmmirror for CN) and pulls a newer build.
+async function update({ logPath, port = DEFAULT_PORT } = {}) {
+  await stop();
+  if (process.platform === "win32") {
+    try { await require("./docker").loadImage(); } catch (e) {
+      console.warn(`[cicy-code-sidecar] docker image reload failed: ${e.message}`);
+    }
+    await new Promise(r => setTimeout(r, 300));
+    return start({ logPath, port, force: true });
+  }
+  clearNpxCache();
+  await new Promise(r => setTimeout(r, 300));
+  return start({ logPath, port, force: true, version: "latest" });
+}
+
+module.exports = { start, stop, restart, update, probeExisting, clearNpxCache };

@@ -3,8 +3,11 @@
 // cicy-code is no longer downloaded by an in-app installer — the sidecar runs
 // it via `npx cicy-code` (mac/linux) or Docker (Windows); see
 // src/sidecar/cicy-code.js. So this surface is just lifecycle + status:
-//   sidecar:status → { running }   — is something answering on :8008?
-//   sidecar:start  → { ok, ... }   — start (or reuse) the daemon
+//   sidecar:status  → { running }   — is something answering on :8008?
+//   sidecar:start   → { ok, ... }   — start (or reuse) the daemon
+//   sidecar:stop    → { ok }        — stop the daemon we spawned
+//   sidecar:restart → { ok, ... }   — stop + fresh spawn (same version)
+//   sidecar:update  → { ok, ... }   — stop + spawn cicy-code@latest
 //
 // (Removed: sidecar:check-latest / install / cancel / wsl-status / wsl-install,
 // along with src/sidecar/installer.js and src/sidecar/wsl.js.)
@@ -37,6 +40,48 @@ function register({ sidecarLogPath } = {}) {
         await new Promise((r) => setTimeout(r, 250));
       }
       return { ok: true, pid: child?.pid || null, warning: "spawned but did not bind :8008 within 5s" };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
+  // Stop the daemon we spawned. (A user-run / external instance we only
+  // probed can't be killed from here — stop() no-ops when we hold no child.)
+  ipcMain.handle("sidecar:stop", async () => {
+    try {
+      await sidecar.stop();
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
+  // Restart: stop + fresh spawn (same cached version). Wait for :8008 to
+  // come back so the homepage poll flips to "running".
+  ipcMain.handle("sidecar:restart", async () => {
+    try {
+      const child = await sidecar.restart({ logPath: sidecarLogPath });
+      for (let i = 0; i < 20; i++) {
+        if (await sidecar.probeExisting(PORT)) return { ok: true, pid: child?.pid || null };
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      return { ok: true, pid: child?.pid || null, warning: "restarted but did not bind :8008 within 5s" };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
+  // Update: stop + spawn cicy-code@latest (or reload the Docker image on
+  // win32). The npx re-resolve / image pull can take a while on a cold cache,
+  // so allow a longer window for :8008 to come back.
+  ipcMain.handle("sidecar:update", async () => {
+    try {
+      const child = await sidecar.update({ logPath: sidecarLogPath });
+      for (let i = 0; i < 240; i++) {
+        if (await sidecar.probeExisting(PORT)) return { ok: true, pid: child?.pid || null };
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      return { ok: true, pid: child?.pid || null, warning: "updated but did not bind :8008 within 60s" };
     } catch (e) {
       return { ok: false, error: e.message };
     }
