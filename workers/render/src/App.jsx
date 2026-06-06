@@ -439,11 +439,13 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
     if (onRename && next && next !== team.name) await onRename(team.id, next);
   };
 
-  // The local cicy-code daemon (the :8008 sidecar) that backs this team:
-  // 启动 / 重启 / 更新 / 停止. 打开 stays the one primary action — daemon
-  // maintenance lives in a ⋯ menu so it never competes for attention. Only on
-  // a desktop build whose bridge owns the daemon.
-  const hasOps = !!window.cicy?.sidecar?.restart;
+  // Lifecycle (启动 / 重启 / 更新 / 停止) acts on the daemon the desktop OWNS —
+  // localhost on the sidecar port (:8008). A remote node or a non-8008 port
+  // can't be controlled from here (sidecar.* would hit the wrong, local :8008),
+  // so those cards get 打开 only — no ⋯ menu, no update prompt. 打开 stays the
+  // one primary action; maintenance lives in the ⋯ menu.
+  const hasBridge = !!window.cicy?.sidecar?.restart;
+  const local = hasBridge && isLocalSidecar(team.base_url);
   const running = team.status === "running";
   const [busy, setBusy] = useState("");   // "" | start | restart | update | stop
   const [opMsg, setOpMsg] = useState("");
@@ -455,17 +457,17 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
   // exists (no nagging when current). Renderer-side via cloud.fetch — main
   // proxies it, dodging CORS; no extra IPC needed.
   useEffect(() => {
-    if (!hasOps || !window.cicy?.cloud?.fetch) return;
+    if (!local || !window.cicy?.cloud?.fetch) return;
     let alive = true;
     window.cicy.cloud
       .fetch("https://registry.npmmirror.com/cicy-code/latest")
       .then((r) => { if (alive && r?.ok) { try { setLatest(JSON.parse(r.body)?.version || null); } catch {} } })
       .catch(() => {});
     return () => { alive = false; };
-  }, [hasOps]);
+  }, [local]);
 
-  const updateAvailable = !!(latest && team.version && cmpVer(latest, team.version) > 0);
-  const showMenu = hasOps && (running || updateAvailable);
+  const updateAvailable = !!(local && latest && team.version && cmpVer(latest, team.version) > 0);
+  const showMenu = local && (running || updateAvailable);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -492,18 +494,13 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
   };
   const BUSY_LABEL = { start: "启动中…", restart: "重启中…", update: "更新中…", stop: "停止中…" };
 
-  // Can we bring this daemon up locally? Only the 127.0.0.1:8008 team is the
-  // sidecar we own — a remote node (or a non-8008 local port) can't be started
-  // from the desktop, so for those 打开 just opens the window and lets the
-  // loaded page show its own connecting/login/error UI.
-  const localSidecar = hasOps && isLocalSidecar(team.base_url);
-
   // 打开 is NEVER gated on /api/health — openTeam() in main doesn't check it,
-  // it just opens the window. health is an indicator, not a gate. When a local
-  // daemon is down we start it first; otherwise we open and let the page cope.
+  // it just opens the window. health is an indicator, not a gate. When the
+  // LOCAL daemon is down we start it first; remote/other-port teams just open
+  // and let the loaded page show its own connecting/login/error UI.
   const handleOpen = async () => {
     if (busy) return;
-    if (!running && localSidecar && window.cicy?.sidecar?.start) {
+    if (!running && local && window.cicy?.sidecar?.start) {
       setBusy("start"); setOpMsg("");
       const r = await window.cicy.sidecar.start().catch((e) => ({ ok: false, error: e?.message || String(e) }));
       setBusy(""); onRefresh?.();
@@ -516,9 +513,7 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
   };
   const openLabel = running
     ? tr("localTeams.open", "打开")
-    : localSidecar
-      ? tr("localTeams.startOpen", "启动并打开")
-      : tr("localTeams.open", "打开");
+    : tr("localTeams.startOpen", "启动并打开");
   return (
     <div data-id="LocalTeamCard" className={`bcard bcard--local${tone === "ok" ? " bcard--online" : ""}`}>
       <div className="bcard__accent" />
@@ -604,8 +599,6 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
           {team.base_url || "—"}
         </div>
         <div className="bcard__meta">
-          <span className="bcard__chip">{statusInfo.label}</span>
-          {team.version && <span className="bcard__chip">v{team.version}</span>}
           {updateAvailable && (
             <span
               className="bcard__chip bcard__chip--new"
@@ -616,11 +609,6 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
             </span>
           )}
         </div>
-        {(busy || opMsg) && (
-          <div className="bcard__opmsg" data-id="LocalTeamCard-opmsg">
-            {busy ? <><Spinner />{BUSY_LABEL[busy] || tr("sidecar.working", "处理中…")}</> : opMsg}
-          </div>
-        )}
       </div>
       <button
         type="button"
