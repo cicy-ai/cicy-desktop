@@ -19,26 +19,54 @@ const path = require("path");
 
 const docker = require("./docker"); // ensureDownloaded/withRetry/waitUntil/probeHealth/run
 
-// Dev builds are VERSIONED by md5 prefix (builds/cicy-code-win32-x64-<md5头8>.exe)
-// because r2.deepfetch.de5.net sits behind Cloudflare's edge cache — a mutable
-// "-dev.exe" name serves stale bytes. Final distribution moves to the npm
-// subpackage (cicybot/cicy-code-win32-x64), no R2 dependency.
-const EXE_URL = process.env.CICY_CODE_EXE_URL
-  || "https://r2.deepfetch.de5.net/builds/cicy-code-win32-x64-868719d9.exe";
+// Exe acquisition (主人指令 2026-06-07): the PRODUCT path is npm — the
+// cicy-code-win32-x64 subpackage (optionalDependency of cicy-code, os/cpu
+// pinned) carries cicy-code.exe, installed via npmmirror with npm's own
+// caching/resume/version management. NO R2 download in product. The R2
+// direct-pull below survives ONLY for w-10084↔w-10026 联调, gated on an
+// explicitly set CICY_CODE_EXE_URL.
+const DEV_EXE_URL = process.env.CICY_CODE_EXE_URL || ""; // dev/联调 only
+const EXE_PKG  = process.env.CICY_CODE_EXE_PKG || "cicy-code-win32-x64";
+const REGISTRY = process.env.CICY_NPM_REGISTRY || "https://registry.npmmirror.com";
 const BIN_DIR  = path.join(os.homedir(), "cicy-ai", "bin");
-const EXE_PATH = process.env.CICY_CODE_EXE_PATH || path.join(BIN_DIR, "cicy-code.exe");
+// npm prefix dir owned by the sidecar (isolated from the user's global npm).
+const NPM_PREFIX = path.join(os.homedir(), "cicy-ai", "sidecar-npm");
+const DEV_EXE_PATH = process.env.CICY_CODE_EXE_PATH || path.join(BIN_DIR, "cicy-code.exe");
 const PID_FILE = path.join(BIN_DIR, "cicy-code.pid");
+
+function npmExePath() {
+  return path.join(NPM_PREFIX, "node_modules", EXE_PKG, "cicy-code.exe");
+}
 
 const probeHealth = docker.probeHealth;
 
-// Download (or reuse) the exe. ensureDownloaded HEAD-compares size → complete
-// file is a no-op, partial resumes, retries with progress events.
-async function ensureExe({ emit } = {}) {
-  fs.mkdirSync(BIN_DIR, { recursive: true });
-  await docker.ensureDownloaded(EXE_URL, EXE_PATH, null, {
-    emit, phase: "exe", label: "下载 cicy-code.exe",
+// Acquire (or reuse) the exe.
+//   PRODUCT: npm-install the win32 subpackage into the sidecar's own prefix
+//   and resolve the exe inside it — npm brings caching/integrity/versioning,
+//   npmmirror keeps CN viable. `version` ("latest" from update()) re-resolves.
+//   DEV (联调 only): CICY_CODE_EXE_URL set → resumable R2 download.
+async function ensureExe({ emit, version = null } = {}) {
+  if (DEV_EXE_URL) {
+    fs.mkdirSync(BIN_DIR, { recursive: true });
+    await docker.ensureDownloaded(DEV_EXE_URL, DEV_EXE_PATH, null, {
+      emit, phase: "exe", label: "下载 cicy-code.exe (dev)",
+    });
+    return DEV_EXE_PATH;
+  }
+  const exe = npmExePath();
+  if (!version && fs.existsSync(exe)) return exe;
+  const e = emit || (() => {});
+  e({ phase: "exe", status: "running", message: "npm 安装 cicy-code (win32)…" });
+  fs.mkdirSync(NPM_PREFIX, { recursive: true });
+  const spec = `${EXE_PKG}@${version || "latest"}`;
+  await new Promise((resolve, reject) => {
+    execFile("npm.cmd", ["i", spec, "--prefix", NPM_PREFIX, `--registry=${REGISTRY}`, "--no-audit", "--no-fund", "--loglevel=error"],
+      { windowsHide: true, timeout: 600000 },
+      (err, _o, stderr) => err ? reject(new Error(`npm i ${spec}: ${String(stderr).slice(0, 200)}`)) : resolve());
   });
-  return EXE_PATH;
+  if (!fs.existsSync(exe)) throw new Error(`installed ${spec} but ${exe} missing`);
+  e({ phase: "exe", status: "done", message: "cicy-code.exe 就绪" });
+  return exe;
 }
 
 // One-time migration off the Docker route: the legacy containers (`cicy` from
@@ -87,12 +115,12 @@ function taskkill(pid) {
 // Start cicy-code.exe on :port. Adopts an already-healthy instance. When
 // taking the canonical :8008, clears the legacy Docker containers first so
 // they can't fight for the bind.
-async function start({ port = 8008, logPath = null, emit } = {}) {
+async function start({ port = 8008, logPath = null, emit, version = null } = {}) {
   if (await probeHealth(port)) {
     console.log(`[native-sidecar] :${port} already healthy — adopting`);
     return { native: true, adopted: true, port };
   }
-  await ensureExe({ emit });
+  const exe = await ensureExe({ emit, version });
   if (port === 8008) await clearDockerLegacy();
 
   let stdio = ["ignore", "ignore", "ignore"];
@@ -106,10 +134,10 @@ async function start({ port = 8008, logPath = null, emit } = {}) {
     PORT: String(port),
     CICY_CODE_PORT: String(port),
   };
-  const child = spawn(EXE_PATH, [], { stdio, detached: true, windowsHide: true, env });
+  const child = spawn(exe, [], { stdio, detached: true, windowsHide: true, env });
   child.unref();
   try { fs.writeFileSync(PID_FILE, String(child.pid)); } catch {}
-  console.log(`[native-sidecar] spawned ${EXE_PATH} pid=${child.pid} port=${port} log=${logPath || "(none)"}`);
+  console.log(`[native-sidecar] spawned ${exe} pid=${child.pid} port=${port} log=${logPath || "(none)"}`);
 
   const up = await docker.waitUntil(() => probeHealth(port), { totalMs: 60000, everyMs: 2000 });
   if (!up) {
@@ -133,20 +161,20 @@ async function restart({ port = 8008, logPath = null } = {}) {
   return start({ port, logPath });
 }
 
-// Update = force re-download (unlink defeats ensureDownloaded's size-match
-// skip) then restart on the new exe.
+// Update: npm route re-resolves @latest; dev route unlinks the cached exe to
+// defeat ensureDownloaded's size-match skip. Then restart on the new build.
 async function update({ port = 8008, logPath = null, emit } = {}) {
   await stop({ port });
-  try { fs.unlinkSync(EXE_PATH); } catch {}
-  return start({ port, logPath, emit });
+  if (DEV_EXE_URL) { try { fs.unlinkSync(DEV_EXE_PATH); } catch {} }
+  return start({ port, logPath, emit, version: DEV_EXE_URL ? null : "latest" });
 }
 
 async function checkStatus({ port = 8008 } = {}) {
   return {
-    exePresent: fs.existsSync(EXE_PATH),
+    exePresent: fs.existsSync(DEV_EXE_URL ? DEV_EXE_PATH : npmExePath()),
     running: await probeHealth(port),
     pid: readPid() || null,
   };
 }
 
-module.exports = { start, stop, restart, update, checkStatus, ensureExe, clearDockerLegacy, probeHealth, EXE_PATH };
+module.exports = { start, stop, restart, update, checkStatus, ensureExe, clearDockerLegacy, probeHealth, npmExePath };
