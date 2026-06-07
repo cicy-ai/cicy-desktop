@@ -117,12 +117,20 @@ if (!__singleLock) {
   electronApp.exit(0);
 }
 
-// Register cicy:// as a custom URL protocol handler. On macOS the OS calls
-// open-url; on Windows/Linux the URL arrives as a command-line argument in
-// a second instance (caught by second-instance below) or in process.argv on
-// cold start.
-if (!electronApp.isDefaultProtocolClient("cicy")) {
-  electronApp.setAsDefaultProtocolClient("cicy");
+// Register cicy-desktop:// as the desktop's URL protocol. We MOVED off the bare
+// `cicy://` scheme because it collides: the CiCy mobile/Expo app (com.cicy-ai
+// .mobile) and a generic com.github.Electron both claim `cicy:`, so a browser
+// click routes the deeplink to the wrong app (the desktop only got it when an
+// already-running Electron instance happened to intercept its own scheme).
+// `cicy-desktop://` is desktop-only → browsers route it unambiguously here.
+// `cicy://` stays registered + accepted for back-compat with old links.
+// On macOS the OS calls open-url; on Windows/Linux the URL arrives in argv
+// (second-instance below, or process.argv on cold start).
+const DEEPLINK_SCHEMES = ["cicy-desktop", "cicy"]; // primary, then legacy
+const isDeepLink = (u) =>
+  typeof u === "string" && DEEPLINK_SCHEMES.some((s) => u.startsWith(`${s}://`));
+for (const s of DEEPLINK_SCHEMES) {
+  try { if (!electronApp.isDefaultProtocolClient(s)) electronApp.setAsDefaultProtocolClient(s); } catch {}
 }
 
 // Deep links can arrive before any BrowserWindow exists (cold start via
@@ -165,9 +173,10 @@ electronApp.on("browser-window-created", (_e, win) => {
 
 async function handleDeepLink(url) {
   log.info(`[deeplink] handleDeepLink got: ${url}`);
-  if (!url || !url.startsWith("cicy://")) return;
+  if (!isDeepLink(url)) return;
   try {
-    // cicy://addTeam?title=My+Team&url=https://...&token=xxx
+    // cicy-desktop://addTeam?title=My+Team&url=https://...&token=xxx
+    // (legacy cicy://addTeam?... still accepted)
     const u = new URL(url);
     const action = (u.hostname || "").toLowerCase();
     if (action === "addteam") {
@@ -219,13 +228,13 @@ electronApp.on("open-url", (_e, url) => {
 // Cold start on Windows/Linux: protocol URL is the last argv element. macOS
 // also gets the argv copy on some launchers, so this is harmless there.
 {
-  const coldUrl = process.argv.find(a => typeof a === "string" && a.startsWith("cicy://"));
+  const coldUrl = process.argv.find(a => isDeepLink(a));
   if (coldUrl) handleDeepLink(coldUrl);
 }
 
 electronApp.on("second-instance", (_e, argv) => {
-  // argv may include cicy:// URL on Windows/Linux
-  const cicyUrl = argv.find(a => a.startsWith("cicy://"));
+  // argv may include a cicy-desktop:// (or legacy cicy://) URL on Windows/Linux
+  const cicyUrl = argv.find(a => isDeepLink(a));
   if (cicyUrl) handleDeepLink(cicyUrl);
 
   try {
