@@ -478,7 +478,15 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
   }, [local]);
 
   const updateAvailable = !!(local && latest && team.version && cmpVer(latest, team.version) > 0);
-  const showMenu = local && (running || updateAvailable);
+  // Custom (deeplink-added, non-local) nodes can be removed from the desktop —
+  // it just drops them from cicyDesktopNodes; re-addable via deeplink. The
+  // local sidecar isn't deletable here. So the ⋯ menu shows for a local card
+  // with lifecycle, OR a custom card with just 删除.
+  const isCustom = !local && !!window.cicy?.localTeams?.remove;
+  const showMenu = (local && (running || updateAvailable)) || isCustom;
+
+  // Two-click delete guard, reset whenever the menu closes.
+  const [confirmDel, setConfirmDel] = useState(false);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -486,6 +494,18 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, [menuOpen]);
+
+  useEffect(() => { if (!menuOpen) setConfirmDel(false); }, [menuOpen]);
+
+  const handleRemove = async () => {
+    if (!confirmDel) { setConfirmDel(true); return; } // first click arms it
+    setMenuOpen(false); setConfirmDel(false);
+    if (busy) return;
+    setBusy("remove");
+    try { await window.cicy?.localTeams?.remove?.(team.id); } catch {}
+    setBusy("");
+    onRefresh?.();
+  };
 
   const runOp = async (kind, fn, doneText) => {
     setMenuOpen(false);
@@ -541,7 +561,7 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
               type="button"
               data-id="LocalTeamCard-menu-btn"
               className={`bcard__kebab${updateAvailable ? " has-dot" : ""}`}
-              title={tr("localTeams.manage", "管理本地 cicy-code")}
+              title={local ? tr("localTeams.manage", "管理本地 cicy-code") : tr("localTeams.more", "更多")}
               disabled={!!busy}
               onClick={() => setMenuOpen((v) => !v)}
             >
@@ -578,6 +598,16 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
                       {tr("sidecar.stop", "停止")}
                     </button>
                   </>
+                )}
+                {isCustom && (
+                  <button
+                    type="button"
+                    data-id="LocalTeamCard-remove"
+                    className="bcard__menu-item is-danger"
+                    onClick={handleRemove}
+                  >
+                    {confirmDel ? tr("localTeams.removeConfirm", "确认删除？") : tr("localTeams.remove", "删除")}
+                  </button>
                 )}
               </div>
             )}
