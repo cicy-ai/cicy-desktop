@@ -37,6 +37,47 @@ function probeExisting(port = DEFAULT_PORT, timeoutMs = 500) {
 
 let child = null;
 
+// Runtime Bundle v1 (主人指令): prefer the versioned runtime store on EVERY
+// platform — first run seeds it from the bundled optionalDependency (zero
+// network, zero npx), upgrades come through runtime.upgrade(). Returns the
+// spawn child or null when the store has no usable binary (legacy fallbacks
+// below take over).
+function startFromRuntime({ logPath, port }) {
+  let runtime;
+  try { runtime = require("./runtime"); } catch { return null; }
+  let exe = null;
+  try { exe = runtime.binPath("cicy-code") || runtime.ensureFromBundle("cicy-code"); } catch (e) {
+    console.warn(`[cicy-code-sidecar] runtime store unusable: ${e.message}`);
+    return null;
+  }
+  if (!exe) return null;
+
+  let stdio = ["ignore", "ignore", "ignore"];
+  if (logPath) {
+    fs.mkdirSync(path.dirname(logPath), { recursive: true });
+    const fd = fs.openSync(logPath, "a");
+    stdio = ["ignore", fd, fd];
+  }
+  const env = {
+    ...process.env,
+    CICY_CODE_PORT: String(port),
+    PORT: String(port),
+  };
+  if (process.platform === "win32") {
+    try {
+      const msys = runtime.binPath("msys2") || runtime.ensureFromBundle("msys2");
+      if (msys) env.CICY_MSYS_ROOT = msys; // w-10084 exe 探测约定
+    } catch {}
+  }
+  const c = spawn(exe, [], { stdio, detached: false, windowsHide: true, env });
+  console.log(`[cicy-code-sidecar] spawned runtime ${exe} (v${runtime.currentVersion("cicy-code")}) pid=${c.pid} port=${port}`);
+  c.on("exit", (code, signal) => {
+    console.log(`[cicy-code-sidecar] exited code=${code} signal=${signal}`);
+    child = null;
+  });
+  return c;
+}
+
 async function start({ logPath, port = DEFAULT_PORT, force = false, version = null } = {}) {
   if (child && !force) return child;
 
@@ -44,6 +85,10 @@ async function start({ logPath, port = DEFAULT_PORT, force = false, version = nu
     console.log(`[cicy-code-sidecar] existing instance on :${port}, reusing`);
     return null;
   }
+
+  // Runtime store first — uniform across platforms.
+  const rt = startFromRuntime({ logPath, port });
+  if (rt) { child = rt; return child; }
 
   if (process.platform === "win32") {
     // NATIVE route (2026-06 方向): cicy-code.exe + bundled slim MSYS2, no
@@ -221,6 +266,33 @@ async function restart({ logPath, port = DEFAULT_PORT } = {}) {
 //            against the registry (npmmirror for CN) and pulls a newer build.
 async function update({ logPath, port = DEFAULT_PORT, emit } = {}) {
   const e = emit || (() => {});
+
+  // Runtime store managed → versioned upgrade with health-verify + rollback.
+  try {
+    const runtime = require("./runtime");
+    if (runtime.currentVersion("cicy-code")) {
+      return await runtime.upgrade("cicy-code", {
+        emit,
+        stop: () => stop({ port }),
+        start: async () => {
+          child = startFromRuntime({ logPath, port });
+          if (!child) throw new Error("runtime spawn failed");
+        },
+        verify: async () => {
+          for (let i = 0; i < 120; i++) {
+            if (await probeExisting(port)) return true;
+            await new Promise((r) => setTimeout(r, 500));
+          }
+          return false;
+        },
+      });
+    }
+  } catch (err) {
+    console.warn(`[cicy-code-sidecar] runtime upgrade failed: ${err.message}`);
+    e({ phase: "done", status: "error", message: `更新失败：${err.message}` });
+    return null;
+  }
+
   if (process.platform === "win32") {
     // NATIVE route: safe-swap update with real download progress.
     if (process.env.CICY_WIN_NATIVE === "1") {
