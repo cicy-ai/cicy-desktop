@@ -175,6 +175,35 @@ function stripVolatile(u) {
   } catch { return u; }
 }
 
+// Reload the web content of this team's already-open window (the homepage's
+// 刷新 action). Matches the window the same way openTeam reuses one — by
+// origin+pathname. No-op-with-error if no window is open for the team.
+function reloadTeam(id) {
+  const g = readGlobal();
+  const node = g?.cicyDesktopNodes?.[id];
+  if (!node) return { ok: false, error: "team not found" };
+  const baseUrl = (node.base_url || "").replace(/\/$/, "");
+  if (!baseUrl) return { ok: false, error: "no base_url" };
+  const token = node.api_token || "";
+  const url = token ? `${baseUrl}/?token=${encodeURIComponent(token)}` : baseUrl;
+  const targetKey = stripVolatile(url);
+  const win = BrowserWindow.getAllWindows().find((w) => {
+    if (!w || w.isDestroyed()) return false;
+    try { return stripVolatile(w.webContents.getURL()) === targetKey; }
+    catch { return false; }
+  });
+  if (!win) return { ok: false, error: "no_open_window" };
+  try {
+    win.webContents.reload();
+    if (win.isMinimized()) win.restore();
+    win.show(); win.focus();
+    log.info(`[local-teams] reload ${id} → win.id=${win.id}`);
+    return { ok: true, windowId: win.id };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
 // ── mutations ──────────────────────────────────────────────────────────
 //
 // add/remove/upgrade let an external caller (currently the cloud Team
@@ -211,13 +240,15 @@ async function writeGlobal(updater) {
   return next;
 }
 
-// Normalise a base_url for dedupe comparison. Strips trailing slash and
-// folds case on the host. Keeps the port as-is because two distinct
-// daemons can run on different ports.
+// Dedupe key for a team: host:port only. The same cicy-code node is the same
+// node across platforms/protocols, so protocol, path and token never affect
+// identity — one host:port = one team. (Was protocol+host+port+path, which
+// treated http vs https or /a vs /b as different teams.)
 function normaliseUrl(u) {
   try {
     const p = new URL(String(u || "").trim());
-    return `${p.protocol}//${p.hostname.toLowerCase()}${p.port ? `:${p.port}` : ""}${p.pathname.replace(/\/$/, "")}`;
+    const port = p.port || (p.protocol === "https:" ? "443" : "80");
+    return `${p.hostname.toLowerCase()}:${port}`;
   } catch { return ""; }
 }
 
@@ -262,9 +293,14 @@ async function addTeam(spec) {
     if (normaliseUrl(v?.base_url || "") === baseUrlKey) { existingId = k; break; }
   }
 
+  // Derive the id from the host:port key so it CAN'T collide: two different
+  // nodes never share an id (different host:port → different slug), and the
+  // same node always hits existingId above. (Was spec.name || local-<port>,
+  // which made two hosts on the same port — or same name — overwrite each
+  // other.) An explicit spec.id still wins for callers that want to pin one.
   const id = existingId
     ? existingId
-    : slugifyId(spec.id || spec.name || (port ? `local-${port}` : "local"));
+    : slugifyId(spec.id || baseUrlKey || (port ? `local-${port}` : "local"));
   if (!id) return { ok: false, error: "could not derive id" };
 
   const now = new Date().toISOString();
@@ -627,4 +663,4 @@ async function upgradeTeam(id) {
   return result;
 }
 
-module.exports = { list, openTeam, addTeam, removeTeam, updateTeam, upgradeTeam };
+module.exports = { list, openTeam, reloadTeam, addTeam, removeTeam, updateTeam, upgradeTeam };

@@ -583,6 +583,18 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
                   <>
                     <button
                       type="button"
+                      data-id="LocalTeamCard-reload"
+                      className="bcard__menu-item"
+                      onClick={() => runOp("reload", async () => {
+                        const r = await window.cicy.localTeams.reload(team.id);
+                        // not open yet → open it (still a "refresh" of the team)
+                        return (!r?.ok && r?.error === "no_open_window") ? window.cicy.localTeams.open(team.id) : r;
+                      }, tr("localTeams.reloaded", "已刷新窗口"))}
+                    >
+                      {tr("localTeams.reloadWindow", "刷新窗口")}
+                    </button>
+                    <button
+                      type="button"
                       data-id="LocalTeamCard-restart"
                       className="bcard__menu-item"
                       onClick={() => runOp("restart", () => window.cicy.sidecar.restart(), tr("sidecar.restarted", "已重启"))}
@@ -644,15 +656,6 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
         <div className="bcard__meta">
           {team.version && (
             <span className="bcard__ver" data-id="LocalTeamCard-version">v{team.version}</span>
-          )}
-          {updateAvailable && (
-            <span
-              className="bcard__chip bcard__chip--new"
-              data-id="LocalTeamCard-newbadge"
-              title={`${tr("sidecar.updateTo", "更新到")} v${latest}`}
-            >
-              {tr("sidecar.newVersion", "新版")} v{latest}
-            </span>
           )}
         </div>
       </div>
