@@ -32,11 +32,9 @@ const relay = (type, payload) =>
 // install cicy-code on the user's machine, so we mirror the same bridge
 // here. Same channel as homepage-preload's "rpc" → the existing tool
 // registry dispatches without any further wiring.
-contextBridge.exposeInMainWorld("electronRPC", (tool, args) =>
-  ipcRenderer.invoke("rpc", tool, args || {}),
-);
+const electronRPC = (tool, args) => ipcRenderer.invoke("rpc", tool, args || {});
 
-contextBridge.exposeInMainWorld("cicy", {
+const cicyApi = {
   platform: process.platform,
   arch: process.arch,
   localTeams: {
@@ -48,6 +46,19 @@ contextBridge.exposeInMainWorld("cicy", {
   },
   // (sidecar install/checkLatest removed — cicy-code is installed via
   // `npx cicy-code` by the sidecar, no in-app downloader.)
-});
+};
 
-console.log("[webview-preload] electronRPC + cicy.localTeams ready");
+// contextBridge.exposeInMainWorld ONLY works with contextIsolation:true. createWindow
+// runs TRUSTED urls with contextIsolation:false (+ nodeIntegration:true), where
+// exposeInMainWorld throws — there the preload already shares the page's main-world
+// `window`, so attach the bridge to it directly. Untrusted urls are isolated and
+// must go through contextBridge. (process.contextIsolated tells us which world we're in.)
+if (process.contextIsolated) {
+  contextBridge.exposeInMainWorld("electronRPC", electronRPC);
+  contextBridge.exposeInMainWorld("cicy", cicyApi);
+} else {
+  window.electronRPC = electronRPC;
+  window.cicy = Object.assign(window.cicy || {}, cicyApi);
+}
+
+console.log(`[webview-preload] electronRPC + cicy.localTeams ready (isolated=${process.contextIsolated})`);

@@ -293,6 +293,12 @@ function createWindow(options = {}, accountIdx = 0, forceNew = false) {
       offscreen: false, // 确保不是离屏渲染
       nodeIntegration: isTrustedUrl(url),
       contextIsolation: !isTrustedUrl(url),
+      // electronRPC + window.cicy for EVERY window open_window creates — without
+      // this, untrusted (contextIsolation:true) pages had no electronRPC and the
+      // agent-desktop/agent-electron skills' `desktop_event rpc_call` failed with
+      // 'electronRPC not available'. webview-preload self-adapts to the isolation
+      // mode (contextBridge when isolated, direct window assign when not).
+      preload: path.join(__dirname, "../backends/webview-preload.js"),
       partition: `persist:sandbox-${accountIdx}`,
       // 启用剪贴板权限
       enableClipboard: true,
