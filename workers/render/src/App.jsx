@@ -548,7 +548,7 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
       ? tr("localTeams.startOpen", "启动并打开") // only the local sidecar can be started from here
       : tr("localTeams.open", "打开");           // custom/remote: 探活-only, just open
   return (
-    <div data-id="LocalTeamCard" className={`bcard bcard--local${tone === "ok" ? " bcard--online" : ""}`}>
+    <div data-id="LocalTeamCard" className={`bcard ${local ? "bcard--local" : "bcard--custom"}${tone === "ok" ? " bcard--online" : ""}`}>
       <div className="bcard__accent" />
       <div className="bcard__top">
         <div className="bcard__pill">

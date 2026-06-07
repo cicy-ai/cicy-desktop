@@ -498,8 +498,9 @@ body {
   display: flex; flex-direction: column;
   overflow: hidden;
   transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
-  --brand: #5b8df7;
-  --accent-cloud: #f59e0b;
+  --brand: #5b8df7;        /* 本地 local */
+  --accent-cloud: #f59e0b; /* 云端 cloud */
+  --accent-custom: #8b5cf6;/* 自定义 custom (deeplink 远程节点) */
 }
 .bcard:hover {
   transform: translateY(-2px);
@@ -514,6 +515,7 @@ body {
   opacity: .9;
 }
 .bcard--cloud .bcard__accent { background: var(--accent-cloud); }
+.bcard--custom .bcard__accent { background: var(--accent-custom); }
 
 .bcard--online::before {
   content: "";
@@ -526,6 +528,9 @@ body {
 }
 .bcard--cloud.bcard--online::before {
   background: radial-gradient(circle at center, rgba(245,158,11,.22) 0%, transparent 60%);
+}
+.bcard--custom.bcard--online::before {
+  background: radial-gradient(circle at center, rgba(139,92,246,.22) 0%, transparent 60%);
 }
 
 .bcard__top {
@@ -614,6 +619,10 @@ body {
 .bcard--cloud .bcard__cta {
   background: var(--accent-cloud);
   box-shadow: 0 4px 12px -2px rgba(245,158,11,.45);
+}
+.bcard--custom .bcard__cta {
+  background: var(--accent-custom);
+  box-shadow: 0 4px 12px -2px rgba(139,92,246,.45);
 }
 .bcard__cta:hover { filter: brightness(1.08); }
 .bcard__cta:active { transform: translateY(1px); }
