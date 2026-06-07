@@ -28,7 +28,7 @@ const docker = require("./docker"); // ensureDownloaded/withRetry/waitUntil/prob
 // dev/联调 only — read LAZILY (not at require time) so tests/tools can set the
 // env var after loading the module.
 const devExeUrl = () => process.env.CICY_CODE_EXE_URL || "";
-const EXE_PKG  = process.env.CICY_CODE_EXE_PKG || "cicy-code-win32-x64";
+const EXE_PKG  = process.env.CICY_CODE_EXE_PKG || "cicy-code-windows-x64"; // npm spam filter 403s 'win32' names
 const REGISTRY = process.env.CICY_NPM_REGISTRY || "https://registry.npmmirror.com";
 const BIN_DIR  = path.join(os.homedir(), "cicy-ai", "bin");
 // npm prefix dir owned by the sidecar (isolated from the user's global npm).

@@ -30,8 +30,13 @@ const VERSIONS_JSON = path.join(RUNTIME_DIR, "versions.json");
 const REGISTRY = process.env.CICY_NPM_REGISTRY || "https://registry.npmmirror.com";
 const IS_WIN = process.platform === "win32";
 
+// npm subpackage platform suffix. NOTE: Windows is "windows" not "win32" —
+// npm's spam filter 403s NEW package names containing 'win32', so EVERY cicy
+// subpackage (code/mihomo/msys2) is published as *-windows-*. This must match
+// the published names exactly or both the bundled-dir lookup AND the npm-pull
+// fallback fail (a 404 that stranded first start on Windows).
 function plat() {
-  const osStr = IS_WIN ? "win32" : process.platform === "darwin" ? "darwin" : "linux";
+  const osStr = IS_WIN ? "windows" : process.platform === "darwin" ? "darwin" : "linux";
   const archStr = process.arch === "arm64" ? "arm64" : "x64";
   return `${osStr}-${archStr}`;
 }
@@ -46,8 +51,7 @@ const COMPONENTS = {
   },
   "mihomo": {
     kind: "bin",
-    // npm spam filter 403s new names containing 'win32' → windows-* naming
-    pkg: () => `cicy-mihomo-${plat().replace("win32", "windows")}`,
+    pkg: () => `cicy-mihomo-${plat()}`,
     bin: () => (IS_WIN ? "mihomo.exe" : "mihomo"),
   },
   "msys2": {
