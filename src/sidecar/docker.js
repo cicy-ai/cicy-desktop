@@ -166,7 +166,7 @@ async function ensureDownloaded(url, dest, mirror, { emit, phase, label } = {}) 
   }
   const sources = mirror ? [url, mirror] : [url];
   let lastPct = -1; // throttle: chunks arrive dozens/s — only emit on whole-percent change
-  return withRetry(async (attempt) => {
+  const attempted = withRetry(async (attempt) => {
     const src = sources[Math.min(attempt - 1, sources.length - 1)];
     await download(src, dest, {
       resume: true,
@@ -186,6 +186,18 @@ async function ensureDownloaded(url, dest, mirror, { emit, phase, label } = {}) 
     tries: 6,
     onAttempt: ({ attempt, tries, error }) =>
       emit && emit({ phase, status: "retry", message: `${label}：重试 (${attempt}/${tries})`, error }),
+  });
+  return attempted.catch((e) => {
+    // Offline fallback: the network (and HEAD) may be dead while a complete
+    // file from an earlier run sits on disk — use it instead of dying. Only
+    // when we CAN'T prove it incomplete (no expected size, or sizes match).
+    let have = 0; try { have = fs.statSync(dest).size; } catch {}
+    if (have > 0 && (expected === 0 || have === expected)) {
+      console.warn(`[docker-sidecar] download failed (${e.message}) — using existing ${dest} (${have}B, unverified)`);
+      emit && emit({ phase, status: "skip", message: `${label}：网络不可达，使用本地已有文件`, progress: 100 });
+      return dest;
+    }
+    throw e;
   });
 }
 

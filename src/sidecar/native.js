@@ -25,7 +25,9 @@ const docker = require("./docker"); // ensureDownloaded/withRetry/waitUntil/prob
 // caching/resume/version management. NO R2 download in product. The R2
 // direct-pull below survives ONLY for w-10084↔w-10026 联调, gated on an
 // explicitly set CICY_CODE_EXE_URL.
-const DEV_EXE_URL = process.env.CICY_CODE_EXE_URL || ""; // dev/联调 only
+// dev/联调 only — read LAZILY (not at require time) so tests/tools can set the
+// env var after loading the module.
+const devExeUrl = () => process.env.CICY_CODE_EXE_URL || "";
 const EXE_PKG  = process.env.CICY_CODE_EXE_PKG || "cicy-code-win32-x64";
 const REGISTRY = process.env.CICY_NPM_REGISTRY || "https://registry.npmmirror.com";
 const BIN_DIR  = path.join(os.homedir(), "cicy-ai", "bin");
@@ -46,9 +48,9 @@ const probeHealth = docker.probeHealth;
 //   npmmirror keeps CN viable. `version` ("latest" from update()) re-resolves.
 //   DEV (联调 only): CICY_CODE_EXE_URL set → resumable R2 download.
 async function ensureExe({ emit, version = null } = {}) {
-  if (DEV_EXE_URL) {
+  if (devExeUrl()) {
     fs.mkdirSync(BIN_DIR, { recursive: true });
-    await docker.ensureDownloaded(DEV_EXE_URL, DEV_EXE_PATH, null, {
+    await docker.ensureDownloaded(devExeUrl(), DEV_EXE_PATH, null, {
       emit, phase: "exe", label: "下载 cicy-code.exe (dev)",
     });
     return DEV_EXE_PATH;
@@ -59,9 +61,13 @@ async function ensureExe({ emit, version = null } = {}) {
   e({ phase: "exe", status: "running", message: "npm 安装 cicy-code (win32)…" });
   fs.mkdirSync(NPM_PREFIX, { recursive: true });
   const spec = `${EXE_PKG}@${version || "latest"}`;
+  // npm on Windows is npm.cmd — Node ≥18 (CVE-2024-27980) refuses to spawn
+  // .cmd/.bat without shell:true (spawn EINVAL). shell:true concatenates args
+  // un-escaped, so quote the one arg that can contain spaces (user dir).
+  const quotedPrefix = /\s/.test(NPM_PREFIX) ? `"${NPM_PREFIX}"` : NPM_PREFIX;
   await new Promise((resolve, reject) => {
-    execFile("npm.cmd", ["i", spec, "--prefix", NPM_PREFIX, `--registry=${REGISTRY}`, "--no-audit", "--no-fund", "--loglevel=error"],
-      { windowsHide: true, timeout: 600000 },
+    execFile("npm", ["i", spec, "--prefix", quotedPrefix, `--registry=${REGISTRY}`, "--no-audit", "--no-fund", "--loglevel=error"],
+      { windowsHide: true, timeout: 600000, shell: true },
       (err, _o, stderr) => err ? reject(new Error(`npm i ${spec}: ${String(stderr).slice(0, 200)}`)) : resolve());
   });
   if (!fs.existsSync(exe)) throw new Error(`installed ${spec} but ${exe} missing`);
@@ -165,13 +171,13 @@ async function restart({ port = 8008, logPath = null } = {}) {
 // defeat ensureDownloaded's size-match skip. Then restart on the new build.
 async function update({ port = 8008, logPath = null, emit } = {}) {
   await stop({ port });
-  if (DEV_EXE_URL) { try { fs.unlinkSync(DEV_EXE_PATH); } catch {} }
-  return start({ port, logPath, emit, version: DEV_EXE_URL ? null : "latest" });
+  if (devExeUrl()) { try { fs.unlinkSync(DEV_EXE_PATH); } catch {} }
+  return start({ port, logPath, emit, version: devExeUrl() ? null : "latest" });
 }
 
 async function checkStatus({ port = 8008 } = {}) {
   return {
-    exePresent: fs.existsSync(DEV_EXE_URL ? DEV_EXE_PATH : npmExePath()),
+    exePresent: fs.existsSync(devExeUrl() ? DEV_EXE_PATH : npmExePath()),
     running: await probeHealth(port),
     pid: readPid() || null,
   };
