@@ -462,20 +462,35 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
   const [opMsg, setOpMsg] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [latest, setLatest] = useState(null); // newest cicy-code on the registry
+  const [checking, setChecking] = useState(false);
+  const [upToDateMsg, setUpToDateMsg] = useState(""); // transient "已是最新 vX"
   const menuWrap = useRef(null);
 
-  // Look up the newest cicy-code once so we surface 更新 only when one actually
-  // exists (no nagging when current). Renderer-side via cloud.fetch — main
-  // proxies it, dodging CORS; no extra IPC needed.
-  useEffect(() => {
+  // Fetch the newest cicy-code from the registry and compare. Auto-runs once on
+  // mount (passive — only surfaces 更新 when behind, no nagging when current).
+  // The ⋯ menu's 检查更新 calls it with manual=true to echo "已是最新" when current.
+  // Renderer-side via cloud.fetch — main proxies it, dodging CORS; no extra IPC.
+  const checkUpdate = useCallback(async (manual = false) => {
     if (!local || !window.cicy?.cloud?.fetch) return;
-    let alive = true;
-    window.cicy.cloud
-      .fetch("https://registry.npmmirror.com/cicy-code/latest")
-      .then((r) => { if (alive && r?.ok) { try { setLatest(JSON.parse(r.body)?.version || null); } catch {} } })
-      .catch(() => {});
-    return () => { alive = false; };
-  }, [local]);
+    if (manual) { setChecking(true); setUpToDateMsg(""); }
+    try {
+      const r = await window.cicy.cloud.fetch("https://registry.npmmirror.com/cicy-code/latest");
+      if (r?.ok) {
+        const v = JSON.parse(r.body)?.version || null;
+        setLatest(v);
+        if (manual && v) {
+          const behind = team.version && cmpVer(v, team.version) > 0;
+          if (!behind) {
+            setUpToDateMsg(`${tr("sidecar.upToDate", "已是最新")} v${team.version || v}`);
+            setTimeout(() => setUpToDateMsg(""), 2500);
+          }
+        }
+      }
+    } catch { /* offline / registry hiccup — leave latest as-is */ }
+    finally { if (manual) setChecking(false); }
+  }, [local, team.version]);
+
+  useEffect(() => { checkUpdate(false); }, [checkUpdate]);
 
   const updateAvailable = !!(local && latest && team.version && cmpVer(latest, team.version) > 0);
   // Custom (deeplink-added, non-local) nodes can be removed from the desktop —
@@ -483,7 +498,9 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
   // local sidecar isn't deletable here. So the ⋯ menu shows for a local card
   // with lifecycle, OR a custom card with just 删除.
   const isCustom = !local && !!window.cicy?.localTeams?.remove;
-  const showMenu = (local && (running || updateAvailable)) || isCustom;
+  // Local always gets the ⋯ menu (so 检查更新 is always reachable, even stopped);
+  // custom gets it for 删除.
+  const showMenu = local || isCustom;
 
   // Two-click delete guard, reset whenever the menu closes.
   const [confirmDel, setConfirmDel] = useState(false);
@@ -610,6 +627,19 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
                       {tr("sidecar.stop", "停止")}
                     </button>
                   </>
+                )}
+                {local && (
+                  <button
+                    type="button"
+                    data-id="LocalTeamCard-check-update"
+                    className="bcard__menu-item"
+                    disabled={checking}
+                    onClick={(e) => { e.stopPropagation(); checkUpdate(true); }}
+                  >
+                    {checking
+                      ? tr("sidecar.checking2", "检查中…")
+                      : (upToDateMsg || tr("sidecar.checkUpdate", "检查更新"))}
+                  </button>
                 )}
                 {isCustom && (
                   <button
