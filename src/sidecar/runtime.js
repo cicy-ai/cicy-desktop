@@ -46,13 +46,14 @@ const COMPONENTS = {
   },
   "mihomo": {
     kind: "bin",
-    pkg: () => `cicy-mihomo-${plat()}`,
+    // npm spam filter 403s new names containing 'win32' → windows-* naming
+    pkg: () => `cicy-mihomo-${plat().replace("win32", "windows")}`,
     bin: () => (IS_WIN ? "mihomo.exe" : "mihomo"),
   },
   "msys2": {
     kind: "dir",
     winOnly: true,
-    pkg: () => "cicy-msys2-win32-x64",
+    pkg: () => "cicy-msys2-windows-x64",
     check: path.join("usr", "bin", "bash.exe"),
   },
 };
