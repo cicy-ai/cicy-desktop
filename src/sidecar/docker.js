@@ -372,4 +372,9 @@ async function bootstrap({ onProgress, port = 8008 } = {}) {
   return { ok: healthy, container: CONTAINER };
 }
 
-module.exports = { start, stop, checkStatus, loadImage, imagePresent, dockerOk, installDocker, bootstrap, probeHealth, readContainerToken };
+module.exports = {
+  start, stop, checkStatus, loadImage, imagePresent, dockerOk, installDocker,
+  bootstrap, probeHealth, readContainerToken,
+  // platform-agnostic download/retry primitives, reused by native.js
+  ensureDownloaded, withRetry, waitUntil, run,
+};

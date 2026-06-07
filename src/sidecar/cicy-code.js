@@ -46,9 +46,26 @@ async function start({ logPath, port = DEFAULT_PORT, force = false, version = nu
   }
 
   if (process.platform === "win32") {
-    // Windows runs cicy-code in Docker Desktop (the container's entrypoint
-    // npx-installs cicy-code). The docker module owns image-load-from-R2 +
-    // container run; here we just delegate. (Replaced the old WSL path.)
+    // NATIVE route (2026-06 方向): cicy-code.exe + bundled slim MSYS2, no
+    // Docker/WSL. Gated behind CICY_WIN_NATIVE=1 while in 联调; the Docker
+    // container route below remains the transitional default until native
+    // ships.
+    if (process.env.CICY_WIN_NATIVE === "1") {
+      try {
+        const native = require("./native");
+        const r = await native.start({ port, logPath });
+        if (!r) { console.warn("[cicy-code-sidecar] native start failed"); return null; }
+        child = r; // { native:true, pid|adopted, port }
+        console.log(`[cicy-code-sidecar] started native exe (${r.adopted ? "adopted" : `pid=${r.pid}`}) on :${port}`);
+        return child;
+      } catch (e) {
+        console.warn(`[cicy-code-sidecar] native start failed: ${e.message}`);
+        return null;
+      }
+    }
+    // Transitional: Windows runs cicy-code in Docker Desktop (the container's
+    // entrypoint npx-installs cicy-code). The docker module owns
+    // image-load-from-R2 + container run; here we just delegate.
     try {
       const docker = require("./docker");
       const r = await docker.start({ port });
@@ -138,12 +155,17 @@ async function killPortListeners(port = DEFAULT_PORT, timeoutMs = 5000) {
 }
 
 async function stop({ timeoutMs = 5000, port = DEFAULT_PORT } = {}) {
-  // 1) The child we spawned this session (npx) or the Docker container.
+  // 1) The child we spawned this session (npx), the Docker container, or the
+  // native exe.
   if (child) {
     const p = child;
     child = null;
     if (p.docker) {
       try { await require("./docker").stop(); } catch {}
+      return;
+    }
+    if (p.native) {
+      try { await require("./native").stop({ port }); } catch {}
       return;
     }
     try { p.kill("SIGTERM"); } catch {}
