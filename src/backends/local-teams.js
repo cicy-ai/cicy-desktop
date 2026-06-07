@@ -180,7 +180,7 @@ async function list({ refresh = false } = {}) {
 // dom-ready electronRPC injection — bare `new BrowserWindow` strips
 // the SPA of every desktop tool, which was the regression in the
 // previous implementation.
-function openTeam(id) {
+async function openTeam(id) {
   const node = readNodes()[id];
   if (!node) return { ok: false, error: "team not found" };
   const baseUrl = (node.base_url || "").replace(/\/$/, "");
@@ -201,6 +201,21 @@ function openTeam(id) {
     try { if (existing.isMinimized()) existing.restore(); } catch {}
     try { existing.show(); } catch {}
     try { existing.focus(); } catch {}
+    // A reused window can be STUCK at the login screen (its original load
+    // had a stale/absent token, e.g. after a token rotation) — focusing it
+    // would loop the user at login forever. If the page holds no token,
+    // re-navigate with the current ?token= so the SPA can consume it. An
+    // authenticated workspace (token present) is left untouched.
+    if (token) {
+      try {
+        const hasTok = await existing.webContents.executeJavaScript(
+          "!!localStorage.getItem('api_token')", true);
+        if (!hasTok) {
+          log.info(`[local-teams] open ${id} → reused win.id=${existing.id} had no token, re-navigating`);
+          existing.loadURL(url);
+        }
+      } catch { /* page not ready / JS blocked — leave as-is */ }
+    }
     log.info(`[local-teams] open ${id} → reused win.id=${existing.id}`);
     return { ok: true, windowId: existing.id, reused: true };
   }
