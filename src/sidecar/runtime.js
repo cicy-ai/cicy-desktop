@@ -105,9 +105,17 @@ function installPayload(comp, ver, payloadDir) {
   fs.rmSync(staging, { recursive: true, force: true });
   fs.mkdirSync(staging, { recursive: true });
   if (c.kind === "dir") {
-    cpDirSync(payloadDir, staging);
+    // The 118MB+ MSYS2 tree ships as a single .tar.gz inside the npm package
+    // (npm handles one big file far better than 10k tiny ones). Extract it;
+    // otherwise the payload is already an unpacked tree → copy.
+    const tgz = (() => { try { return fs.readdirSync(payloadDir).find((f) => /\.tar\.gz$/i.test(f)); } catch { return null; } })();
+    if (tgz) {
+      require("child_process").execFileSync("tar", ["-xzf", path.join(payloadDir, tgz), "-C", staging], { windowsHide: true });
+    } else {
+      cpDirSync(payloadDir, staging);
+    }
     if (!fs.existsSync(path.join(staging, c.check))) {
-      // the tree may be nested one level (package/msys64/usr/...)
+      // the tree may be nested one level (package/msys64/usr/... or root/usr/...)
       const sub = fs.readdirSync(staging).find((d) =>
         fs.existsSync(path.join(staging, d, c.check)));
       if (!sub) { fs.rmSync(staging, { recursive: true, force: true }); throw new Error(`${comp}: ${c.check} missing in package`); }
