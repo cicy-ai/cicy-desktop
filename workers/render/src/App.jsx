@@ -494,7 +494,7 @@ function MitmConsentCard({ team }) {
         // fall back to the self-elevating CLI (OS prompt = the second consent)
         const ex = await window.cicy?.mitm?.caExec?.("install");
         if (ex?.ok) await refresh();
-        else setError(ex?.code === 1 && /cancel/i.test(ex?.stderr || "") ? "授权被取消,可重试" : (ex?.stderr || "提权失败,请从管理员控制台运行"));
+        else setError(/cancel/i.test(ex?.stderr || "") ? tr("mitmConsent.errorAdminDenied", "未获得管理员授权,已取消。") : (ex?.stderr || tr("mitmConsent.errorTitle", "提权失败,请从管理员控制台运行")));
       } else {
         setError(r.json?.error || `失败 (HTTP ${r.status})`);
       }
@@ -518,31 +518,36 @@ function MitmConsentCard({ team }) {
 
   const granted = status.consent && status.trusted;
   const partial = status.consent && !status.trusted; // consented but not (re)installed
+  const t = (k, fb) => tr(`mitmConsent.${k}`, fb);
 
   return (
     <div data-id="MitmConsentCard" className={`mitm-card${granted ? " mitm-card--on" : ""}`}>
       <div className="mitm-card__head">
         <span className="mitm-card__dot" data-state={granted ? "on" : partial ? "warn" : "off"} />
         <span className="mitm-card__title" data-id="MitmConsentCard-title">
-          {granted ? "HTTPS 审计已启用" : partial ? "需要重新授权 HTTPS 审计" : "启用 HTTPS 审计"}
+          {busy ? t("stateProcessingTitle", "处理中…")
+            : granted ? t("stateGrantedTitle", "已启用")
+            : `${t("cardTitle", "HTTPS 流量本地审计")}${partial ? " — " + t("retry", "重试") : ""}`}
         </span>
       </div>
       <p className="mitm-card__desc" data-id="MitmConsentCard-desc">
-        启用后本机到 AI 厂商(Claude / OpenAI / DeepSeek / Gemini)的 HTTPS 将被本地审计解密,数据留本地,可随时关闭。
-        <br />
-        <span className="mitm-card__note">需将一张根证书写入系统信任库,需要管理员授权。</span>
+        {granted ? t("grantedDesc", "HTTPS 审计已开启;可随时撤销并卸载证书。") : t("body", "启用后,本机到 AI 厂商(Claude / OpenAI / DeepSeek / Gemini)的 HTTPS 将被本地审计解密,数据留本地,可随时关闭。")}
+        {!granted && <>
+          <br /><span className="mitm-card__note">{t("adminNote", "需写入系统根证书信任库,需要管理员授权。")}</span>
+          <br /><span className="mitm-card__sub">{t("scopeNote", "仅解密上述 AI 厂商域名,其余一切流量不被解密、不被读取。")}</span>
+        </>}
       </p>
-      {error && <div className="mitm-card__error" data-id="MitmConsentCard-error">{error}</div>}
+      {error && <div className="mitm-card__error" data-id="MitmConsentCard-error">{t("errorTitle", "操作失败")}: {error}</div>}
       <div className="mitm-card__actions">
         {granted ? (
           <button data-id="MitmConsentCard-revoke" className="mitm-card__btn mitm-card__btn--ghost"
-            disabled={!!busy} onClick={disable}>
-            {busy === "disable" ? "撤销中…" : "撤销授权"}
+            disabled={!!busy} onClick={() => { if (window.confirm(t("revokeConfirm", "撤销后将卸载证书、停止解密,并清除同意标记。确定?"))) disable(); }}>
+            {busy === "disable" ? t("processingRevoke", "正在卸载证书…") : t("revoke", "撤销")}
           </button>
         ) : (
           <button data-id="MitmConsentCard-enable" className="mitm-card__btn"
             disabled={!!busy} onClick={enable}>
-            {busy === "enable" ? "授权中…" : partial ? "重新启用" : "同意并启用"}
+            {busy === "enable" ? t("processingEnable", "正在安装证书…") : partial ? t("retry", "重试") : t("enable", "同意并启用")}
           </button>
         )}
       </div>

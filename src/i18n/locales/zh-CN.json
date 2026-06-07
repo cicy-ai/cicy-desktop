@@ -82,5 +82,40 @@
   "cli": {
     "controllerTitle": "cicy - CiCy Desktop 控制器",
     "usage": "用法: cicy [命令] [选项]"
+  },
+  "mitmConsent": {
+    "cardTitle": "HTTPS 流量本地审计",
+    "stateUngrantedTitle": "尚未启用",
+    "body": "启用后，本机到 AI 厂商（Claude / OpenAI / DeepSeek / Gemini）的 HTTPS 将被本地审计解密，数据留本地，可随时关闭。",
+    "adminNote": "需写入系统根证书信任库，需要管理员授权。",
+    "scopeNote": "仅解密上述 AI 厂商域名，其余一切流量（网银、社交、其他网站）不被解密、不被读取。",
+    "localNote": "解密后的数据仅保存在你本机，不上传到任何服务器。",
+    "enable": "启用",
+    "stateGrantedTitle": "已启用",
+    "grantedDesc": "HTTPS 审计已开启；可随时撤销并卸载证书。",
+    "revoke": "撤销",
+    "revokeConfirm": "撤销后将卸载证书、停止解密，并清除同意标记。确定？",
+    "stateProcessingTitle": "处理中…",
+    "processingEnable": "正在安装证书…",
+    "processingRevoke": "正在卸载证书…",
+    "errorTitle": "操作失败",
+    "errorAdminDenied": "未获得管理员授权，已取消。",
+    "retry": "重试"
+  },
+  "firstRunTerms": {
+    "title": "用户协议与授权说明",
+    "subtitle": "使用 CiCy Desktop 前，请阅读并同意以下条款",
+    "summaryTitle": "一眼看懂",
+    "summary1": "CiCy Desktop 是在你自己电脑上运行的 AI Agent 编排工具，帮你调度第三方 AI 助手（Claude Code、Codex、Gemini 等）完成工作。",
+    "summary2": "第三方 AI 与账号是你和对应厂商之间的事：用哪个 AI、用谁的账号、用量与费用，由你决定并承担，与 CiCy 无关。",
+    "summary3": "为完成工作，本软件需要一系列对你电脑的授权（运行程序、执行脚本、控制浏览器、访问文件等）。你对经本软件发起的操作负全部责任。",
+    "summary4": "你的数据默认留在本机，CiCy 不以运营为目的上传你的工作内容。",
+    "summary5": "两项高风险能力需要你单独额外授权、默认关闭：(a) HTTPS 流量本地审计（需装证书、需管理员）；(b) 本机命令/脚本执行。整体同意本协议不等于开启它们。",
+    "summary6": "严禁用本软件控制未授权设备、违法多账号/刷量、绕过平台风控、违规抓取等。",
+    "viewFull": "查看完整条款",
+    "agree": "同意并继续",
+    "decline": "不同意并退出",
+    "mustAgree": "未同意则无法使用本软件。",
+    "scrollHint": "请阅读至底部以继续"
   }
 }

@@ -82,5 +82,40 @@
   "cli": {
     "controllerTitle": "cicy - CiCy Desktop Controller",
     "usage": "Usage: cicy [command] [options]"
+  },
+  "mitmConsent": {
+    "cardTitle": "Local HTTPS Traffic Auditing",
+    "stateUngrantedTitle": "Not enabled",
+    "body": "When enabled, HTTPS traffic from this machine to AI providers (Claude / OpenAI / DeepSeek / Gemini) is decrypted locally for auditing. Data stays local and you can turn it off anytime.",
+    "adminNote": "Requires writing a certificate into the system root trust store; administrator authorization is required.",
+    "scopeNote": "Only traffic to the AI provider domains above is decrypted; all other traffic (banking, social, other sites) is never decrypted or read.",
+    "localNote": "Decrypted data is stored only on your machine and is never uploaded to any server.",
+    "enable": "Enable",
+    "stateGrantedTitle": "Enabled",
+    "grantedDesc": "HTTPS auditing is on; you can revoke and uninstall the certificate anytime.",
+    "revoke": "Revoke",
+    "revokeConfirm": "Revoking will uninstall the certificate, stop decryption, and clear the consent flag. Continue?",
+    "stateProcessingTitle": "Working…",
+    "processingEnable": "Installing certificate…",
+    "processingRevoke": "Uninstalling certificate…",
+    "errorTitle": "Operation failed",
+    "errorAdminDenied": "Administrator authorization was not granted; cancelled.",
+    "retry": "Retry"
+  },
+  "firstRunTerms": {
+    "title": "Terms of Use & Authorization Notice",
+    "subtitle": "Please read and accept the following before using CiCy Desktop",
+    "summaryTitle": "At a glance",
+    "summary1": "CiCy Desktop is an AI agent orchestration tool that runs on your own computer, helping you coordinate third-party AI assistants (Claude Code, Codex, Gemini, etc.) to get work done.",
+    "summary2": "Third-party AI and accounts are between you and the respective provider: which AI you use, whose account you log in with, and the usage and fees are your decision and responsibility, not CiCy's.",
+    "summary3": "To do the work, this software needs a range of authorizations on your computer (running programs, executing scripts, controlling the browser, accessing files, etc.). You are fully responsible for the operations initiated through this software.",
+    "summary4": "Your data stays on your machine by default; CiCy does not upload your work content for operational purposes.",
+    "summary5": "Two high-risk capabilities require your separate, explicit authorization and are off by default: (a) local HTTPS traffic auditing (installs a certificate, requires administrator); (b) local command/script execution. Accepting these Terms does not enable them.",
+    "summary6": "You must not use this software to control unauthorized devices, conduct unlawful multi-accounting / traffic faking, circumvent platform risk controls, or scrape in violation of terms.",
+    "viewFull": "View full Terms",
+    "agree": "Agree and continue",
+    "decline": "Decline and exit",
+    "mustAgree": "You cannot use this software without accepting the Terms.",
+    "scrollHint": "Please read to the end to continue"
   }
 }

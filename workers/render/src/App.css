@@ -777,3 +777,4 @@ body {
 }
 .mitm-card__btn:disabled { opacity: 0.6; cursor: default; }
 .mitm-card__btn--ghost { background: transparent; border: 1px solid rgba(125, 135, 150, 0.35); color: var(--text-dim, #9da7b3); }
+.mitm-card__sub { color: var(--text-dim, #9da7b3); opacity: 0.8; font-size: 11.5px; }
