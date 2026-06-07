@@ -1,27 +1,20 @@
 // Homepage window — primary CiCy Desktop window. Singleton; closing it
 // does NOT quit the app.
 //
-// URL selection (HARDCODED — no env/dev-URL switch, no Vite):
-//   - Windows: the remote Cloudflare worker https://desktop.cicy-ai.com — keeps
-//     Win shipping without rebuilding (Win release cadence is slower than
-//     render's). Falls back to the local file:// SPA if unreachable.
-//   - Mac/Linux: the bundled local SPA file:// — works offline, fast, no remote
-//     dependency, no mixed-content concerns when embedding the team-assistant
-//     webview (the cicy-desktop preload's IPC bridge still attaches).
+// URL selection (HARDCODED — no env/dev-URL switch, no Vite): ALL platforms
+// load the bundled local file:// SPA — works offline, fast, no remote
+// dependency, no mixed-content concerns when embedding the team-assistant
+// webview (the cicy-desktop preload's IPC bridge still attaches). The remote
+// Cloudflare worker is only a fallback if the bundled SPA fails to load.
 
 const path = require("path");
 const { BrowserWindow } = require("electron");
 const log = require("electron-log");
 
-// Hardcoded homepage source — no Vite / CICY_HOMEPAGE_URL dev-URL switch.
-//   - mac/linux: the bundled file:// SPA (offline, fast, no remote dependency).
-//   - Windows:   the remote Cloudflare worker (Win release cadence is slower
-//                than render's, so it loads the homepage remotely).
-const REMOTE_URL = "https://desktop.cicy-ai.com/"; // Cloudflare worker (remote homepage)
+const REMOTE_URL = "https://desktop.cicy-ai.com/"; // Cloudflare worker (fallback only)
 const LOCAL_INDEX = path.join(__dirname, "homepage-react", "index.html");
 
 function pickHomepageURL() {
-  if (process.platform === "win32") return REMOTE_URL;
   return `file://${LOCAL_INDEX}`;
 }
 
@@ -83,16 +76,13 @@ async function openHomepage() {
   homepage.webContents.on("console-message", (_e, level, msg, line, source) => {
     if (level >= 1) console.log(`[homepage:console L${line}] ${msg}  (${source})`);
   });
-  // If the dev URL (Vite / SSH tunnel) is unreachable, fall back to the
-  // local bundled file:// SPA so the window never stays blank.
+  // If the bundled file:// SPA fails to load (corrupt/missing install), fall
+  // back to the remote Cloudflare homepage so the window never stays blank.
   homepage.webContents.on("did-fail-load", (_e, code, desc, url) => {
     console.error(`[homepage] did-fail-load ${code} ${desc} ${url}`);
-    const fallback = `file://${LOCAL_INDEX}`;
-    // If the remote (Windows) Cloudflare homepage is unreachable, fall back to
-    // the bundled local SPA so the window never stays blank.
-    if (url && url.startsWith(REMOTE_URL.replace(/\/$/, "")) && url !== fallback) {
-      log.warn(`[homepage] remote homepage unreachable, falling back to ${fallback}`);
-      homepage.loadURL(fallback);
+    if (url && url.startsWith("file://")) {
+      log.warn(`[homepage] bundled homepage failed, falling back to ${REMOTE_URL}`);
+      homepage.loadURL(REMOTE_URL);
     }
   });
   homepage.on("closed", () => { homepage = null; });
