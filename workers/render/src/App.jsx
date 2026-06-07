@@ -579,7 +579,7 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
                     {tr("sidecar.updateTo", "更新到")} v{latest}
                   </button>
                 )}
-                {running && (
+                {local && running && (
                   <>
                     <button
                       type="button"
