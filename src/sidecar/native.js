@@ -19,8 +19,12 @@ const path = require("path");
 
 const docker = require("./docker"); // ensureDownloaded/withRetry/waitUntil/probeHealth/run
 
+// Dev builds are VERSIONED by md5 prefix (builds/cicy-code-win32-x64-<md5头8>.exe)
+// because r2.deepfetch.de5.net sits behind Cloudflare's edge cache — a mutable
+// "-dev.exe" name serves stale bytes. Final distribution moves to the npm
+// subpackage (cicybot/cicy-code-win32-x64), no R2 dependency.
 const EXE_URL = process.env.CICY_CODE_EXE_URL
-  || "https://r2.deepfetch.de5.net/builds/cicy-code-win32-x64-dev.exe";
+  || "https://r2.deepfetch.de5.net/builds/cicy-code-win32-x64-868719d9.exe";
 const BIN_DIR  = path.join(os.homedir(), "cicy-ai", "bin");
 const EXE_PATH = process.env.CICY_CODE_EXE_PATH || path.join(BIN_DIR, "cicy-code.exe");
 const PID_FILE = path.join(BIN_DIR, "cicy-code.pid");
