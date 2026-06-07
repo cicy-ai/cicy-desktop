@@ -42,13 +42,27 @@ let child = null;
 // network, zero npx), upgrades come through runtime.upgrade(). Returns the
 // spawn child or null when the store has no usable binary (legacy fallbacks
 // below take over).
-function startFromRuntime({ logPath, port }) {
+async function startFromRuntime({ logPath, port }) {
   let runtime;
   try { runtime = require("./runtime"); } catch { return null; }
   let exe = null;
   try { exe = runtime.binPath("cicy-code") || runtime.ensureFromBundle("cicy-code"); } catch (e) {
     console.warn(`[cicy-code-sidecar] runtime store unusable: ${e.message}`);
-    return null;
+  }
+  // Bundle absent or empty (npm optionalDependencies are best-effort — a flaky
+  // mirror/network can leave the dep recorded but unpopulated). Don't strand
+  // the user: pull the pinned/latest version from npm into the runtime store.
+  // This is the network fallback to the zero-network bundle seed.
+  if (!exe) {
+    try {
+      const { latest } = await runtime.checkUpdate("cicy-code");
+      if (latest) {
+        console.log(`[cicy-code-sidecar] bundle missing — npm-pulling cicy-code@${latest} into runtime store`);
+        await runtime.fetchVersion("cicy-code", latest);
+        runtime.switchCurrent("cicy-code", latest);
+        exe = runtime.binPath("cicy-code");
+      }
+    } catch (e) { console.warn(`[cicy-code-sidecar] runtime npm-pull failed: ${e.message}`); }
   }
   if (!exe) return null;
 
@@ -87,7 +101,7 @@ async function start({ logPath, port = DEFAULT_PORT, force = false, version = nu
   }
 
   // Runtime store first — uniform across platforms.
-  const rt = startFromRuntime({ logPath, port });
+  const rt = await startFromRuntime({ logPath, port });
   if (rt) { child = rt; return child; }
 
   if (process.platform === "win32") {
@@ -275,7 +289,7 @@ async function update({ logPath, port = DEFAULT_PORT, emit } = {}) {
         emit,
         stop: () => stop({ port }),
         start: async () => {
-          child = startFromRuntime({ logPath, port });
+          child = await startFromRuntime({ logPath, port });
           if (!child) throw new Error("runtime spawn failed");
         },
         verify: async () => {
