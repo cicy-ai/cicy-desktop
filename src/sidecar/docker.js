@@ -42,6 +42,28 @@ async function dockerOk() {
   catch { return false; }
 }
 
+// Docker Desktop installed on disk? (daemon may still be stopped — dockerOk()
+// only answers "is the daemon up"). Lets bootstrap start the app instead of
+// re-downloading the 500MB installer when it's merely not running.
+function dockerDesktopExe() {
+  const candidates = [
+    path.join(process.env["ProgramFiles"] || "C:\\Program Files", "Docker", "Docker", "Docker Desktop.exe"),
+    path.join(process.env["LOCALAPPDATA"] || "", "Docker", "Docker Desktop.exe"),
+  ];
+  for (const p of candidates) { try { if (p && fs.existsSync(p)) return p; } catch {} }
+  return null;
+}
+
+function startDockerDesktop() {
+  const exe = dockerDesktopExe();
+  if (!exe) return false;
+  try {
+    const child = spawn(exe, [], { detached: true, stdio: "ignore", windowsHide: false });
+    child.unref();
+    return true;
+  } catch { return false; }
+}
+
 async function imagePresent() {
   try { await run(["image", "inspect", IMAGE], { timeout: 8000 }); return true; }
   catch { return false; }
@@ -143,12 +165,15 @@ async function ensureDownloaded(url, dest, mirror, { emit, phase, label } = {}) 
     return dest;
   }
   const sources = mirror ? [url, mirror] : [url];
+  let lastPct = -1; // throttle: chunks arrive dozens/s — only emit on whole-percent change
   return withRetry(async (attempt) => {
     const src = sources[Math.min(attempt - 1, sources.length - 1)];
     await download(src, dest, {
       resume: true,
       onProgress: ({ received, total }) => {
         const pct = total ? Math.round((received / total) * 100) : 0;
+        if (pct === lastPct) return;
+        lastPct = pct;
         emit && emit({ phase, status: "running", message: label, progress: pct, received, total });
       },
     });
@@ -182,7 +207,15 @@ async function loadImage({ emit } = {}) {
   await ensureDownloaded(R2_TARBALL, tmp, null, { emit, phase: "image", label: "下载镜像" });
   emit && emit({ phase: "image", status: "running", message: "docker load…", progress: 100 });
   console.log(`[docker-sidecar] docker load…`);
-  await run(["load", "-i", tmp], { timeout: 300000 });
+  const { stdout } = await run(["load", "-i", tmp], { timeout: 300000 });
+  // The tarball's embedded tag may be a pinned version (e.g. :2.1.6) while we
+  // run IMAGE (:latest). Re-tag whatever was loaded so imagePresent()/start()
+  // match — otherwise every start() re-downloads the tarball forever.
+  const m = String(stdout).match(/Loaded image:\s*(\S+)/i);
+  if (m && m[1] !== IMAGE) {
+    try { await run(["tag", m[1], IMAGE]); console.log(`[docker-sidecar] tagged ${m[1]} -> ${IMAGE}`); }
+    catch (e) { console.warn(`[docker-sidecar] re-tag failed: ${e.message}`); }
+  }
   // Only delete AFTER a successful load — a failed load keeps the tarball so the
   // next attempt skips the re-download. (imagePresent() gates re-entry anyway.)
   try { fs.unlinkSync(tmp); } catch {}
@@ -197,6 +230,13 @@ async function checkStatus() {
 // id } or null when Docker isn't ready (homepage guides the user to install
 // Docker Desktop).
 async function start({ port = 8008 } = {}) {
+  // Something already serves a healthy cicy-code on :port (a legacy-named
+  // container auto-revived by `--restart unless-stopped`, a manual run…).
+  // Adopt it — `docker run` would just lose the port-bind fight.
+  if (await probeHealth(port)) {
+    console.log(`[docker-sidecar] :${port} already healthy — adopting existing instance`);
+    return { docker: true, container: CONTAINER, adopted: true };
+  }
   if (!(await dockerOk())) {
     console.warn("[docker-sidecar] Docker not available — homepage will guide install");
     return null;
@@ -261,6 +301,17 @@ async function bootstrap({ onProgress, port = 8008 } = {}) {
   // 1) Docker present?
   if (await dockerOk()) {
     emit({ phase: "install-docker", status: "skip", message: "Docker 已安装，跳过" });
+  } else if (dockerDesktopExe()) {
+    // Installed but the daemon is down — just launch Docker Desktop, never
+    // re-download/re-run the installer ("步骤走过的不要再走").
+    emit({ phase: "install-docker", status: "running", message: "Docker 已安装，正在启动 Docker Desktop…" });
+    startDockerDesktop();
+    const up = await waitUntil(dockerOk, { totalMs: 300000, everyMs: 5000 });
+    if (!up) {
+      emit({ phase: "install-docker", status: "error", message: "Docker Desktop 启动超时——手动打开它等图标变绿，再点「重试」" });
+      return { ok: false, reason: "docker_not_ready" };
+    }
+    emit({ phase: "install-docker", status: "done", message: "Docker 就绪" });
   } else {
     await installDocker({ emit });
     emit({ phase: "install-docker", status: "running", message: "等待 Docker 启动（如需授权/重启，完成后会自动继续）…" });
@@ -285,12 +336,19 @@ async function bootstrap({ onProgress, port = 8008 } = {}) {
     }
   }
 
-  // 3) Container — start() already reuses/replaces by name.
-  emit({ phase: "container", status: "running", message: "启动 cicy-code 容器…" });
-  const child = await start({ port });
-  if (!child) {
-    emit({ phase: "container", status: "error", message: "容器启动失败" });
-    return { ok: false, reason: "container_start_failed" };
+  // 3) Container — skip when :port is already healthy (idempotent re-entry);
+  // start() additionally adopts an existing instance instead of port-fighting.
+  if (await probeHealth(port)) {
+    emit({ phase: "container", status: "skip", message: "本地服务已在运行，跳过" });
+  } else {
+    emit({ phase: "container", status: "running", message: "启动 cicy-code 容器…" });
+    let child = null;
+    try { child = await start({ port }); }
+    catch (e) { emit({ phase: "container", status: "error", message: `容器启动失败：${e.message}` }); return { ok: false, reason: "container_start_failed" }; }
+    if (!child) {
+      emit({ phase: "container", status: "error", message: "容器启动失败" });
+      return { ok: false, reason: "container_start_failed" };
+    }
   }
 
   // 4) Health

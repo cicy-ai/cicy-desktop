@@ -45,10 +45,19 @@ function register({ sidecarLogPath } = {}) {
   ipcMain.handle("docker:bootstrap", async (e) => {
     if (process.platform !== "win32") return { ok: false, error: "docker bootstrap is Windows-only" };
     try {
-      return await docker.bootstrap({
+      const result = await docker.bootstrap({
         port: PORT,
         onProgress: (ev) => { try { e.sender.send("docker:bootstrap-progress", ev); } catch {} },
       });
+      // Healthy local stack → make sure it shows up as a team ("本地团队就加
+      // 上去了"). addTeam dedups by host:port, so re-runs are no-ops.
+      if (result && result.ok) {
+        try {
+          const lt = require("./local-teams");
+          await lt.addTeam({ base_url: `http://127.0.0.1:${PORT}`, name: "本地团队" });
+        } catch { /* best-effort — the stack itself is up */ }
+      }
+      return result;
     } catch (err) {
       return { ok: false, error: err.message };
     }
