@@ -50,11 +50,17 @@ function register({ sidecarLogPath } = {}) {
         onProgress: (ev) => { try { e.sender.send("docker:bootstrap-progress", ev); } catch {} },
       });
       // Healthy local stack → make sure it shows up as a team ("本地团队就加
-      // 上去了"). addTeam dedups by host:port, so re-runs are no-ops.
+      // 上去了"). addTeam dedups by host:port, so re-runs are no-ops. The
+      // api_token must be the CONTAINER's own (volume global.json) — the
+      // host's token is a different credential and fails verify.
       if (result && result.ok) {
         try {
           const lt = require("./local-teams");
-          await lt.addTeam({ base_url: `http://127.0.0.1:${PORT}`, name: "本地团队" });
+          const tok = await docker.readContainerToken(PORT);
+          await lt.addTeam({
+            base_url: `http://127.0.0.1:${PORT}`, name: "本地团队",
+            ...(tok ? { api_token: tok } : {}),
+          });
         } catch { /* best-effort — the stack itself is up */ }
       }
       return result;

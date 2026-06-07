@@ -189,6 +189,20 @@ async function ensureDownloaded(url, dest, mirror, { emit, phase, label } = {}) 
   });
 }
 
+// The container's cicy-code mints its own api_token in its volume-persisted
+// global.json — the HOST's global.json token is a different credential and
+// won't verify. Read the real one out of whatever container publishes :port
+// (works for adopted legacy-named containers too).
+async function readContainerToken(port = 8008) {
+  try {
+    const { stdout } = await run(["ps", "--filter", `publish=${port}`, "--format", "{{.Names}}"]);
+    const name = stdout.trim().split("\n")[0];
+    if (!name) return "";
+    const r = await run(["exec", name, "cat", "/home/cicy/cicy-ai/global.json"], { timeout: 10000 });
+    return (JSON.parse(r.stdout).api_token || "");
+  } catch { return ""; }
+}
+
 // HTTP /health probe of the container on :port.
 function probeHealth(port = 8008, timeoutMs = 2500) {
   return new Promise((resolve) => {
@@ -358,4 +372,4 @@ async function bootstrap({ onProgress, port = 8008 } = {}) {
   return { ok: healthy, container: CONTAINER };
 }
 
-module.exports = { start, stop, checkStatus, loadImage, imagePresent, dockerOk, installDocker, bootstrap, probeHealth };
+module.exports = { start, stop, checkStatus, loadImage, imagePresent, dockerOk, installDocker, bootstrap, probeHealth, readContainerToken };
