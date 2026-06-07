@@ -729,9 +729,9 @@ electronApp.whenReady().then(async () => {
     // Persist the cloud login durably in the MAIN process (global.json),
     // independent of the homepage renderer's origin. The renderer keeps the
     // token in localStorage, which Chromium scopes to the homepage window's
-    // origin — and that origin drifts (file:// on mac, https://desktop.cicy-ai.com
-    // on Windows, http://<ip>:port or the team domain when CICY_HOMEPAGE_URL is
-    // set). A token saved under one origin is invisible after the URL changes,
+    // origin — and that origin has drifted historically (file:// today; the
+    // remote worker / dev URLs in the past). A token saved under one origin
+    // is invisible after the URL changes,
     // which forced the user to log in again and again. Storing it here and
     // restoring it on every homepage load makes "logged in once" survive origin
     // changes, restarts and public-URL switches. ONLY explicit logout clears it.

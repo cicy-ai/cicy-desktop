@@ -1,17 +1,16 @@
 // Homepage window — primary CiCy Desktop window. Singleton; closing it
 // does NOT quit the app.
 //
-// URL selection (HARDCODED — no env/dev-URL switch, no Vite): ALL platforms
-// load the bundled local file:// SPA — works offline, fast, no remote
-// dependency, no mixed-content concerns when embedding the team-assistant
-// webview (the cicy-desktop preload's IPC bridge still attaches). The remote
-// Cloudflare worker is only a fallback if the bundled SPA fails to load.
+// URL selection (HARDCODED — no env/dev-URL switch, no Vite, no remote): ALL
+// platforms load the bundled local file:// SPA — works offline, fast, no
+// remote dependency, no mixed-content concerns when embedding the
+// team-assistant webview (the cicy-desktop preload's IPC bridge still
+// attaches).
 
 const path = require("path");
 const { BrowserWindow } = require("electron");
 const log = require("electron-log");
 
-const REMOTE_URL = "https://desktop.cicy-ai.com/"; // Cloudflare worker (fallback only)
 const LOCAL_INDEX = path.join(__dirname, "homepage-react", "index.html");
 
 function pickHomepageURL() {
@@ -76,14 +75,10 @@ async function openHomepage() {
   homepage.webContents.on("console-message", (_e, level, msg, line, source) => {
     if (level >= 1) console.log(`[homepage:console L${line}] ${msg}  (${source})`);
   });
-  // If the bundled file:// SPA fails to load (corrupt/missing install), fall
-  // back to the remote Cloudflare homepage so the window never stays blank.
+  // Log load failures (corrupt/missing install) — no remote fallback by
+  // design: the homepage is the bundled SPA, full stop.
   homepage.webContents.on("did-fail-load", (_e, code, desc, url) => {
     console.error(`[homepage] did-fail-load ${code} ${desc} ${url}`);
-    if (url && url.startsWith("file://")) {
-      log.warn(`[homepage] bundled homepage failed, falling back to ${REMOTE_URL}`);
-      homepage.loadURL(REMOTE_URL);
-    }
   });
   homepage.on("closed", () => { homepage = null; });
   return homepage;
