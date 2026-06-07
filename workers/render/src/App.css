@@ -671,6 +671,12 @@ body {
 .bcard__menu-item.is-accent:hover { background: rgba(245,158,11,.15); color: #fcd34d; }
 .bcard__menu-item.is-danger { color: #f7a3a3; }
 .bcard__menu-item.is-danger:hover { background: rgba(239,68,68,.16); color: #fff; }
+/* version from /api/health 探活 */
+.bcard__ver {
+  font-size: 11px;
+  color: #8b949e;
+  font-variant-numeric: tabular-nums;
+}
 /* "新版 vX.Y.Z" chip on the card face */
 .bcard__chip--new {
   color: #fbbf24;

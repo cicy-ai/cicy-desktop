@@ -320,9 +320,16 @@ export default function App() {
 
   // Logged in: unified tabs + cards grid on the left, full-height webview
   // drawer on the right.
-  const localCount = (localTeams || []).length;
+  // Split the cicyDesktopNodes list into 本地 (the localhost:8008 sidecar the
+  // desktop owns — full lifecycle) vs 自定义 (deeplink-added nodes, usually
+  // remote — probe-only, no restart/stop/update, just 打开).
+  const localList  = (localTeams || []).filter((t) => isLocalSidecar(t.base_url));
+  const customList = (localTeams || []).filter((t) => !isLocalSidecar(t.base_url));
+  const localCount = localList.length;
+  const customCount = customList.length;
   const cloudCount = (teams || []).length;
   const showLocal = tab === "all" || tab === "local";
+  const showCustom = tab === "all" || tab === "custom";
   const showCloud = tab === "all" || tab === "cloud";
 
   return (
@@ -333,9 +340,10 @@ export default function App() {
       <main className="main">
         <div className="app__tabs">
           {[
-            { k: "all",   label: "全部", n: localCount + cloudCount },
-            { k: "local", label: "本地", n: localCount },
-            { k: "cloud", label: "云端", n: cloudCount },
+            { k: "all",    label: "全部",   n: localCount + customCount + cloudCount },
+            { k: "local",  label: "本地",   n: localCount },
+            { k: "cloud",  label: "云端",   n: cloudCount },
+            { k: "custom", label: "自定义", n: customCount },
           ].map(({ k, label, n }) => (
             <button
               key={k}
@@ -359,8 +367,11 @@ export default function App() {
         )}
 
         <div className="app__grid">
-          {showLocal && localTeams && localTeams.map((t) => (
+          {showLocal && localList.map((t) => (
             <LocalTeamCard key={"local:" + t.id} team={t} onOpen={() => openLocalTeam(t.id)} onRename={renameLocalTeam} onRefresh={fetchLocalTeams} />
+          ))}
+          {showCustom && customList.map((t) => (
+            <LocalTeamCard key={"custom:" + t.id} team={t} onOpen={() => openLocalTeam(t.id)} onRename={renameLocalTeam} onRefresh={fetchLocalTeams} />
           ))}
           {showCloud && teams && teams.map((t) => (
             <TeamCard
@@ -513,7 +524,9 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
   };
   const openLabel = running
     ? tr("localTeams.open", "打开")
-    : tr("localTeams.startOpen", "启动并打开");
+    : local
+      ? tr("localTeams.startOpen", "启动并打开") // only the local sidecar can be started from here
+      : tr("localTeams.open", "打开");           // custom/remote: 探活-only, just open
   return (
     <div data-id="LocalTeamCard" className={`bcard bcard--local${tone === "ok" ? " bcard--online" : ""}`}>
       <div className="bcard__accent" />
@@ -599,6 +612,9 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
           {team.base_url || "—"}
         </div>
         <div className="bcard__meta">
+          {team.version && (
+            <span className="bcard__ver" data-id="LocalTeamCard-version">v{team.version}</span>
+          )}
           {updateAvailable && (
             <span
               className="bcard__chip bcard__chip--new"
