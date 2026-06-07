@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import "./App.css";
+import { TERMS_VERSION, TERMS_FULL } from "./termsText";
 
 // i18n bridge exposed by homepage-preload (window.cicyI18n.t, locale from
 // app.getLocale()). Returns the localized string, or `fallback` when the key
@@ -15,6 +16,17 @@ const USER_ID_KEY = "cicy_user_id";
 const CLOUD_BASE = "https://cicy-ai.com";
 
 export default function App() {
+  // First-run terms gate (合规第一道整体同意) — blocks the whole UI until
+  // accepted. undefined = checking, false = must show gate, true = past it.
+  // Distinct from the MITM CA opt-in; accepting terms never enables audit.
+  const [termsOk, setTermsOk] = useState(undefined);
+  useEffect(() => {
+    if (!window.cicy?.terms?.status) { setTermsOk(true); return; } // no bridge (dev) → don't block
+    window.cicy.terms.status(TERMS_VERSION)
+      .then((r) => setTermsOk(!!r?.accepted))
+      .catch(() => setTermsOk(true));
+  }, []);
+
   // sk-xxx (LLM API). Used by /v1/chat/completions etc.
   const [token, setToken] = useState(() => safeGet(TOKEN_KEY));
   // Console-API bearer. Used by /api/user/self, /api/teams, etc.
@@ -268,6 +280,20 @@ export default function App() {
     setProfileError("");
   }
 
+  // First-run terms gate takes precedence over everything (even login) —
+  // accepting the terms is a precondition to using the software at all.
+  if (termsOk === undefined) {
+    return (
+      <div className="shell" data-id="TermsCheckingSplash">
+        <div className="glow" aria-hidden />
+        <div className="card"><Brand /><div className="spinner-row"><Spinner /></div></div>
+      </div>
+    );
+  }
+  if (!termsOk) {
+    return <FirstRunTermsGate onAgree={() => setTermsOk(true)} />;
+  }
+
   // Still checking the durable store — show a minimal splash, not the login
   // card, so we never flash "please log in" before restore completes.
   if (!token && authRestoring) {
@@ -449,6 +475,70 @@ const DOCKER_STEPS = [
   { key: "container",      label: "启动 cicy-code" },
   { key: "health",         label: "本地团队就绪" },
 ];
+
+// 首启门控:整体条款的第一道同意。未同意不进主界面;读到底部才解锁"同意"。
+// 与 MitmConsentCard(HTTPS 审计第二道同意)完全独立 —— 同意条款 ≠ 开启审计。
+function FirstRunTermsGate({ onAgree }) {
+  const [scrolledEnd, setScrolledEnd] = useState(false);
+  const [showFull, setShowFull] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const locale = (window.cicyI18n?.locale || "en").startsWith("zh") ? "zh-CN" : "en";
+  const t = (k, fb) => tr(`firstRunTerms.${k}`, fb);
+  const summaries = [1, 2, 3, 4, 5, 6].map((i) => t(`summary${i}`, ""));
+
+  const onScroll = (e) => {
+    const el = e.currentTarget;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 24) setScrolledEnd(true);
+  };
+  // Short content that never scrolls → unlock immediately.
+  const bodyRef = useRef(null);
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (el && el.scrollHeight <= el.clientHeight + 24) setScrolledEnd(true);
+  }, [showFull]);
+
+  const agree = async () => {
+    if (busy || !scrolledEnd) return;
+    setBusy(true);
+    try { await window.cicy?.terms?.agree?.(TERMS_VERSION); onAgree?.(); }
+    catch { onAgree?.(); } // never trap the user; main also persists
+  };
+  const decline = () => { try { window.cicy?.terms?.decline?.(); } catch {} };
+
+  return (
+    <div className="shell terms-gate" data-id="FirstRunTermsGate">
+      <div className="glow" aria-hidden />
+      <div className="terms-gate__panel">
+        <h1 className="terms-gate__title" data-id="FirstRunTermsGate-title">{t("title", "用户协议与授权说明")}</h1>
+        <p className="terms-gate__subtitle">{t("subtitle", "使用 CiCy Desktop 前,请阅读并同意以下条款")}</p>
+
+        <div className="terms-gate__body" ref={bodyRef} onScroll={onScroll} data-id="FirstRunTermsGate-body">
+          <h2 className="terms-gate__h2">{t("summaryTitle", "一眼看懂")}</h2>
+          <ol className="terms-gate__summary">
+            {summaries.filter(Boolean).map((s, i) => <li key={i}>{s}</li>)}
+          </ol>
+          {!showFull ? (
+            <button className="terms-gate__viewfull" data-id="FirstRunTermsGate-viewfull"
+              onClick={() => setShowFull(true)}>{t("viewFull", "查看完整条款")}</button>
+          ) : (
+            <pre className="terms-gate__fulltext" data-id="FirstRunTermsGate-fulltext">{TERMS_FULL[locale] || TERMS_FULL.en}</pre>
+          )}
+        </div>
+
+        {!scrolledEnd && <div className="terms-gate__scrollhint" data-id="FirstRunTermsGate-scrollhint">{t("scrollHint", "请阅读至底部以继续")}</div>}
+        <div className="terms-gate__actions">
+          <button data-id="FirstRunTermsGate-decline" className="terms-gate__btn terms-gate__btn--ghost" onClick={decline}>
+            {t("decline", "不同意并退出")}
+          </button>
+          <button data-id="FirstRunTermsGate-agree" className="terms-gate__btn" disabled={!scrolledEnd || busy}
+            title={!scrolledEnd ? t("mustAgree", "未同意则无法使用本软件。") : ""} onClick={agree}>
+            {t("agree", "同意并继续")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // HTTPS 审计 CA 授权卡片 (合规 opt-in)。绝不首启静默装根证书 (Superfish 红线) —
 // 用户在此显式同意后,才由 cicy-code 写入系统根信任库。三态:未授权 / 已授权(可撤销) /

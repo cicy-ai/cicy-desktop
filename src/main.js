@@ -792,6 +792,33 @@ electronApp.whenReady().then(async () => {
       } catch (e) { log.warn(`[auth] logout clear failed: ${e.message}`); }
       return { ok: true };
     });
+
+    // First-run terms gate (合规第一道整体同意). Persist acceptance in
+    // global.json keyed by terms VERSION — a future version bump re-gates.
+    // This is DISTINCT from the MITM CA opt-in (the compliance second consent);
+    // accepting the terms NEVER enables HTTPS audit.
+    __ipcMainAuth.handle("terms:status", (_e, version) => {
+      try {
+        const c = readGlobalConfig(GLOBAL_JSON);
+        const a = c && c.termsAccepted;
+        return { accepted: !!(a && a.version === version), version: a?.version || null };
+      } catch { return { accepted: false, version: null }; }
+    });
+    __ipcMainAuth.handle("terms:agree", (_e, version) => {
+      try {
+        updateGlobalConfig(GLOBAL_JSON, (c) => {
+          c.termsAccepted = { version, accepted_at: new Date().toISOString() };
+          return c;
+        });
+        log.info(`[terms] accepted v${version}`);
+        return { ok: true };
+      } catch (e) { return { ok: false, error: e.message }; }
+    });
+    __ipcMainAuth.handle("terms:decline", () => {
+      log.info("[terms] declined — quitting");
+      setTimeout(() => electronApp.quit(), 50);
+      return { ok: true };
+    });
   }
 
   // Local-team discovery — reads ~/cicy-ai/global.json's cicyDesktopNodes

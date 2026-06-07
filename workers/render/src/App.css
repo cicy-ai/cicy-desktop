@@ -778,3 +778,39 @@ body {
 .mitm-card__btn:disabled { opacity: 0.6; cursor: default; }
 .mitm-card__btn--ghost { background: transparent; border: 1px solid rgba(125, 135, 150, 0.35); color: var(--text-dim, #9da7b3); }
 .mitm-card__sub { color: var(--text-dim, #9da7b3); opacity: 0.8; font-size: 11.5px; }
+
+/* 首启门控条款页 (合规第一道整体同意) */
+.terms-gate { display: flex; align-items: center; justify-content: center; padding: 24px; }
+.terms-gate__panel {
+  position: relative; z-index: 1; width: min(680px, 94vw); max-height: 90vh;
+  display: flex; flex-direction: column;
+  background: rgba(20, 25, 33, 0.92); border: 1px solid rgba(125, 135, 150, 0.22);
+  border-radius: 16px; padding: 28px 30px; box-shadow: 0 24px 60px rgba(0,0,0,0.5);
+}
+.terms-gate__title { font-size: 20px; font-weight: 700; margin: 0 0 4px; color: var(--text, #e6edf3); }
+.terms-gate__subtitle { font-size: 13px; color: var(--text-dim, #9da7b3); margin: 0 0 16px; }
+.terms-gate__body {
+  overflow-y: auto; flex: 1 1 auto; min-height: 0; padding-right: 8px;
+  border-top: 1px solid rgba(125,135,150,0.15); border-bottom: 1px solid rgba(125,135,150,0.15);
+  padding-top: 14px; padding-bottom: 14px;
+}
+.terms-gate__h2 { font-size: 14px; font-weight: 600; margin: 0 0 10px; color: var(--text, #e6edf3); }
+.terms-gate__summary { margin: 0 0 14px; padding-left: 20px; }
+.terms-gate__summary li { font-size: 13px; line-height: 1.6; color: var(--text-dim, #c2cbd6); margin-bottom: 8px; }
+.terms-gate__viewfull {
+  background: none; border: none; color: var(--accent, #3b82f6); cursor: pointer;
+  font-size: 13px; padding: 4px 0; text-decoration: underline;
+}
+.terms-gate__fulltext {
+  white-space: pre-wrap; word-break: break-word; font-size: 12px; line-height: 1.6;
+  color: var(--text-dim, #b3bcc8); background: rgba(0,0,0,0.2); border-radius: 8px;
+  padding: 14px; margin: 10px 0 0; font-family: inherit;
+}
+.terms-gate__scrollhint { font-size: 12px; color: #fbbf24; text-align: center; margin: 12px 0 0; }
+.terms-gate__actions { display: flex; gap: 12px; justify-content: flex-end; margin-top: 18px; }
+.terms-gate__btn {
+  font-size: 14px; padding: 10px 22px; border-radius: 9px; border: none; cursor: pointer;
+  background: var(--accent, #3b82f6); color: #fff; font-weight: 600;
+}
+.terms-gate__btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.terms-gate__btn--ghost { background: transparent; border: 1px solid rgba(125,135,150,0.35); color: var(--text-dim, #9da7b3); font-weight: 500; }

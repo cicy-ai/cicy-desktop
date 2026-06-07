@@ -121,6 +121,12 @@ contextBridge.exposeInMainWorld("cicy", {
   mitm: {
     caExec: (action) => logInvoke("mitm:ca-exec", action), // "install" | "uninstall"
   },
+  // First-run terms gate (合规第一道整体同意).
+  terms: {
+    status:  (version) => logInvoke("terms:status", version),
+    agree:   (version) => logInvoke("terms:agree", version),
+    decline: ()        => logInvoke("terms:decline"),
+  },
   // Windows Docker bootstrap (install Docker → load image → start container).
   docker: {
     status:      ()  => logInvoke("docker:status"),
