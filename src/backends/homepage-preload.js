@@ -117,6 +117,10 @@ contextBridge.exposeInMainWorld("cicy", {
       return () => ipcRenderer.removeListener("sidecar:op-progress", handler);
     },
   },
+  // MITM CA elevation fallback (exec self-elevating install-ca/uninstall-ca).
+  mitm: {
+    caExec: (action) => logInvoke("mitm:ca-exec", action), // "install" | "uninstall"
+  },
   // Windows Docker bootstrap (install Docker → load image → start container).
   docker: {
     status:      ()  => logInvoke("docker:status"),

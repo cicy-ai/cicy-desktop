@@ -751,3 +751,29 @@ body {
   background: var(--accent, #3b82f6);
   transition: width 0.25s ease;
 }
+
+/* HTTPS 审计 CA 授权卡片 (合规 opt-in) */
+.mitm-card {
+  border: 1px solid rgba(125, 135, 150, 0.22);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  background: rgba(30, 36, 46, 0.4);
+}
+.mitm-card--on { border-color: rgba(74, 222, 128, 0.35); background: rgba(22, 40, 30, 0.4); }
+.mitm-card__head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.mitm-card__dot { width: 8px; height: 8px; border-radius: 50%; background: #9da7b3; flex: 0 0 auto; }
+.mitm-card__dot[data-state="on"]   { background: #4ade80; box-shadow: 0 0 6px rgba(74, 222, 128, 0.6); }
+.mitm-card__dot[data-state="warn"] { background: #fbbf24; }
+.mitm-card__dot[data-state="off"]  { background: #60a5fa; }
+.mitm-card__title { font-size: 14px; font-weight: 600; color: var(--text, #e6edf3); }
+.mitm-card__desc { font-size: 12.5px; line-height: 1.5; color: var(--text-dim, #9da7b3); margin: 0 0 10px; }
+.mitm-card__note { color: #fbbf24; }
+.mitm-card__error { font-size: 12px; color: #f87171; margin-bottom: 8px; }
+.mitm-card__actions { display: flex; gap: 8px; }
+.mitm-card__btn {
+  font-size: 13px; padding: 7px 16px; border-radius: 8px; border: none; cursor: pointer;
+  background: var(--accent, #3b82f6); color: #fff; font-weight: 500;
+}
+.mitm-card__btn:disabled { opacity: 0.6; cursor: default; }
+.mitm-card__btn--ghost { background: transparent; border: 1px solid rgba(125, 135, 150, 0.35); color: var(--text-dim, #9da7b3); }

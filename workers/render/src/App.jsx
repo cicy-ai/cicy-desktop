@@ -358,6 +358,7 @@ export default function App() {
         </div>
 
         {showLocal && <DockerSetup onReady={fetchLocalTeams} />}
+        {showLocal && localList.length > 0 && <MitmConsentCard team={localList[0]} />}
 
         {profileError && (
           <div className="error" style={{ marginBottom: 12 }}>
@@ -448,6 +449,106 @@ const DOCKER_STEPS = [
   { key: "container",      label: "启动 cicy-code" },
   { key: "health",         label: "本地团队就绪" },
 ];
+
+// HTTPS 审计 CA 授权卡片 (合规 opt-in)。绝不首启静默装根证书 (Superfish 红线) —
+// 用户在此显式同意后,才由 cicy-code 写入系统根信任库。三态:未授权 / 已授权(可撤销) /
+// 处理中。同意走 POST /api/mitm/consent;need_elevation 回退 exec 自提权 install-ca。
+function MitmConsentCard({ team }) {
+  const [status, setStatus] = useState(undefined); // undefined=loading, null=endpoint absent, {generated,trusted,consent}
+  const [busy, setBusy] = useState("");            // "" | enable | disable
+  const [error, setError] = useState("");
+
+  const base = (team?.base_url || "").replace(/\/$/, "");
+  const token = team?.api_token || "";
+
+  const caFetch = useCallback(async (path, opts = {}) => {
+    if (!window.cicy?.cloud?.fetch) throw new Error("bridge missing");
+    const r = await window.cicy.cloud.fetch(`${base}${path}`, {
+      ...opts,
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", ...(opts.headers || {}) },
+    });
+    let json = null; try { json = JSON.parse(r.body); } catch {}
+    return { ok: r.ok, status: r.status, json };
+  }, [base, token]);
+
+  const refresh = useCallback(async () => {
+    try {
+      const r = await caFetch("/api/mitm/ca-status");
+      // 404 / not-ok → endpoint not present (older cicy-code) → hide card.
+      setStatus(r.ok && r.json ? r.json : null);
+    } catch { setStatus(null); }
+  }, [caFetch]);
+  useEffect(() => { if (base && token) refresh(); }, [base, token, refresh]);
+
+  // Hide until we know the CA exists. No CA generated (MITM off) → nothing to consent to.
+  if (status === undefined) return null;          // still loading
+  if (!status || !status.generated) return null;  // endpoint absent or no CA
+
+  const enable = async () => {
+    if (busy) return;
+    setBusy("enable"); setError("");
+    try {
+      const r = await caFetch("/api/mitm/consent", { method: "POST", body: JSON.stringify({ enable: true }) });
+      if (r.ok && r.json?.ok && r.json?.trusted) { await refresh(); }
+      else if (r.json?.error === "need_elevation" || (!r.ok && r.status === 403)) {
+        // fall back to the self-elevating CLI (OS prompt = the second consent)
+        const ex = await window.cicy?.mitm?.caExec?.("install");
+        if (ex?.ok) await refresh();
+        else setError(ex?.code === 1 && /cancel/i.test(ex?.stderr || "") ? "授权被取消,可重试" : (ex?.stderr || "提权失败,请从管理员控制台运行"));
+      } else {
+        setError(r.json?.error || `失败 (HTTP ${r.status})`);
+      }
+    } catch (e) { setError(String(e?.message || e)); }
+    finally { setBusy(""); }
+  };
+
+  const disable = async () => {
+    if (busy) return;
+    setBusy("disable"); setError("");
+    try {
+      const r = await caFetch("/api/mitm/consent", { method: "POST", body: JSON.stringify({ enable: false }) });
+      if (r.ok && r.json?.ok) await refresh();
+      else {
+        const ex = await window.cicy?.mitm?.caExec?.("uninstall");
+        if (ex?.ok) await refresh(); else setError(ex?.stderr || r.json?.error || "撤销失败");
+      }
+    } catch (e) { setError(String(e?.message || e)); }
+    finally { setBusy(""); }
+  };
+
+  const granted = status.consent && status.trusted;
+  const partial = status.consent && !status.trusted; // consented but not (re)installed
+
+  return (
+    <div data-id="MitmConsentCard" className={`mitm-card${granted ? " mitm-card--on" : ""}`}>
+      <div className="mitm-card__head">
+        <span className="mitm-card__dot" data-state={granted ? "on" : partial ? "warn" : "off"} />
+        <span className="mitm-card__title" data-id="MitmConsentCard-title">
+          {granted ? "HTTPS 审计已启用" : partial ? "需要重新授权 HTTPS 审计" : "启用 HTTPS 审计"}
+        </span>
+      </div>
+      <p className="mitm-card__desc" data-id="MitmConsentCard-desc">
+        启用后本机到 AI 厂商(Claude / OpenAI / DeepSeek / Gemini)的 HTTPS 将被本地审计解密,数据留本地,可随时关闭。
+        <br />
+        <span className="mitm-card__note">需将一张根证书写入系统信任库,需要管理员授权。</span>
+      </p>
+      {error && <div className="mitm-card__error" data-id="MitmConsentCard-error">{error}</div>}
+      <div className="mitm-card__actions">
+        {granted ? (
+          <button data-id="MitmConsentCard-revoke" className="mitm-card__btn mitm-card__btn--ghost"
+            disabled={!!busy} onClick={disable}>
+            {busy === "disable" ? "撤销中…" : "撤销授权"}
+          </button>
+        ) : (
+          <button data-id="MitmConsentCard-enable" className="mitm-card__btn"
+            disabled={!!busy} onClick={enable}>
+            {busy === "enable" ? "授权中…" : partial ? "重新启用" : "同意并启用"}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function DockerSetup({ onReady }) {
   const [status, setStatus] = useState(null);  // {platform, installed, imagePresent, running}

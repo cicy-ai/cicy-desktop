@@ -132,6 +132,25 @@ function register({ sidecarLogPath } = {}) {
       return { ok: false, error: err.message };
     }
   });
+
+  // MITM CA elevation fallback: when POST /api/mitm/consent returns
+  // need_elevation (cicy-code not running elevated), the homepage card calls
+  // this to exec `<runtime cicy-code> mitm install-ca|uninstall-ca`, which
+  // self-elevates (Win UAC / mac osascript / linux pkexec) — the OS prompt is
+  // the compliance second-consent. Returns { ok, code, stderr }.
+  ipcMain.handle("mitm:ca-exec", async (_e, action) => {
+    const verb = action === "uninstall" ? "uninstall-ca" : "install-ca";
+    let exe = null;
+    try { exe = require("../sidecar/runtime").binPath("cicy-code"); } catch {}
+    if (!exe) return { ok: false, error: "cicy-code runtime binary not found" };
+    return await new Promise((resolve) => {
+      const { execFile } = require("child_process");
+      execFile(exe, ["mitm", verb], { windowsHide: false, timeout: 120000 }, (err, _stdout, stderr) => {
+        if (err) resolve({ ok: false, code: err.code ?? 1, stderr: String(stderr || err.message).slice(0, 400) });
+        else resolve({ ok: true, code: 0 });
+      });
+    });
+  });
 }
 
 module.exports = { register };
