@@ -116,16 +116,20 @@ function register({ sidecarLogPath } = {}) {
   // Update: stop + spawn cicy-code@latest (or reload the Docker image on
   // win32). The npx re-resolve / image pull can take a while on a cold cache,
   // so allow a longer window for :8008 to come back.
-  ipcMain.handle("sidecar:update", async () => {
+  ipcMain.handle("sidecar:update", async (e) => {
+    // Stream phase/progress events to the homepage so the user SEES the
+    // update working (download %, swap, restart) instead of a frozen label.
+    const emit = (ev) => { try { e.sender.send("sidecar:op-progress", { op: "update", ...ev }); } catch {} };
     try {
-      const child = await sidecar.update({ logPath: sidecarLogPath });
+      const child = await sidecar.update({ logPath: sidecarLogPath, port: PORT, emit });
       for (let i = 0; i < 240; i++) {
         if (await sidecar.probeExisting(PORT)) return { ok: true, pid: child?.pid || null };
         await new Promise((r) => setTimeout(r, 250));
       }
       return { ok: true, pid: child?.pid || null, warning: "updated but did not bind :8008 within 60s" };
-    } catch (e) {
-      return { ok: false, error: e.message };
+    } catch (err) {
+      emit({ phase: "done", status: "error", message: `更新失败：${err.message}` });
+      return { ok: false, error: err.message };
     }
   });
 }

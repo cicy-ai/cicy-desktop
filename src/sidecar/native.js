@@ -167,12 +167,33 @@ async function restart({ port = 8008, logPath = null } = {}) {
   return start({ port, logPath });
 }
 
-// Update: npm route re-resolves @latest; dev route unlinks the cached exe to
-// defeat ensureDownloaded's size-match skip. Then restart on the new build.
+// Update — SAFE swap order: acquire the new build FIRST (progress streamed),
+// only then stop the running instance and switch. A dead network therefore
+// fails the update loudly but never kills a working install. Dev route
+// downloads to .new and renames; npm route re-resolves @latest in place
+// (npm's own staging is already atomic).
 async function update({ port = 8008, logPath = null, emit } = {}) {
-  await stop({ port });
-  if (devExeUrl()) { try { fs.unlinkSync(DEV_EXE_PATH); } catch {} }
-  return start({ port, logPath, emit, version: devExeUrl() ? null : "latest" });
+  const e = emit || (() => {});
+  if (devExeUrl()) {
+    const tmp = DEV_EXE_PATH + ".new";
+    try { fs.unlinkSync(tmp); } catch {}
+    e({ phase: "download", status: "running", message: "下载新版 cicy-code.exe…", progress: 0 });
+    await docker.ensureDownloaded(devExeUrl(), tmp, null, { emit, phase: "download", label: "下载新版" });
+    if (!fs.existsSync(tmp)) throw new Error("下载未完成，保留当前版本");
+    e({ phase: "swap", status: "running", message: "停止旧版本…" });
+    await stop({ port });
+    try { fs.unlinkSync(DEV_EXE_PATH + ".bak"); } catch {}
+    try { fs.renameSync(DEV_EXE_PATH, DEV_EXE_PATH + ".bak"); } catch {}
+    fs.renameSync(tmp, DEV_EXE_PATH);
+  } else {
+    e({ phase: "download", status: "running", message: "npm 获取最新版…" });
+    await ensureExe({ emit, version: "latest" }); // service untouched until this succeeds
+    e({ phase: "swap", status: "running", message: "重启服务…" });
+    await stop({ port });
+  }
+  const r = await start({ port, logPath, emit });
+  e({ phase: "done", status: r ? "done" : "error", message: r ? "已更新并重启" : "更新后启动失败" });
+  return r;
 }
 
 async function checkStatus({ port = 8008 } = {}) {

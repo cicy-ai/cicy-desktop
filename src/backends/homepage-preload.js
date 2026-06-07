@@ -109,6 +109,13 @@ contextBridge.exposeInMainWorld("cicy", {
     stop:        ()  => logInvoke("sidecar:stop"),
     restart:     ()  => logInvoke("sidecar:restart"),
     update:      ()  => logInvoke("sidecar:update"),
+    // live {op, phase, status, message, progress?} events during update —
+    // returns an unsubscribe fn.
+    onOpProgress: (cb) => {
+      const handler = (_e, ev) => { try { cb(ev); } catch {} };
+      ipcRenderer.on("sidecar:op-progress", handler);
+      return () => ipcRenderer.removeListener("sidecar:op-progress", handler);
+    },
   },
   // Windows Docker bootstrap (install Docker → load image → start container).
   docker: {

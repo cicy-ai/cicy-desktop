@@ -543,6 +543,7 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
   const running = team.status === "running";
   const [busy, setBusy] = useState("");   // "" | start | restart | update | stop
   const [opMsg, setOpMsg] = useState("");
+  const [opProg, setOpProg] = useState(null); // live {message, progress?, status} during 更新
   const [menuOpen, setMenuOpen] = useState(false);
   const [latest, setLatest] = useState(null); // newest cicy-code on the registry
   const [checking, setChecking] = useState(false);
@@ -610,7 +611,15 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
   const runOp = async (kind, fn, doneText) => {
     setMenuOpen(false);
     if (busy) return;
-    setBusy(kind); setOpMsg("");
+    setBusy(kind); setOpMsg(""); setOpProg(null);
+    // 更新 streams real phase/percent events from the main process — surface
+    // them live on the card so the user SEES the download/swap happening.
+    let unsub = null;
+    if (kind === "update" && window.cicy?.sidecar?.onOpProgress) {
+      unsub = window.cicy.sidecar.onOpProgress((ev) => {
+        if (ev?.op === "update") setOpProg(ev);
+      });
+    }
     try {
       const r = await fn();
       setOpMsg(r?.ok
@@ -619,8 +628,10 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
     } catch (err) {
       setOpMsg(tr("sidecar.failed", "操作失败") + `: ${err?.message || err}`);
     } finally {
-      setBusy("");
+      try { unsub && unsub(); } catch {}
+      setBusy(""); setOpProg(null);
       onRefresh?.(); // re-probe so the status dot/chip catches up
+      setTimeout(() => setOpMsg(""), 5000); // result line is transient
     }
   };
   const BUSY_LABEL = { start: "启动中…", restart: "重启中…", update: "更新中…", stop: "停止中…" };
@@ -771,6 +782,22 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
             <span className="bcard__ver" data-id="LocalTeamCard-version">v{team.version}</span>
           )}
         </div>
+        {busy && (
+          <div className="bcard__prog" data-id="LocalTeamCard-progress" data-status={opProg?.status || "running"}>
+            <span className="bcard__progmsg">
+              {opProg?.message || BUSY_LABEL[busy] || `${busy}…`}
+              {Number.isFinite(opProg?.progress) ? ` ${opProg.progress}%` : ""}
+            </span>
+            {Number.isFinite(opProg?.progress) && (
+              <span className="bcard__progbar"><span style={{ width: `${Math.min(100, opProg.progress)}%` }} /></span>
+            )}
+          </div>
+        )}
+        {!busy && opMsg && (
+          <div className="bcard__prog" data-id="LocalTeamCard-progress" data-status={/失败|error/i.test(opMsg) ? "error" : "done"}>
+            <span className="bcard__progmsg">{opMsg}</span>
+          </div>
+        )}
       </div>
       <button
         type="button"
@@ -779,8 +806,8 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
         disabled={!!busy || !team.base_url}
         onClick={handleOpen}
       >
-        {busy === "start" ? <Spinner /> : <ArrowIcon />}
-        <span>{openLabel}</span>
+        {busy && busy !== "stop" ? <Spinner /> : <ArrowIcon />}
+        <span>{busy ? (BUSY_LABEL[busy] || openLabel) : openLabel}</span>
       </button>
     </div>
   );

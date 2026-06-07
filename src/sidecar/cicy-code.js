@@ -219,17 +219,28 @@ async function restart({ logPath, port = DEFAULT_PORT } = {}) {
 //   win32  → reload the Docker image (from R2) and re-run the container.
 //   else   → clear the npx cache + spawn `cicy-code@latest` so npx re-resolves
 //            against the registry (npmmirror for CN) and pulls a newer build.
-async function update({ logPath, port = DEFAULT_PORT } = {}) {
-  await stop({ port });
+async function update({ logPath, port = DEFAULT_PORT, emit } = {}) {
+  const e = emit || (() => {});
   if (process.platform === "win32") {
-    try { await require("./docker").loadImage(); } catch (e) {
-      console.warn(`[cicy-code-sidecar] docker image reload failed: ${e.message}`);
+    // NATIVE route: safe-swap update with real download progress.
+    if (process.env.CICY_WIN_NATIVE === "1") {
+      return require("./native").update({ port, logPath, emit });
+    }
+    // Transitional Docker route. loadImage streams 下载镜像 % via emit.
+    await stop({ port });
+    try { await require("./docker").loadImage({ emit }); } catch (err) {
+      console.warn(`[cicy-code-sidecar] docker image reload failed: ${err.message}`);
+      e({ phase: "download", status: "error", message: `镜像更新失败：${err.message}` });
     }
     await new Promise(r => setTimeout(r, 300));
+    e({ phase: "swap", status: "running", message: "重启容器…" });
     return start({ logPath, port, force: true });
   }
+  e({ phase: "download", status: "running", message: "获取最新版 cicy-code…" });
+  await stop({ port });
   clearNpxCache();
   await new Promise(r => setTimeout(r, 300));
+  e({ phase: "swap", status: "running", message: "启动新版本…" });
   return start({ logPath, port, force: true, version: "latest" });
 }
 
