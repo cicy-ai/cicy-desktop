@@ -1,6 +1,6 @@
 {
   "name": "cicy-desktop",
-  "version": "2.1.66",
+  "version": "2.1.67",
   "description": "CiCy - AI-powered operating system browser",
   "main": "src/main.js",
   "bin": {
@@ -130,6 +130,20 @@
     "zod": "3.25",
     "electron-updater": "6.6.2",
     "electron": "41.0.3"
+  },
+  "//optionalDependencies": "Runtime Bundle v1 (主人指令): platform binaries delivered by `npm i -g cicy-desktop` itself — npm installs only the current-platform subpackage (os/cpu pinned in each), so first start seeds the runtime store with ZERO network, ZERO npx. Windows packages are named *-windows-* (npm spam filter 403s new names containing win32). cicy-msys2 added once published.",
+  "optionalDependencies": {
+    "cicy-code-darwin-x64": "2.1.60",
+    "cicy-code-darwin-arm64": "2.1.60",
+    "cicy-code-linux-x64": "2.1.60",
+    "cicy-code-linux-arm64": "2.1.60",
+    "cicy-code-windows-x64": "2.1.60",
+    "cicy-mihomo-darwin-x64": "1.10.4",
+    "cicy-mihomo-darwin-arm64": "1.10.4",
+    "cicy-mihomo-linux-x64": "1.10.4",
+    "cicy-mihomo-linux-arm64": "1.10.4",
+    "cicy-mihomo-windows-x64": "1.10.4",
+    "cicy-mihomo-windows-arm64": "1.10.4"
   },
   "devDependencies": {
     "@babel/core": "^7.29.0",
