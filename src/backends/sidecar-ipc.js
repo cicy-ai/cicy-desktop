@@ -14,6 +14,7 @@
 
 const { ipcMain } = require("electron");
 const sidecar = require("../sidecar/cicy-code");
+const docker = require("../sidecar/docker");
 
 const PORT = Number(process.env.CICY_CODE_PORT || 8008);
 let registered = false;
@@ -25,6 +26,32 @@ function register({ sidecarLogPath } = {}) {
   ipcMain.handle("sidecar:status", async () => {
     const running = await sidecar.probeExisting(PORT);
     return { running };
+  });
+
+  // ---- Windows Docker bootstrap (homepage's "no Docker" setup flow) ----
+  // docker:status → what's missing; docker:bootstrap → install Docker (if
+  // needed) + load image + start container, streaming progress back to the
+  // homepage on 'docker:bootstrap-progress'. Bootstrap is win32-only.
+  ipcMain.handle("docker:status", async () => {
+    try {
+      const st = await docker.checkStatus();        // { installed, imagePresent }
+      const running = await docker.probeHealth(PORT);
+      return { ...st, running, platform: process.platform };
+    } catch (e) {
+      return { installed: false, imagePresent: false, running: false, error: e.message, platform: process.platform };
+    }
+  });
+
+  ipcMain.handle("docker:bootstrap", async (e) => {
+    if (process.platform !== "win32") return { ok: false, error: "docker bootstrap is Windows-only" };
+    try {
+      return await docker.bootstrap({
+        port: PORT,
+        onProgress: (ev) => { try { e.sender.send("docker:bootstrap-progress", ev); } catch {} },
+      });
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
   });
 
   // Start (or reuse) the cicy-code daemon. probeExisting inside start() reuses

@@ -357,6 +357,8 @@ export default function App() {
           ))}
         </div>
 
+        {showLocal && <DockerSetup onReady={fetchLocalTeams} />}
+
         {profileError && (
           <div className="error" style={{ marginBottom: 12 }}>
             云端: {profileError}
@@ -433,6 +435,87 @@ function Section({ title, subtitle, icon, children }) {
       </div>
       <div className="section-body">{children}</div>
     </section>
+  );
+}
+
+// Windows-only: when the local team needs Docker and it isn't ready, this card
+// drives the one-click bootstrap (install Docker → load image → start container
+// → wait health). Each step shows pending/running/skip/done/error + download %.
+// Idempotent + resumable on the backend, so 重试 picks up where it left off.
+const DOCKER_STEPS = [
+  { key: "install-docker", label: "安装 Docker" },
+  { key: "image",          label: "拉取基础镜像" },
+  { key: "container",      label: "启动 cicy-code" },
+  { key: "health",         label: "本地团队就绪" },
+];
+
+function DockerSetup({ onReady }) {
+  const [status, setStatus] = useState(null);  // {platform, installed, imagePresent, running}
+  const [phases, setPhases] = useState({});    // key -> { status, message, progress }
+  const [busy, setBusy] = useState(false);
+
+  const refresh = useCallback(async () => {
+    if (!window.cicy?.docker?.status) return;
+    try { setStatus(await window.cicy.docker.status()); } catch {}
+  }, []);
+  useEffect(() => { refresh(); }, [refresh]);
+
+  // Only relevant on Windows while the local daemon isn't up yet.
+  if (!status || status.platform !== "win32" || status.running) return null;
+
+  const run = async () => {
+    if (busy) return;
+    setBusy(true);
+    const unsub = window.cicy.docker.onProgress((ev) => {
+      if (ev && ev.phase) setPhases((p) => ({ ...p, [ev.phase]: ev }));
+    });
+    try {
+      const r = await window.cicy.docker.bootstrap();
+      if (r?.ok) onReady?.();
+    } catch {}
+    finally { try { unsub?.(); } catch {} setBusy(false); refresh(); }
+  };
+
+  const started = Object.keys(phases).length > 0;
+
+  return (
+    <div data-id="DockerSetup" className="docker-setup">
+      <div className="docker-setup__head">
+        <span className="docker-setup__title">本机团队需要 Docker</span>
+        <span className="docker-setup__sub">
+          Windows 上 cicy-code 跑在 Docker(Linux 容器)里。一键装好并启动,或先用云端/已添加的团队。
+        </span>
+      </div>
+      <div className="docker-setup__steps">
+        {DOCKER_STEPS.map(({ key, label }) => {
+          const ph = phases[key];
+          const st = ph?.status || "pending";
+          return (
+            <div key={key} data-id={`DockerSetup-step-${key}`} className={`docker-step is-${st}`}>
+              <span className="docker-step__dot" aria-hidden />
+              <span className="docker-step__label">{label}</span>
+              {ph?.message && <span className="docker-step__msg" title={ph.message}>{ph.message}</span>}
+              {st === "running" && typeof ph?.progress === "number" && (
+                <span className="docker-step__pct">{ph.progress}%</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div className="docker-setup__actions">
+        <button type="button" data-id="DockerSetup-run" className="btn-primary" disabled={busy} onClick={run}>
+          {busy ? tr("docker.working", "处理中…") : started ? tr("docker.retry", "重试") : tr("docker.run", "一键安装并启动")}
+        </button>
+        <button
+          type="button"
+          data-id="DockerSetup-manual"
+          className="btn-ghost"
+          onClick={() => window.cicy?.shell?.openExternal?.("https://www.docker.com/products/docker-desktop/")}
+        >
+          {tr("docker.manual", "手动装 Docker")}
+        </button>
+      </div>
+    </div>
   );
 }
 

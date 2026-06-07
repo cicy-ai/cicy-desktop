@@ -110,6 +110,16 @@ contextBridge.exposeInMainWorld("cicy", {
     restart:     ()  => logInvoke("sidecar:restart"),
     update:      ()  => logInvoke("sidecar:update"),
   },
+  // Windows Docker bootstrap (install Docker → load image → start container).
+  docker: {
+    status:      ()  => logInvoke("docker:status"),
+    bootstrap:   ()  => logInvoke("docker:bootstrap"),
+    onProgress:  (cb) => {
+      const handler = (_e, ev) => { try { cb(ev); } catch {} };
+      ipcRenderer.on("docker:bootstrap-progress", handler);
+      return () => ipcRenderer.removeListener("docker:bootstrap-progress", handler);
+    },
+  },
   windows: {
     list:  ()   => logInvoke("windows:list"),
     focus: (id) => logInvoke("windows:focus", id),
