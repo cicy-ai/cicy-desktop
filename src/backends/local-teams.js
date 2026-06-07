@@ -26,7 +26,12 @@ try { __t = require("../i18n").t; } catch { __t = null; }
 const unnamedName = () => { try { return (__t && __t("localTeams.unnamed")) || "Unnamed"; } catch { return "Unnamed"; } };
 const log = require("electron-log");
 
+// global.json is now only read for the local sidecar's api_token (auto-fill).
+// The TEAM LIST lives in its own file: ~/cicy-ai/db/teams.json — decoupled from
+// global.json (which cicy-code + the helper self-register into, which used to
+// leak "Unnamed" ghosts into the team list). Shape: a flat { "<id>": {node} } map.
 const GLOBAL_JSON = path.join(os.homedir(), "cicy-ai", "global.json");
+const TEAMS_JSON = path.join(os.homedir(), "cicy-ai", "db", "teams.json");
 const HEALTH_TIMEOUT_MS = 1500;
 const CACHE_MS = 4000; // small dedupe so rapid renderer polls don't fan-out
 
@@ -42,6 +47,50 @@ function readGlobal() {
     if (e && e.code !== "ENOENT") log.info(`[local-teams] read failed: ${e.message}`);
     return null;
   }
+}
+
+// The team map, from teams.json. One-time migration: if teams.json is absent
+// but the legacy global.json.cicyDesktopNodes still has teams, seed teams.json
+// from it (global.json is left untouched). Returns a { "<id>": {node} } map.
+function readNodes() {
+  try {
+    const raw = fs.readFileSync(TEAMS_JSON, "utf8");
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") return parsed;
+  } catch (e) {
+    if (e && e.code !== "ENOENT") log.info(`[local-teams] teams.json read failed: ${e.message}`);
+  }
+  const legacy = (readGlobal()?.cicyDesktopNodes) || {};
+  if (Object.keys(legacy).length) {
+    try {
+      fs.mkdirSync(path.dirname(TEAMS_JSON), { recursive: true });
+      fs.writeFileSync(TEAMS_JSON, JSON.stringify(legacy, null, 2), { mode: 0o600 });
+      log.info(`[local-teams] migrated ${Object.keys(legacy).length} team(s) global.json → teams.json`);
+    } catch (e) { log.info(`[local-teams] teams.json migrate failed: ${e.message}`); }
+    return legacy;
+  }
+  return {};
+}
+
+// Atomic read-modify-write of teams.json. The updater gets the node map and
+// returns the next map. Seeds from legacy global.json on first write too.
+async function writeNodes(updater) {
+  let nodes = {};
+  try {
+    const raw = await fs.promises.readFile(TEAMS_JSON, "utf8");
+    nodes = JSON.parse(raw);
+    if (!nodes || typeof nodes !== "object") nodes = {};
+  } catch (e) {
+    if (e.code !== "ENOENT") throw e;
+    nodes = (readGlobal()?.cicyDesktopNodes) || {}; // seed from legacy
+  }
+  const next = updater(nodes) || nodes;
+  const tmp = `${TEAMS_JSON}.tmp.${process.pid}.${Date.now()}`;
+  await fs.promises.mkdir(path.dirname(TEAMS_JSON), { recursive: true });
+  await fs.promises.writeFile(tmp, JSON.stringify(next, null, 2), { mode: 0o600 });
+  await fs.promises.rename(tmp, TEAMS_JSON);
+  _cacheUntil = 0; // invalidate list() cache
+  return next;
 }
 
 function probeHealth(baseUrl, token) {
@@ -93,8 +142,7 @@ function classify(health) {
 
 async function list({ refresh = false } = {}) {
   if (!refresh && _cache && Date.now() < _cacheUntil) return _cache;
-  const g = readGlobal();
-  const nodes = (g && g.cicyDesktopNodes) || {};
+  const nodes = readNodes();
   const slugs = Object.keys(nodes);
   const teams = await Promise.all(slugs.map(async (slug) => {
     const node = nodes[slug] || {};
@@ -133,8 +181,7 @@ async function list({ refresh = false } = {}) {
 // the SPA of every desktop tool, which was the regression in the
 // previous implementation.
 function openTeam(id) {
-  const g = readGlobal();
-  const node = g?.cicyDesktopNodes?.[id];
+  const node = readNodes()[id];
   if (!node) return { ok: false, error: "team not found" };
   const baseUrl = (node.base_url || "").replace(/\/$/, "");
   if (!baseUrl) return { ok: false, error: "no base_url" };
@@ -179,8 +226,7 @@ function stripVolatile(u) {
 // 刷新 action). Matches the window the same way openTeam reuses one — by
 // origin+pathname. No-op-with-error if no window is open for the team.
 function reloadTeam(id) {
-  const g = readGlobal();
-  const node = g?.cicyDesktopNodes?.[id];
+  const node = readNodes()[id];
   if (!node) return { ok: false, error: "team not found" };
   const baseUrl = (node.base_url || "").replace(/\/$/, "");
   if (!baseUrl) return { ok: false, error: "no base_url" };
@@ -222,23 +268,6 @@ function slugifyId(input) {
     .slice(0, 40);
 }
 
-async function writeGlobal(updater) {
-  let parsed = {};
-  try {
-    const raw = await fsp.readFile(GLOBAL_JSON, "utf8");
-    parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") parsed = {};
-  } catch (e) {
-    if (e.code !== "ENOENT") throw e;
-  }
-  const next = updater(parsed);
-  const tmp = `${GLOBAL_JSON}.tmp.${process.pid}.${Date.now()}`;
-  await fsp.mkdir(path.dirname(GLOBAL_JSON), { recursive: true });
-  await fsp.writeFile(tmp, JSON.stringify(next, null, 2), { mode: 0o600 });
-  await fsp.rename(tmp, GLOBAL_JSON);
-  _cacheUntil = 0; // invalidate list() cache
-  return next;
-}
 
 // Dedupe key for a team: host:port only. The same cicy-code node is the same
 // node across platforms/protocols, so protocol, path and token never affect
@@ -286,8 +315,7 @@ async function addTeam(spec) {
   // This is what the user sees in the helper flow — "rerun the installer
   // on the same port" should rotate the token in place, not pile on a
   // second card.
-  const g = readGlobal();
-  const existing = g?.cicyDesktopNodes || {};
+  const existing = readNodes();
   let existingId = null;
   for (const [k, v] of Object.entries(existing)) {
     if (normaliseUrl(v?.base_url || "") === baseUrlKey) { existingId = k; break; }
@@ -318,10 +346,9 @@ async function addTeam(spec) {
   // Drop undefined keys so we never overwrite existing fields with null.
   Object.keys(patch).forEach(k => patch[k] === undefined && delete patch[k]);
 
-  await writeGlobal((gNext) => {
-    if (!gNext.cicyDesktopNodes || typeof gNext.cicyDesktopNodes !== "object") gNext.cicyDesktopNodes = {};
-    const prev = gNext.cicyDesktopNodes[id] || {};
-    gNext.cicyDesktopNodes[id] = {
+  await writeNodes((nodes) => {
+    const prev = nodes[id] || {};
+    nodes[id] = {
       ...prev,
       ...patch,
       // Upsert by base_url: an EXISTING team keeps its (possibly user-renamed)
@@ -332,10 +359,10 @@ async function addTeam(spec) {
       added_at: prev.added_at || now,
       updated_at: now,
     };
-    return gNext;
+    return nodes;
   });
   log.info(`[local-teams] ${existingId ? "upsert" : "add"} ${id} → ${baseUrl} (source=${patch.install_source || "n/a"})`);
-  const next = (readGlobal()?.cicyDesktopNodes || {})[id] || {};
+  const next = readNodes()[id] || {};
   return { ok: true, id, upserted: !!existingId, team: { id, ...next, port } };
 }
 
@@ -370,9 +397,8 @@ async function updateTeam(id, patch) {
 
   // If base_url is changing, enforce dedupe — refuse to merge two teams.
   if (filtered.base_url) {
-    const g = readGlobal();
     const nextKey = normaliseUrl(filtered.base_url);
-    for (const [k, v] of Object.entries(g?.cicyDesktopNodes || {})) {
+    for (const [k, v] of Object.entries(readNodes())) {
       if (k === id) continue;
       if (normaliseUrl(v?.base_url || "") === nextKey) {
         return { ok: false, error: `another team (id=${k}) already uses that base_url` };
@@ -381,20 +407,16 @@ async function updateTeam(id, patch) {
   }
 
   let existed = false;
-  await writeGlobal((g) => {
-    if (g.cicyDesktopNodes && Object.prototype.hasOwnProperty.call(g.cicyDesktopNodes, id)) {
+  await writeNodes((nodes) => {
+    if (Object.prototype.hasOwnProperty.call(nodes, id)) {
       existed = true;
-      g.cicyDesktopNodes[id] = {
-        ...g.cicyDesktopNodes[id],
-        ...filtered,
-        updated_at: new Date().toISOString(),
-      };
+      nodes[id] = { ...nodes[id], ...filtered, updated_at: new Date().toISOString() };
     }
-    return g;
+    return nodes;
   });
   if (!existed) return { ok: false, error: "team not found" };
   log.info(`[local-teams] update ${id} → ${Object.keys(filtered).join(",")}`);
-  const next = (readGlobal()?.cicyDesktopNodes || {})[id] || {};
+  const next = readNodes()[id] || {};
   let port = null;
   try { port = parseInt(new URL(next.base_url || "").port, 10) || null; } catch {}
   return { ok: true, id, team: { id, ...next, port } };
@@ -403,12 +425,12 @@ async function updateTeam(id, patch) {
 async function removeTeam(id) {
   if (!id) return { ok: false, error: "id required" };
   let existed = false;
-  await writeGlobal((g) => {
-    if (g.cicyDesktopNodes && Object.prototype.hasOwnProperty.call(g.cicyDesktopNodes, id)) {
+  await writeNodes((nodes) => {
+    if (Object.prototype.hasOwnProperty.call(nodes, id)) {
       existed = true;
-      delete g.cicyDesktopNodes[id];
+      delete nodes[id];
     }
-    return g;
+    return nodes;
   });
   log.info(`[local-teams] remove ${id} (existed=${existed})`);
   return { ok: true, removed: existed };
@@ -651,8 +673,7 @@ async function upgradeDocker(node) {
 
 async function upgradeTeam(id) {
   if (!id) return { ok: false, error: "id required" };
-  const g = readGlobal();
-  const node = g?.cicyDesktopNodes?.[id];
+  const node = readNodes()[id];
   if (!node) return { ok: false, error: "team not found" };
   const src = String(node.install_source || "").toLowerCase();
   const isDocker = src.includes("docker") || (!!node.container_name && !node.install_path);
