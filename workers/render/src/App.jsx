@@ -975,9 +975,17 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
         const v = JSON.parse(r.body)?.version || null;
         setLatest(v);
         if (manual && v) {
-          const behind = team.version && cmpVer(v, team.version) > 0;
-          if (!behind) {
-            setUpToDateMsg(`${tr("sidecar.upToDate", "已是最新")} v${team.version || v}`);
+          if (!team.version) {
+            // Current version UNKNOWN (daemon stopped, or health returned no
+            // version). Do NOT claim "已是最新" and NEVER show the latest as if
+            // it were the current version (the old `team.version || v` bug made
+            // it say "已是最新 v<latest>" while the running daemon was older).
+            setUpToDateMsg(`${tr("sidecar.latestVersionIs", "最新版本")} v${v}·${tr("sidecar.startToCompare", "启动后对比当前版本")}`);
+            setTimeout(() => setUpToDateMsg(""), 3500);
+          } else if (cmpVer(v, team.version) > 0) {
+            // Behind — the 更新 badge/button drives the upgrade; no toast here.
+          } else {
+            setUpToDateMsg(`${tr("sidecar.upToDate", "已是最新")} v${team.version}`);
             setTimeout(() => setUpToDateMsg(""), 2500);
           }
         }
