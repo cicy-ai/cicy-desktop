@@ -33,7 +33,7 @@ jobs:
       - name: Build homepage SPA → src/backends/homepage-react
         run: |
           cd workers/render
-          npm ci
+          npm install --no-audit --no-fund
           npm run build
           cd ../..
           rm -rf src/backends/homepage-react/assets src/backends/homepage-react/index.html
