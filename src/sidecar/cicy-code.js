@@ -128,13 +128,8 @@ async function start({ logPath, port = DEFAULT_PORT, force = false, version = nu
   };
   const args = [];
   if (process.platform === "win32") {
-    // cicy-code.exe shells out to the bundled slim MSYS2 — point it there.
-    try {
-      const runtime = require("./runtime");
-      const msys = runtime.binPath("msys2") || runtime.ensureFromBundle("msys2");
-      if (msys) env.CICY_MSYS_ROOT = msys;
-    } catch {}
-    // --helper=1: boot as the single headless cicy 团队助手 on w-1001 (开机即团队助手).
+    // Windows runs the single headless 团队助手 (--helper=1) on w-1001 — no tmux
+    // panes, so msys2/tmux are NOT bundled or referenced anymore (主人指令 2026-06-08).
     args.push("--helper=1");
   }
   child = spawn(exe, args, { stdio, detached: false, windowsHide: true, env });

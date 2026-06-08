@@ -1,0 +1,32 @@
+name: Publish to npm
+
+# Tag push (vX.Y.Z) → sync optionalDependencies to the LATEST per-platform
+# cicy-code + cicy-mihomo, then publish cicy-desktop to npm. This is what
+# `npx cicy-desktop` / `npm i -g cicy-desktop` users get — the app-installer
+# workflows only build dmg/exe/AppImage, they do NOT publish npm.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch: {}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Sync runtime deps to latest (cicy-code + cicy-mihomo; drop msys2)
+        run: node scripts/sync-runtime-deps.cjs
+
+      - name: Publish cicy-desktop to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

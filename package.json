@@ -1,6 +1,6 @@
 {
   "name": "cicy-desktop",
-  "version": "2.1.71",
+  "version": "2.1.72",
   "description": "CiCy - AI-powered operating system browser",
   "main": "src/main.js",
   "bin": {
@@ -143,8 +143,7 @@
     "cicy-mihomo-linux-x64": "1.10.4",
     "cicy-mihomo-linux-arm64": "1.10.4",
     "cicy-mihomo-windows-x64": "1.10.4",
-    "cicy-mihomo-windows-arm64": "1.10.4",
-    "cicy-msys2-windows-x64": "1.0.0"
+    "cicy-mihomo-windows-arm64": "1.10.4"
   },
   "devDependencies": {
     "@babel/core": "^7.29.0",

@@ -53,6 +53,9 @@ jobs:
           SKIP_TTYD_ASSET=1 SKIP_SKILLS_EMBED=1 bash build.sh all
           ls -lh dist/
 
+      - name: Sync runtime deps to latest (cicy-code + cicy-mihomo; drop msys2)
+        run: node scripts/sync-runtime-deps.cjs
+
       - name: Install project dependencies
         run: npm install --no-audit
 
