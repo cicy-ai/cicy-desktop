@@ -927,6 +927,10 @@ body {
 
 /* 首启门控条款页 (合规第一道整体同意) */
 .terms-gate { display: flex; align-items: center; justify-content: center; padding: 24px; }
+/* .shell sets -webkit-app-region: drag; only .shell--app un-drags itself. The
+   terms gate / splash screens are bare .shell, so without this the whole panel
+   is a window-drag region and its buttons can't be clicked. */
+.terms-gate__panel, .terms-gate__panel * { -webkit-app-region: no-drag; }
 .terms-gate__panel {
   position: relative; z-index: 1; width: min(680px, 94vw); max-height: 90vh;
   display: flex; flex-direction: column;
