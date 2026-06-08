@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import "./App.css";
 import { TERMS_VERSION, TERMS_FULL } from "./termsText";
 
@@ -14,6 +15,190 @@ const TOKEN_KEY = "cicy_token";
 const ACCESS_TOKEN_KEY = "cicy_access_token";
 const USER_ID_KEY = "cicy_user_id";
 const CLOUD_BASE = "https://cicy-ai.com";
+
+// ── Toast: lightweight global notifications (bottom-right). Pub/sub store so
+// any component can push without prop-drilling — one <ToastHost/> at the shell
+// root renders them. Used for 更新/启动/重启 progress + result so feedback floats
+// over the UI instead of being buried inside a card. show() upserts by id, so a
+// long-running op keeps ONE toast and just streams message/progress into it.
+const toastListeners = new Set();
+let toastSeq = 0;
+let toastItems = [];
+const toastTimers = new Map();
+function emitToasts() { toastListeners.forEach((l) => l(toastItems)); }
+const toast = {
+  show(opts = {}) {
+    const id = opts.id || `t${++toastSeq}`;
+    const prev = toastItems.find((t) => t.id === id);
+    const next = { id, status: "running", ...prev, ...opts };
+    toastItems = prev ? toastItems.map((t) => (t.id === id ? next : t)) : [...toastItems, next];
+    emitToasts();
+    const old = toastTimers.get(id);
+    if (old) { clearTimeout(old); toastTimers.delete(id); }
+    if (opts.ttl) toastTimers.set(id, setTimeout(() => toast.dismiss(id), opts.ttl));
+    return id;
+  },
+  dismiss(id) {
+    toastItems = toastItems.filter((t) => t.id !== id);
+    const tm = toastTimers.get(id);
+    if (tm) { clearTimeout(tm); toastTimers.delete(id); }
+    emitToasts();
+  },
+};
+function ToastHost() {
+  const [items, setItems] = useState(toastItems);
+  useEffect(() => { toastListeners.add(setItems); return () => { toastListeners.delete(setItems); }; }, []);
+  if (!items.length) return null;
+  return (
+    <div className="toast-host" data-id="ToastHost">
+      {items.map((t) => (
+        <div key={t.id} className="toast" data-id={`Toast-${t.id}`} data-status={t.status || "running"}>
+          <button type="button" className="toast__x" data-id="Toast-dismiss" onClick={() => toast.dismiss(t.id)} aria-label="dismiss">×</button>
+          <span className="toast__msg">
+            {t.message}{Number.isFinite(t.progress) ? ` ${t.progress}%` : ""}
+          </span>
+          {Number.isFinite(t.progress) && (
+            <span className="toast__bar"><span style={{ width: `${Math.min(100, t.progress)}%` }} /></span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Update drawer: a bottom sheet that streams the live update log (下载→切换→
+// 完成), surfaces the exact step it's on, and offers 重试 when it fails — so a
+// stuck/slow update is legible and recoverable instead of a frozen "更新中…".
+// The sidecar update op emits {phase,status,message} on 'sidecar:op-progress';
+// runOp tees those into this store. Single global instance, mounted at shell root.
+const drawerListeners = new Set();
+let drawerLogSeq = 0;
+let drawerState = null; // null = closed
+function emitDrawer() { drawerListeners.forEach((l) => l(drawerState)); }
+function clockHHMMSS() { const d = new Date(); return d.toTimeString().slice(0, 8); }
+const updateDrawer = {
+  open({ teamId, fromVer, toVer, onRetry } = {}) {
+    drawerState = {
+      teamId, fromVer: fromVer || null, toVer: toVer || null,
+      status: "running",   // running | done | error
+      phase: "download",   // download | swap | done
+      logs: [],
+      onRetry: onRetry || null,
+      lastAt: Date.now(),
+    };
+    emitDrawer();
+  },
+  push(ev = {}) {
+    if (!drawerState) return;
+    const line = { id: ++drawerLogSeq, t: clockHHMMSS(), phase: ev.phase || drawerState.phase, status: ev.status || "running", message: ev.message || "" };
+    drawerState = {
+      ...drawerState,
+      phase: ev.phase || drawerState.phase,
+      toVer: ev.toVer || drawerState.toVer,
+      logs: [...drawerState.logs, line],
+      lastAt: Date.now(),
+    };
+    emitDrawer();
+  },
+  finish({ ok, message } = {}) {
+    if (!drawerState) return;
+    const status = ok ? "done" : "error";
+    const line = { id: ++drawerLogSeq, t: clockHHMMSS(), phase: "done", status, message: message || (ok ? "更新完成" : "更新失败") };
+    drawerState = { ...drawerState, status, phase: "done", logs: [...drawerState.logs, line], lastAt: Date.now() };
+    emitDrawer();
+  },
+  close() { drawerState = null; emitDrawer(); },
+};
+const DRAWER_PHASES = [["download", "下载"], ["swap", "切换"], ["done", "完成"]];
+function UpdateDrawerHost() {
+  const [st, setSt] = useState(drawerState);
+  useEffect(() => { drawerListeners.add(setSt); return () => { drawerListeners.delete(setSt); }; }, []);
+  const logRef = useRef(null);
+  useEffect(() => { const el = logRef.current; if (el) el.scrollTop = el.scrollHeight; }, [st?.logs?.length]);
+  // Stuck detector: running but no new log line for 25s → the verify/probe wait
+  // is taking long; nudge the user (they can keep it in the background).
+  const [stuck, setStuck] = useState(false);
+  useEffect(() => {
+    if (!st || st.status !== "running") { setStuck(false); return; }
+    const id = setInterval(() => setStuck(Date.now() - (st.lastAt || 0) > 25000), 3000);
+    return () => clearInterval(id);
+  }, [st?.lastAt, st?.status]);
+
+  if (!st) return null;
+  const running = st.status === "running";
+  const phaseIdx = DRAWER_PHASES.findIndex(([k]) => k === st.phase);
+  return (
+    <div className="drawer-scrim" data-id="UpdateDrawer-scrim" onClick={() => { if (!running) updateDrawer.close(); }}>
+      <div className="drawer" data-id="UpdateDrawer" data-status={st.status} onClick={(e) => e.stopPropagation()}>
+        <div className="drawer__head">
+          <div className="drawer__title">
+            <span className={`drawer__spark drawer__spark--${st.status}`}>
+              {running ? <Spinner /> : st.status === "done" ? "✓" : "!"}
+            </span>
+            <div>
+              <div className="drawer__h">更新 cicy-code</div>
+              <div className="drawer__sub">{st.fromVer ? `v${st.fromVer}` : "当前"} → {st.toVer ? `v${st.toVer}` : "最新版"}</div>
+            </div>
+          </div>
+          <button type="button" className="drawer__x" data-id="UpdateDrawer-close" disabled={running} title={running ? "更新进行中" : "关闭"} onClick={() => updateDrawer.close()} aria-label="close">×</button>
+        </div>
+
+        <div className="drawer__steps" data-id="UpdateDrawer-steps">
+          {DRAWER_PHASES.map(([k, label], i) => {
+            const done = st.status === "done" || i < phaseIdx;
+            const active = i === phaseIdx && running;
+            const err = st.status === "error" && i === phaseIdx;
+            return (
+              <div key={k} className={`drawer__step${active ? " is-active" : ""}${done ? " is-done" : ""}${err ? " is-error" : ""}`}>
+                <span className="drawer__step-dot">{done ? "✓" : err ? "!" : i + 1}</span>
+                <span className="drawer__step-label">{label}</span>
+                {i < DRAWER_PHASES.length - 1 && <span className="drawer__step-bar" />}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="drawer__log" data-id="UpdateDrawer-log" ref={logRef}>
+          {st.logs.length === 0
+            ? <div className="drawer__log-empty">准备中…</div>
+            : st.logs.map((l) => (
+              <div key={l.id} className="drawer__line" data-status={l.status}>
+                <span className="drawer__t">{l.t}</span>
+                <span className={`drawer__badge drawer__badge--${l.phase}`}>{({ download: "下载", swap: "切换", done: "完成" })[l.phase] || l.phase}</span>
+                <span className="drawer__linemsg">{l.message}</span>
+              </div>
+            ))}
+        </div>
+
+        {stuck && running && (
+          <div className="drawer__hint" data-id="UpdateDrawer-stuck">
+            正在等待新版本就绪，耗时比平常久。可以放到后台继续，完成或失败都会提示。
+          </div>
+        )}
+
+        <div className="drawer__foot">
+          {running ? (
+            <>
+              <span className="drawer__foot-status">更新进行中…</span>
+              <button type="button" className="drawer__btn" data-id="UpdateDrawer-background" onClick={() => updateDrawer.close()}>在后台继续</button>
+            </>
+          ) : st.status === "error" ? (
+            <>
+              <span className="drawer__foot-status is-error">更新失败</span>
+              {st.onRetry && <button type="button" className="drawer__btn is-accent" data-id="UpdateDrawer-retry" onClick={() => st.onRetry()}>重试</button>}
+              <button type="button" className="drawer__btn" data-id="UpdateDrawer-dismiss" onClick={() => updateDrawer.close()}>关闭</button>
+            </>
+          ) : (
+            <>
+              <span className="drawer__foot-status is-done">已更新到最新</span>
+              <button type="button" className="drawer__btn is-accent" data-id="UpdateDrawer-finish" onClick={() => updateDrawer.close()}>完成</button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   // First-run terms gate (合规第一道整体同意) — blocks the whole UI until
@@ -429,6 +614,8 @@ export default function App() {
         )}
       </main>
       </div>{/* /.shell__left */}
+      <ToastHost />
+      <UpdateDrawerHost />
     </div>
   );
 }
@@ -579,8 +766,16 @@ function MitmConsentCard({ team }) {
     setBusy("enable"); setError("");
     try {
       const r = await caFetch("/api/mitm/consent", { method: "POST", body: JSON.stringify({ enable: true }) });
+      // Any "I lack privilege to write the trust store" answer → elevate. Older
+      // daemons (esp. macOS) return the raw keychain error instead of the tidy
+      // "need_elevation" code, so match those too rather than dumping a scary
+      // "security add-trusted-cert: Write permissions error" on the user.
+      const elevText = `${r.json?.error || ""} ${r.json?.detail || ""}`;
+      const needsElevation = r.json?.error === "need_elevation"
+        || (!r.ok && r.status === 403)
+        || /need_elevation|add-trusted-cert|write permission|SecCertificate|not permitted|requires admin|administrator/i.test(elevText);
       if (r.ok && r.json?.ok && r.json?.trusted) { await refresh(); }
-      else if (r.json?.error === "need_elevation" || (!r.ok && r.status === 403)) {
+      else if (needsElevation) {
         // fall back to the self-elevating CLI (OS prompt = the second consent)
         const ex = await window.cicy?.mitm?.caExec?.("install");
         if (ex?.ok) await refresh();
@@ -610,6 +805,29 @@ function MitmConsentCard({ team }) {
   const partial = status.consent && !status.trusted; // consented but not (re)installed
   const t = (k, fb) => tr(`mitmConsent.${k}`, fb);
 
+  // 已启用是稳态状态,不是决策 — 收成一个低调的小 pill(一行 + "关闭"),把显眼的
+  // 大卡片只留给首次"同意"那一下,不在首页常驻一个大块。
+  if (granted || busy === "disable") {
+    // Portal to <body> so the fixed pill sits in the ROOT stacking context and
+    // paints above the topbar (otherwise it's trapped in the content stack and the
+    // 顶栏 user chip covers it).
+    return createPortal(
+      <div data-id="MitmConsentCard" className="mitm-pill" title={t("grantedDesc", "HTTPS 审计已开启,仅对 CiCy 启动的 AI 工具生效;随时可关闭。")}>
+        <span className="mitm-pill__dot" data-busy={busy ? "1" : "0"} />
+        <span className="mitm-pill__text" data-id="MitmConsentCard-title">
+          {busy === "disable" ? t("processingRevoke", "正在关闭…") : t("statePillOn", "HTTPS 审计已开启")}
+        </span>
+        {!busy && (
+          <button type="button" data-id="MitmConsentCard-revoke" className="mitm-pill__off"
+            onClick={() => { if (window.confirm(t("revokeConfirm", "撤销后将停止解密审计并清除同意标记。确定?"))) disable(); }}>
+            {t("turnOff", "关闭")}
+          </button>
+        )}
+      </div>,
+      document.body
+    );
+  }
+
   return (
     <div data-id="MitmConsentCard" className={`mitm-card${granted ? " mitm-card--on" : ""}`}>
       <div className="mitm-card__head">
@@ -621,9 +839,9 @@ function MitmConsentCard({ team }) {
         </span>
       </div>
       <p className="mitm-card__desc" data-id="MitmConsentCard-desc">
-        {granted ? t("grantedDesc", "HTTPS 审计已开启;可随时撤销并卸载证书。") : t("body", "启用后,本机到 AI 厂商(Claude / OpenAI / DeepSeek / Gemini)的 HTTPS 将被本地审计解密,数据留本地,可随时关闭。")}
+        {granted ? t("grantedDesc", "HTTPS 审计已开启,仅对 CiCy 启动的 AI 工具(claude / codex 等)生效;随时可关闭。") : t("body", "启用后,CiCy 启动的 AI 工具(claude / codex 等)访问 AI 厂商(Claude / OpenAI / DeepSeek / Gemini)的 HTTPS 流量将被本地审计解密,数据留本地,随时可关闭。")}
         {!granted && <>
-          <br /><span className="mitm-card__note">{t("adminNote", "需写入系统根证书信任库,需要管理员授权。")}</span>
+          <br /><span className="mitm-card__note">{t("adminNote", "通过环境变量对 CiCy 启动的 AI 工具生效,不修改系统、无需管理员授权。")}</span>
           <br /><span className="mitm-card__sub">{t("scopeNote", "仅解密上述 AI 厂商域名,其余一切流量不被解密、不被读取。")}</span>
         </>}
       </p>
@@ -631,13 +849,13 @@ function MitmConsentCard({ team }) {
       <div className="mitm-card__actions">
         {granted ? (
           <button data-id="MitmConsentCard-revoke" className="mitm-card__btn mitm-card__btn--ghost"
-            disabled={!!busy} onClick={() => { if (window.confirm(t("revokeConfirm", "撤销后将卸载证书、停止解密,并清除同意标记。确定?"))) disable(); }}>
-            {busy === "disable" ? t("processingRevoke", "正在卸载证书…") : t("revoke", "撤销")}
+            disabled={!!busy} onClick={() => { if (window.confirm(t("revokeConfirm", "撤销后将停止解密审计并清除同意标记。确定?"))) disable(); }}>
+            {busy === "disable" ? t("processingRevoke", "正在关闭…") : t("revoke", "撤销")}
           </button>
         ) : (
           <button data-id="MitmConsentCard-enable" className="mitm-card__btn"
             disabled={!!busy} onClick={enable}>
-            {busy === "enable" ? t("processingEnable", "正在安装证书…") : partial ? t("retry", "重试") : t("enable", "同意并启用")}
+            {busy === "enable" ? t("processingEnable", "正在启用…") : partial ? t("retry", "重试") : t("enable", "同意并启用")}
           </button>
         )}
       </div>
@@ -738,8 +956,6 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
   const local = hasBridge && isLocalSidecar(team.base_url);
   const running = team.status === "running";
   const [busy, setBusy] = useState("");   // "" | start | restart | update | stop
-  const [opMsg, setOpMsg] = useState("");
-  const [opProg, setOpProg] = useState(null); // live {message, progress?, status} during 更新
   const [menuOpen, setMenuOpen] = useState(false);
   const [latest, setLatest] = useState(null); // newest cicy-code on the registry
   const [checking, setChecking] = useState(false);
@@ -804,30 +1020,43 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
     onRefresh?.();
   };
 
+  // One toast per card-op, keyed by team — progress streams into it, the final
+  // result replaces the message and auto-dismisses. Feedback floats over the UI
+  // (toast), NOT inside the card; the card's only busy hint is the CTA spinner.
+  const opToastId = `sidecar-op:${team.id}`;
   const runOp = async (kind, fn, doneText) => {
     setMenuOpen(false);
     if (busy) return;
-    setBusy(kind); setOpMsg(""); setOpProg(null);
-    // 更新 streams real phase/percent events from the main process — surface
-    // them live on the card so the user SEES the download/swap happening.
+    setBusy(kind);
+    // 更新 gets its own drawer (live log + 阶段 + 重试); other ops use the toast.
+    const isUpdate = kind === "update";
     let unsub = null;
-    if (kind === "update" && window.cicy?.sidecar?.onOpProgress) {
-      unsub = window.cicy.sidecar.onOpProgress((ev) => {
-        if (ev?.op === "update") setOpProg(ev);
-      });
+    if (isUpdate) {
+      updateDrawer.open({ teamId: team.id, fromVer: team.version, toVer: latest, onRetry: () => runOp("update", fn, doneText) });
+      if (window.cicy?.sidecar?.onOpProgress) {
+        unsub = window.cicy.sidecar.onOpProgress((ev) => { if (ev?.op === "update") updateDrawer.push(ev); });
+      }
+    } else {
+      toast.show({ id: opToastId, message: BUSY_LABEL[kind] || `${kind}…`, status: "running", progress: undefined });
     }
     try {
       const r = await fn();
-      setOpMsg(r?.ok
-        ? (r.warning ? `${doneText}（${r.warning}）` : doneText)
-        : (tr("sidecar.failed", "操作失败") + (r?.error ? `: ${r.error}` : "")));
+      const ok = !!r?.ok;
+      const okMsg = r?.warning ? `${doneText}（${r.warning}）` : doneText;
+      const errMsg = tr("sidecar.failed", "操作失败") + (r?.error ? `: ${r.error}` : "");
+      if (isUpdate) {
+        updateDrawer.finish({ ok, message: ok ? okMsg : errMsg });
+      } else {
+        toast.show({ id: opToastId, message: ok ? okMsg : errMsg, progress: undefined, status: ok ? "done" : "error", ttl: ok ? 4000 : 8000 });
+      }
     } catch (err) {
-      setOpMsg(tr("sidecar.failed", "操作失败") + `: ${err?.message || err}`);
+      const m = tr("sidecar.failed", "操作失败") + `: ${err?.message || err}`;
+      if (isUpdate) updateDrawer.finish({ ok: false, message: m });
+      else toast.show({ id: opToastId, message: m, progress: undefined, status: "error", ttl: 8000 });
     } finally {
       try { unsub && unsub(); } catch {}
-      setBusy(""); setOpProg(null);
+      setBusy("");
       onRefresh?.(); // re-probe so the status dot/chip catches up
-      setTimeout(() => setOpMsg(""), 5000); // result line is transient
     }
   };
   const BUSY_LABEL = { start: "启动中…", restart: "重启中…", update: "更新中…", stop: "停止中…" };
@@ -839,13 +1068,15 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
   const handleOpen = async () => {
     if (busy) return;
     if (!running && local && window.cicy?.sidecar?.start) {
-      setBusy("start"); setOpMsg("");
+      setBusy("start");
+      toast.show({ id: opToastId, message: BUSY_LABEL.start, status: "running", progress: undefined });
       const r = await window.cicy.sidecar.start().catch((e) => ({ ok: false, error: e?.message || String(e) }));
       setBusy(""); onRefresh?.();
       if (!r?.ok || r?.warning) { // didn't come up — surface it, don't open a dead link
-        setOpMsg(tr("sidecar.startFailed", "启动失败") + (r?.error ? `: ${r.error}` : r?.warning ? `: ${r.warning}` : ""));
+        toast.show({ id: opToastId, message: tr("sidecar.startFailed", "启动失败") + (r?.error ? `: ${r.error}` : r?.warning ? `: ${r.warning}` : ""), status: "error", ttl: 8000 });
         return;
       }
+      toast.dismiss(opToastId); // came up — no lingering toast, the window opens
     }
     onOpen(); // open regardless of health — the window/page handles the rest
   };
@@ -978,22 +1209,6 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
             <span className="bcard__ver" data-id="LocalTeamCard-version">v{team.version}</span>
           )}
         </div>
-        {busy && (
-          <div className="bcard__prog" data-id="LocalTeamCard-progress" data-status={opProg?.status || "running"}>
-            <span className="bcard__progmsg">
-              {opProg?.message || BUSY_LABEL[busy] || `${busy}…`}
-              {Number.isFinite(opProg?.progress) ? ` ${opProg.progress}%` : ""}
-            </span>
-            {Number.isFinite(opProg?.progress) && (
-              <span className="bcard__progbar"><span style={{ width: `${Math.min(100, opProg.progress)}%` }} /></span>
-            )}
-          </div>
-        )}
-        {!busy && opMsg && (
-          <div className="bcard__prog" data-id="LocalTeamCard-progress" data-status={/失败|error/i.test(opMsg) ? "error" : "done"}>
-            <span className="bcard__progmsg">{opMsg}</span>
-          </div>
-        )}
       </div>
       <button
         type="button"

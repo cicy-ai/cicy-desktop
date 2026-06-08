@@ -16,6 +16,7 @@ const path = require("path");
 const os = require("os");
 const http = require("http");
 const https = require("https");
+const net = require("net");
 const { execFile } = require("child_process");
 const { spawn } = require("child_process");
 const { BrowserWindow } = require("electron");
@@ -33,6 +34,7 @@ const log = require("electron-log");
 const GLOBAL_JSON = path.join(os.homedir(), "cicy-ai", "global.json");
 const TEAMS_JSON = path.join(os.homedir(), "cicy-ai", "db", "teams.json");
 const HEALTH_TIMEOUT_MS = 1500;
+const PORT_TIMEOUT_MS = 700; // raw TCP-connect liveness for the LOCAL sidecar
 const CACHE_MS = 4000; // small dedupe so rapid renderer polls don't fan-out
 
 let _cache = null;
@@ -131,6 +133,21 @@ function probeHealth(baseUrl, token) {
   });
 }
 
+// Raw TCP-connect liveness: is ANYTHING listening on host:port? A successful
+// connect means the daemon's socket is up — even if it's mid-boot or busy and
+// /api/health hasn't answered yet. This is the authoritative "is it alive" for
+// the LOCAL sidecar: /api/health is a heavy, blockable signal, so timing it out
+// used to mis-classify a live-but-busy daemon as "stopped" — which made the card
+// offer 启动并打开 and a click would spawn a SECOND cicy-code racing for :8008.
+function probePort(hostname, port, timeoutMs = PORT_TIMEOUT_MS) {
+  return new Promise((resolve) => {
+    const sock = net.connect({ host: hostname, port }, () => { sock.destroy(); resolve(true); });
+    sock.setTimeout(timeoutMs);
+    sock.on("timeout", () => { sock.destroy(); resolve(false); });
+    sock.on("error", () => resolve(false)); // ECONNREFUSED → nothing listening
+  });
+}
+
 function classify(health) {
   if (health.ok) return "running";
   if (health.status === 401 || health.status === 403) return "auth_error";
@@ -138,6 +155,27 @@ function classify(health) {
   if (health.error === "ECONNREFUSED" || health.error === "ECONNRESET" || health.error === "EHOSTUNREACH") return "stopped";
   if (health.error === "bad_url") return "misconfigured";
   return "error";
+}
+
+// Liveness for one team. LOCAL sidecar: TCP-port-listening is authoritative
+// (never down-grade a listening daemon to "stopped"), /api/health only enriches
+// version/auth. REMOTE/cloud (https): the port is a CDN that's always "open", so
+// /api/health stays authoritative there.
+async function probeLiveness(baseUrl, token) {
+  let parsed;
+  try { parsed = new URL(baseUrl); } catch { return { status: "misconfigured", version: null, error: "bad_url" }; }
+  const isLocal = parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost" || parsed.hostname === "::1";
+  if (isLocal) {
+    const port = Number(parsed.port) || (parsed.protocol === "https:" ? 443 : 80);
+    const open = await probePort(parsed.hostname, port);
+    if (!open) return { status: "stopped", version: null, error: "port_closed" };
+    const health = await probeHealth(baseUrl, token); // best-effort enrichment
+    if (health.status === 401 || health.status === 403) return { status: "auth_error", version: health.version || null, error: null };
+    // Port is listening → the daemon is up. Health timing out just means busy.
+    return { status: "running", version: health.version || null, error: health.ok ? null : (health.error || null) };
+  }
+  const health = await probeHealth(baseUrl, token);
+  return { status: classify(health), version: health.version || null, error: health.error || null };
 }
 
 async function list({ refresh = false } = {}) {
@@ -149,7 +187,7 @@ async function list({ refresh = false } = {}) {
     const baseUrl = node.base_url || "";
     let port = null;
     try { port = parseInt(new URL(baseUrl).port, 10) || null; } catch {}
-    const health = await probeHealth(baseUrl, node.api_token);
+    const live = await probeLiveness(baseUrl, node.api_token);
     return {
       id: slug,
       name: node.name || slug,
@@ -162,9 +200,9 @@ async function list({ refresh = false } = {}) {
       install_path: node.install_path || null,
       container_name: node.container_name || null,
       image: node.image || null,
-      status: classify(health),
-      version: health.version || null,
-      error: health.error || null,
+      status: live.status,
+      version: live.version || null,
+      error: live.error || null,
     };
   }));
   _cache = teams;

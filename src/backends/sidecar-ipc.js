@@ -140,9 +140,31 @@ function register({ sidecarLogPath } = {}) {
   // the compliance second-consent. Returns { ok, code, stderr }.
   ipcMain.handle("mitm:ca-exec", async (_e, action) => {
     const verb = action === "uninstall" ? "uninstall-ca" : "install-ca";
+    const fs = require("fs"), os = require("os"), path = require("path");
+    // Resolve a runnable cicy-code for the self-elevating CA install. Order:
+    // runtime store (production schtasks build) → npx-cached platform binary
+    // (macOS/global npx — runtime store is EMPTY there, which is why the card's
+    // auto-elevate used to fail with "runtime binary not found") → global npm
+    // launcher → bare name on PATH.
     let exe = null;
     try { exe = require("../sidecar/runtime").binPath("cicy-code"); } catch {}
-    if (!exe) return { ok: false, error: "cicy-code runtime binary not found" };
+    if (!exe) {
+      const cands = [];
+      try {
+        const npxRoot = path.join(os.homedir(), ".npm", "_npx");
+        for (const hash of fs.readdirSync(npxRoot)) {
+          let pkgs = []; try { pkgs = fs.readdirSync(path.join(npxRoot, hash, "node_modules")); } catch {}
+          for (const pkg of pkgs) {
+            if (pkg.startsWith("cicy-code-")) {
+              const p = path.join(npxRoot, hash, "node_modules", pkg, process.platform === "win32" ? "cicy-code.exe" : "cicy-code");
+              if (fs.existsSync(p)) cands.push(p);
+            }
+          }
+        }
+      } catch {}
+      cands.push("/usr/local/bin/cicy-code", "/opt/homebrew/bin/cicy-code");
+      exe = cands.find((c) => { try { return fs.existsSync(c); } catch { return false; } }) || "cicy-code";
+    }
     return await new Promise((resolve) => {
       const { execFile } = require("child_process");
       execFile(exe, ["mitm", verb], { windowsHide: false, timeout: 120000 }, (err, _stdout, stderr) => {

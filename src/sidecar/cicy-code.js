@@ -16,22 +16,24 @@
 const fs = require("fs");
 const os = require("os");
 const http = require("http");
+const net = require("net");
 const path = require("path");
 const { spawn, execFileSync } = require("child_process");
 
 const DEFAULT_PORT = Number(process.env.CICY_CODE_PORT || 8008);
 
+// Liveness = "is something LISTENING on :port", via a raw TCP connect — NOT an
+// HTTP GET. /health can block (mid-boot, busy, hung) and time out even while the
+// daemon owns the socket; an HTTP-timeout probe then returns false and start()
+// spawns a SECOND cicy-code that races the first for :8008 (the duplicate-spawn
+// storm). A TCP connect succeeds the instant the socket is bound, so a present
+// daemon is always reused, never double-spawned.
 function probeExisting(port = DEFAULT_PORT, timeoutMs = 500) {
   return new Promise(resolve => {
-    const req = http.get(
-      { host: "127.0.0.1", port, path: "/health", timeout: timeoutMs },
-      res => {
-        res.resume();
-        resolve(res.statusCode >= 200 && res.statusCode < 500);
-      }
-    );
-    req.on("error", () => resolve(false));
-    req.on("timeout", () => { req.destroy(); resolve(false); });
+    const sock = net.connect({ host: "127.0.0.1", port }, () => { sock.destroy(); resolve(true); });
+    sock.setTimeout(timeoutMs);
+    sock.on("timeout", () => { sock.destroy(); resolve(false); });
+    sock.on("error", () => resolve(false)); // ECONNREFUSED → nothing there
   });
 }
 
@@ -100,46 +102,18 @@ async function start({ logPath, port = DEFAULT_PORT, force = false, version = nu
     return null;
   }
 
-  // Runtime store first — uniform across platforms.
-  const rt = await startFromRuntime({ logPath, port });
-  if (rt) { child = rt; return child; }
-
-  if (process.platform === "win32") {
-    // NATIVE route (2026-06 方向): cicy-code.exe + bundled slim MSYS2, no
-    // Docker/WSL. Gated behind CICY_WIN_NATIVE=1 while in 联调; the Docker
-    // container route below remains the transitional default until native
-    // ships.
-    if (process.env.CICY_WIN_NATIVE === "1") {
-      try {
-        const native = require("./native");
-        const r = await native.start({ port, logPath });
-        if (!r) { console.warn("[cicy-code-sidecar] native start failed"); return null; }
-        child = r; // { native:true, pid|adopted, port }
-        console.log(`[cicy-code-sidecar] started native exe (${r.adopted ? "adopted" : `pid=${r.pid}`}) on :${port}`);
-        return child;
-      } catch (e) {
-        console.warn(`[cicy-code-sidecar] native start failed: ${e.message}`);
-        return null;
-      }
-    }
-    // Transitional: Windows runs cicy-code in Docker Desktop (the container's
-    // entrypoint npx-installs cicy-code). The docker module owns
-    // image-load-from-R2 + container run; here we just delegate.
-    try {
-      const docker = require("./docker");
-      const r = await docker.start({ port });
-      if (!r) {
-        console.warn("[cicy-code-sidecar] Docker not ready — homepage will guide install");
-        return null;
-      }
-      child = r; // { docker:true, container, id }
-      console.log(`[cicy-code-sidecar] started in Docker container ${r.container} (${r.id})`);
-      return child;
-    } catch (e) {
-      console.warn(`[cicy-code-sidecar] Docker start failed: ${e.message}`);
-      return null;
-    }
+  // UNIFIED model (主人指令): run our OWN binary at ~/.local/bin/cicy-code on
+  // every platform — never `npx cicy-code` (which reuses a stale globally-installed
+  // copy and shadows updates). localbin seeds from the bundled subpackage on first
+  // run (zero network) and uses npm ONLY as a download channel for updates; the run
+  // path is always stable.
+  const localbin = require("./localbin");
+  let exe = localbin.currentLink();
+  if (!exe) {
+    try { exe = (await localbin.ensure({ version }))?.exe; }
+    catch (e) { console.warn(`[cicy-code-sidecar] localbin ensure failed: ${e.message}`); }
   }
+  if (!exe) { console.warn("[cicy-code-sidecar] no cicy-code binary available"); return null; }
 
   let stdio = ["ignore", "ignore", "ignore"];
   if (logPath) {
@@ -147,28 +121,24 @@ async function start({ logPath, port = DEFAULT_PORT, force = false, version = nu
     const fd = fs.openSync(logPath, "a");
     stdio = ["ignore", fd, fd];
   }
-
-  // Run the daemon via `npx cicy-code` — no bundled/downloaded binary. The
-  // launcher fetches the per-version binary from npm (default npmmirror for
-  // CN; override with CICY_NPM_REGISTRY) and does its own :8008 port hygiene.
-  // cicy-code reads PORT; we also set CICY_CODE_PORT and override the parent's
-  // PORT (the worker sets it to its own listen port, e.g. 8101) so it doesn't
-  // leak in and clash with the worker's HTTP server.
-  const registry = process.env.CICY_NPM_REGISTRY || "https://registry.npmmirror.com";
   const env = {
     ...process.env,
     CICY_CODE_PORT: String(port),
     PORT: String(port),
-    npm_config_registry: registry,
   };
-  const npxBin = process.platform === "win32" ? "npx.cmd" : "npx";
-  // version arg (e.g. "latest" from update()) wins over the env pin; explicit
-  // `cicy-code@latest` makes npx re-resolve against the registry so an update
-  // actually pulls a newer build even when an older one is cached/global.
-  const pin = version || process.env.CICY_CODE_VERSION;
-  const spec = pin ? `cicy-code@${pin}` : "cicy-code";
-  child = spawn(npxBin, ["-y", spec], { stdio, detached: false, env });
-  console.log(`[cicy-code-sidecar] spawned npx ${spec} pid=${child.pid} port=${port} registry=${registry} log=${logPath || "(none)"}`);
+  const args = [];
+  if (process.platform === "win32") {
+    // cicy-code.exe shells out to the bundled slim MSYS2 — point it there.
+    try {
+      const runtime = require("./runtime");
+      const msys = runtime.binPath("msys2") || runtime.ensureFromBundle("msys2");
+      if (msys) env.CICY_MSYS_ROOT = msys;
+    } catch {}
+    // --helper=1: boot as the single headless cicy 团队助手 on w-1001 (开机即团队助手).
+    args.push("--helper=1");
+  }
+  child = spawn(exe, args, { stdio, detached: false, windowsHide: true, env });
+  console.log(`[cicy-code-sidecar] spawned ${exe} ${args.join(" ")} pid=${child.pid} port=${port} log=${logPath || "(none)"}`);
 
   child.on("exit", (code, signal) => {
     console.log(`[cicy-code-sidecar] exited code=${code} signal=${signal}`);
@@ -274,60 +244,33 @@ async function restart({ logPath, port = DEFAULT_PORT } = {}) {
   return start({ logPath, port, force: true });
 }
 
-// Update: stop, then start the LATEST build.
-//   win32  → reload the Docker image (from R2) and re-run the container.
-//   else   → clear the npx cache + spawn `cicy-code@latest` so npx re-resolves
-//            against the registry (npmmirror for CN) and pulls a newer build.
+// Update (UNIFIED, all platforms): npm is ONLY the download channel — `npm pack`
+// the latest per-platform subpackage into ~/.local/bin as a NEW version-named
+// binary, re-point cicy-code at it (re-copy on Windows), then stop + start from
+// that stable path and health-verify.
 async function update({ logPath, port = DEFAULT_PORT, emit } = {}) {
   const e = emit || (() => {});
-
-  // Runtime store managed → versioned upgrade with health-verify + rollback.
+  const localbin = require("./localbin");
   try {
-    const runtime = require("./runtime");
-    if (runtime.currentVersion("cicy-code")) {
-      return await runtime.upgrade("cicy-code", {
-        emit,
-        stop: () => stop({ port }),
-        start: async () => {
-          child = await startFromRuntime({ logPath, port });
-          if (!child) throw new Error("runtime spawn failed");
-        },
-        verify: async () => {
-          for (let i = 0; i < 120; i++) {
-            if (await probeExisting(port)) return true;
-            await new Promise((r) => setTimeout(r, 500));
-          }
-          return false;
-        },
-      });
+    e({ phase: "download", status: "running", message: "检查最新版本…" });
+    const latest = await localbin.latestVersion();
+    if (!latest) throw new Error("无法获取最新版本号");
+    await localbin.fetchToLocalBin(latest, { emit }); // download → ~/.local/bin → re-link
+    e({ phase: "swap", status: "running", message: `切换到 ${latest}，启动…` });
+    await stop({ port });
+    await new Promise(r => setTimeout(r, 300));
+    const c = await start({ logPath, port, force: true });
+    for (let i = 0; i < 120; i++) {
+      if (await probeExisting(port)) { e({ phase: "done", status: "done", message: `已更新到 ${latest}` }); return c; }
+      await new Promise(r => setTimeout(r, 500));
     }
+    e({ phase: "done", status: "error", message: "新版本未在 60s 内就绪" });
+    return c;
   } catch (err) {
-    console.warn(`[cicy-code-sidecar] runtime upgrade failed: ${err.message}`);
+    console.warn(`[cicy-code-sidecar] update failed: ${err.message}`);
     e({ phase: "done", status: "error", message: `更新失败：${err.message}` });
     return null;
   }
-
-  if (process.platform === "win32") {
-    // NATIVE route: safe-swap update with real download progress.
-    if (process.env.CICY_WIN_NATIVE === "1") {
-      return require("./native").update({ port, logPath, emit });
-    }
-    // Transitional Docker route. loadImage streams 下载镜像 % via emit.
-    await stop({ port });
-    try { await require("./docker").loadImage({ emit }); } catch (err) {
-      console.warn(`[cicy-code-sidecar] docker image reload failed: ${err.message}`);
-      e({ phase: "download", status: "error", message: `镜像更新失败：${err.message}` });
-    }
-    await new Promise(r => setTimeout(r, 300));
-    e({ phase: "swap", status: "running", message: "重启容器…" });
-    return start({ logPath, port, force: true });
-  }
-  e({ phase: "download", status: "running", message: "获取最新版 cicy-code…" });
-  await stop({ port });
-  clearNpxCache();
-  await new Promise(r => setTimeout(r, 300));
-  e({ phase: "swap", status: "running", message: "启动新版本…" });
-  return start({ logPath, port, force: true, version: "latest" });
 }
 
 module.exports = { start, stop, restart, update, probeExisting, clearNpxCache };
