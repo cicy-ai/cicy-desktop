@@ -24,13 +24,17 @@ const { contextBridge, ipcRenderer, shell } = require("electron");
 // args, and the reply (or error) to the console. Skip noisy channels that
 // fire on every render tick to avoid drowning the console.
 const __noisy = new Set(["backends:list", "backends:health-all"]);
+// Per-IPC call/reply tracing floods the console on every render tick and is
+// pure debug noise for someone just running `npx cicy-desktop`. Off by default;
+// set CICY_DEBUG=1 to restore it. Errors are always logged.
+const __verbose = !!(process.env.CICY_DEBUG || process.env.CICY_VERBOSE);
 let __ipcSeq = 0;
 function logInvoke(channel, ...args) {
   const id = ++__ipcSeq;
   const noisy = __noisy.has(channel);
-  if (!noisy) console.log(`[ipc#${id}] call`, channel, ...args);
+  if (__verbose && !noisy) console.log(`[ipc#${id}] call`, channel, ...args);
   return ipcRenderer.invoke(channel, ...args).then(
-    (res) => { if (!noisy) console.log(`[ipc#${id}] reply`, channel, res); return res; },
+    (res) => { if (__verbose && !noisy) console.log(`[ipc#${id}] reply`, channel, res); return res; },
     (err) => { console.error(`[ipc#${id}] error`, channel, err); throw err; },
   );
 }

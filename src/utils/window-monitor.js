@@ -331,15 +331,21 @@ function initWindowMonitoring(win) {
     const logs = windowLogs.get(winId);
 
     const counters = windowIndexCounters.get(winId);
-    log.info(
-      `[${JSON.stringify({
-        timestamp: Date.now(),
-        level: ["verbose", "info", "warning", "error"][level] || "log",
-        message,
-        line,
-        source: sourceId,
-      })}`
-    );
+    // Mirror EVERY renderer console line into the main log only with CICY_DEBUG;
+    // by default forward warnings/errors (level>=2) so normal startup stays quiet
+    // but real problems still surface. The in-memory log store below is unaffected
+    // (the log-viewer API still sees everything).
+    if (level >= 2 || process.env.CICY_DEBUG || process.env.CICY_VERBOSE) {
+      log.info(
+        `[${JSON.stringify({
+          timestamp: Date.now(),
+          level: ["verbose", "info", "warning", "error"][level] || "log",
+          message,
+          line,
+          source: sourceId,
+        })}`
+      );
+    }
     if (logs && counters) {
       logs.push({
         index: ++counters.log,

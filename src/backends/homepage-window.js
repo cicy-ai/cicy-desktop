@@ -72,8 +72,11 @@ async function openHomepage() {
 
   // Pipe renderer console + load failures to main-process stdout so we can
   // diagnose blank-page bugs from logs without opening DevTools.
+  const __verbose = !!(process.env.CICY_DEBUG || process.env.CICY_VERBOSE);
   homepage.webContents.on("console-message", (_e, level, msg, line, source) => {
-    if (level >= 1) console.log(`[homepage:console L${line}] ${msg}  (${source})`);
+    // Warnings/errors (level>=2) always surface — they're what diagnose a blank
+    // page. The chatty info stream only with CICY_DEBUG.
+    if (level >= 2 || (__verbose && level >= 1)) console.log(`[homepage:console L${line}] ${msg}  (${source})`);
   });
   // Log load failures (corrupt/missing install) — no remote fallback by
   // design: the homepage is the bundled SPA, full stop.
