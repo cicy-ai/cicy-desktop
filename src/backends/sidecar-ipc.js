@@ -92,6 +92,9 @@ function register({ sidecarLogPath } = {}) {
   ipcMain.handle("sidecar:stop", async () => {
     try {
       await sidecar.stop();
+      // The daemon is gone — close any open team window pointing at it so the
+      // user isn't left staring at a dead :8008 page (主人 bug report).
+      try { require("./local-teams").closeLocalWindows(PORT); } catch {}
       return { ok: true };
     } catch (e) {
       return { ok: false, error: e.message };

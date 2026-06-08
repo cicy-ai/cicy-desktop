@@ -258,6 +258,20 @@ async function openTeam(id) {
     return { ok: true, windowId: existing.id, reused: true };
   }
 
+  // No window yet. Before opening one against a LOCAL sidecar, make sure the
+  // daemon is REALLY up (TCP 探活) — opening a window at a not-yet-ready :8008
+  // loads a blank page the user has to manually reload (主人 bug). Start it if
+  // it isn't running, then poll until it answers; bail (no blank window) if it
+  // never comes up. Remote/custom (non-localhost) teams skip this — their page
+  // shows its own connecting/login UI.
+  if (isLocalOrigin(url)) {
+    const ready = await ensureLocalSidecarAlive(url);
+    if (!ready) {
+      log.warn(`[local-teams] open ${id} → local sidecar not ready, not opening blank window`);
+      return { ok: false, error: "sidecar_not_ready" };
+    }
+  }
+
   const { createWindow } = require("../utils/window-utils");
   const win = createWindow(
     { url, title: `Local · ${node.name || id}` },
@@ -266,6 +280,31 @@ async function openTeam(id) {
   );
   log.info(`[local-teams] open ${id} → new win.id=${win.id}`);
   return { ok: true, windowId: win.id, reused: false };
+}
+
+// Is this URL served by something on the local machine (the cicy-code sidecar)?
+function isLocalOrigin(url) {
+  try { const h = new URL(url).hostname; return h === "127.0.0.1" || h === "localhost" || h === "::1"; }
+  catch { return false; }
+}
+
+// Ensure the local cicy-code daemon serving `url` actually answers before we
+// open a window at it. Already up → true immediately. Down → start it, then
+// poll a TCP probe (NOT /api/health, which is unreliable mid-boot) until it
+// binds or we time out.
+async function ensureLocalSidecarAlive(url, { timeoutMs = 15000 } = {}) {
+  let port;
+  try { port = Number(new URL(url).port) || 8008; } catch { return true; } // unparseable → don't block
+  let sidecar;
+  try { sidecar = require("../sidecar/cicy-code"); } catch { return true; }
+  if (await sidecar.probeExisting(port)) return true;       // already answering
+  try { await sidecar.start({ port }); } catch {}            // not up → bring it up
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    if (await sidecar.probeExisting(port)) return true;
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  return false;
 }
 
 function stripVolatile(u) {
@@ -301,6 +340,25 @@ function reloadTeam(id) {
   } catch (e) {
     return { ok: false, error: e.message };
   }
+}
+
+// Close any open window served by the local sidecar (origin
+// http://127.0.0.1:<port> or http://localhost:<port>). Called when the sidecar
+// is STOPPED so a now-dead :8008 team window doesn't linger showing a broken
+// page (主人 bug report: stop 后应关掉 localhost 的 window).
+function closeLocalWindows(port = 8008) {
+  const origins = new Set([`http://127.0.0.1:${port}`, `http://localhost:${port}`]);
+  let closed = 0;
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w || w.isDestroyed()) continue;
+    let origin = "";
+    try { origin = new URL(w.webContents.getURL()).origin; } catch { continue; }
+    if (origins.has(origin)) {
+      try { w.close(); closed++; } catch {}
+    }
+  }
+  if (closed) log.info(`[local-teams] closed ${closed} local window(s) on :${port} after stop`);
+  return closed;
 }
 
 // ── mutations ──────────────────────────────────────────────────────────
@@ -737,4 +795,4 @@ async function upgradeTeam(id) {
   return result;
 }
 
-module.exports = { list, openTeam, reloadTeam, addTeam, removeTeam, updateTeam, upgradeTeam };
+module.exports = { list, openTeam, reloadTeam, closeLocalWindows, addTeam, removeTeam, updateTeam, upgradeTeam };

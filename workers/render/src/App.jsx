@@ -1061,10 +1061,13 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
   };
   const BUSY_LABEL = { start: "启动中…", restart: "重启中…", update: "更新中…", stop: "停止中…" };
 
-  // 打开 is NEVER gated on /api/health — openTeam() in main doesn't check it,
-  // it just opens the window. health is an indicator, not a gate. When the
-  // LOCAL daemon is down we start it first; remote/other-port teams just open
-  // and let the loaded page show its own connecting/login/error UI.
+  // 打开 flow (主人 spec): start the LOCAL daemon if it's down (with a 启动中…
+  // toast), then open. The window itself is opened by openTeam() in main, which
+  // (1) reuses an already-open window for this team (list_windows check first),
+  // and (2) for a local team, TCP-探活 until :8008 actually answers before
+  // creating the window — so we never pop a blank page that needs a manual
+  // reload. (/api/health is NOT used — it's unreliable mid-boot; the gate is a
+  // raw TCP probe.) Remote/custom teams just open and show their own UI.
   const handleOpen = async () => {
     if (busy) return;
     if (!running && local && window.cicy?.sidecar?.start) {
@@ -1078,7 +1081,7 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
       }
       toast.dismiss(opToastId); // came up — no lingering toast, the window opens
     }
-    onOpen(); // open regardless of health — the window/page handles the rest
+    onOpen(); // openTeam() gates on list_windows + TCP liveness before showing
   };
   const openLabel = running
     ? tr("localTeams.open", "打开")
