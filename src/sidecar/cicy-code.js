@@ -112,8 +112,21 @@ async function start({ logPath, port = DEFAULT_PORT, force = false, version = nu
   if (!exe) {
     try { exe = (await localbin.ensure({ version }))?.exe; }
     catch (e) { console.warn(`[cicy-code-sidecar] localbin ensure failed: ${e.message}`); }
+  } else {
+    // Present — let ensure() do a zero-network bundle upgrade if cicy-desktop
+    // itself was updated and now ships a newer cicy-code (版本高了就更新).
+    try { await localbin.ensure({ version }); } catch {}
   }
   if (!exe) { console.warn("[cicy-code-sidecar] no cicy-code binary available"); return null; }
+
+  // cicy-desktop ALSO owns the mihomo binary (same npm/localbin model). Seed it
+  // into ~/.local/bin/mihomo from the bundle (zero network) BEFORE the cicy-code
+  // daemon boots, so cicy-code's own startup finds it already present and skips
+  // its GitHub/COS download. Best-effort — never block cicy-code on it.
+  try {
+    const r = await localbin.ensure({ name: "mihomo" });
+    if (r?.exe) console.log(`[cicy-code-sidecar] mihomo ready at ${r.exe} (v${r.version || "?"})`);
+  } catch (e) { console.warn(`[cicy-code-sidecar] mihomo seed skipped: ${e.message}`); }
 
   let stdio = ["ignore", "ignore", "ignore"];
   if (logPath) {
@@ -248,8 +261,14 @@ async function update({ logPath, port = DEFAULT_PORT, emit } = {}) {
   const localbin = require("./localbin");
   try {
     e({ phase: "download", status: "running", message: "检查最新版本…" });
+    const cur = localbin.currentVersion();
     const latest = await localbin.latestVersion();
     if (!latest) throw new Error("无法获取最新版本号");
+    if (cur && localbin.cmpVer(latest, cur) <= 0) {
+      // Already current — no download, no restart (不重复下载/更新).
+      e({ phase: "done", status: "done", message: `已是最新 ${cur}` });
+      return null;
+    }
     await localbin.fetchToLocalBin(latest, { emit }); // download → ~/.local/bin → re-link
     e({ phase: "swap", status: "running", message: `切换到 ${latest}，启动…` });
     await stop({ port });
