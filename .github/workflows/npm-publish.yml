@@ -26,6 +26,20 @@ jobs:
       - name: Sync runtime deps to latest (cicy-code + cicy-mihomo; drop msys2)
         run: node scripts/sync-runtime-deps.cjs
 
+      # The shipped homepage is the prebuilt SPA at src/backends/homepage-react.
+      # vite outputs to workers/render/dist, so rebuild + copy it here — otherwise
+      # the package ships a STALE homepage (this is exactly how the Docker card
+      # lingered after it was removed in source). Always build from source on publish.
+      - name: Build homepage SPA → src/backends/homepage-react
+        run: |
+          cd workers/render
+          npm ci
+          npm run build
+          cd ../..
+          rm -rf src/backends/homepage-react/assets src/backends/homepage-react/index.html
+          cp -r workers/render/dist/. src/backends/homepage-react/
+          echo "homepage bundle: $(grep -o 'assets/index-[A-Za-z0-9_-]*\.js' src/backends/homepage-react/index.html)"
+
       - name: Publish cicy-desktop to npm
         run: npm publish --access public
         env:
