@@ -117,6 +117,14 @@ if (!__singleLock) {
   electronApp.exit(0);
 }
 
+// Windows groups taskbar buttons + picks the taskbar icon by AppUserModelId.
+// Unpackaged (npx / npm i -g) there's no installer to register one, so without
+// this the taskbar shows the stock Electron icon even when each BrowserWindow
+// sets its own. Must be set before any window is created. (No-op off Windows.)
+if (process.platform === "win32") {
+  try { electronApp.setAppUserModelId("com.cicy.desktop"); } catch {}
+}
+
 // Register cicy-desktop:// as the desktop's URL protocol. We MOVED off the bare
 // `cicy://` scheme because it collides: the CiCy mobile/Expo app (com.cicy-ai
 // .mobile) and a generic com.github.Electron both claim `cicy:`, so a browser

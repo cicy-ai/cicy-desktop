@@ -32,6 +32,8 @@ async function openHomepage() {
     minWidth: 360,
     minHeight: 480,
     title: "CiCy Desktop",
+    icon: require("../utils/app-icon").appIconPath(), // npx/unpackaged → set the
+    // window+taskbar icon ourselves (no .exe to embed it on Windows).
     backgroundColor: "#0d1117",
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     // Auto-hide the native menu bar on win/linux. The bar reappears when

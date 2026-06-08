@@ -284,6 +284,8 @@ function createWindow(options = {}, accountIdx = 0, forceNew = false) {
     height: winHeight,
     x: posX,
     y: posY,
+    icon: require("./app-icon").appIconPath(), // npx/unpackaged → set our own icon
+    // (Windows has no built .exe to embed it; default electron icon otherwise).
     // Native menu bar collapses by default on win/linux; press Alt to
     // peek. Same UX as the homepage window — keeps the chrome out of
     // the way for backend pages.
