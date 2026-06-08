@@ -568,7 +568,7 @@ export default function App() {
           ))}
         </div>
 
-        {showLocal && <DockerSetup onReady={fetchLocalTeams} />}
+        {/* Docker 安装卡已下线 (主人令): Windows 走原生 cicy-code.exe --helper,不再用 Docker。 */}
         {showLocal && localList.length > 0 && <MitmConsentCard team={localList[0]} />}
 
         {profileError && (
