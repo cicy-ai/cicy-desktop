@@ -29,16 +29,13 @@ function setupWindowHandlers(win) {
   // 初始化窗口监控（在 dom-ready 之前调用）
   initWindowMonitoring(win);
 
-  // 🔥 确保窗口可以正常关闭 + 添加日志
-  // Close → hide. The user can re-open from the tray icon or topbar menu.
-  // Only actually destroy the window when the app is quitting (set by the
-  // tray "Quit" item / "before-quit" handler in main.js).
-  win.on("close", (event) => {
-    log.info(`[Window ${win.id}] Close event triggered: ${win.getTitle()}`);
-    if (!app.isQuitting) {
-      event.preventDefault();
-      win.hide();
-    }
+  // Non-homepage windows (team / backend windows) close DIRECTLY — a close
+  // actually destroys the window, it does NOT hide it (主人令). Only the
+  // homepage is a persistent window; everything created here is disposable and
+  // re-openable from the homepage. (Previously these preventDefault()+hide()'d,
+  // so "closed" windows lingered hidden forever.)
+  win.on("close", () => {
+    log.info(`[Window ${win.id}] Close → destroy: ${win.getTitle()}`);
   });
 
   // 🔥 全局下载处理 - 自动保存到 ~/Downloads/electron/
