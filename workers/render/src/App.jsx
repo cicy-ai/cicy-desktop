@@ -16,6 +16,15 @@ const ACCESS_TOKEN_KEY = "cicy_access_token";
 const USER_ID_KEY = "cicy_user_id";
 const CLOUD_BASE = "https://cicy-ai.com";
 
+// Open a cloud dash page with a CLEAN URL — no token of any kind in the address
+// (主人: 钱包/账单/团队账单 URL 不要带 token,连一次性票据 ?t 也不要). The dash
+// authenticates via the browser's own cicy-ai.com session; if not logged in it
+// bounces through /login and returns. `query` is the part after /dash,
+// e.g. "?view=wallet" or "?team=14".
+async function openCloudPage(query) {
+  try { window.cicy?.shell?.openExternal?.(`${CLOUD_BASE}/dash${query}`); } catch {}
+}
+
 // ── Toast: lightweight global notifications (bottom-right). Pub/sub store so
 // any component can push without prop-drilling — one <ToastHost/> at the shell
 // root renders them. Used for 更新/启动/重启 progress + result so feedback floats
@@ -212,6 +221,21 @@ export default function App() {
       .catch(() => setTermsOk(true));
   }, []);
 
+  // Tag <html> with the platform + fullscreen state so CSS can reserve the
+  // macOS hiddenInset traffic-light gutter (the topbar's padding-left:84px rule
+  // is gated on [data-platform="darwin"][data-fullscreen="0"]). Without this the
+  // red/yellow/green buttons overlap the brand — the reported misalignment.
+  useEffect(() => {
+    const root = document.documentElement;
+    try { root.setAttribute("data-platform", window.cicy?.platform || "linux"); } catch {}
+    root.setAttribute("data-fullscreen", "0");
+    let off;
+    try {
+      off = window.cicy?.window?.onFullscreen?.((fs) => root.setAttribute("data-fullscreen", fs ? "1" : "0"));
+    } catch {}
+    return () => { try { off && off(); } catch {} };
+  }, []);
+
   // sk-xxx (LLM API). Used by /v1/chat/completions etc.
   const [token, setToken] = useState(() => safeGet(TOKEN_KEY));
   // Console-API bearer. Used by /api/user/self, /api/teams, etc.
@@ -253,22 +277,33 @@ export default function App() {
     }
     setProfileLoading(true);
     setProfileError("");
+    // Cloud uses its own per-user session token (sk-sess-, from /cb) as the
+    // SOLE Bearer for every console call. No New-Api-User header and no
+    // access_token — those were the old new-api convention, dropped when owner
+    // moved cloud to self-built identity (authM resolves owner from the session).
     const headers = { Authorization: `Bearer ${at}` };
-    if (uid) headers["New-Api-User"] = String(uid);
     try {
       const [selfRes, teamsRes] = await Promise.all([
         window.cicy.cloud.fetch(`${CLOUD_BASE}/api/user/self`, { headers }),
         window.cicy.cloud.fetch(`${CLOUD_BASE}/api/teams`,     { headers }),
       ]);
-      if (!selfRes?.ok)  throw new Error(`/api/user/self ${selfRes?.status || "?"} ${selfRes?.error || ""}`);
+      // /api/teams drives the team grid — it is the ONLY critical call here.
       if (!teamsRes?.ok) throw new Error(`/api/teams ${teamsRes?.status || "?"} ${teamsRes?.error || ""}`);
-      // /api/user/self is wrapped: { success, message, data }
       // /api/teams is bare: { teams: [...] }
-      const selfBody  = JSON.parse(selfRes.body || "{}");
       const teamsBody = JSON.parse(teamsRes.body || "{}");
-      if (selfBody?.success === false) throw new Error(selfBody.message || "self failed");
-      setMe(selfBody?.data || null);
       setTeams(Array.isArray(teamsBody?.teams) ? teamsBody.teams : []);
+      // /api/user/self is best-effort: it only fills the profile display name.
+      // A 404 / failure here must NOT block login or the team list (the cloud
+      // endpoint can lag) — degrade to a null profile instead of throwing.
+      // /api/user/self is wrapped: { success, message, data }
+      if (selfRes?.ok) {
+        try {
+          const selfBody = JSON.parse(selfRes.body || "{}");
+          setMe(selfBody?.success === false ? null : (selfBody?.data || null));
+        } catch { setMe(null); }
+      } else {
+        setMe(null);
+      }
     } catch (e) {
       setProfileError(e.message || String(e));
     } finally {
@@ -276,10 +311,15 @@ export default function App() {
     }
   }, []);
 
-  // First profile fetch on mount if we already have an access_token.
+  // First profile fetch on mount. The cloud console endpoints (/api/user/self,
+  // /api/teams) authenticate the owner-bound LOGIN token (the sk-xxx from the
+  // /cb callback) — NOT the console access_token (the cloud never mints one;
+  // sending it 401s). Prefer the login token; fall back to access_token only if
+  // somehow that's all we have.
   useEffect(() => {
-    if (accessToken) fetchProfile(accessToken, userId);
-  }, [accessToken, userId, fetchProfile]);
+    const bearer = token || accessToken;
+    if (bearer) fetchProfile(bearer, userId);
+  }, [token, accessToken, userId, fetchProfile]);
 
   // Local teams: probe on mount (independent of cloud login — local team
   // discovery doesn't require a token). Fast-poll every 3s for the first
@@ -538,7 +578,12 @@ export default function App() {
   const customList = (localTeams || []).filter((t) => !isLocalSidecar(t.base_url));
   const localCount = localList.length;
   const customCount = customList.length;
-  const cloudCount = (teams || []).length;
+  // /api/teams returns ALL of this owner's teams — including kind=local ones
+  // (this device's AND other devices'). On the desktop the 云端 tab must show
+  // ONLY cloud teams; local teams come from the local store (localList) and
+  // cross-device local aggregation belongs to the web dash, not here.
+  const cloudList = (teams || []).filter((t) => !t.is_local && t.kind !== "local");
+  const cloudCount = cloudList.length;
   const showLocal = tab === "all" || tab === "local";
   const showCustom = tab === "all" || tab === "custom";
   const showCloud = tab === "all" || tab === "cloud";
@@ -547,7 +592,8 @@ export default function App() {
     <div className="shell shell--app">
       <div className="glow glow--app" aria-hidden />
       <div className="shell__left">
-      <Header me={me} welcome={welcome} onLogout={handleLogout} />
+      <Header me={me} welcome={welcome} onLogout={handleLogout}
+        mitmTeam={localList.length > 0 ? localList[0] : null} />
       <main className="main">
         <div className="app__tabs">
           {[
@@ -569,12 +615,12 @@ export default function App() {
         </div>
 
         {/* Docker 安装卡已下线 (主人令): Windows 走原生 cicy-code.exe --helper,不再用 Docker。 */}
-        {showLocal && localList.length > 0 && <MitmConsentCard team={localList[0]} />}
+        {/* HTTPS 审计 tip(MitmConsentCard)已移入右上角用户菜单(user-chip 下拉)。 */}
 
         {profileError && (
           <div className="error" style={{ marginBottom: 12 }}>
             云端: {profileError}
-            <button className="btn-ghost" style={{ marginLeft: 8 }} onClick={() => fetchProfile(accessToken, userId)}>
+            <button className="btn-ghost" style={{ marginLeft: 8 }} onClick={() => fetchProfile(token || accessToken, userId)}>
               重试
             </button>
           </div>
@@ -587,7 +633,7 @@ export default function App() {
           {showCustom && customList.map((t) => (
             <LocalTeamCard key={"custom:" + t.id} team={t} onOpen={() => openLocalTeam(t.id)} onRename={renameLocalTeam} onRefresh={fetchLocalTeams} />
           ))}
-          {showCloud && teams && teams.map((t) => (
+          {showCloud && cloudList.map((t) => (
             <TeamCard
               key={"cloud:" + t.id}
               team={t}
@@ -620,20 +666,58 @@ export default function App() {
   );
 }
 
-function Header({ me, welcome, onLogout }) {
+function Header({ me, welcome, onLogout, mitmTeam }) {
   const name = me?.display_name || me?.username || "…";
   const initials = (name || "?").slice(0, 1).toUpperCase();
+  const [open, setOpen] = useState(false);
+  const wrap = useRef(null);
+  // Click-outside closes the dropdown (mirrors LocalTeamCard's ⋯ menu).
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => { if (wrap.current && !wrap.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+  // Cloud dash pages: query-param routed, opened via a one-time handoff ticket
+  // (no long-term token in the URL — see openCloudPage).
+  const goDash = (query) => { openCloudPage(query); setOpen(false); };
   return (
     <header className="topbar">
       <div className="brand-mini">
         <div className="brand-mark sm"><BrandGlyph /></div>
         <span className="brand-name">CiCy Desktop</span>
       </div>
-      <div className="user-chip">
+      <div className="user-chip" data-id="UserChip" ref={wrap}>
         {welcome && <span className="welcome">{welcome}</span>}
-        <div className="avatar">{initials}</div>
-        <span className="user-name">{name}</span>
-        <button className="btn-ghost sm" onClick={onLogout}>退出</button>
+        <button
+          type="button"
+          data-id="UserChip-trigger"
+          className={`user-chip__trigger${open ? " is-open" : ""}`}
+          onClick={() => setOpen((v) => !v)}
+        >
+          <div className="avatar">{initials}</div>
+          <span className="user-name">{name}</span>
+          <span className="user-chip__caret" aria-hidden>▾</span>
+        </button>
+        {open && (
+          <div className="user-chip__menu" data-id="UserChip-menu" role="menu">
+            <button type="button" data-id="UserChip-wallet" className="user-chip__menu-item" onClick={() => goDash("?view=wallet")}>
+              我的钱包
+            </button>
+            <button type="button" data-id="UserChip-billing" className="user-chip__menu-item" onClick={() => goDash("?view=usage")}>
+              我的账单
+            </button>
+            {mitmTeam && (
+              <div className="user-chip__menu-mitm" data-id="UserChip-mitm" onClick={(e) => e.stopPropagation()}>
+                <MitmConsentCard team={mitmTeam} variant="menu" />
+              </div>
+            )}
+            <div className="user-chip__menu-sep" aria-hidden />
+            <button type="button" data-id="UserChip-logout" className="user-chip__menu-item is-danger" onClick={() => { setOpen(false); onLogout(); }}>
+              退出
+            </button>
+          </div>
+        )}
       </div>
     </header>
   );
@@ -730,7 +814,7 @@ function FirstRunTermsGate({ onAgree }) {
 // HTTPS 审计 CA 授权卡片 (合规 opt-in)。绝不首启静默装根证书 (Superfish 红线) —
 // 用户在此显式同意后,才由 cicy-code 写入系统根信任库。三态:未授权 / 已授权(可撤销) /
 // 处理中。同意走 POST /api/mitm/consent;need_elevation 回退 exec 自提权 install-ca。
-function MitmConsentCard({ team }) {
+function MitmConsentCard({ team, variant }) {
   const [status, setStatus] = useState(undefined); // undefined=loading, null=endpoint absent, {generated,trusted,consent}
   const [busy, setBusy] = useState("");            // "" | enable | disable
   const [error, setError] = useState("");
@@ -804,6 +888,34 @@ function MitmConsentCard({ team }) {
   const granted = status.consent && status.trusted;
   const partial = status.consent && !status.trusted; // consented but not (re)installed
   const t = (k, fb) => tr(`mitmConsent.${k}`, fb);
+
+  // Menu variant: a single flat row matching the user-chip dropdown items —
+  // label + state dot on the left, a quiet on/off toggle on the right. No big
+  // card, no portal pill. Used inside the user menu (主人: tip 要和 menu 风格统一).
+  if (variant === "menu") {
+    const toggle = (e) => {
+      e?.stopPropagation?.();
+      if (busy) return;
+      if (granted) { if (window.confirm(t("revokeConfirm", "撤销后将停止解密审计并清除同意标记。确定?"))) disable(); }
+      else enable();
+    };
+    return (
+      <div className="user-chip__mitm" data-id="MitmConsentCard">
+        <div className="user-chip__menu-item user-chip__mitm-row"
+          title={t("scopeNote", "仅解密 AI 厂商域名,数据留本地,随时可关闭。")}>
+          <span className="user-chip__mitm-label">{t("rowLabel", "HTTPS 审计")}</span>
+          <button type="button" role="switch" aria-checked={granted ? "true" : "false"}
+            data-id="MitmConsentCard-toggle"
+            className={`mini-switch${granted ? " is-on" : ""}${busy ? " is-busy" : ""}`}
+            disabled={!!busy} onClick={toggle}>
+            <span className="mini-switch__knob" />
+          </button>
+        </div>
+        {partial && !busy && <div className="user-chip__mitm-note" data-id="MitmConsentCard-note">{t("partialNote", "已同意但未安装,点开关重试")}</div>}
+        {error && <div className="user-chip__mitm-err" data-id="MitmConsentCard-error">{error}</div>}
+      </div>
+    );
+  }
 
   // 已启用是稳态状态,不是决策 — 收成一个低调的小 pill(一行 + "关闭"),把显眼的
   // 大卡片只留给首次"同意"那一下,不在首页常驻一个大块。
@@ -1173,6 +1285,23 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
                       : (upToDateMsg || tr("sidecar.checkUpdate", "检查更新"))}
                   </button>
                 )}
+                {team.cloud_team_id && (
+                  <button
+                    type="button"
+                    data-id="LocalTeamCard-billing"
+                    className="bcard__menu-item"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMenuOpen(false);
+                      // Per-team billing (w-10032): /dash?team=<teamId> + handoff
+                      // ticket. teamId = the cloud_team_id we stored on name-sync;
+                      // no key in the URL — dash fetches it via session.
+                      openCloudPage(`?team=${encodeURIComponent(team.cloud_team_id)}`);
+                    }}
+                  >
+                    {tr("localTeams.billing", "账单")}
+                  </button>
+                )}
                 {isCustom && (
                   <button
                     type="button"
@@ -1267,6 +1396,7 @@ function TeamCard({ team, onOpen }) {
   const kindLabel = team.team_kind === "personal" ? "个人" : "共享";
   const statusOk = team.status === "active";
   const hasUrl = !!(team.workspace_url || team.workspace_direct_url);
+  const billTeamId = team.teamId || team.id; // /dash?team=<teamId> (no key in URL)
   return (
     <div className={`bcard bcard--cloud${statusOk ? " bcard--online" : ""}`}>
       <div className="bcard__accent" />
@@ -1275,7 +1405,20 @@ function TeamCard({ team, onOpen }) {
           <span className="bcard__dot" data-tone={statusOk ? "ok" : "off"} />
           <GlobeIcon />
         </div>
-        {team.is_trial && <span className="bcard__badge">trial</span>}
+        <div className="bcard__top-right">
+          {team.is_trial && <span className="bcard__badge">trial</span>}
+          {billTeamId != null && (
+            <button
+              type="button"
+              data-id="TeamCard-billing"
+              className="bcard__billing-btn"
+              title={tr("localTeams.billing", "账单")}
+              onClick={(e) => { e.stopPropagation(); openCloudPage(`?team=${encodeURIComponent(billTeamId)}`); }}
+            >
+              {tr("localTeams.billing", "账单")}
+            </button>
+          )}
+        </div>
       </div>
       <div className="bcard__body">
         <h3 className="bcard__name" title={team.title}>{team.title}</h3>
@@ -1323,10 +1466,13 @@ function Brand() {
 }
 
 function BrandGlyph() {
+  // New CiCy mark (六芒星). Rendered white here because it sits on the brand
+  // chip's blue→violet gradient square; the full-color gradient version is the
+  // app/favicon icon. Path matches build/icon.svg (viewBox 0 0 96 96).
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 12a9 9 0 1 1-3.5-7.1" />
-      <path d="M21 3v6h-6" />
+    <svg width="22" height="22" viewBox="0 0 96 96" fill="none">
+      <path d="M48 11L39.5 33.3L16 29.5L31 48L16 66.5L39.5 62.7L48 85L56.5 62.7L80 66.5L65 48L80 29.5L56.5 33.3Z"
+        fill="white" stroke="white" strokeWidth="8" strokeLinejoin="round" strokeLinecap="round" />
     </svg>
   );
 }

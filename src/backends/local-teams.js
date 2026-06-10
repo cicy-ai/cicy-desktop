@@ -193,6 +193,10 @@ async function list({ refresh = false } = {}) {
       name: node.name || slug,
       base_url: baseUrl,
       api_token: node.api_token || "",
+      // Cloud-issued teamId (from name-sync register). The renderer maps it to
+      // the team's sk-cicy- gateway apiKey (via /api/teams) for the 账单 link —
+      // the local api_token is an MCP token the cloud can't bill on.
+      cloud_team_id: node.cloud_team_id || null,
       port,
       install_source: node.install_source || null,
       install_os: node.install_os || null,
@@ -392,6 +396,51 @@ function normaliseUrl(u) {
   } catch { return ""; }
 }
 
+// Sync THIS device's local team title to the cloud (desktop→cloud, one-way;
+// 主人 + w-10032 spec). Best-effort: a cloud failure NEVER blocks the local
+// create/rename. Persists the cloud-assigned teamId so later renames UPDATE the
+// same row (POST /api/team/register with teamId) instead of creating dupes.
+// Only local-origin teams sync — a custom remote team isn't "this device's
+// local team". No-op when logged out.
+async function syncNameToCloud(id) {
+  let cc;
+  try { cc = require("../cloud/cloud-client"); } catch { return; }
+  try {
+    if (!cc.loginToken || !cc.loginToken()) return; // not logged in
+    const node = readNodes()[id];
+    if (!node || !isLocalOrigin(node.base_url || "")) return;
+    const reg = await cc.registerTeam({ teamId: node.cloud_team_id || null, title: node.name || "" });
+    if (reg && reg.ok && reg.teamId && reg.teamId !== node.cloud_team_id) {
+      await writeNodes((nodes) => {
+        if (nodes[id]) nodes[id].cloud_team_id = reg.teamId;
+        return nodes;
+      });
+      log.info(`[local-teams] cloud name-sync ${id} → teamId=${reg.teamId}`);
+    } else if (reg && reg.ok) {
+      log.info(`[local-teams] cloud name-sync ${id} title updated (teamId=${node.cloud_team_id})`);
+    }
+  } catch (e) { log.warn(`[local-teams] cloud name-sync ${id} failed: ${e.message}`); }
+}
+
+// Sync EVERY existing local-origin team to cloud. Runs once at startup (after
+// login) so teams that were created BEFORE the cloud-client existed — or that
+// live on a freshly-deployed machine (e.g. a Windows box whose 本地团队 predates
+// this code) — register to cloud without needing a manual rename to trigger it.
+// create/rename still sync individually; this is the catch-up for the rest.
+// Best-effort, fully non-blocking, no-op when logged out.
+async function syncAllLocalTeams() {
+  try {
+    const cc = require("../cloud/cloud-client");
+    if (!cc.loginToken || !cc.loginToken()) return; // logged out → no-op
+    const nodes = readNodes();
+    const ids = Object.keys(nodes).filter((id) => isLocalOrigin(nodes[id]?.base_url || ""));
+    for (const id of ids) {
+      try { await syncNameToCloud(id); } catch {}
+    }
+    if (ids.length) log.info(`[local-teams] startup cloud-sync of ${ids.length} local team(s)`);
+  } catch (e) { log.warn(`[local-teams] startup cloud-sync failed: ${e.message}`); }
+}
+
 async function addTeam(spec) {
   if (!spec || typeof spec !== "object") return { ok: false, error: "spec required" };
   const baseUrlRaw = String(spec.base_url || "").trim();
@@ -474,6 +523,7 @@ async function addTeam(spec) {
   });
   log.info(`[local-teams] ${existingId ? "upsert" : "add"} ${id} → ${baseUrl} (source=${patch.install_source || "n/a"})`);
   const next = readNodes()[id] || {};
+  syncNameToCloud(id).catch(() => {}); // best-effort title sync (desktop→cloud)
   return { ok: true, id, upserted: !!existingId, team: { id, ...next, port } };
 }
 
@@ -527,6 +577,8 @@ async function updateTeam(id, patch) {
   });
   if (!existed) return { ok: false, error: "team not found" };
   log.info(`[local-teams] update ${id} → ${Object.keys(filtered).join(",")}`);
+  // Rename → push the new title to the cloud (best-effort, one-way).
+  if (filtered.name !== undefined) syncNameToCloud(id).catch(() => {});
   const next = readNodes()[id] || {};
   let port = null;
   try { port = parseInt(new URL(next.base_url || "").port, 10) || null; } catch {}
@@ -795,4 +847,4 @@ async function upgradeTeam(id) {
   return result;
 }
 
-module.exports = { list, openTeam, reloadTeam, closeLocalWindows, addTeam, removeTeam, updateTeam, upgradeTeam };
+module.exports = { list, openTeam, reloadTeam, closeLocalWindows, addTeam, removeTeam, updateTeam, upgradeTeam, syncAllLocalTeams };

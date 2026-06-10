@@ -18,10 +18,26 @@
 const http = require("http");
 const crypto = require("crypto");
 const os = require("os");
+const fs = require("fs");
+const path = require("path");
 const { shell } = require("electron");
 const log = require("electron-log");
 
 const LOGIN_BASE = "https://cicy-ai.com/login";
+
+// Styled /cb success page (dark, CiCy-branded — matches the landing). Shipped
+// alongside this module so it works in the packaged app; falls back to a plain
+// inline page if the file is somehow missing.
+const SUCCESS_FALLBACK = `<!doctype html><meta charset="utf-8">
+<body style="font-family:-apple-system,sans-serif;text-align:center;padding:60px;color:#222;background:#f7f8fa">
+  <h1 style="color:#10b981;margin-bottom:8px">登录成功 ✓</h1>
+  <p style="opacity:.7">请回到 CiCy Desktop 继续使用。</p>
+  <p style="opacity:.4;font-size:13px;margin-top:32px">此页面可以安全关闭。</p>
+</body>`;
+const SUCCESS_HTML = (() => {
+  try { return fs.readFileSync(path.join(__dirname, "login-success.html"), "utf8"); }
+  catch (e) { log.warn(`[auth-loopback] success page load failed, using fallback: ${e.message}`); return SUCCESS_FALLBACK; }
+})();
 // 120 s — per w-10032 cloud spec. Cloud-side fallback when /exchange fails
 // is to redirect to /team/dashboard, NOT back to our loopback, so the
 // listener never sees a result and must self-time-out instead of hanging
@@ -100,12 +116,7 @@ async function startLogin({ onResult } = {}) {
     }
 
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-    res.end(`<!doctype html><meta charset="utf-8">
-<body style="font-family:-apple-system,sans-serif;text-align:center;padding:60px;color:#222;background:#f7f8fa">
-  <h1 style="color:#10b981;margin-bottom:8px">登录成功 ✓</h1>
-  <p style="opacity:.7">请回到 CiCy Desktop 继续使用。</p>
-  <p style="opacity:.4;font-size:13px;margin-top:32px">此页面可以关闭。</p>
-</body>`);
+    res.end(SUCCESS_HTML);
     try { onResult && onResult({ token, state, reused, accessToken, userId }); } catch {}
     setTimeout(() => shutdown("login complete"), 500);
   });

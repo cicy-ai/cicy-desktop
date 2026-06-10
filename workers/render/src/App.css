@@ -1,3 +1,19 @@
+/* ── Palette (restrained: one accent + neutrals + sparse semantics) ──
+   accent  = brand blue (primary actions, version/update/local accents)
+   brand gradient (blue→violet) = logo + primary CTA ONLY
+   ok/danger = sparse semantic (live dot / destructive); amber retired. */
+:root {
+  --accent: #5b8df7;
+  --accent-soft: rgba(91,141,247,.16);
+  --accent-line: rgba(91,141,247,.32);
+  --accent-text: #a5c4ff;
+  --ok: #4ade80;
+  --danger: #f7a3a3;
+  --text: #e5e7eb;
+  --text-dim: #9da7b3;
+  --text-mute: #6b7280;
+  --line: rgba(255,255,255,.08);
+}
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; height: 100%; }
 body {
@@ -132,10 +148,12 @@ body {
   border-bottom: 1px solid rgba(255,255,255,.05);
   backdrop-filter: blur(14px);
 }
-/* Reserve left gutter for the macOS hiddenInset traffic-light buttons
-   (red/yellow/green) so brand-mini isn't covered. Removed in fullscreen
-   where the buttons hide. */
-[data-platform="darwin"][data-fullscreen="0"] .topbar { padding-left: 84px; }
+/* macOS hiddenInset traffic-light buttons sit top-left. Instead of squeezing
+   the brand to their RIGHT (84px gutter), drop the whole header row BELOW them
+   — logo/title and the user chip live on their own line under the red/yellow/
+   green dots. Cleaner, and the brand isn't crammed beside the controls.
+   Removed in fullscreen where the buttons hide. */
+[data-platform="darwin"][data-fullscreen="0"] .topbar { padding-top: 34px; }
 .brand-mini { display: inline-flex; align-items: center; gap: 10px; }
 .brand-mini .brand-name { font-size: 14px; }
 
@@ -144,10 +162,10 @@ body {
   display: inline-flex; align-items: center; gap: 10px;
 }
 .welcome {
-  font-size: 12px; color: #34d399;
+  font-size: 12px; color: var(--text-dim);
   padding: 4px 10px; border-radius: 999px;
-  background: rgba(16,185,129,.1);
-  border: 1px solid rgba(16,185,129,.25);
+  background: rgba(255,255,255,.05);
+  border: 1px solid var(--line);
   animation: fadein 200ms ease;
 }
 @keyframes fadein { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
@@ -158,6 +176,82 @@ body {
   font-size: 12px; font-weight: 600; color: #fff;
 }
 .user-name { font-size: 13px; color: #c7cdd6; }
+
+/* user-chip dropdown (我的钱包 / 我的订单 / HTTPS tip / 退出) */
+.user-chip { position: relative; }
+.user-chip__trigger {
+  -webkit-app-region: no-drag;
+  display: inline-flex; align-items: center; gap: 8px;
+  border: 1px solid transparent; background: transparent;
+  border-radius: 999px; padding: 3px 8px 3px 3px; cursor: pointer;
+  transition: .12s;
+}
+.user-chip__trigger:hover,
+.user-chip__trigger.is-open {
+  background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.12);
+}
+.user-chip__caret { font-size: 10px; color: #8a93a3; transition: transform .12s; }
+.user-chip__trigger.is-open .user-chip__caret { transform: rotate(180deg); }
+.user-chip__menu {
+  position: absolute; top: 38px; right: 0; z-index: 30;
+  min-width: 200px; padding: 6px;
+  background: #1b2027; border: 1px solid rgba(255,255,255,.12);
+  border-radius: 12px; box-shadow: 0 12px 34px rgba(0,0,0,.5);
+  display: flex; flex-direction: column; gap: 2px;
+  animation: fadein 140ms ease;
+}
+.user-chip__menu-item {
+  text-align: left; width: 100%;
+  border: none; background: transparent; color: #d1d5db;
+  border-radius: 8px; padding: 9px 11px; font-size: 13px;
+  cursor: pointer; transition: .12s;
+}
+.user-chip__menu-item:hover { background: rgba(255,255,255,.07); color: #fff; }
+.user-chip__menu-item.is-danger { color: #f7a3a3; }
+.user-chip__menu-item.is-danger:hover { background: rgba(239,68,68,.16); color: #fff; }
+.user-chip__menu-sep { height: 1px; margin: 4px 2px; background: rgba(255,255,255,.08); }
+/* HTTPS audit tip, rendered as a flat menu row with an on/off switch */
+.user-chip__mitm-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  cursor: default;
+}
+.user-chip__mitm-row:hover { background: transparent; }
+.user-chip__mitm-label { font-size: 13px; color: var(--text); }
+/* mini toggle switch (开/关) */
+.mini-switch {
+  -webkit-app-region: no-drag;
+  position: relative; flex: 0 0 auto;
+  width: 36px; height: 20px; padding: 0;
+  border-radius: 999px; border: 1px solid var(--line);
+  background: rgba(255,255,255,.08); cursor: pointer;
+  transition: background .16s ease, border-color .16s ease;
+}
+.mini-switch.is-on { background: var(--accent); border-color: var(--accent); }
+.mini-switch.is-busy { opacity: .6; cursor: default; }
+.mini-switch:disabled { cursor: default; }
+.mini-switch__knob {
+  position: absolute; top: 1px; left: 1px;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.45);
+  transition: transform .16s ease;
+}
+.mini-switch.is-on .mini-switch__knob { transform: translateX(16px); }
+.mini-switch.is-busy .mini-switch__knob { animation: spin 1s linear infinite; }
+.user-chip__mitm-note { margin: 0 4px; padding: 2px 4px 6px; font-size: 11px; color: var(--text-mute); }
+.user-chip__mitm-err {
+  margin: 2px 4px 6px; padding: 5px 8px; font-size: 11px;
+  color: var(--danger); background: rgba(239,68,68,.1); border-radius: 6px; line-height: 1.4;
+}
+
+/* cloud team card: 账单 entry (top-right, beside trial badge) */
+.bcard__top-right { display: inline-flex; align-items: center; gap: 6px; }
+.bcard__billing-btn {
+  -webkit-app-region: no-drag;
+  border: 1px solid var(--line); background: transparent; color: var(--text-dim);
+  border-radius: 7px; padding: 3px 9px; font-size: 11px; cursor: pointer;
+  transition: color .12s, border-color .12s, background .12s;
+}
+.bcard__billing-btn:hover { color: var(--accent-text); border-color: var(--accent-line); background: var(--accent-soft); }
 
 .glow--app {
   inset: -10% -10% auto -10%;
@@ -276,9 +370,9 @@ body {
   border: 1px solid rgba(52,211,153,.3);
 }
 .bcard__badge--trial {
-  background: rgba(251,191,36,.15);
-  color: #fcd34d;
-  border: 1px solid rgba(251,191,36,.3);
+  background: rgba(255,255,255,.06);
+  color: var(--text-dim);
+  border: 1px solid var(--line);
   font-size: 9.5px;
   letter-spacing: 0.3px;
   padding: 2px 7px;
@@ -309,10 +403,10 @@ body {
   opacity: .8;
 }
 .bcard__cta--helper {
-  background: linear-gradient(90deg, #5b8df7, #a78bfa);
-  box-shadow: 0 6px 18px -4px rgba(167,139,250,.45);
+  background: rgba(255,255,255,.05);
+  box-shadow: none;
 }
-.bcard__cta--helper:hover { filter: brightness(1.1); }
+.bcard__cta--helper:hover { background: var(--accent-soft); }
 
 /* ── Helper drawer top bar (close button) ── */
 .helper-aside__top {
@@ -563,8 +657,8 @@ body {
   display: inline-flex; align-items: center;
   padding: 2px 8px;
   border-radius: 999px;
-  background: rgba(251,191,36,.12);
-  color: #fbbf24;
+  background: var(--accent-soft);
+  color: var(--accent-text);
   font-size: 10px; font-weight: 700;
   text-transform: uppercase; letter-spacing: 0.5px;
 }
@@ -604,27 +698,29 @@ body {
   border-radius: 999px;
 }
 
+/* One calm, uniform 打开 button for EVERY card type — no loud blue/amber/purple
+   fills or colored shadows (主人: 打开 别用不同颜色太醒目的 btn). Quiet neutral
+   surface that warms to the single accent on hover. */
 .bcard__cta {
   position: relative; z-index: 1;
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   width: 100%; height: 38px;
-  border: 0; border-radius: 9px;
-  background: var(--brand); color: #fff;
+  border: 1px solid var(--line); border-radius: 9px;
+  background: rgba(255,255,255,.05); color: var(--text);
   font-size: 13px; font-weight: 600;
   letter-spacing: 0.1px;
   cursor: pointer;
-  transition: transform 80ms ease, background 160ms ease, box-shadow 160ms ease, filter 160ms ease;
-  box-shadow: 0 4px 12px -2px rgba(91,141,247,.45);
+  transition: transform 80ms ease, background 140ms ease, border-color 140ms ease, color 140ms ease;
+  box-shadow: none;
 }
-.bcard--cloud .bcard__cta {
-  background: var(--accent-cloud);
-  box-shadow: 0 4px 12px -2px rgba(245,158,11,.45);
-}
+/* card-type variants inherit the same quiet style (overrides removed) */
+.bcard--cloud .bcard__cta,
 .bcard--custom .bcard__cta {
-  background: var(--accent-custom);
-  box-shadow: 0 4px 12px -2px rgba(139,92,246,.45);
+  background: rgba(255,255,255,.05); box-shadow: none;
 }
-.bcard__cta:hover { filter: brightness(1.08); }
+.bcard__cta:hover {
+  background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-text);
+}
 .bcard__cta:active { transform: translateY(1px); }
 .bcard__cta:disabled {
   background: rgba(255,255,255,.03);
@@ -676,8 +772,8 @@ body {
   cursor: pointer; transition: .12s;
 }
 .bcard__menu-item:hover { background: rgba(255,255,255,.07); color: #fff; }
-.bcard__menu-item.is-accent { color: #fbbf24; font-weight: 600; }
-.bcard__menu-item.is-accent:hover { background: rgba(245,158,11,.15); color: #fcd34d; }
+.bcard__menu-item.is-accent { color: var(--accent-text); font-weight: 600; }
+.bcard__menu-item.is-accent:hover { background: var(--accent-soft); color: #c7dbff; }
 .bcard__menu-item.is-danger { color: #f7a3a3; }
 .bcard__menu-item.is-danger:hover { background: rgba(239,68,68,.16); color: #fff; }
 /* ---- Windows Docker 一键安装/启动卡 (DockerSetup) ---- */
@@ -723,9 +819,9 @@ body {
 }
 /* "新版 vX.Y.Z" chip on the card face */
 .bcard__chip--new {
-  color: #fbbf24;
-  background: rgba(245,158,11,.12);
-  border-color: rgba(245,158,11,.3);
+  color: var(--accent-text);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
 }
 .bcard__opmsg {
   display: flex; align-items: center; gap: 6px;

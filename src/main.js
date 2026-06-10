@@ -11,6 +11,7 @@ const { openWindowForBackend } = require("./backends/window-manager");
 const { Menu } = require("electron");
 const { dialog } = require("electron");
 const { setupAppIcons } = require("./tray");
+const { brandHostElectron } = require("./utils/brand-host-electron");
 const appUpdater = require("./app-updater");
 
 // 🎯 添加右键上下文菜单
@@ -604,6 +605,19 @@ function ensureAutoLaunch() {
 function ensureMacLoginItem(want) {
   const name = "CiCy Desktop";
   const appletPath = path.join(os.homedir(), "Desktop", "CiCy Desktop.app");
+  // Run the osascript ONLY when the desired state differs from what we last
+  // applied. Each `tell application "System Events"` triggers macOS's
+  // Automation-consent dialog, and because cicy-desktop is unpackaged/unsigned
+  // it has no stable TCC identity — so the grant can't be remembered and the
+  // dialog re-pops on EVERY launch. Persisting our own flag means we only touch
+  // System Events on first configuration (or an actual on↔off change), so the
+  // prompt appears at most once instead of every startup.
+  const prefs = readPrefs();
+  const state = want ? "on" : "off";
+  if (prefs.macLoginItem === state) {
+    log.info(`[autostart] mac login item already ${state} — skip (no re-prompt)`);
+    return;
+  }
   try {
     const { execFileSync } = require("child_process");
     const osa = (script) => execFileSync("osascript", ["-e", script], { stdio: "ignore" });
@@ -614,6 +628,10 @@ function ensureMacLoginItem(want) {
     } else {
       log.info(`[autostart] mac login item ${want ? "skipped (applet missing)" : "removed"}`);
     }
+    // Only persist the flag once the applet actually exists (so a first launch
+    // that races applet creation re-tries next time instead of latching "on"
+    // without ever registering).
+    if (!want || fs.existsSync(appletPath)) writePrefs({ ...prefs, macLoginItem: state });
   } catch (e) {
     log.warn(`[autostart] mac login item failed: ${e.message}`);
   }
@@ -625,6 +643,15 @@ function readPrefs() {
     if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, "utf8"));
   } catch {}
   return {};
+}
+
+function writePrefs(prefs) {
+  try {
+    const p = path.join(electronApp.getPath("userData"), "prefs.json");
+    fs.writeFileSync(p, JSON.stringify(prefs, null, 2), "utf8");
+  } catch (e) {
+    log.warn(`[prefs] write failed: ${e.message}`);
+  }
 }
 
 function ensureLinuxAutostart(want) {
@@ -704,6 +731,10 @@ electronApp.whenReady().then(async () => {
     log.info(`[i18n] locale = ${i18n.i18next.language} (raw: ${realLocale})`);
   } catch (e) { log.warn(`[i18n] ready-time relocale failed: ${e.message}`); }
 
+  // Rebrand the host (unpackaged) Electron bundle → "CiCy Desktop" name + icon.
+  // May relaunch once on first run to apply the menu-bar name; everything after
+  // here is skipped on that one relaunch path, so keep it first.
+  brandHostElectron();
   setupAppIcons();
   ensureDesktopLauncher();
   ensureAutoLaunch();
@@ -762,7 +793,21 @@ electronApp.whenReady().then(async () => {
       try {
         await auth.startLogin({
           onResult: (payload) => {
-            if (payload && payload.token) saveDesktopAuth(payload);
+            if (payload && payload.token) {
+              saveDesktopAuth(payload);
+              // Now that we have a real owner-bound login token, report this
+              // machine to the cloud (best-effort; safe to call repeatedly —
+              // cloud upserts by (owner, deviceId)).
+              try {
+                require("./cloud/cloud-client")
+                  .registerDevice()
+                  .catch((e) => log.warn(`[cloud] device register (on login) failed: ${e.message}`));
+                // Fresh login → also register this device's local team(s).
+                require("./backends/local-teams")
+                  .syncAllLocalTeams()
+                  .catch((e) => log.warn(`[cloud] local-team sync (on login) failed: ${e.message}`));
+              } catch (e) { log.warn(`[cloud] device register hook failed: ${e.message}`); }
+            }
             const hw = require("./backends/homepage-window");
             const w = hw.getHomepageWindow && hw.getHomepageWindow();
             if (w && !w.isDestroyed()) {
@@ -828,6 +873,22 @@ electronApp.whenReady().then(async () => {
       return { ok: true };
     });
   }
+
+  // Cloud device registration — if the user is already logged in, report this
+  // machine (stable deviceId + platform/arch/publicIp) to the cloud on launch.
+  // Best-effort and fully non-blocking; a no-op when not logged in (the login
+  // onResult hook above covers the log-in-later case).
+  try {
+    require("./cloud/cloud-client")
+      .registerDevice()
+      .catch((e) => log.warn(`[cloud] device register (on launch) failed: ${e.message}`));
+    // Catch-up sync of this device's local team(s) → cloud, so a box whose 本地
+    // team predates the cloud-client (e.g. a freshly-deployed Windows install)
+    // still shows up under 本地 without needing a rename. Non-blocking.
+    require("./backends/local-teams")
+      .syncAllLocalTeams()
+      .catch((e) => log.warn(`[cloud] startup local-team sync failed: ${e.message}`));
+  } catch (e) { log.warn(`[cloud] device register launch hook failed: ${e.message}`); }
 
   // Local-team discovery — reads ~/cicy-ai/global.json's cicyDesktopNodes
   // and probes each via /api/health. Pure local, never talks to the cloud

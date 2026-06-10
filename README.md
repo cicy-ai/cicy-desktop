@@ -131,11 +131,11 @@ the Electron main process loads into the primary BrowserWindow.
 
 ### Where it's served from
 
-- **Windows**: remote `https://desktop.cicy-ai.com` (CF Worker hosts the
-  prod bundle; UI changes ship without rebuilding cicy-desktop).
-- **Mac/Linux**: local `file:///.../src/backends/homepage-react/index.html`
-  (a synced copy of `workers/render/dist/`, lets the homepage embed the
-  HTTP team-assistant webview without mixed-content issues).
+- **All platforms (Win/Mac/Linux)**: local
+  `file:///.../src/backends/homepage-react/index.html` (a synced copy of
+  `workers/render/dist/`). `pickHomepageURL()` returns this unconditionally —
+  the bundled `file://` SPA works offline, is fast, and lets the homepage
+  embed the HTTP team-assistant webview without mixed-content issues.
 - **Dev**: set `CICY_HOMEPAGE_URL=http://localhost:8173` to load the live
   vite dev server instead. See "Dev workflow" below.
 
@@ -146,8 +146,6 @@ the Electron main process loads into the primary BrowserWindow.
 cd workers/render && npm run build
 # copy into the file:// SPA folder cicy-desktop's main process loads from
 rsync -av --delete dist/ ../../src/backends/homepage-react/
-# deploy CF Worker (Windows users hit this URL)
-npx wrangler deploy
 ```
 
 ### Dev workflow
@@ -186,25 +184,30 @@ Vite HMR picks it up instantly. No Electron restart for React/CSS edits.
 
 `src/backends/homepage-window.js` URL priority:
 1. `CICY_HOMEPAGE_URL` env (dev override) → falls back to `file://` on load failure
-2. Windows → `https://desktop.cicy-ai.com` (CF Worker `desktop-render`)
-3. Mac/Linux → bundled `file://src/backends/homepage-react/index.html`
+2. All platforms → bundled `file://src/backends/homepage-react/index.html`
 
-### Shipping SPA changes to Windows
+### Shipping SPA changes to Windows (hotpatch)
 
-Win NSIS package main process loads `https://desktop.cicy-ai.com/` —
-the `desktop-render` Cloudflare Worker. To ship a SPA change to Win
-users without rebuilding the desktop package, redeploy the Worker:
+Windows loads the same local `file://` SPA as Mac/Linux — the running
+npm-global install reads `src/backends/homepage-react/`. So shipping a SPA
+change = sync the files, **not** redeploy a Worker (there is no remote
+homepage Worker for Windows anymore):
 
 ```bash
+# build + mirror into the file:// folder
 cd workers/render && npm run build
-CLOUDFLARE_ACCOUNT_ID=$(jq -r .cf.prod.account_id ~/cicy-ai/global.json) \
-CLOUDFLARE_API_TOKEN=$(jq -r .cf.prod.api_token ~/cicy-ai/global.json) \
-  npx wrangler deploy
-# Mirror dist/ into the file:// folder so Mac packaged builds match
 rsync -av --delete dist/ ../../src/backends/homepage-react/
+# package backend + SPA and push to the Windows box
+cd ../.. && tar czf /tmp/cicy-hotpatch.tgz src build bin package.json
+scp /tmp/cicy-hotpatch.tgz win:'C:/Users/Administrator/cicy-hotpatch.tgz'
+ssh win 'cd /d "C:\Users\Administrator\AppData\Roaming\npm\node_modules\cicy-desktop" && tar -xzf C:\Users\Administrator\cicy-hotpatch.tgz'
+# relaunch in the *interactive* session (session 0 can't paint a GUI window)
+ssh win 'schtasks /run /tn StartElectron'
 ```
 
-Win users see the new SPA on next cicy-desktop relaunch.
+The `StartElectron` scheduled task is set to "interactive only" so the
+relaunched window appears on the user's RDP desktop. `bin/cicy-desktop`
+always opens `--remote-debugging-port=9221`, so verify the reload over CDP.
 
 ## Canonical config
 

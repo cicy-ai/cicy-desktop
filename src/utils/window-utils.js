@@ -14,12 +14,33 @@ if (app) {
 }
 
 function setupWindowHandlers(win) {
-  // Hook window.open to use createWindow with proper webPreferences (webviewTag etc)
+  // Hook window.open. App/internal popups (about:blank or trusted/local hosts —
+  // e.g. a popped-out ttyd terminal from CiCy Code) must open as REAL Electron
+  // windows WITH webviewTag, or any <webview> inside them (terminal / artifact
+  // guest) collapses to 0x0. Returning action:"deny" (the old behavior) routed
+  // every popup through a dialog; an *allowed* window.open window inherits
+  // DEFAULT webPreferences (webviewTag=false) unless we override it here.
+  // External links (other websites) keep the open-in-browser/app dialog.
   win.webContents.setWindowOpenHandler(({ url }) => {
     log.info(`[WindowOpen] Intercepted: ${url}`);
-    if (url && url !== "about:blank") {
-      showOpenLinkDialog(win, url);
+    if (!url || url === "about:blank" || isTrustedUrl(url)) {
+      return {
+        action: "allow",
+        overrideBrowserWindowOptions: {
+          autoHideMenuBar: true,
+          icon: require("./app-icon").appIconPath(),
+          webPreferences: {
+            webviewTag: true, // embedded <webview> (ttyd/artifact) must render
+            nodeIntegration: isTrustedUrl(url),
+            contextIsolation: !isTrustedUrl(url),
+            preload: path.join(__dirname, "../backends/webview-preload.js"),
+            webSecurity: false,
+            enableClipboard: true,
+          },
+        },
+      };
     }
+    showOpenLinkDialog(win, url);
     return { action: "deny" };
   });
   if (!win.webContents.debugger.isAttached()) {
@@ -288,7 +309,6 @@ function createWindow(options = {}, accountIdx = 0, forceNew = false) {
     // the way for backend pages.
     autoHideMenuBar: true,
     webPreferences: {
-      webviewTag: true,
       offscreen: false, // 确保不是离屏渲染
       nodeIntegration: isTrustedUrl(url),
       contextIsolation: !isTrustedUrl(url),
@@ -304,6 +324,10 @@ function createWindow(options = {}, accountIdx = 0, forceNew = false) {
       // 允许 webview 访问剪贴板
       webSecurity: false, // 在开发环境中可以考虑禁用，生产环境需要谨慎
       ...webPreferences,
+      // webviewTag MUST stay on for embedded <webview> (ttyd terminal, artifact
+      // guest) to render — a 0x0/blank <webview> is the classic symptom of it
+      // being off. Forced LAST so a caller's webPreferences can never disable it.
+      webviewTag: true,
     },
   });
 
@@ -408,6 +432,33 @@ function getWindowInfo(win) {
 if (app) {
   app.on("browser-window-created", (event, win) => {
     setupWindowHandlers(win);
+  });
+
+  // <webview> guests (Team Helper drawer, artifact, an embedded CiCy Code SPA)
+  // get their OWN webContents — setupWindowHandlers only runs for BrowserWindows,
+  // so a window.open from INSIDE a <webview> would otherwise create a window with
+  // default webPreferences (webviewTag=false) → any nested <webview> there is 0x0.
+  // Give every guest a handler that opens its popups WITH webviewTag.
+  app.on("web-contents-created", (_e, contents) => {
+    try {
+      if (contents.getType && contents.getType() === "webview") {
+        contents.setWindowOpenHandler(({ url }) => ({
+          action: "allow",
+          overrideBrowserWindowOptions: {
+            autoHideMenuBar: true,
+            webPreferences: {
+              webviewTag: true,
+              contextIsolation: !isTrustedUrl(url),
+              nodeIntegration: isTrustedUrl(url),
+              webSecurity: false,
+              enableClipboard: true,
+            },
+          },
+        }));
+      }
+    } catch (e) {
+      log.warn(`[web-contents-created] guest open-handler failed: ${e.message}`);
+    }
   });
 }
 
