@@ -270,6 +270,17 @@ const {
   chromeUserDataRoot,
   chromeDebuggerBasePort,
 } = parseArgs();
+
+// The two remote-control surfaces are the HTTP/MCP tool server (PORT, default
+// 8101) and the Chrome DevTools Protocol debug port (9221). CDP has NO
+// authentication — anyone who can reach 9221 can drive every Electron window
+// (run arbitrary JS, read the DOM, navigate). So gate BOTH behind the same
+// opt-in: a default desktop install (no --mcp, no CICY_DESKTOP_HTTP, no
+// CICY_MASTER_URL) opens neither, removing the unauthenticated CDP surface
+// entirely unless automation is actually wanted.
+const automationEnabled =
+  process.env.CICY_DESKTOP_HTTP === "1" || enableMcp || !!process.env.CICY_MASTER_URL;
+
 config.port = PORT;
 if (chromeBinary) {
   config.chromeBinary = chromeBinary;
@@ -464,9 +475,15 @@ app.use(
 // Start server
 const server = http.createServer(app);
 
-// 必须在 whenReady 之前设置调试端口
-electronApp.commandLine.appendSwitch("remote-debugging-port", "9221");
-log.info("[MCP] Remote debugging enabled on port 9221");
+// 必须在 whenReady 之前设置调试端口。CDP 无鉴权,仅在自动化启用时才开,并显式
+// 绑回环地址(默认已是 127.0.0.1,显式设置防止意外暴露到 0.0.0.0)。
+if (automationEnabled) {
+  electronApp.commandLine.appendSwitch("remote-debugging-port", "9221");
+  electronApp.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
+  log.info("[MCP] Remote debugging enabled on 127.0.0.1:9221 (automation enabled)");
+} else {
+  log.info("[MCP] Remote debugging port NOT opened (automation disabled — set --mcp / CICY_DESKTOP_HTTP=1 / CICY_MASTER_URL to enable)");
+}
 
 // IPC Bridge: expose all RPC tools to renderer via ipcMain.handle
 const { ipcMain } = require("electron");
@@ -1074,9 +1091,8 @@ electronApp.whenReady().then(async () => {
   // are required for the homepage UI itself, which talks to the main
   // process via Electron IPC. So skip the listen by default; opt in with
   // CICY_DESKTOP_HTTP=1 (or CICY_DESKTOP_HTTP_PORT set explicitly).
-  const httpEnabled = process.env.CICY_DESKTOP_HTTP === "1"
-                   || enableMcp
-                   || !!process.env.CICY_MASTER_URL;
+  // Same opt-in as the CDP debug port above (see `automationEnabled`).
+  const httpEnabled = automationEnabled;
 
   // Code that used to live inside server.listen(...) — startup work that
   // needs to happen after whenReady. Pulled out so we can run it whether
@@ -1097,7 +1113,7 @@ electronApp.whenReady().then(async () => {
 
   if (!httpEnabled) {
     log.info(`[MCP] HTTP server skipped (set CICY_DESKTOP_HTTP=1 or pass --mcp to enable)`);
-    log.info(`[MCP] Remote debugger: http://localhost:9221`);
+    log.info(`[MCP] Remote debugger NOT running (automation disabled)`);
     onAppStarted();
   } else {
     server.listen(PORT, async () => {
