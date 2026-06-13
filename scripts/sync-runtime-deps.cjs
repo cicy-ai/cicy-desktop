@@ -8,22 +8,23 @@
 //
 // Usage: node scripts/sync-runtime-deps.cjs   (writes package.json in place)
 
-const { execFileSync } = require("child_process");
+const { execSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
 const REGISTRY = process.env.NPM_REGISTRY || "https://registry.npmjs.org";
-// On Windows `npm` is `npm.cmd`; execFileSync (no shell) can't launch a bare
-// "npm" there → every `npm view` throws ENOENT, gets swallowed by the catch,
-// and the script aborts with "resolved nothing" (registry was fine all along).
-// Resolve the real binary name per-platform.
-const NPM = process.platform === "win32" ? "npm.cmd" : "npm";
 const PLATFORMS = ["darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64", "windows-x64", "windows-arm64"];
 const COMPONENTS = ["cicy-code", "cicy-mihomo"]; // NOT cicy-msys2 — win drops it
 
 function latest(pkg) {
+  // Use execSync (runs through a shell) instead of execFileSync: on Windows npm
+  // is npm.cmd, and Node refuses to spawn .cmd/.bat without a shell (EINVAL) —
+  // execFileSync('npm'|'npm.cmd', …) therefore threw on every call and the whole
+  // script aborted with "resolved nothing" even though the registry was fine.
+  // cmd.exe (win) / sh (unix) resolve `npm` correctly. pkg/REGISTRY are trusted
+  // constants, so the interpolation is safe.
   try {
-    return execFileSync(NPM, ["view", pkg, "version", `--registry=${REGISTRY}`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || null;
+    return execSync(`npm view ${pkg} version --registry=${REGISTRY}`, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || null;
   } catch {
     return null; // not published for this platform (e.g. cicy-code has no windows-arm64)
   }
