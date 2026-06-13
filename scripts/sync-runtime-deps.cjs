@@ -13,12 +13,17 @@ const fs = require("fs");
 const path = require("path");
 
 const REGISTRY = process.env.NPM_REGISTRY || "https://registry.npmjs.org";
+// On Windows `npm` is `npm.cmd`; execFileSync (no shell) can't launch a bare
+// "npm" there → every `npm view` throws ENOENT, gets swallowed by the catch,
+// and the script aborts with "resolved nothing" (registry was fine all along).
+// Resolve the real binary name per-platform.
+const NPM = process.platform === "win32" ? "npm.cmd" : "npm";
 const PLATFORMS = ["darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64", "windows-x64", "windows-arm64"];
 const COMPONENTS = ["cicy-code", "cicy-mihomo"]; // NOT cicy-msys2 — win drops it
 
 function latest(pkg) {
   try {
-    return execFileSync("npm", ["view", pkg, "version", `--registry=${REGISTRY}`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || null;
+    return execFileSync(NPM, ["view", pkg, "version", `--registry=${REGISTRY}`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || null;
   } catch {
     return null; // not published for this platform (e.g. cicy-code has no windows-arm64)
   }
