@@ -17,6 +17,9 @@ const { isPortOpen } = require("../utils/process-utils");
 const { getVersion, getTargets, createTarget, activateTarget, callCdp } = require("../chrome/chrome-cdp-client");
 const { resolveChromeDebuggerPort } = require("../chrome/debugger-port-resolver");
 const { config } = require("../config");
+const profileStore = require("../profiles/profile-store");
+const { summarizeCookieLogins } = require("../utils/cookie-logins");
+const { probeIpViaSession } = require("../utils/ip-probe");
 
 const PRIVATE_CHROME_JSON = path.join(os.homedir(), "cicy-ai", "db", "chrome.json");
 const PRIVATE_CHROME_TMP_DIR = path.join(os.homedir(), "chrome", "_tmp");
@@ -39,14 +42,24 @@ function expandHome(input) {
   return input;
 }
 
+// tildify — collapse the home-dir prefix back to "~" for DISPLAY only.
+// The machine has its own user (e.g. /Users/ton); surfacing that absolute path
+// is non-portable for other people/agents, so anything shown/returned uses "~".
+// NEVER feed a tildified path to Chrome's --user-data-dir or fs (use expandHome).
+function tildify(input) {
+  if (typeof input !== "string" || input.length === 0) return input;
+  const home = os.homedir();
+  if (input === home) return "~";
+  if (input.startsWith(home + path.sep)) return "~/" + input.slice(home.length + 1);
+  return input;
+}
+
+// Delegate to the shared normalizer (profile-store) so chrome + electron agree
+// on proxy encoding. Accepts string | {enable,url} | {url,enabled}; returns the
+// URL string when enabled, else null (the contract chrome-launcher expects).
 function normalizePrivateProxy(proxyValue) {
-  if (typeof proxyValue === "string") {
-    return proxyValue || null;
-  }
-  if (proxyValue && typeof proxyValue === "object" && proxyValue.enable && proxyValue.url) {
-    return proxyValue.url;
-  }
-  return null;
+  const p = profileStore.normalizeProxy(proxyValue);
+  return p.enabled && p.url ? p.url : null;
 }
 
 function readPrivateChromeConfig() {
@@ -71,7 +84,7 @@ function listPrivateChromeEntries({ includeHidden = false } = {}) {
   const entries = Object.entries(data)
     .filter(([k]) => (includeHidden ? true : !k.startsWith("__")))
     .map(([profileKey, entry]) => {
-      const m = /^account_(\d+)$/.exec(profileKey);
+      const m = /^profile_(\d+)$/.exec(profileKey);
       const accountIdx = m ? Number(m[1]) : null;
       return { profileKey, accountIdx, entry };
     })
@@ -87,7 +100,7 @@ function listPrivateChromeEntries({ includeHidden = false } = {}) {
 
 function getPrivateChromeEntryByAccountIdx(accountIdx) {
   const data = readPrivateChromeConfig();
-  const profileKey = `account_${accountIdx}`;
+  const profileKey = `profile_${accountIdx}`;
   const entry = data[profileKey] || null;
   if (!entry) return null;
   return { profileKey, accountIdx, entry };
@@ -144,7 +157,7 @@ function normalizeEffectiveChromeProfile(accountIdx, effectiveChromeProfile) {
   const platform = parsed.platform && typeof parsed.platform === "object" ? parsed.platform : {};
 
   return {
-    profileKey: `account_${accountIdx}`,
+    profileKey: `profile_${accountIdx}`,
     accountIdx,
     gmail,
     orgPath,
@@ -279,7 +292,7 @@ async function launchOrActivateProfile({
   effectiveChromeProfile,
 }) {
   const registry = getChromeRuntimeRegistry();
-  const profileKey = `account_${accountIdx}`;
+  const profileKey = `profile_${accountIdx}`;
 
   let normalized;
   let profileSource;
@@ -290,7 +303,7 @@ async function launchOrActivateProfile({
     const cfg = getPrivateChromeEntryByAccountIdx(accountIdx);
     if (!cfg) {
       throw new Error(
-        `Missing chrome profile for account_${accountIdx}. Use master dispatch or pass effectiveChromeProfile.`
+        `Missing chrome profile for profile_${accountIdx}. Use master dispatch or pass effectiveChromeProfile.`
       );
     }
     normalized = normalizePrivateChromeEntry(cfg.profileKey, cfg.accountIdx, cfg.entry);
@@ -308,6 +321,8 @@ async function launchOrActivateProfile({
   const effectiveUserDataDirRoot =
     normalized.expanded.rpaDir ||
     getDefaultUserDataDirRoot(accountIdx, config.chromeUserDataRoot || DEFAULT_USER_DATA_BASE_ROOT);
+  // ~-collapsed form for anything returned/stored for display (portable across users)
+  const displayUserDataDir = tildify(effectiveUserDataDirRoot);
 
   // Script parity: if /json/version reachable => activate first page target and return reused
   const liveStatus = await probeChromeDebugger(effectivePort);
@@ -323,7 +338,7 @@ async function launchOrActivateProfile({
       status: "running",
       debuggerPort: effectivePort,
       proxy: effectiveProxy || null,
-      userDataDirRoot: effectiveUserDataDirRoot,
+      userDataDirRoot: displayUserDataDir,
       profileDirectory: getProfileDirectory(accountIdx),
       url: url || null,
       webSocketDebuggerUrl: liveStatus.webSocketDebuggerUrl || null,
@@ -339,7 +354,7 @@ async function launchOrActivateProfile({
       gmail: normalized.gmail,
       port: effectivePort,
       proxy: effectiveProxy || null,
-      userDataDirRoot: effectiveUserDataDirRoot,
+      userDataDirRoot: displayUserDataDir,
       runtime: nextRuntime,
       liveStatus,
       targetsPreview: buildTargetsPreview(targets),
@@ -363,7 +378,7 @@ async function launchOrActivateProfile({
     debuggerPort: effectivePort,
     proxy: effectiveProxy || null,
     chromeBinary: config.chromeBinary || null,
-    userDataDirRoot: effectiveUserDataDirRoot,
+    userDataDirRoot: displayUserDataDir,
     profileDirectory: getProfileDirectory(accountIdx),
     url: url || null,
     error: null,
@@ -385,7 +400,7 @@ async function launchOrActivateProfile({
     debuggerPort: launched.debuggerPort,
     proxy: launched.proxy,
     chromeBinary: launched.chromeBinary,
-    userDataDirRoot: launched.userDataDirRoot,
+    userDataDirRoot: tildify(launched.userDataDirRoot),
     profileDirectory: launched.profileDirectory,
     url: launched.url,
     webSocketDebuggerUrl: launched.webSocketDebuggerUrl,
@@ -406,7 +421,7 @@ async function launchOrActivateProfile({
     gmail: normalized.gmail,
     port: effectivePort,
     proxy: effectiveProxy || null,
-    userDataDirRoot: effectiveUserDataDirRoot,
+    userDataDirRoot: displayUserDataDir,
     runtime: nextRuntime,
     activatedTargetId,
     targetsPreview: buildTargetsPreview(targets),
@@ -440,12 +455,16 @@ function registerChromeTools(registerTool) {
           profileKey,
           accountIdx,
           gmail: normalized.gmail,
+          note: normalized.note,
           orgPath: normalized.orgPath,
           rpaDir: normalized.rpaDir,
           port,
           proxy: normalized.proxyUrl,
           proxyRaw: normalized.proxy,
           platform: normalized.platform,
+          // parity with electron_list_profiles so the panel renders the same row
+          ipInfo: profileStore.normalizeIpInfo(entry.ipInfo),
+          logins: (Array.isArray(entry.logins) ? entry.logins : []).map(profileStore.normalizeLogin),
           runtime,
           liveStatus,
         });
@@ -528,14 +547,14 @@ function registerChromeTools(registerTool) {
     "chrome_get_profile",
     "获取指定 accountIdx 的 profile：privateConfig + runtime + liveStatus（脚本心智）",
     z.object({
-      accountIdx: z.number().describe("账户索引，映射到 ~/cicy-ai/db/chrome.json 的 account_<idx>"),
+      accountIdx: z.number().describe("账户索引，映射到 ~/cicy-ai/db/chrome.json 的 profile_<idx>"),
     }),
     async ({ accountIdx }) => {
       const registry = getChromeRuntimeRegistry();
       const cfg = getPrivateChromeEntryByAccountIdx(accountIdx);
       if (!cfg) {
         return toToolResult(
-          { error: `Missing chrome.json entry: account_${accountIdx}` },
+          { error: `Missing chrome.json entry: profile_${accountIdx}` },
           { isError: true }
         );
       }
@@ -587,7 +606,7 @@ function registerChromeTools(registerTool) {
 
   registerTool(
     "chrome_add_profile",
-    "新增账号（等价于 chrome-rpa.sh add）：从 ~/chrome/__tmp 创建 ~/chrome/account_N 并写回 ~/cicy-ai/db/chrome.json",
+    "新增账号（等价于 chrome-rpa.sh add）：从 ~/chrome/__tmp 创建 ~/chrome/profile_N 并写回 ~/cicy-ai/db/chrome.json",
     z.object({
       gmail: z.string().optional().describe("可选：新账号 gmail"),
       orgPath: z.string().optional().describe("可选：orgPath（默认 Profile 9）"),
@@ -596,13 +615,13 @@ function registerChromeTools(registerTool) {
     async ({ gmail, orgPath, launchAfterCreate } = {}) => {
       const data = readPrivateChromeConfig();
       const nums = Object.keys(data)
-        .map((k) => (/^account_(\d+)$/.exec(k) ? Number(/^account_(\d+)$/.exec(k)[1]) : null))
+        .map((k) => (/^profile_(\d+)$/.exec(k) ? Number(/^profile_(\d+)$/.exec(k)[1]) : null))
         .filter((n) => typeof n === "number");
       const nextNum = nums.length ? Math.max(...nums) + 1 : 1;
 
-      const profileKey = `account_${nextNum}`;
+      const profileKey = `profile_${nextNum}`;
       const port = 11000 + nextNum;
-      const rpaDirTilde = `~/chrome/${profileKey}`;
+      const rpaDirTilde = `~/chrome/profile_${nextNum}`;
       const rpaDir = expandHome(rpaDirTilde);
 
       if (fs.existsSync(rpaDir)) {
@@ -652,23 +671,92 @@ function registerChromeTools(registerTool) {
 
   registerTool(
     "chrome_set_profile_proxy",
-    "设置 ~/cicy-ai/db/chrome.json 中指定 accountIdx 的 proxy（脚本对齐；下次启动生效）",
+    "设置 ~/cicy-ai/db/chrome.json 中指定 accountIdx 的 proxy（持久化为 {url,enabled}；下次启动生效）",
     z.object({
       accountIdx: z.number().describe("账户索引"),
       proxy: z.string().optional().describe("代理 URL；留空则清空"),
     }),
     async ({ accountIdx, proxy } = {}) => {
-      const data = readPrivateChromeConfig();
-      const key = `account_${accountIdx}`;
-      if (!data[key]) {
-        return toToolResult({ error: `Missing chrome.json entry: ${key}` }, { isError: true });
+      try {
+        const view = profileStore.setProxy("chrome", accountIdx, proxy || "");
+        return toToolResult({ success: true, profileKey: `profile_${accountIdx}`, profile: view });
+      } catch (e) {
+        return toToolResult({ error: e.message }, { isError: true });
       }
-      data[key] = {
-        ...data[key],
-        proxy: typeof proxy === "string" ? proxy : "",
-      };
-      writePrivateChromeConfig(data);
-      return toToolResult({ success: true, profileKey: key, privateConfig: data[key] });
+    },
+    { tag: "Chrome" }
+  );
+
+  registerTool(
+    "chrome_profile_login_add",
+    "记录某 Chrome profile 登录了哪个平台账号（每个平台一条，重复平台覆盖）",
+    z.object({
+      accountIdx: z.number().describe("账户索引"),
+      platform: z.string().describe("平台，如 github / google / x"),
+      account: z.string().describe("账号标识，如 alice@x.com"),
+    }),
+    async ({ accountIdx, platform, account } = {}) => {
+      try {
+        return toToolResult(profileStore.addLogin("chrome", accountIdx, platform, account));
+      } catch (e) {
+        return toToolResult({ error: e.message }, { isError: true });
+      }
+    },
+    { tag: "Chrome" }
+  );
+
+  registerTool(
+    "chrome_profile_login_set",
+    "新增/更新某 Chrome profile 的一条登录记录（富字段：地址/名称/用户名/邮箱/手机/2FA/备用邮箱/备注；按名称 name 归并，只覆盖传入的非空字段）",
+    z.object({
+      accountIdx: z.number().describe("账户索引"),
+      name: z.string().describe("名称＝平台/站点名，如 抖音 / Google（归并键）"),
+      url: z.string().optional().describe("地址，如 https://www.douyin.com"),
+      username: z.string().optional().describe("用户名"),
+      email: z.string().optional().describe("邮箱"),
+      mobile: z.string().optional().describe("手机号"),
+      twofa: z.string().optional().describe("2FA（TOTP 秘钥或说明）"),
+      secondEmail: z.string().optional().describe("备用邮箱"),
+      note: z.string().optional().describe("备注"),
+      loginAt: z.string().optional().describe("登录时间 ISO（不传则首次记录时自动 now）"),
+    }),
+    async ({ accountIdx, ...login } = {}) => {
+      try {
+        return toToolResult(profileStore.setLogin("chrome", accountIdx, login));
+      } catch (e) {
+        return toToolResult({ error: e.message }, { isError: true });
+      }
+    },
+    { tag: "Chrome" }
+  );
+
+  registerTool(
+    "chrome_profile_login_rm",
+    "移除某 Chrome profile 的某平台登录记录",
+    z.object({
+      accountIdx: z.number().describe("账户索引"),
+      platform: z.string().describe("平台"),
+    }),
+    async ({ accountIdx, platform } = {}) => {
+      try {
+        return toToolResult(profileStore.removeLogin("chrome", accountIdx, platform));
+      } catch (e) {
+        return toToolResult({ error: e.message }, { isError: true });
+      }
+    },
+    { tag: "Chrome" }
+  );
+
+  registerTool(
+    "chrome_profile_logins",
+    "列出某 Chrome profile 已记录的平台登录",
+    z.object({ accountIdx: z.number().describe("账户索引") }),
+    async ({ accountIdx } = {}) => {
+      try {
+        return toToolResult(profileStore.listLogins("chrome", accountIdx));
+      } catch (e) {
+        return toToolResult({ error: e.message }, { isError: true });
+      }
     },
     { tag: "Chrome" }
   );
@@ -696,7 +784,7 @@ function registerChromeTools(registerTool) {
     }),
     async ({ accountIdx, note, accounts } = {}) => {
       const data = readPrivateChromeConfig();
-      const key = `account_${accountIdx}`;
+      const key = `profile_${accountIdx}`;
       if (!data[key]) {
         return toToolResult({ error: `Missing chrome.json entry: ${key}` }, { isError: true });
       }
@@ -775,7 +863,7 @@ function registerChromeTools(registerTool) {
       const cfg = getPrivateChromeEntryByAccountIdx(accountIdx);
       const { debuggerPort: port } = resolveChromeDebuggerPort(accountIdx, {
         registry,
-        chromeConfig: cfg ? { [`account_${accountIdx}`]: cfg.entry } : null,
+        chromeConfig: cfg ? { [`profile_${accountIdx}`]: cfg.entry } : null,
       });
 
       if (!port) {
@@ -813,7 +901,7 @@ function registerChromeTools(registerTool) {
       const cfg = getPrivateChromeEntryByAccountIdx(accountIdx);
       const { debuggerPort: port } = resolveChromeDebuggerPort(accountIdx, {
         registry,
-        chromeConfig: cfg ? { [`account_${accountIdx}`]: cfg.entry } : null,
+        chromeConfig: cfg ? { [`profile_${accountIdx}`]: cfg.entry } : null,
       });
 
       if (!port) {
@@ -836,6 +924,54 @@ function registerChromeTools(registerTool) {
         return toToolResult({ debuggerPort: port, result });
       } catch (error) {
         registry.upsert(accountIdx, { status: "error", error: error.message, debuggerPort: port });
+        return toToolResult({ error: error.message }, { isError: true });
+      }
+    },
+    { tag: "Chrome" }
+  );
+
+  registerTool(
+    "chrome_probe_ip",
+    "探测某 Chrome profile 当前出口 IP + 地区(经其配置代理,用临时 Electron session,无需启动 Chrome),写入 config 并盖探测时间;可重复探测",
+    z.object({ accountIdx: z.number().describe("账户索引") }),
+    async ({ accountIdx }) => {
+      try {
+        const { session } = require("electron");
+        const view = profileStore.getProfile("chrome", accountIdx);
+        const rules = profileStore.proxyRules(view && view.proxy);
+        const ses = session.fromPartition(`chrome-ipprobe-${accountIdx}`, { cache: false });
+        await ses.setProxy({ proxyRules: rules || "direct://" });
+        const info = await probeIpViaSession(ses);
+        const saved = profileStore.setIpInfo("chrome", accountIdx, info);
+        return toToolResult({ accountIdx, backend: "chrome", proxy: rules || null, ipInfo: saved.ipInfo });
+      } catch (e) {
+        return toToolResult({ error: e.message }, { isError: true });
+      }
+    },
+    { tag: "Chrome" }
+  );
+
+  registerTool(
+    "chrome_detect_logins",
+    "探测指定 Chrome profile 当前 session 登录了哪些站点：读取全部 cookie 按域名归并，标记带会话 cookie 的域名（cookie 在≠一定登录，仅强信号；profile 需在运行）",
+    z.object({ accountIdx: z.number().describe("账户索引") }),
+    async ({ accountIdx }) => {
+      const registry = getChromeRuntimeRegistry();
+      const cfg = getPrivateChromeEntryByAccountIdx(accountIdx);
+      const { debuggerPort: port } = resolveChromeDebuggerPort(accountIdx, {
+        registry,
+        chromeConfig: cfg ? { [`profile_${accountIdx}`]: cfg.entry } : null,
+      });
+      if (!port) {
+        return toToolResult(
+          { error: `Missing debuggerPort for accountIdx=${accountIdx}（profile 未启动？先 launch）` },
+          { isError: true }
+        );
+      }
+      try {
+        const { cookies } = await callCdp({ debuggerPort: port, method: "Storage.getCookies", params: {} });
+        return toToolResult({ accountIdx, backend: "chrome", ...summarizeCookieLogins(cookies) });
+      } catch (error) {
         return toToolResult({ error: error.message }, { isError: true });
       }
     },

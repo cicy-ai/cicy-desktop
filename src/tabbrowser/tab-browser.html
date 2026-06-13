@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>CiCy Browser</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+  body{display:flex;flex-direction:column;background:#202124;color:#e8eaed}
+  #tabs{display:flex;align-items:center;gap:2px;padding:6px 6px 0;overflow-x:auto;flex-wrap:nowrap}
+  #tabs::-webkit-scrollbar{height:0}
+  .tab{display:flex;align-items:center;gap:6px;max-width:220px;min-width:110px;padding:8px 10px;background:#35363a;border-radius:9px 9px 0 0;font-size:12px;white-space:nowrap;cursor:default}
+  .tab.active{background:#5f6368}
+  .tab .t{flex:1;overflow:hidden;text-overflow:ellipsis}
+  .tab .x{opacity:.55;cursor:pointer;padding:0 3px;border-radius:3px}
+  .tab .x:hover{background:#0004;opacity:1}
+  #newtab{padding:4px 11px;cursor:pointer;font-size:18px;color:#9aa0a6}
+  #newtab:hover{color:#fff}
+  #bar{display:flex;align-items:center;gap:8px;padding:8px 10px;background:#35363a}
+  #bar button{background:none;border:none;color:#9aa0a6;font-size:17px;cursor:pointer;padding:4px 9px;border-radius:6px}
+  #bar button:hover{background:#ffffff18;color:#fff}
+  #url{flex:1;background:#202124;border:1px solid #5f6368;border-radius:18px;padding:8px 14px;color:#e8eaed;font-size:13px;outline:none}
+  #url:focus{border-color:#8ab4f8}
+  #views{flex:1;position:relative;background:#fff}
+  webview{position:absolute;inset:0;width:100%;height:100%}
+  webview.hidden{display:none}
+</style>
+</head>
+<body>
+  <div id="tabs"></div>
+  <div id="bar">
+    <button id="back" title="后退">&#8249;</button>
+    <button id="fwd" title="前进">&#8250;</button>
+    <button id="reload" title="刷新">&#8635;</button>
+    <input id="url" placeholder="输入网址或搜索">
+  </div>
+  <div id="views"></div>
+<script>
+  // partition (profile) comes from the query: ?p=<accountIdx>
+  const Q = new URLSearchParams(location.search);
+  const ACCT = Q.get('p') || '0';
+  const PARTITION = 'persist:sandbox-' + ACCT;
+  // cicy's webview preload → trusted tabs (cicy-code team app) get
+  // window.electronRPC + cicy bridges so they keep working as a tab.
+  const PRELOAD = new URL('../backends/webview-preload.js', location.href).href;
+  // homepage uses its OWN preload (window.cicy.localTeams/auth/...). When ?home=
+  // is set, the first tab loads the homepage with that preload.
+  const HOMEPAGE_PRELOAD = new URL('../backends/homepage-preload.js', location.href).href;
+  const HOME = Q.get('home') || '';
+  // Built-in start page (a real page, not about:blank) for new tabs.
+  const START = 'data:text/html;charset=utf-8,' + encodeURIComponent(
+    `<!doctype html><meta charset=utf-8><style>html,body{height:100%;margin:0;display:flex;align-items:center;justify-content:center;background:#202124;color:#e8eaed;font-family:-apple-system,sans-serif}.w{text-align:center}.l{width:54px;height:54px;border-radius:16px;margin:0 auto 16px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;color:#fff;font-size:26px}h1{font-size:16px;margin-bottom:6px}p{color:#9aa0a6;font-size:13px}</style><div class=w><div class=l>&#10022;</div><h1>CiCy Browser</h1><p>profile sandbox-${ACCT}</p></div>`);
+
+  const tabsEl = document.getElementById('tabs');
+  const viewsEl = document.getElementById('views');
+  const urlEl = document.getElementById('url');
+  let tabs = [];   // { wv, title, url }
+  let active = -1;
+
+  function render() {
+    tabsEl.innerHTML = '';
+    tabs.forEach((t, i) => {
+      const d = document.createElement('div');
+      d.className = 'tab' + (i === active ? ' active' : '');
+      d.innerHTML = '<span class="t"></span><span class="x">&#10005;</span>';
+      d.querySelector('.t').textContent = t.title || '新标签页';
+      d.title = t.url || '';
+      d.onclick = () => select(i);
+      d.querySelector('.x').onclick = (e) => { e.stopPropagation(); closeAt(i); };
+      tabsEl.appendChild(d);
+    });
+    const add = document.createElement('div');
+    add.id = 'newtab'; add.textContent = '+';
+    add.onclick = () => newTab();
+    tabsEl.appendChild(add);
+  }
+
+  function select(i) {
+    active = i;
+    tabs.forEach((t, j) => t.wv.classList.toggle('hidden', j !== i));
+    const t = tabs[i];
+    if (t) { try { urlEl.value = t.wv.getURL() || t.url || ''; } catch (e) { urlEl.value = t.url || ''; } }
+    render();
+  }
+
+  function closeAt(i) {
+    const t = tabs[i]; if (!t) return;
+    t.wv.remove(); tabs.splice(i, 1);
+    if (tabs.length === 0) { newTab(); return; }
+    if (active >= tabs.length) active = tabs.length - 1;
+    select(active);
+  }
+
+  // Public: open a new tab. opts.trusted=true → inject the electronRPC bridge
+  // (ONLY for trusted pages like the cicy-code team app — never random sites).
+  window.newTab = function (u, opts) {
+    u = (u && String(u).trim()) || START;
+    const wv = document.createElement('webview');
+    wv.setAttribute('partition', PARTITION);
+    wv.setAttribute('allowpopups', '');
+    if (opts && opts.trusted) { try { wv.setAttribute('preload', PRELOAD); } catch (e) {} }
+    wv.setAttribute('src', u);
+    viewsEl.appendChild(wv);
+    const t = { wv, title: '', url: u };
+    tabs.push(t);
+    wv.addEventListener('page-title-updated', (e) => { t.title = e.title; render(); });
+    wv.addEventListener('did-navigate', (e) => { t.url = e.url; if (tabs[active] === t) urlEl.value = e.url; });
+    wv.addEventListener('did-navigate-in-page', (e) => { if (tabs[active] === t) urlEl.value = e.url; });
+    // popups / window.open → open as a new tab instead of a new window
+    wv.addEventListener('new-window', (e) => { try { newTab(e.url); } catch (x) {} });
+    select(tabs.length - 1);
+  };
+
+  // Public: close the tab whose webview has this webContentsId (used by main).
+  window.closeTabByWcId = function (id) {
+    const i = tabs.findIndex((t) => { try { return t.wv.getWebContentsId() === id; } catch (e) { return false; } });
+    if (i >= 0) closeAt(i);
+    return i >= 0;
+  };
+  // Public: activate (foreground) a tab by webContentsId.
+  window.activateTabByWcId = function (id) {
+    const i = tabs.findIndex((t) => { try { return t.wv.getWebContentsId() === id; } catch (e) { return false; } });
+    if (i >= 0) select(i);
+    return i >= 0;
+  };
+  // origin+pathname only (token/hash vary per session) — for tab reuse.
+  function stripVol(u) { try { const x = new URL(u); return x.origin + x.pathname; } catch (e) { return u || ''; } }
+  // Public: focus an existing tab whose url matches (origin+pathname); else false.
+  window.activateTabByUrl = function (key) {
+    const i = tabs.findIndex((t) => { try { return stripVol(t.wv.getURL() || t.url) === key; } catch (e) { return false; } });
+    if (i >= 0) { select(i); return true; }
+    return false;
+  };
+
+  function go() {
+    let v = urlEl.value.trim(); if (!v) return;
+    if (!/^[a-z]+:\/\//i.test(v)) {
+      v = (/\.\w/.test(v) && !/\s/.test(v)) ? 'https://' + v : 'https://www.google.com/search?q=' + encodeURIComponent(v);
+    }
+    if (tabs[active]) tabs[active].wv.loadURL(v);
+  }
+  urlEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+  document.getElementById('back').onclick = () => { const w = tabs[active] && tabs[active].wv; if (w && w.canGoBack()) w.goBack(); };
+  document.getElementById('fwd').onclick = () => { const w = tabs[active] && tabs[active].wv; if (w && w.canGoForward()) w.goForward(); };
+  document.getElementById('reload').onclick = () => { tabs[active] && tabs[active].wv.reload(); };
+
+  // first tab = start page
+  newTab();
+</script>
+</body>
+</html>

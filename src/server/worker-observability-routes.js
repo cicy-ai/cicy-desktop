@@ -16,7 +16,6 @@ function createWorkerObservabilityRoutes({ getWorkerIdentity, getWorkerSnapshot 
       workerId: getWorkerIdentity().workerId,
       ts: Date.now(),
       agents: snapshot.agents.length,
-      artifacts: snapshot.artifacts.length,
     });
   });
 
@@ -30,7 +29,6 @@ function createWorkerObservabilityRoutes({ getWorkerIdentity, getWorkerSnapshot 
     const lines = [
       `cicy_worker_up 1`,
       `cicy_worker_agents ${snapshot.agents.length}`,
-      `cicy_worker_artifacts ${snapshot.artifacts.length}`,
       `cicy_worker_capabilities ${snapshot.capabilities.length}`,
       `cicy_worker_memory_rss ${snapshot.resources.memory.rss || 0}`,
       `cicy_worker_uptime ${snapshot.resources.uptime || 0}`,

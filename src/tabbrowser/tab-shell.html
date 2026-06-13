@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>CiCy Browser</title>
+<style>
+  /* Chrome MUST total CHROME_H (80) in tab-browser-tools.js: strip 40 + bar 40. */
+  :root{
+    /* match cicy-code's #0A0A0A main bg so the tab strip blends into the
+       content below — no color seam (断层). */
+    /* The top tab-strip is a clearly different (lighter) bar; the ACTIVE tab is
+       the same color as the toolbar/content (#0A0A0A) so it merges into the
+       page, carved out of the lighter strip with outward bottom curves.
+       (content is near-black, so a darker strip would be invisible → go lighter.) */
+    --bg:#0A0A0A; --strip:#1c1c20; --toolbar:#0A0A0A;
+    --fg:#e6e6e9; --muted:#8b8b92; --line:rgba(255,255,255,.06);
+    --accent:#3b82f6; --omni:#1a1a1c;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--fg);overflow:hidden;-webkit-user-select:none;user-select:none}
+  svg{display:block}
+
+  /* ── tab strip ── */
+  /* Chrome Refresh tabs: floating rounded pills, gaps between; active = a filled
+     lighter surface (NO bottom border — Chrome doesn't use one). */
+  /* gap >= the active tab's ear width so the ear sits in the inter-tab gap
+     (over the strip) instead of spilling onto / occluding the neighbor tab. */
+  #tabs{height:40px;display:flex;align-items:flex-end;gap:6px;padding:8px 8px 0;background:var(--strip);overflow-x:auto;white-space:nowrap;-webkit-app-region:drag}
+  /* titleBarStyle:hidden — the strip IS the top of the window: make empty areas
+     draggable, and reserve room for the native window controls (mac traffic
+     lights on the left, win min/max/close overlay on the right). Tabs/buttons
+     stay clickable. */
+  body.is-mac #tabs{padding-left:78px}
+  body.is-win #tabs{padding-right:140px}
+  /* fullscreen → OS window controls hidden → reclaim the reserved gutter
+     (mac: traffic lights on the left, win: min/max/close overlay on the right) */
+  body.is-mac.is-fullscreen #tabs{padding-left:8px}
+  body.is-win.is-fullscreen #tabs{padding-right:8px}
+  .tab,#newtab{-webkit-app-region:no-drag}
+  #tabs::-webkit-scrollbar{height:0}
+  .tab{position:relative;display:flex;align-items:center;gap:9px;height:32px;min-width:54px;max-width:240px;padding:0 12px;border-radius:10px 10px 0 0;font-size:12.5px;color:var(--muted);background:transparent;cursor:default;flex:1 1 0;transition:background .12s,color .12s}
+  .tab:hover{background:rgba(255,255,255,.06);color:var(--fg)}
+  /* home = the resident homepage tab: pinned first, fixed width, user icon, no
+     title text, no close — like Chrome's profile/avatar button. */
+  /* start-page tab: pinned, sizes to its "我的团队" label (not a flex-grow tab) */
+  .tab.home{flex:0 0 auto;min-width:0;max-width:none;padding:0 12px 0 10px}
+  .tab.home .ttl{flex:0 0 auto}
+  .tab.home .fav{overflow:visible}
+  /* CiCy brand mark — gradient rounded square + ✦, matches the start page logo */
+  .cicy-logo{width:17px;height:17px;border-radius:5px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;line-height:1;box-shadow:0 1px 2px rgba(0,0,0,.3)}
+  /* the homepage tab has no toolbar beneath it (its content covers y=40 down),
+     so drop the outward ears — they'd otherwise meet the homepage top with a seam. */
+  .tab.home.active::before,.tab.home.active::after{display:none}
+  /* active tab = toolbar/content color, merged into the page, with outward bottom curves */
+  .tab.active{background:var(--toolbar);color:#fff;z-index:1}
+  /* outward bottom "ears" carved from the strip into the toolbar. gradient goes
+     strip→toolbar (NOT transparent→toolbar): a transparent→opaque ramp passes
+     through semi-transparent black and leaves a dark fringe on the lighter strip;
+     using the solid strip color makes the inner quarter blend seamlessly. */
+  /* ear width (5px) < the inter-tab gap (6px) so the ear never reaches the
+     neighbor tab — no overlap/occlusion on hover. */
+  .tab.active::before,.tab.active::after{content:"";position:absolute;bottom:0;width:5px;height:5px}
+  .tab.active::before{left:-5px;background:radial-gradient(circle at top left,var(--strip) 4.5px,var(--toolbar) 5px)}
+  .tab.active::after{right:-5px;background:radial-gradient(circle at top right,var(--strip) 4.5px,var(--toolbar) 5px)}
+  .fav{width:16px;height:16px;flex:0 0 16px;border-radius:4px;display:flex;align-items:center;justify-content:center;overflow:hidden}
+  .fav img{width:16px;height:16px;object-fit:contain}
+  .spin{width:14px;height:14px;border:2px solid rgba(255,255,255,.25);border-top-color:var(--accent);border-radius:50%;animation:sp .7s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .ttl{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cls{flex:0 0 16px;width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;opacity:0;color:var(--muted);transition:opacity .1s,background .1s}
+  .tab:hover .cls,.tab.active .cls{opacity:.85}
+  .cls:hover{background:rgba(255,255,255,.16);color:#fff;opacity:1}
+  #newtab{flex:0 0 30px;width:30px;height:30px;margin:2px 0 2px 2px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--muted);cursor:default}
+  #newtab:hover{background:rgba(255,255,255,.08);color:#fff}
+
+  /* ── toolbar ── */
+  #bar{position:relative;height:40px;display:flex;align-items:center;gap:4px;padding:0 8px;background:var(--toolbar)}
+  .nav{width:32px;height:32px;flex:0 0 32px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--fg);cursor:default}
+  .nav:hover{background:rgba(255,255,255,.10)}
+  .nav.off{color:var(--muted);opacity:.35;pointer-events:none}
+  #omni{flex:1;height:30px;display:flex;align-items:center;gap:8px;margin-left:6px;padding:0 12px;background:var(--omni);border:1px solid var(--line);border-radius:16px;transition:border-color .12s,background .12s}
+  #omni.focus{background:#111113;border-color:var(--accent)}
+  #lead{flex:0 0 16px;width:16px;height:16px;color:var(--muted);display:flex;align-items:center;justify-content:center}
+  #url{flex:1;height:100%;background:transparent;border:none;outline:none;color:var(--fg);font-size:13px;-webkit-user-select:text;user-select:text}
+  #url::placeholder{color:var(--muted)}
+
+  /* ── top load progress ── */
+  #prog{position:absolute;left:0;right:0;bottom:-1px;height:2px;overflow:hidden;pointer-events:none;opacity:0;transition:opacity .2s}
+  #prog.on{opacity:1}
+  #prog::before{content:"";position:absolute;left:0;top:0;height:100%;width:35%;background:linear-gradient(90deg,transparent,var(--accent),transparent);animation:load 1.05s ease-in-out infinite}
+  @keyframes load{0%{left:-35%}100%{left:100%}}
+</style>
+</head>
+<body>
+  <div id="tabs"></div>
+  <div id="bar">
+    <div class="nav off" id="back" title="后退">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+    </div>
+    <div class="nav off" id="fwd" title="前进">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+    </div>
+    <div class="nav" id="reload" title="刷新">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+    </div>
+    <div id="omni">
+      <span id="lead"></span>
+      <input id="url" placeholder="搜索或输入网址" spellcheck="false" autocomplete="off">
+    </div>
+    <div id="prog"></div>
+  </div>
+<script>
+  const ICON_GLOBE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9aa0a6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>';
+  const CICY_LOGO = '<span class="cicy-logo">✦</span>';
+  const ICON_LOCK = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
+
+  const tabsEl = document.getElementById('tabs');
+  const urlEl = document.getElementById('url');
+  const omniEl = document.getElementById('omni');
+  const leadEl = document.getElementById('lead');
+  const backEl = document.getElementById('back');
+  const fwdEl = document.getElementById('fwd');
+  const progEl = document.getElementById('prog');
+  const NO_NEW = new URLSearchParams(location.search).get('noNew') === '1'; // profile 0
+  const PLAT = new URLSearchParams(location.search).get('plat') || '';      // darwin|win32|linux
+  if (PLAT === 'darwin') document.body.classList.add('is-mac');
+  else if (PLAT === 'win32') document.body.classList.add('is-win');
+  try { window.tabAPI.onFullscreen((fs) => document.body.classList.toggle('is-fullscreen', !!fs)); } catch (e) {}
+  let state = { tabs: [], nav: {} };
+  let urlFocused = false;
+
+  function faviconNode(t) {
+    const w = document.createElement('span');
+    w.className = 'fav';
+    if (t.loading) { w.innerHTML = '<span class="spin"></span>'; return w; }
+    if (t.favicon) {
+      const img = document.createElement('img');
+      img.src = t.favicon;
+      img.onerror = () => { w.innerHTML = ICON_GLOBE; };
+      w.appendChild(img);
+    } else { w.innerHTML = ICON_GLOBE; }
+    return w;
+  }
+
+  function render() {
+    tabsEl.innerHTML = '';
+    const hasHome = state.tabs.some((x) => x.home);
+    const nonHome = state.tabs.filter((x) => !x.home).length;
+    state.tabs.forEach((t) => {
+      const d = document.createElement('div');
+      d.className = 'tab' + (t.home ? ' home' : '') + (t.active ? ' active' : '');
+      d.title = t.home ? '我的团队' : (t.url || '');
+      d.onclick = () => window.tabAPI.activate(t.id);
+      // resident start-page tab: pinned first, user icon only, no title, no close
+      if (t.home) {
+        const ic = document.createElement('span');
+        ic.className = 'fav'; ic.innerHTML = CICY_LOGO;
+        d.appendChild(ic);
+        const ttl = document.createElement('span');
+        ttl.className = 'ttl'; ttl.textContent = '我的团队';
+        d.appendChild(ttl);
+        tabsEl.appendChild(d);
+        return;
+      }
+      d.appendChild(faviconNode(t));
+      const ttl = document.createElement('span');
+      ttl.className = 'ttl'; ttl.textContent = t.title || '新标签页';
+      d.appendChild(ttl);
+      // closable unless it's the only tab and there's no resident homepage to
+      // keep the window alive (don't let the user empty a plain browser window).
+      if (hasHome || nonHome > 1) {
+        const cls = document.createElement('span');
+        cls.className = 'cls';
+        cls.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg>';
+        cls.onclick = (e) => { e.stopPropagation(); window.tabAPI.close(t.id); };
+        d.appendChild(cls);
+      }
+      tabsEl.appendChild(d);
+    });
+    if (!NO_NEW) {
+      const add = document.createElement('div');
+      add.id = 'newtab'; add.title = '新建标签';
+      add.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+      add.onclick = () => window.tabAPI.newTab();
+      tabsEl.appendChild(add);
+    }
+
+    const nav = state.nav || {};
+    backEl.classList.toggle('off', !nav.canBack);
+    fwdEl.classList.toggle('off', !nav.canFwd);
+    progEl.classList.toggle('on', !!nav.loading);
+    const activeTab = state.tabs.find((x) => x.active);
+    const isHome = !!(activeTab && activeTab.home);
+    const u = nav.url || '';
+    const secure = /^https:\/\//i.test(u);
+    leadEl.style.color = secure ? '#81c995' : '#9aa0a6';
+    leadEl.innerHTML = secure ? ICON_LOCK : ICON_GLOBE;
+    // homepage tab → empty omnibox (like Chrome's new-tab page), don't expose the file:// path
+    if (!urlFocused) urlEl.value = isHome ? '' : displayUrl(u);
+  }
+
+  function displayUrl(u) {
+    // start pages (cicy://newtab) and data: URLs → empty omnibox (like Chrome NTP)
+    if (!u || u.startsWith('data:') || u.startsWith('cicyui://')) return '';
+    return u;
+  }
+
+  window.tabAPI.onState((s) => { state = s || { tabs: [], nav: {} }; render(); });
+
+  function go() {
+    let v = urlEl.value.trim(); if (!v) return;
+    if (!/^[a-z]+:\/\//i.test(v)) {
+      v = (/\.\w/.test(v) && !/\s/.test(v)) ? 'https://' + v : 'https://www.google.com/search?q=' + encodeURIComponent(v);
+    }
+    window.tabAPI.navigate(v);
+  }
+  urlEl.addEventListener('focus', () => { urlFocused = true; omniEl.classList.add('focus'); urlEl.select(); });
+  urlEl.addEventListener('blur', () => { urlFocused = false; omniEl.classList.remove('focus'); render(); });
+  urlEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { go(); urlEl.blur(); } });
+  backEl.onclick = () => window.tabAPI.back();
+  fwdEl.onclick = () => window.tabAPI.fwd();
+  document.getElementById('reload').onclick = () => window.tabAPI.reload();
+
+  window.tabAPI.ready();
+</script>
+</body>
+</html>

@@ -28,6 +28,17 @@ function register({ sidecarLogPath } = {}) {
     return { running };
   });
 
+  // The ONE place the homepage gets cicy-code versions (主人令:"拿版本就一个方法").
+  //   running   → the live daemon's /api/health version ("正在跑什么"的唯一真相)
+  //   latest    → newest on npm (same number 更新 upgrades to)
+  //   installed → on-disk binary (manifest)
+  // The card derives 更新可用 / 已是最新 from THESE — never from ad-hoc probes.
+  ipcMain.handle("sidecar:versions", async () => {
+    const version = require("../sidecar/version");
+    const [running, latest] = await Promise.all([version.running(PORT), version.latest()]);
+    return { running: running || null, latest: latest || null, installed: version.installed() || null };
+  });
+
   // ---- Windows Docker bootstrap (homepage's "no Docker" setup flow) ----
   // docker:status → what's missing; docker:bootstrap → install Docker (if
   // needed) + load image + start container, streaming progress back to the

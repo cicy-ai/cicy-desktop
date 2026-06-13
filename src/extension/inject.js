@@ -11,7 +11,7 @@ window._g = window._g || {};
 // ========================================
 try {
   const { ipcRenderer } = require('electron');
-  window.electronRPC = (tool, args) => ipcRenderer.invoke('rpc', tool, args || {});
+  window.electronRPC = (tool, args) => ipcRenderer.invoke('rpc:guarded', tool, args || {});
   window._g.rpc = window.electronRPC;
   console.log('[RPC] electronRPC ready');
 } catch(e) {

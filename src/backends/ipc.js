@@ -214,6 +214,63 @@ function register(opts = {}) {
     return { ok: true, ...readTos() };
   });
   ipcMain.handle("logs:tail", (_e, input) => tailLog(input || {}));
+
+  // ── Trusted origins (Chrome-style site-settings allowlist) ──────────────────
+  // The ONLY user-controlled source of "which sites may receive the electronRPC
+  // bridge (= run commands locally)". Every write refreshes the cached set in
+  // window-utils so isTrustedUrl() takes effect immediately (no restart).
+  ipcMain.handle("trustedOrigins:list", () => {
+    return require("../profiles/trusted-origins-store").listForUi();
+  });
+  ipcMain.handle("trustedOrigins:add", (_e, host) => {
+    const r = require("../profiles/trusted-origins-store").add(host);
+    try { require("../utils/window-utils").refreshTrustedOrigins(); } catch {}
+    return r;
+  });
+  ipcMain.handle("trustedOrigins:remove", (_e, host) => {
+    const r = require("../profiles/trusted-origins-store").remove(host);
+    try { require("../utils/window-utils").refreshTrustedOrigins(); } catch {}
+    return r;
+  });
+
+  // ── Open / reload a URL as a TAB in profile 0's tab browser ─────────────────
+  // Homepage cards (incl. cloud team cards) open the same way the local card does
+  // — a tab in the current profile (0) — instead of a new window / system browser.
+  ipcMain.handle("tabs:open", async (_e, input) => {
+    try {
+      const tb = require("../tools/tab-browser-tools");
+      const r = await tb.openTab(0, String((input && input.url) || ""), { systemOpen: true, trusted: false, title: (input && input.title) || "" });
+      return { ok: true, winId: r.winId, tabId: r.tabId };
+    } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+  });
+  ipcMain.handle("tabs:reload", async (_e, input) => {
+    try {
+      const tb = require("../tools/tab-browser-tools");
+      return await tb.reloadTabByUrl(0, String((input && input.url) || ""), { title: (input && input.title) || "" });
+    } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+  });
+
+  // ── RPC audit log (read-only viewer) ────────────────────────────────────────
+  // JSONL at ~/cicy-ai/db/rpc-audit.log (utils/rpc-audit.js): every electronRPC
+  // call + every authorization decision (incl. temporary ones) + allowlist edits.
+  // Returns the most recent `limit` entries newest-first; merges the rotated .1
+  // file when the live log is short. Read-only — the UI reviews, never mutates.
+  ipcMain.handle("rpcAudit:tail", (_e, input) => {
+    const limit = Math.max(1, Math.min(2000, Number((input && input.limit) || 300)));
+    try {
+      const { LOG } = require("../utils/rpc-audit");
+      const fs = require("fs");
+      const read = (p) => { try { return fs.readFileSync(p, "utf-8").split("\n").filter(Boolean); } catch { return []; } };
+      let lines = read(LOG);
+      if (lines.length < limit) lines = read(LOG + ".1").concat(lines); // older file first
+      const entries = [];
+      for (const ln of lines.slice(-limit)) { try { entries.push(JSON.parse(ln)); } catch {} }
+      entries.reverse(); // newest first
+      return { ok: true, entries, path: LOG };
+    } catch (e) {
+      return { ok: false, error: String((e && e.message) || e), entries: [] };
+    }
+  });
 }
 
 module.exports = { register, openHomepage };

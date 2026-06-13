@@ -14,40 +14,13 @@ const { setupAppIcons } = require("./tray");
 const { brandHostElectron } = require("./utils/brand-host-electron");
 const appUpdater = require("./app-updater");
 
-// 🎯 添加右键上下文菜单
-contextMenu({
-  showLookUpSelection: true,
-  showSearchWithGoogle: true,
-  showCopyImage: true,
-  showCopyImageAddress: true,
-  showSaveImageAs: true,
-  showCopyVideoAddress: true,
-  showSaveVideoAs: true,
-  showCopyLink: true,
-  showSaveLinkAs: true,
-  showInspectElement: true,
-  showServices: true,
-  labels: {
-    cut: "剪切",
-    copy: "复制",
-    paste: "粘贴",
-    selectAll: "全选",
-    reload: "重新加载",
-    forceReload: "强制重新加载",
-    toggleDevTools: "切换开发者工具",
-    inspectElement: "检查元素",
-    services: "服务",
-    lookUpSelection: "查找选中内容",
-    searchWithGoogle: "用 Google 搜索",
-    copyImage: "复制图片",
-    copyImageAddress: "复制图片地址",
-    saveImage: "保存图片",
-    copyVideoAddress: "复制视频地址",
-    saveVideo: "保存视频",
-    copyLink: "复制链接",
-    saveLinkAs: "链接另存为...",
-  },
-});
+// 🎯 Right-click menu — attach the SAME menu to EVERY webContents (host window,
+// tab, <webview>, popup) via 'web-contents-created'. ecm only auto-attaches to a
+// BrowserWindow's MAIN webContents, so the tab-browser SHELL window ("BaseWindow")
+// and guests fell back to the OS-native menu; this unifies them and adds 重新加载
+// + 切换开发者工具 + 检查元素 everywhere (see utils/context-menu-options.js).
+const { attachContextMenu } = require("./utils/context-menu-options");
+electronApp.on("web-contents-created", (_e, wc) => attachContextMenu(wc));
 
 // Setup Electron flags IMMEDIATELY after require
 electronApp.commandLine.appendSwitch("ignore-certificate-errors");
@@ -89,7 +62,6 @@ const { loadToolCatalog } = require("./server/tool-catalog");
 const { executeTool } = require("./server/tool-executor");
 const { getWorkerIdentity } = require("./cluster/worker-identity");
 const { listLocalAgents } = require("./cluster/local-agent-registry");
-const { listArtifacts } = require("./cluster/artifact-registry");
 const { WorkerClient } = require("./cluster/worker-client");
 const { getChromeRuntimeRegistry } = require("./chrome/runtime-registry");
 
@@ -147,15 +119,30 @@ for (const s of DEEPLINK_SCHEMES) {
 // Linux when the URL is in argv). Queue them and flush whenever a window
 // finishes loading. The renderer subscribes via window.cicy.deeplink.onAddTeam.
 const __pendingDeepLinks = [];
-function broadcastDeepLink(channel, payload) {
+// Deep-link delivery targets = every BrowserWindow's webContents PLUS the
+// homepage tab's webContents. The homepage is now a BrowserView tab (not a
+// BrowserWindow), so getAllWindows() alone would miss it and cicy://addTeam
+// would only refresh on the next poll instead of instantly.
+function deepLinkTargets() {
   const { BrowserWindow } = require("electron");
-  const wins = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed());
-  if (wins.length === 0) {
+  const targets = BrowserWindow.getAllWindows()
+    .filter((w) => !w.isDestroyed())
+    .map((w) => w.webContents);
+  try {
+    const hw = require("./backends/homepage-window").getHomepageWindow();
+    const wc = hw && hw.webContents;
+    if (wc && !wc.isDestroyed() && !targets.includes(wc)) targets.push(wc);
+  } catch {}
+  return targets;
+}
+function broadcastDeepLink(channel, payload) {
+  const targets = deepLinkTargets();
+  if (targets.length === 0) {
     __pendingDeepLinks.push({ channel, payload });
     return;
   }
-  for (const w of wins) {
-    try { w.webContents.send(channel, payload); } catch {}
+  for (const wc of targets) {
+    try { wc.send(channel, payload); } catch {}
   }
 }
 
@@ -164,13 +151,12 @@ function broadcastDeepLink(channel, payload) {
 // even when it was the URL that started the app in the first place.
 function flushPendingDeepLinks() {
   if (__pendingDeepLinks.length === 0) return;
-  const { BrowserWindow } = require("electron");
-  const wins = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed());
-  if (wins.length === 0) return;
+  const targets = deepLinkTargets();
+  if (targets.length === 0) return;
   const drained = __pendingDeepLinks.splice(0, __pendingDeepLinks.length);
   for (const { channel, payload } of drained) {
-    for (const w of wins) {
-      try { w.webContents.send(channel, payload); } catch {}
+    for (const wc of targets) {
+      try { wc.send(channel, payload); } catch {}
     }
   }
 }
@@ -410,7 +396,6 @@ function getWorkerSnapshot(authManager) {
       .map((tool) => tool.name),
     agents: listLocalAgents(),
     chromeProfiles: chromeRuntimeRegistry.list(),
-    artifacts: listArtifacts(),
     resources: {
       pid: process.pid,
       memory: process.memoryUsage(),
@@ -457,10 +442,6 @@ app.get("/api/agents", authMiddleware, (req, res) => {
   res.json({ agents: listLocalAgents() });
 });
 
-app.get("/api/artifacts", authMiddleware, (req, res) => {
-  res.json({ artifacts: listArtifacts() });
-});
-
 app.use(
   "/api/chrome",
   createChromeManagementRoutes({
@@ -485,30 +466,133 @@ if (automationEnabled) {
   log.info("[MCP] Remote debugging port NOT opened (automation disabled — set --mcp / CICY_DESKTOP_HTTP=1 / CICY_MASTER_URL to enable)");
 }
 
+// Register the cicy:// scheme (tab-browser start page) — must run before ready.
+require("./tabbrowser/newtab-protocol").registerScheme();
+
 // IPC Bridge: expose all RPC tools to renderer via ipcMain.handle
 const { ipcMain } = require("electron");
+const { isDangerousTool, ensureRpcGrant, ensureOriginAuthorized, originDecision, startOriginModal } = require("./utils/rpc-guard");
+// Sentinels returned (as normal tool results, so useDesktopEvents forwards their
+// text verbatim) to a NON-BLOCKING caller while origin consent is undecided/denied.
+// The agent/skill CLI polls on __CICY_AUTH_PENDING__ and stops on __CICY_AUTH_DENIED__.
+const AUTH_PENDING_RESULT = { content: [{ type: "text", text: "__CICY_AUTH_PENDING__" }], isError: false };
+const AUTH_DENIED_RESULT = { content: [{ type: "text", text: "__CICY_AUTH_DENIED__" }], isError: false };
+const { audit, argsPreview } = require("./utils/rpc-audit");
+function rpcOrigin(event) {
+  try { return new URL(event.sender.getURL()).origin; } catch { return (event && event.sender && event.sender.getURL && event.sender.getURL()) || "(unknown)"; }
+}
+async function dispatchRpc(event, toolName, args) {
+  const result = await executeTool(toolName, args || {}, {
+    transport: "ipc",
+    toolName,
+    controlSessionId: args?.controlSessionId || null,
+    agentId: args?.agentId || null,
+    runtimeSessionId: args?.runtimeSessionId || null,
+    windowRef: args?.windowRef || null,
+    accountIdx: args?.accountIdx,
+    worker: getWorkerIdentity(),
+    webContentsId: event.sender.id,
+  });
+  return result;
+}
+// "rpc" — unguarded full bridge for the first-party homepage system UI only.
 ipcMain.handle("rpc", async (event, toolName, args) => {
   console.log("[IPC Bridge] called:", toolName, JSON.stringify(args));
+  const origin = rpcOrigin(event);
+  const danger = isDangerousTool(toolName);
   try {
-    const result = await executeTool(toolName, args || {}, {
-      transport: "ipc",
-      toolName,
-      controlSessionId: args?.controlSessionId || null,
-      agentId: args?.agentId || null,
-      runtimeSessionId: args?.runtimeSessionId || null,
-      windowRef: args?.windowRef || null,
-      accountIdx: args?.accountIdx,
-      worker: getWorkerIdentity(),
-      webContentsId: event.sender.id,
-    });
+    const result = await dispatchRpc(event, toolName, args);
     console.log("[IPC Bridge] success:", toolName);
+    audit({ kind: "rpc", channel: "rpc", origin, tool: toolName, dangerous: danger, ok: true, args: argsPreview(toolName, args) });
     return result;
   } catch (e) {
     console.error("[IPC Bridge] error:", toolName, e.message);
+    audit({ kind: "rpc", channel: "rpc", origin, tool: toolName, dangerous: danger, ok: false, error: e.message, args: argsPreview(toolName, args) });
     throw e;
   }
 });
-console.log("[IPC Bridge] All RPC tools available via ipcRenderer.invoke('rpc', toolName, args)");
+// FIFO concurrency limiter for the guarded path. While the consent modal is open
+// a page (or the cloud rpc_call bridge) can pile up many RPC calls all awaiting
+// the same authorization promise; the moment the user clicks 允许 they would ALL
+// resolve and dispatch in one microtask flush, pegging the main thread for a beat
+// ("点完之后卡一阵"). The limiter spreads that burst over a few in-flight slots —
+// a single call still runs immediately (slot is free), only true bursts queue.
+function makeLimiter(max) {
+  let active = 0;
+  const q = [];
+  const pump = () => {
+    while (active < max && q.length) {
+      active++;
+      const { fn, resolve, reject } = q.shift();
+      Promise.resolve().then(fn).then(
+        (v) => { active--; resolve(v); pump(); },
+        (e) => { active--; reject(e); pump(); },
+      );
+    }
+  };
+  return (fn) => new Promise((resolve, reject) => { q.push({ fn, resolve, reject }); pump(); });
+}
+const guardedDispatchLimit = makeLimiter(6);
+
+// "rpc:guarded" — for every non-homepage renderer (team-helper webview, trusted
+// remote pages, injected scripts). Dangerous tools (exec_*/file_*) require an
+// explicit per-page user grant so a trusted-origin XSS can't silently run code.
+ipcMain.handle("rpc:guarded", async (event, toolName, args) => {
+  console.log("[IPC Bridge] guarded call:", toolName);
+  // Domain-allowlist gate: a non-allowlisted origin must be authorized via a
+  // consent modal (deny / allow once / add to allowlist) before it can use the
+  // bridge at all. Allowlisted origins pass straight through.
+  const origin = rpcOrigin(event);
+  const danger = isDangerousTool(toolName);
+  // Agent/skill calls tag args with __cicyAuthNonBlocking: their transport is one
+  // fixed-timeout HTTP request, so they can't sit on the blocking consent modal.
+  // For an undecided origin we pop the modal in the BACKGROUND and hand back a
+  // PENDING sentinel the caller polls on; a denied origin gets a DENIED sentinel.
+  // In-page callers (no tag) keep the original blocking behaviour.
+  let nonBlockingAuth = false;
+  if (args && typeof args === "object" && args.__cicyAuthNonBlocking) {
+    nonBlockingAuth = true;
+    args = { ...args };
+    delete args.__cicyAuthNonBlocking;
+  }
+  if (nonBlockingAuth) {
+    const decision = originDecision(event); // "allow" | "deny" | "unknown" (no prompt)
+    if (decision === "deny") {
+      audit({ kind: "rpc", channel: "rpc:guarded", origin, tool: toolName, dangerous: danger, ok: false, error: "origin-denied", args: argsPreview(toolName, args) });
+      return AUTH_DENIED_RESULT;
+    }
+    if (decision === "unknown") {
+      startOriginModal(event); // background consent, deduped per origin
+      audit({ kind: "rpc", channel: "rpc:guarded", origin, tool: toolName, dangerous: danger, ok: false, error: "origin-pending", args: argsPreview(toolName, args) });
+      return AUTH_PENDING_RESULT;
+    }
+    // "allow" → fall through to the normal path
+  } else {
+    const originOk = await ensureOriginAuthorized(event);
+    if (!originOk) {
+      audit({ kind: "rpc", channel: "rpc:guarded", origin, tool: toolName, dangerous: danger, ok: false, error: "origin-unauthorized", args: argsPreview(toolName, args) });
+      throw new Error(`未授权站点访问桌面 RPC（rpc:guarded：域名未加入白名单）`);
+    }
+  }
+  if (danger) {
+    const ok = await ensureRpcGrant(event, toolName, args);
+    if (!ok) {
+      audit({ kind: "rpc", channel: "rpc:guarded", origin, tool: toolName, dangerous: true, ok: false, error: "grant-denied", args: argsPreview(toolName, args) });
+      throw new Error(`已拒绝敏感操作 ${toolName}（rpc:guarded：来源未获授权）`);
+    }
+  }
+  try {
+    // Throttled so a post-allow backlog drains a few at a time, not all at once.
+    const result = await guardedDispatchLimit(() => dispatchRpc(event, toolName, args));
+    audit({ kind: "rpc", channel: "rpc:guarded", origin, tool: toolName, dangerous: danger, ok: true, args: argsPreview(toolName, args) });
+    return result;
+  } catch (e) {
+    console.error("[IPC Bridge] guarded error:", toolName, e.message);
+    audit({ kind: "rpc", channel: "rpc:guarded", origin, tool: toolName, dangerous: danger, ok: false, error: e.message, args: argsPreview(toolName, args) });
+    throw e;
+  }
+});
+console.log("[IPC Bridge] RPC tools available via ipcRenderer.invoke('rpc'|'rpc:guarded', toolName, args)");
 
 const workerClient = maybeCreateWorkerClient(authManager);
 
@@ -708,6 +792,11 @@ function startSidecarWatchdog({ intervalMs = 30_000 } = {}) {
 
   const tick = async () => {
     try {
+      // An update() in progress intentionally stops cicy-code (to swap the binary)
+      // and starts the new one itself — DON'T let the watchdog respawn the OLD
+      // binary into that gap (it would race the swap and the update would "finish"
+      // still on the old version). Pause until the update releases the flag.
+      if (cicyCodeSidecar.isUpdating && cicyCodeSidecar.isUpdating()) { consecutiveFailures = 0; return; }
       const ok = await cicyCodeSidecar.probeExisting();
       if (ok) { consecutiveFailures = 0; return; }
       consecutiveFailures++;
@@ -738,6 +827,9 @@ function startSidecarWatchdog({ intervalMs = 30_000 } = {}) {
 }
 
 electronApp.whenReady().then(async () => {
+  // Serve cicy://newtab (tab-browser start page) — must be after ready.
+  require("./tabbrowser/newtab-protocol").installHandler();
+
   // Re-init i18n now that app is ready — getLocale() returns reliable values
   // only after the ready event. The module-load init may have picked English
   // on platforms (e.g. Windows) where LANG env is unset.
@@ -763,14 +855,33 @@ electronApp.whenReady().then(async () => {
     .catch((e) => log.warn(`[Sidecar] cicy-code start failed: ${e.message}`));
   startSidecarWatchdog();
 
+  // Auto-register the local sidecar as 本地团队 once :8008 answers (主人:
+  // "本地团队没有占位" — a fresh install must show its local team without any
+  // manual step). addTeam upserts by host:port + auto-fills api_token from
+  // global.json, so re-runs are no-ops; addTeam itself then triggers the
+  // cloud team register + gateway-key injection when logged in. A fresh boot
+  // may npm-seed the runtime first, so probe for up to ~90s before giving up.
+  (async () => {
+    const sidecarPort = Number(process.env.CICY_CODE_PORT || 8008);
+    const lt = require("./backends/local-teams");
+    for (let i = 0; i < 30; i++) {
+      try {
+        if (await cicyCodeSidecar.probeExisting(sidecarPort)) {
+          const r = await lt.addTeam({ base_url: `http://127.0.0.1:${sidecarPort}`, name: "本地团队" });
+          if (r && r.ok) log.info(`[Sidecar] local team ${r.upserted ? "refreshed" : "registered"} (${r.id})`);
+          else log.warn(`[Sidecar] local team auto-register failed: ${r && r.error}`);
+          return;
+        }
+      } catch (e) { log.warn(`[Sidecar] local team auto-register error: ${e.message}`); }
+      await new Promise((res) => setTimeout(res, 3000));
+    }
+    log.warn(`[Sidecar] local team auto-register gave up — :${sidecarPort} never came up`);
+  })();
+
   // Backend launcher: app menu + IPC handlers. Menu adds a Backends top-level
   // entry; IPC powers the launcher window (src/backends/launcher.html).
   backendsIPC.register({ sidecarLogPath: path.join(os.homedir(), "logs", "cicy-code-sidecar.log") });
   require("./backends/sidecar-ipc").register({ sidecarLogPath: path.join(os.homedir(), "logs", "cicy-code-sidecar.log") });
-
-  // window.cicy.artifact bridge — CDP/webContents control of the cicy-code
-  // 产物 (artifact) <webview> guest. Injected renderer-side in window-utils.js.
-  require("./backends/artifact-ipc").register();
 
   // Browser-login loopback listener. Renderer calls auth:login-start when
   // the user clicks Login; main opens a 127.0.0.1 server + the browser,
@@ -816,13 +927,15 @@ electronApp.whenReady().then(async () => {
               // machine to the cloud (best-effort; safe to call repeatedly —
               // cloud upserts by (owner, deviceId)).
               try {
+                // Order matters: register the DEVICE FIRST, THEN the local team(s).
+                // POST /api/team/register 404s when the device isn't registered yet,
+                // so firing both concurrently (the old bug) let team-sync race ahead
+                // of device-register → 404 → gateway key never injected → apiKey 空.
+                // Chain them so syncAllLocalTeams only runs after the device exists.
                 require("./cloud/cloud-client")
                   .registerDevice()
-                  .catch((e) => log.warn(`[cloud] device register (on login) failed: ${e.message}`));
-                // Fresh login → also register this device's local team(s).
-                require("./backends/local-teams")
-                  .syncAllLocalTeams()
-                  .catch((e) => log.warn(`[cloud] local-team sync (on login) failed: ${e.message}`));
+                  .then(() => require("./backends/local-teams").syncAllLocalTeams())
+                  .catch((e) => log.warn(`[cloud] device/team register (on login) failed: ${e.message}`));
               } catch (e) { log.warn(`[cloud] device register hook failed: ${e.message}`); }
             }
             const hw = require("./backends/homepage-window");
@@ -896,16 +1009,44 @@ electronApp.whenReady().then(async () => {
   // Best-effort and fully non-blocking; a no-op when not logged in (the login
   // onResult hook above covers the log-in-later case).
   try {
-    require("./cloud/cloud-client")
-      .registerDevice()
-      .catch((e) => log.warn(`[cloud] device register (on launch) failed: ${e.message}`));
-    // Catch-up sync of this device's local team(s) → cloud, so a box whose 本地
-    // team predates the cloud-client (e.g. a freshly-deployed Windows install)
-    // still shows up under 本地 without needing a rename. Non-blocking.
-    require("./backends/local-teams")
-      .syncAllLocalTeams()
-      .catch((e) => log.warn(`[cloud] startup local-team sync failed: ${e.message}`));
-  } catch (e) { log.warn(`[cloud] device register launch hook failed: ${e.message}`); }
+    // 1) Detect egress IP + IP region + system language and persist to
+    //    global.json (deviceInfo) — the single source the get_device_info RPC,
+    //    the chat-WS register, and the cloud report all read. The detection goes
+    //    DIRECT (no proxy), each request times out, and the whole thing is
+    //    fire-and-forget (never awaited → does not block startup). Runs even when
+    //    not logged in so local config is always populated.
+    // 2) THEN register the device with the cloud (no-op if not logged in) — it
+    //    reads the just-persisted ip/region/syslang.
+    // 3) THEN sync local teams (device must register first or /api/team/register 404s).
+    const cc = require("./cloud/cloud-client");
+    let sysLang = "";
+    try { sysLang = (electronApp.getLocale && electronApp.getLocale()) || ""; } catch (_) {}
+    cc.detectAndPersistDeviceInfo({ systemLanguage: sysLang })
+      .then(() => cc.registerDevice())
+      .then(() => require("./backends/local-teams").syncAllLocalTeams())
+      .catch((e) => log.warn(`[cloud] device-info/register (on launch) failed: ${e.message}`));
+  } catch (e) { log.warn(`[cloud] device-info launch hook failed: ${e.message}`); }
+
+  // Cloud↔desktop title reconcile. The homepage drives the FAST cadence by window
+  // visibility (聚焦 ~3s / 切回立即,见 App.jsx + localTeams:syncCloud IPC). This
+  // 30s timer is just the SLOW fallback for when no homepage window is open / it's
+  // hidden / logged-in-but-idle. Best-effort, no-op when logged out.
+  if (!global.__cicyTitleSyncTimer) {
+    global.__cicyTitleSyncTimer = setInterval(() => {
+      try { require("./backends/local-teams").syncAllLocalTeams().catch(() => {}); } catch {}
+    }, 30_000);
+    if (global.__cicyTitleSyncTimer.unref) global.__cicyTitleSyncTimer.unref();
+  }
+
+  // Periodic per-window thumbnails → ~/cicy-files/window-thumbs (chrome-style
+  // small previews on disk; override dir via CICY_THUMB_DIR). Best-effort.
+  if (!global.__cicyThumbStarted) {
+    global.__cicyThumbStarted = true;
+    try {
+      const info = require("./utils/window-thumbnails").startWindowThumbnails();
+      log.info(`[thumbs] window thumbnails → ${info.dir} (every ${info.intervalMs}ms, maxW ${info.maxWidth})`);
+    } catch (e) { log.warn(`[thumbs] start failed: ${e.message}`); }
+  }
 
   // Local-team discovery — reads ~/cicy-ai/global.json's cicyDesktopNodes
   // and probes each via /api/health. Pure local, never talks to the cloud
@@ -920,6 +1061,9 @@ electronApp.whenReady().then(async () => {
     __ipcLT.handle("localTeams:remove",  (_e, id)      => lt.removeTeam(id));
     __ipcLT.handle("localTeams:update",  (_e, payload) => lt.updateTeam(payload?.id, payload?.patch || {}));
     __ipcLT.handle("localTeams:upgrade", (_e, id)      => lt.upgradeTeam(id));
+    // Pull cloud title NOW (homepage calls this on window focus so a dash rename
+    // reflects immediately instead of waiting for the 15s background tick).
+    __ipcLT.handle("localTeams:syncCloud", async () => { try { await lt.syncAllLocalTeams(); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; } });
 
     // Webview → host-renderer relay. The Team Helper <webview> can't
     // directly mutate localTeams: instead its preload (webview-preload.js)
@@ -1101,6 +1245,40 @@ electronApp.whenReady().then(async () => {
     if (START_URL) {
       createWindow({ url: START_URL }, ACCOUNT);
     }
+
+    // Persistent window registry: re-open windows that were still open when the
+    // app last quit. Windows the user/agent closed stay "closed" and are not
+    // reopened. Skip any url already live this session (homepage / START_URL).
+    try {
+      const { BrowserWindow } = require("electron");
+      const registry = require("./utils/window-registry");
+      const liveSet = new Set(
+        BrowserWindow.getAllWindows()
+          .map((w) => {
+            try {
+              const part = w.webContents.session.partition || "";
+              const acc = part.startsWith("persist:sandbox-")
+                ? parseInt(part.replace("persist:sandbox-", ""), 10)
+                : 0;
+              return `${acc}::${registry.normalizeUrl(w.webContents.getURL())}`;
+            } catch {
+              return null;
+            }
+          })
+          .filter(Boolean)
+      );
+      for (const e of registry.staleOpenEntries()) {
+        if (!e.url) continue;
+        if (liveSet.has(`${e.accountIdx || 0}::${registry.normalizeUrl(e.url)}`)) continue;
+        log.info(`[WindowRegistry] Reopening ${e.url} (account ${e.accountIdx || 0})`);
+        const opts = { url: e.url };
+        if (e.bounds && typeof e.bounds === "object") Object.assign(opts, e.bounds);
+        createWindow(opts, e.accountIdx || 0, true);
+      }
+    } catch (err) {
+      log.error(`[WindowRegistry] reopen failed: ${err.message}`);
+    }
+
     if (workerClient) {
       try {
         await workerClient.start();

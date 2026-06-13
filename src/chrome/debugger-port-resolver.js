@@ -12,7 +12,7 @@ function readPrivateChromeConfig() {
 }
 
 function getConfiguredDebuggerPort(accountIdx, chromeConfig = readPrivateChromeConfig()) {
-  const entry = chromeConfig?.[`account_${accountIdx}`];
+  const entry = chromeConfig?.[`profile_${accountIdx}`];
   return typeof entry?.port === "number" ? entry.port : null;
 }
 

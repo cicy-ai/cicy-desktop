@@ -133,9 +133,26 @@ async function latestVersion(name = DEFAULT) {
 function linkTo(name, verBinPath, ver) {
   const link = linkFor(name);
   fs.mkdirSync(LOCAL_BIN, { recursive: true });
-  try { fs.rmSync(link, { force: true }); } catch {}
-  if (IS_WIN) fs.copyFileSync(verBinPath, link);
-  else fs.symlinkSync(verBinPath, link);
+  if (IS_WIN) {
+    // Windows can't DELETE or OVERWRITE a RUNNING .exe (EPERM/EBUSY) — which is
+    // exactly the update case, since cicy-code.exe is live when we re-link. But
+    // Windows CAN *rename* a running exe: move the in-use link aside (unique name
+    // so it never collides with an older still-running one), then copy the new
+    // binary into place. The old process keeps running from the renamed file; the
+    // next start picks up the new one. (Stale .old-* are harmless; best-effort swept.)
+    try {
+      if (fs.existsSync(link)) fs.renameSync(link, `${link}.old-${Date.now()}`);
+    } catch {}
+    fs.copyFileSync(verBinPath, link);
+    try {
+      for (const f of fs.readdirSync(LOCAL_BIN)) {
+        if (f.startsWith(`${BIN}.old-`)) { try { fs.rmSync(path.join(LOCAL_BIN, f), { force: true }); } catch {} }
+      }
+    } catch {}
+  } else {
+    try { fs.rmSync(link, { force: true }); } catch {}
+    fs.symlinkSync(verBinPath, link);
+  }
   if (ver) writeManifest(name, ver);
   return link;
 }

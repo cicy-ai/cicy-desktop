@@ -109,6 +109,7 @@ contextBridge.exposeInMainWorld("cicy", {
   // or Docker (Windows) — no in-app downloader. Only lifecycle + status remain.
   sidecar: {
     status:      ()  => logInvoke("sidecar:status"),
+    versions:    ()  => logInvoke("sidecar:versions"),
     start:       ()  => logInvoke("sidecar:start"),
     stop:        ()  => logInvoke("sidecar:stop"),
     restart:     ()  => logInvoke("sidecar:restart"),
@@ -151,6 +152,26 @@ contextBridge.exposeInMainWorld("cicy", {
   },
   clipboard: {
     write: (text) => logInvoke("clipboard:write", text),
+  },
+  // Trusted-origins allowlist (Chrome-style site settings). Sites listed here may
+  // receive the electronRPC bridge in profile 0 = run commands on this machine,
+  // so the settings UI must warn loudly. list() returns [{host, builtin}], add/
+  // remove return { ok, origins?:[{host,builtin}], error? } and take effect live.
+  trustedOrigins: {
+    list:   ()     => logInvoke("trustedOrigins:list"),
+    add:    (host) => logInvoke("trustedOrigins:add", host),
+    remove: (host) => logInvoke("trustedOrigins:remove", host),
+  },
+  // Read-only RPC audit log viewer (~/cicy-ai/db/rpc-audit.log). tail(limit)
+  // returns { ok, entries:[{ts,kind,...}] newest-first, path }.
+  rpcAudit: {
+    tail: (limit) => logInvoke("rpcAudit:tail", { limit }),
+  },
+  // Open / reload a URL as a TAB in profile 0 (homepage cards open like the local
+  // card — current profile, not a new window / system browser).
+  tabs: {
+    open:   (url, title) => logInvoke("tabs:open", { url, title }),
+    reload: (url, title) => logInvoke("tabs:reload", { url, title }),
   },
 
   // ------- new bridges (last rebuild!) -------
@@ -207,6 +228,7 @@ contextBridge.exposeInMainWorld("cicy", {
     remove:  (id)          => logInvoke("localTeams:remove", id),
     update:  (id, patch)   => logInvoke("localTeams:update", { id, patch }),
     upgrade: (id)          => logInvoke("localTeams:upgrade", id),
+    syncCloud: ()          => logInvoke("localTeams:syncCloud"),
     // Subscribe to relay requests forwarded from a child <webview>
     // (the Team Helper webview, via webview-preload.js). Each fire
     // delivers {reqId, msg:{type, ...payload}}; the renderer is

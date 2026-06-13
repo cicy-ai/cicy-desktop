@@ -1,4 +1,6 @@
 const { app, BrowserWindow, Menu, dialog, shell } = require("electron");
+const { default: contextMenu } = require("electron-context-menu");
+const contextMenuOptions = require("./context-menu-options");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -31,8 +33,11 @@ function setupWindowHandlers(win) {
           icon: require("./app-icon").appIconPath(),
           webPreferences: {
             webviewTag: true, // embedded <webview> (ttyd/artifact) must render
-            nodeIntegration: isTrustedUrl(url),
-            contextIsolation: !isTrustedUrl(url),
+            // hole #4: trusted pages no longer get raw Node. Their electronRPC
+            // bridge comes from webview-preload via contextBridge, so a trusted-origin
+            // XSS can't `require('child_process')` to bypass the rpc:guarded gate.
+            nodeIntegration: false,
+            contextIsolation: true,
             preload: path.join(__dirname, "../backends/webview-preload.js"),
             webSecurity: false,
             enableClipboard: true,
@@ -55,8 +60,22 @@ function setupWindowHandlers(win) {
   // homepage is a persistent window; everything created here is disposable and
   // re-openable from the homepage. (Previously these preventDefault()+hide()'d,
   // so "closed" windows lingered hidden forever.)
+  const _registryId = win.id;
   win.on("close", () => {
-    log.info(`[Window ${win.id}] Close → destroy: ${win.getTitle()}`);
+    log.info(`[Window ${_registryId}] Close → destroy: ${win.getTitle()}`);
+  });
+  // Persistent window registry: a USER/agent close keeps the record (status
+  // "closed", re-openable). A close during app QUIT leaves it "open" so it
+  // auto-reopens next launch. No-op for unregistered windows (e.g. homepage).
+  // "closed" fires for both win.close() and win.destroy().
+  win.on("closed", () => {
+    try {
+      if (!app || !app.isQuitting) {
+        require("./window-registry").markClosed(_registryId);
+      }
+    } catch (e) {
+      log.error("[WindowRegistry] markClosed failed:", e.message);
+    }
   });
 
   // 🔥 全局下载处理 - 自动保存到 ~/Downloads/electron/
@@ -78,70 +97,10 @@ function setupWindowHandlers(win) {
   }
 
   win.webContents.on("dom-ready", async () => {
-    // Auto-inject electronRPC for trusted URLs. Trust comes from
-    // isTrustedUrl(), which includes built-in dev hosts AND any backend the
-    // user explicitly added to the registry (they opt in by adding the URL,
-    // and the auth token is required to reach the cicy-code there anyway).
-    const pageUrl = win.webContents.getURL();
-    try {
-      if (isTrustedUrl(pageUrl)) {
-        const rpcCode = `
-          if (!window.electronRPC) {
-            try {
-              const { ipcRenderer } = require('electron');
-              window.electronRPC = (tool, args) => ipcRenderer.invoke('rpc', tool, args || {});
-              console.log('[RPC] electronRPC ready');
-            } catch(e) {}
-          }
-          // window.cicy.artifact — remote control of the 产物 (artifact) <webview>
-          // guest webContents for cicy-code's artifactBridge.ts. Targets the
-          // element id 'cicy-artifact-webview'; round-trips to artifact-ipc.js.
-          (function(){
-            try {
-              if (window.cicy && window.cicy.artifact) return;
-              const { ipcRenderer } = require('electron');
-              window.cicy = window.cicy || {};
-              const guestId = () => {
-                const el = document.getElementById('cicy-artifact-webview');
-                if (!el || typeof el.getWebContentsId !== 'function')
-                  throw new Error('artifact webview not mounted (open the 产物 tab once)');
-                return el.getWebContentsId();
-              };
-              let _attached = false;
-              window.cicy.artifact = {
-                invoke: (method, args) =>
-                  ipcRenderer.invoke('artifact:invoke', { guestId: guestId(), method, args: args || [] }),
-                cdp: {
-                  attach: (protocolVersion) =>
-                    ipcRenderer.invoke('artifact:cdp-attach', { guestId: guestId(), protocolVersion })
-                      .then((r) => { _attached = true; return r; }),
-                  detach: () =>
-                    ipcRenderer.invoke('artifact:cdp-detach', { guestId: guestId() })
-                      .then((r) => { _attached = false; return r; }),
-                  isAttached: () => _attached,
-                  send: (method, params) =>
-                    ipcRenderer.invoke('artifact:cdp-send', { guestId: guestId(), method, params: params || {} }),
-                },
-              };
-              try { ipcRenderer.removeAllListeners('artifact:event'); } catch(e) {}
-              ipcRenderer.on('artifact:event', (_e, detail) => {
-                if (detail && detail.source === 'cdp' && detail.method === '__detached') _attached = false;
-                try { window.dispatchEvent(new CustomEvent('cicy-artifact-event', { detail: detail })); } catch(e) {}
-              });
-              console.log('[artifact] window.cicy.artifact ready');
-            } catch(e) { console.error('[artifact] bridge inject failed', e && e.message); }
-          })();
-        `;
-        if (win.webContents.debugger.isAttached()) {
-          await win.webContents.debugger.sendCommand("Runtime.evaluate", { expression: rpcCode });
-        } else {
-          await win.webContents.executeJavaScript(rpcCode);
-        }
-      }
-    } catch (e) {
-      log.error("[RPC inject]", e.message);
-    }
-
+    // (Removed: the 产物/artifact bridge injection. electronRPC for trusted pages
+    // is provided by webview-preload.js via contextBridge; the artifact webview
+    // remote-control feature was deleted — superseded by the electron tab + chrome
+    // profile browsers.)
     try {
       // 1. 获取当前页面的根域名
       const currentURL = win.webContents.getURL();
@@ -203,23 +162,17 @@ function setupWindowHandlers(win) {
 // registry.remove call refreshTrustedOrigins() — wired in registry.js).
 let _trustedOriginsCache = null;
 function loadTrustedOrigins() {
-  // Built-in always-trusted hosts (dev + reserved internal domain).
-  const set = new Set(["localhost", "127.0.0.1"]);
+  // The trusted set = the user-managed allowlist in
+  // ~/cicy-ai/db/trusted-origins.json (built-ins localhost/127.0.0.1 included by
+  // the store). Backends / teams are NO LONGER auto-trusted: "add a server" must
+  // never implicitly grant a remote origin the right to run commands locally.
+  // Users (incl. self-hosted) add their own domain explicitly in settings.
   try {
-    // Lazy require to avoid a cycle (registry.js requires electron.app which
-    // isn't ready when this module is first loaded by main.js).
-    const registry = require("../backends/registry");
-    for (const b of registry.list()) {
-      if (!b || !b.url) continue;
-      try {
-        const h = new URL(b.url).hostname;
-        if (h) set.add(h);
-      } catch {}
-    }
+    const store = require("../profiles/trusted-origins-store");
+    return new Set(store.listAll());
   } catch (e) {
-    // Registry not ready yet — fall back to built-ins.
+    return new Set(["localhost", "127.0.0.1"]);
   }
-  return set;
 }
 function trustedOrigins() {
   if (!_trustedOriginsCache) _trustedOriginsCache = loadTrustedOrigins();
@@ -233,14 +186,20 @@ function isTrustedUrl(url) {
   if (!url) return false;
   try {
     const u = new URL(url);
-    if (u.hostname.endsWith(".de5.net")) return true;
+    // Exact-hostname match against the user allowlist ONLY. No domain-suffix
+    // wildcard — a public-upload host under a trusted suffix (e.g.
+    // r2.deepfetch.de5.net, which can serve attacker HTML) must never count as a
+    // trusted RPC origin.
     return trustedOrigins().has(u.hostname);
   } catch {
     return false;
   }
 }
 
-function createWindow(options = {}, accountIdx = 0, forceNew = false) {
+// accountIdx default = 1 (user profile space). Account 0 is reserved for the
+// platform's own/system windows; callers that want the system slot pass 0
+// explicitly (e.g. local-teams). Agents opening windows should use >0.
+function createWindow(options = {}, accountIdx = 1, forceNew = false) {
   const { width = 1200, height = 800, url, webPreferences = {}, x, y } = options;
   console.log("[createWindow] url:", url, "isTrusted:", isTrustedUrl(url));
 
@@ -310,13 +269,16 @@ function createWindow(options = {}, accountIdx = 0, forceNew = false) {
     autoHideMenuBar: true,
     webPreferences: {
       offscreen: false, // 确保不是离屏渲染
-      nodeIntegration: isTrustedUrl(url),
-      contextIsolation: !isTrustedUrl(url),
-      // electronRPC + window.cicy for EVERY window open_window creates — without
-      // this, untrusted (contextIsolation:true) pages had no electronRPC and the
+      // hole #4: trusted pages run with NO raw Node (was nodeIntegration:
+      // isTrustedUrl). electronRPC + window.cicy come from webview-preload via
+      // contextBridge, so a trusted-origin XSS can't `require('child_process')`
+      // past the rpc:guarded gate.
+      nodeIntegration: false,
+      contextIsolation: true,
+      // webview-preload exposes electronRPC + window.cicy for EVERY window
+      // open_window creates (contextBridge under isolation). Without it the
       // agent-desktop/agent-electron skills' `desktop_event rpc_call` failed with
-      // 'electronRPC not available'. webview-preload self-adapts to the isolation
-      // mode (contextBridge when isolated, direct window assign when not).
+      // 'electronRPC not available'.
       preload: path.join(__dirname, "../backends/webview-preload.js"),
       partition: `persist:sandbox-${accountIdx}`,
       // 启用剪贴板权限
@@ -337,16 +299,29 @@ function createWindow(options = {}, accountIdx = 0, forceNew = false) {
   // ✅ 核心修正：获取当前窗口真正使用的那个 session
   const ses = win.webContents.session;
 
-  // 设置代理（如果全局配置了）
-  if (config.proxy) {
-    const proxyConfig = {
-      proxyRules: config.proxy,
-      // proxyBypassRules removed
-    };
+  // 设置代理：优先用该 profile 持久化的 proxy（account-N.json），否则回退全局 config.proxy。
+  // 这样新开窗口会自动套用账号自己保存的代理，无需手动 set_account_proxy。
+  let proxyRules = "";
+  let proxySource = "";
+  try {
+    const profileStore = require("../profiles/profile-store");
+    const persisted = profileStore.proxyRules(profileStore.getProfile("electron", accountIdx)?.proxy);
+    if (persisted) {
+      proxyRules = persisted;
+      proxySource = "profile";
+    }
+  } catch (err) {
+    log.error(`[Proxy] Account ${accountIdx} 读取持久化代理失败:`, err);
+  }
+  if (!proxyRules && config.proxy) {
+    proxyRules = config.proxy;
+    proxySource = "global";
+  }
+  if (proxyRules) {
     ses
-      .setProxy(proxyConfig)
+      .setProxy({ proxyRules })
       .then(() => {
-        log.info(`[Proxy] Account ${accountIdx} 已设置代理: ${config.proxy}`);
+        log.info(`[Proxy] Account ${accountIdx} 已设置代理 (${proxySource}): ${proxyRules}`);
       })
       .catch((err) => {
         log.error(`[Proxy] Account ${accountIdx} 设置代理失败:`, err);
@@ -385,6 +360,43 @@ function createWindow(options = {}, accountIdx = 0, forceNew = false) {
 
   setupWindowHandlers(win);
 
+  // Persistent window registry: record this window (dedup by accountIdx+url),
+  // then keep its url/title/bounds fresh so a restart can restore it. The
+  // "closed" handler in setupWindowHandlers flips status when it's closed.
+  try {
+    const registry = require("./window-registry");
+    registry.registerOpen({
+      accountIdx,
+      url: url || "",
+      title: win.getTitle(),
+      bounds: win.getBounds(),
+      liveId: win.id,
+    });
+    let boundsTimer = null;
+    const touchBounds = () => {
+      if (boundsTimer) clearTimeout(boundsTimer);
+      boundsTimer = setTimeout(() => {
+        if (!win.isDestroyed()) registry.touch({ liveId: win.id, bounds: win.getBounds() });
+      }, 500);
+    };
+    win.on("resize", touchBounds);
+    win.on("move", touchBounds);
+    win.webContents.on("page-title-updated", () => {
+      if (!win.isDestroyed())
+        registry.touch({
+          liveId: win.id,
+          title: win.getTitle(),
+          url: win.webContents.getURL(),
+        });
+    });
+    win.webContents.on("did-navigate", () => {
+      if (!win.isDestroyed())
+        registry.touch({ liveId: win.id, url: win.webContents.getURL() });
+    });
+  } catch (e) {
+    log.error("[WindowRegistry] register failed:", e.message);
+  }
+
   if (url) {
     win.loadURL(url);
   }
@@ -397,6 +409,9 @@ function getWindowInfo(win) {
     const wc = win.webContents;
     if (!wc || !wc.session) return null;
     const partition = wc.session.partition || "";
+    // persist:sandbox-N → account N (N>=1 are user profiles). Anything on the
+    // default session (homepage / platform system windows, partition "") maps
+    // to account 0 — the reserved system slot.
     const accountIdx = partition.startsWith("persist:sandbox-")
       ? parseInt(partition.replace("persist:sandbox-", ""), 10)
       : 0;
@@ -442,19 +457,40 @@ if (app) {
   app.on("web-contents-created", (_e, contents) => {
     try {
       if (contents.getType && contents.getType() === "webview") {
-        contents.setWindowOpenHandler(({ url }) => ({
-          action: "allow",
-          overrideBrowserWindowOptions: {
-            autoHideMenuBar: true,
-            webPreferences: {
-              webviewTag: true,
-              contextIsolation: !isTrustedUrl(url),
-              nodeIntegration: isTrustedUrl(url),
-              webSecurity: false,
-              enableClipboard: true,
+        // NOTE: do NOT attach contextMenu here — the global contextMenu() in
+        // main.js now also auto-attaches to <webview> guests, so an explicit
+        // attach made them get TWO right-click menus (双重弹窗). Global covers it.
+        contents.setWindowOpenHandler(({ url }) => {
+          // External (cross-origin http/https) links opened from a <webview> guest
+          // — e.g. the gotty terminal's "打开链接" confirm button — go to the user's
+          // SYSTEM browser instead of a new in-app window. Same-origin popups (a
+          // team app opening its own sub-page) keep the in-app window so embedded
+          // app flows aren't disturbed. (master: gotty open link 用系统 browser 打开)
+          try {
+            if (/^https?:\/\//i.test(url)) {
+              let guestOrigin = "";
+              try { guestOrigin = new URL(contents.getURL()).origin; } catch (_e) {}
+              if (new URL(url).origin !== guestOrigin) {
+                shell.openExternal(url);
+                return { action: "deny" };
+              }
+            }
+          } catch (_e) {}
+          return {
+            action: "allow",
+            overrideBrowserWindowOptions: {
+              autoHideMenuBar: true,
+              webPreferences: {
+                webviewTag: true,
+                // hole #4: no raw Node for trusted pages (see createWindow above).
+                contextIsolation: true,
+                nodeIntegration: false,
+                webSecurity: false,
+                enableClipboard: true,
+              },
             },
-          },
-        }));
+          };
+        });
       }
     } catch (e) {
       log.warn(`[web-contents-created] guest open-handler failed: ${e.message}`);
@@ -491,4 +527,5 @@ module.exports = {
   setupWindowHandlers,
   getWindowInfo,
   refreshTrustedOrigins,
+  isTrustedUrl,
 };

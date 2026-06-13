@@ -30,9 +30,11 @@ const relay = (type, payload) =>
 // inside the helper agent's exec-js calls) call window.electronRPC("exec_shell",
 // {...}) etc. The Team Helper genuinely needs shell access to download +
 // install cicy-code on the user's machine, so we mirror the same bridge
-// here. Same channel as homepage-preload's "rpc" → the existing tool
-// registry dispatches without any further wiring.
-const electronRPC = (tool, args) => ipcRenderer.invoke("rpc", tool, args || {});
+// here. Routed through the GUARDED channel ("rpc:guarded") — this is a remote
+// third party, so dangerous tools (exec_*/file_*) prompt the user for a per-page
+// grant before running (a trusted-origin XSS must not be silent RCE). Normal
+// tools pass straight through. The homepage uses the unguarded "rpc" channel.
+const electronRPC = (tool, args) => ipcRenderer.invoke("rpc:guarded", tool, args || {});
 
 const cicyApi = {
   platform: process.platform,

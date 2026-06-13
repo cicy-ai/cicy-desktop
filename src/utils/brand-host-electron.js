@@ -60,6 +60,26 @@ function ourIcns() {
   return fs.existsSync(p) ? p : null;
 }
 
+// Declare the desktop's URL schemes (cicy-desktop://, cicy://) in the borrowed
+// Electron.app Info.plist so LaunchServices routes deeplinks (cicy-desktop://
+// addTeam?…) to this app. An UNPACKAGED app CANNOT register a scheme at runtime
+// on macOS — `setAsDefaultProtocolClient()` is a no-op unless the bundle DECLARES
+// the scheme here. Idempotent: skips when our schemes are already declared.
+function ensureURLSchemes(plist) {
+  try {
+    if (plistGet(plist, "CFBundleURLTypes:0:CFBundleURLSchemes:0") === "cicy-desktop") return false;
+    const pb = (cmd) => { try { cp.execFileSync("/usr/libexec/PlistBuddy", ["-c", cmd, plist]); } catch {} };
+    pb("Delete :CFBundleURLTypes");                 // clear any partial/stale block
+    pb("Add :CFBundleURLTypes array");
+    pb("Add :CFBundleURLTypes:0 dict");
+    pb("Add :CFBundleURLTypes:0:CFBundleURLName string com.cicy.desktop");
+    pb("Add :CFBundleURLTypes:0:CFBundleURLSchemes array");
+    pb("Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string cicy-desktop");
+    pb("Add :CFBundleURLTypes:0:CFBundleURLSchemes:1 string cicy");
+    return true;
+  } catch { return false; }
+}
+
 // Patch name + icon. Returns true if the bundle NAME changed (caller relaunches).
 function brandMac() {
   const contents = macBundleContents();
@@ -96,6 +116,11 @@ function brandMac() {
       }
     }
   }
+
+  // 3) Declare cicy-desktop:// / cicy:// so deeplinks route to this app (the
+  //    lsregister below refreshes LaunchServices to pick it up; no relaunch).
+  const urlChanged = ensureURLSchemes(plist);
+  if (urlChanged) log.info("[Brand] declared URL schemes cicy-desktop:// / cicy:// in Info.plist");
 
   // Nudge LaunchServices / Finder / Dock to drop the cached icon + name.
   try {

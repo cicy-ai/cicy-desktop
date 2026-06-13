@@ -255,6 +255,9 @@ export default function App() {
   const [teams, setTeams] = useState(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState("");
+  // Guards the auto re-login so a dead session (/api/teams 401) triggers the
+  // magic-link flow ONCE instead of looping. Reset when a fresh login lands.
+  const reauthing = useRef(false);
   // Local teams discovered from ~/cicy-ai/global.json (main-process probe).
   const [localTeams, setLocalTeams] = useState(null);
   const [localTeamsLoading, setLocalTeamsLoading] = useState(false);
@@ -287,6 +290,18 @@ export default function App() {
         window.cicy.cloud.fetch(`${CLOUD_BASE}/api/user/self`, { headers }),
         window.cicy.cloud.fetch(`${CLOUD_BASE}/api/teams`,     { headers }),
       ]);
+      // Session DEAD (cloud invalidated the sk-sess token) → /api/teams 401. The
+      // "永久登录" red line forbids re-prompting on mere restart/expiry, but a
+      // GENUINE 401 means the session is gone — the only recovery is a fresh
+      // login. Trigger the magic-link ONCE (guarded) instead of retrying forever.
+      if (teamsRes?.status === 401) {
+        if (!reauthing.current && window.cicy?.auth?.loginStart) {
+          reauthing.current = true;
+          setProfileError("会话已过期,正在重新登录…");
+          try { await window.cicy.auth.loginStart(); } catch {}
+        }
+        return;
+      }
       // /api/teams drives the team grid — it is the ONLY critical call here.
       if (!teamsRes?.ok) throw new Error(`/api/teams ${teamsRes?.status || "?"} ${teamsRes?.error || ""}`);
       // /api/teams is bare: { teams: [...] }
@@ -309,6 +324,20 @@ export default function App() {
     } finally {
       setProfileLoading(false);
     }
+  }, []);
+
+  // 私有云/云端团队信息持续同步:/api/teams 原本只在登录/挂载拉一次,所以 dash 上改了
+  // 私有云的 host_url / 名字 / 状态,桌面看不到。用 ref 持有当前 bearer,挂到对账循环里
+  // 按窗口可见性周期重拉(轻量:只 setTeams,不动 loading/self,不在 401 时清空列表)。
+  const bearerRef = useRef("");
+  useEffect(() => { bearerRef.current = token || accessToken || ""; }, [token, accessToken]);
+  const refreshCloudTeams = useCallback(async () => {
+    const at = bearerRef.current;
+    if (!at || !window.cicy?.cloud?.fetch) return;
+    try {
+      const r = await window.cicy.cloud.fetch(`${CLOUD_BASE}/api/teams`, { headers: { Authorization: `Bearer ${at}` } });
+      if (r?.ok) { const b = JSON.parse(r.body || "{}"); if (Array.isArray(b?.teams)) setTeams(b.teams); }
+    } catch {}
   }, []);
 
   // First profile fetch on mount. The cloud console endpoints (/api/user/self,
@@ -341,32 +370,53 @@ export default function App() {
   // Rename a local team: persist via localTeams.update then refresh the list.
   // Empty name falls back to 未命名 (mirrors local-teams.addTeam default).
   const renameLocalTeam = useCallback(async (id, name) => {
-    if (!window.cicy?.localTeams?.update) return;
+    if (!window.cicy?.localTeams?.update) return { ok: false, error: "no_bridge" };
+    let r;
     try {
-      await window.cicy.localTeams.update(id, { name: String(name || "").trim() || tr("localTeams.unnamed", "未命名") });
-    } catch {}
-    await fetchLocalTeams();
+      r = await window.cicy.localTeams.update(id, { name: String(name || "").trim() || tr("localTeams.unnamed", "未命名") });
+    } catch (e) { r = { ok: false, error: e?.message || String(e) }; }
+    await fetchLocalTeams();   // 对账:props 追上后清乐观名
+    return r || { ok: false, error: "no_result" };
   }, [fetchLocalTeams]);
+  // 自适应对账:窗口可见时 ~3s 拉一次云端 title(远端/dash 改名秒级可见),隐藏时
+  // 退避到 30s 只刷新本地(云端对账交给 main 进程 30s 兜底);切回可见/聚焦立即对账。
   useEffect(() => {
-    let fastTimer;
-    let slowTimer;
-    let elapsed = 0;
-    const FAST_MS = 3_000;
-    const FAST_WINDOW_MS = 30_000;
-    const SLOW_MS = 30_000;
+    let timer;
+    let stopped = false;
+    const VISIBLE_MS = 3_000;
+    const HIDDEN_MS = 30_000;
 
-    const tick = async () => {
-      await fetchLocalTeams();
-      elapsed += FAST_MS;
-      if (elapsed < FAST_WINDOW_MS) {
-        fastTimer = setTimeout(tick, FAST_MS);
-      } else {
-        slowTimer = setInterval(fetchLocalTeams, SLOW_MS);
-      }
+    // 一发对账:本地 title 拉进 teams.json + 刷新本地列表 + 重拉云端团队(私有云
+    // host_url/名字/状态的同步)。三件事并行。
+    const reconcile = async () => {
+      try { await window.cicy?.localTeams?.syncCloud?.(); } catch {}
+      await Promise.all([fetchLocalTeams(), refreshCloudTeams()]);
     };
-    tick();
-    return () => { clearTimeout(fastTimer); clearInterval(slowTimer); };
-  }, [fetchLocalTeams]);
+
+    const schedule = () => {
+      if (stopped) return;
+      const visible = document.visibilityState === "visible";
+      timer = setTimeout(async () => {
+        if (document.visibilityState === "visible") await reconcile();
+        else await fetchLocalTeams();           // 隐藏:只刷新本地,不打云端
+        schedule();
+      }, visible ? VISIBLE_MS : HIDDEN_MS);
+    };
+
+    reconcile();        // 挂载即来一发
+    schedule();
+
+    // 切回可见/聚焦 → 立即对账(dash 改完名点回桌面秒同步)
+    const onWake = () => { if (document.visibilityState === "visible") reconcile(); };
+    document.addEventListener("visibilitychange", onWake);
+    window.addEventListener("focus", onWake);
+
+    return () => {
+      stopped = true; clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onWake);
+      window.removeEventListener("focus", onWake);
+    };
+  }, [fetchLocalTeams, refreshCloudTeams]);
 
   // Webview relay — the Team Helper <webview> calls window.cicy.localTeams.add(...)
   // inside the webview, that hops main → here. We run the actual IPC, refresh
@@ -456,6 +506,10 @@ export default function App() {
         return;
       }
       if (payload?.token) {
+        // Fresh session landed — clear the dead-session re-auth guard + message
+        // so a future 401 can re-trigger recovery.
+        reauthing.current = false;
+        setProfileError("");
         try { localStorage.setItem(TOKEN_KEY, payload.token); } catch {}
         setToken(payload.token);
         if (payload.accessToken) {
@@ -595,23 +649,36 @@ export default function App() {
       <Header me={me} welcome={welcome} onLogout={handleLogout}
         mitmTeam={localList.length > 0 ? localList[0] : null} />
       <main className="main">
-        <div className="app__tabs">
-          {[
-            { k: "all",    label: "全部",   n: localCount + customCount + cloudCount },
-            { k: "local",  label: "本地",   n: localCount },
-            { k: "cloud",  label: "云端",   n: cloudCount },
-            { k: "custom", label: "自定义", n: customCount },
-          ].map(({ k, label, n }) => (
-            <button
-              key={k}
-              type="button"
-              className={`app__tab ${tab === k ? "is-active" : ""}`}
-              onClick={() => setTab(k)}
-            >
-              {label}
-              <span className="app__tab-count">{n}</span>
-            </button>
-          ))}
+        {/* 整行:左边 tab 药丸,右边「新加团队」顶到行尾 */}
+        <div className="app__tabsrow">
+          <div className="app__tabs">
+            {[
+              { k: "all",    label: "全部",   n: localCount + customCount + cloudCount },
+              { k: "local",  label: "本地",   n: localCount },
+              { k: "cloud",  label: "私有云", n: cloudCount },
+              { k: "custom", label: "自定义", n: customCount },
+            ].map(({ k, label, n }) => (
+              <button
+                key={k}
+                type="button"
+                className={`app__tab ${tab === k ? "is-active" : ""}`}
+                onClick={() => setTab(k)}
+              >
+                {label}
+                <span className="app__tab-count">{n}</span>
+              </button>
+            ))}
+          </div>
+          {/* 行尾:新加团队 → 跳浏览器到云端 dash 私有云页 */}
+          <button
+            type="button"
+            data-id="AddTeamButton"
+            className="app__add-team"
+            title={tr("teams.addHint", "在云端新建私有云团队")}
+            onClick={() => openCloudPage("?tab=private")}
+          >
+            + {tr("teams.add", "新加团队")}
+          </button>
         </div>
 
         {/* Docker 安装卡已下线 (主人令): Windows 走原生 cicy-code.exe --helper,不再用 Docker。 */}
@@ -630,6 +697,30 @@ export default function App() {
           {showLocal && localList.map((t) => (
             <LocalTeamCard key={"local:" + t.id} team={t} onOpen={() => openLocalTeam(t.id)} onRename={renameLocalTeam} onRefresh={fetchLocalTeams} />
           ))}
+          {/* 占位卡 (主人: "本地团队没有占位"): a fresh install starts the sidecar
+              and main auto-registers 本地团队 once :8008 answers — until that
+              lands, hold its spot so the 本地 tab is never blank. The slow
+              localTeams poll swaps this for the real card automatically. */}
+          {showLocal && localList.length === 0 && (
+            <div data-id="LocalTeamPlaceholder" className="bcard bcard--local">
+              <div className="bcard__accent" />
+              <div className="bcard__top">
+                <div className="bcard__pill">
+                  <span className="bcard__dot" data-tone="warn" />
+                  <LaptopIcon />
+                </div>
+              </div>
+              <div className="bcard__body">
+                <h3 className="bcard__name">本地团队</h3>
+                <div className="bcard__host">http://127.0.0.1:8008</div>
+                <div className="bcard__meta" />
+              </div>
+              <button type="button" className="bcard__cta" disabled>
+                <Spinner />
+                <span>{localTeamsFetched ? "正在启动，就绪后自动加入…" : "检测中…"}</span>
+              </button>
+            </div>
+          )}
           {showCustom && customList.map((t) => (
             <LocalTeamCard key={"custom:" + t.id} team={t} onOpen={() => openLocalTeam(t.id)} onRename={renameLocalTeam} onRefresh={fetchLocalTeams} />
           ))}
@@ -638,8 +729,11 @@ export default function App() {
               key={"cloud:" + t.id}
               team={t}
               onOpen={() => {
-                const url = t.workspace_url || t.workspace_direct_url;
-                if (url) window.cicy?.shell?.openExternal?.(url);
+                // private:开 host_url(自托管地址);历史 cloud:开 workspace_url。
+                // Open as a TAB in the current profile (like the local card), NOT
+                // the system browser.
+                const url = t.kind === "private" ? t.host_url : (t.workspace_url || t.workspace_direct_url);
+                if (url) window.cicy?.tabs?.open?.(url, t.name || t.title || "");
               }}
             />
           ))}
@@ -666,10 +760,262 @@ export default function App() {
   );
 }
 
+// Chrome-style "site settings" for the trusted-origins allowlist: which sites may
+// receive the electronRPC bridge in profile 0 (= run commands on this machine).
+// Backed by window.cicy.trustedOrigins.{list,add,remove}; built-ins (localhost)
+// are greyed + non-removable; the default list is just the built-ins. Inline
+// styles keep it self-contained (no dependency on App.css classes).
+function TrustedSitesModal({ onClose }) {
+  const [rows, setRows] = useState(null);   // [{host, builtin}] | null(loading)
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const api = (typeof window !== "undefined" && window.cicy && window.cicy.trustedOrigins) || null;
+
+  const load = useCallback(async () => {
+    try { setRows((api && (await api.list())) || []); } catch { setRows([]); }
+  }, [api]);
+  useEffect(() => { load(); }, [load]);
+
+  const doAdd = async () => {
+    const v = input.trim();
+    if (!v || busy || !api) return;
+    setBusy(true); setErr("");
+    try {
+      const r = await api.add(v);
+      if (r && r.ok === false) setErr(r.error || tr("trustedSites.addFailed", "添加失败"));
+      else { setInput(""); setRows((r && r.origins) || (await api.list())); }
+    } catch (e) { setErr(String((e && e.message) || e)); }
+    finally { setBusy(false); }
+  };
+  const doRemove = async (host) => {
+    if (busy || !api) return;
+    setBusy(true); setErr("");
+    try {
+      const r = await api.remove(host);
+      if (r && r.ok === false) setErr(r.error || tr("trustedSites.removeFailed", "删除失败"));
+      else setRows((r && r.origins) || (await api.list()));
+    } catch (e) { setErr(String((e && e.message) || e)); }
+    finally { setBusy(false); }
+  };
+
+  const S = {
+    overlay: { position: "fixed", inset: 0, zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.62)", backdropFilter: "blur(3px)" },
+    card: { width: 560, maxWidth: "94vw", maxHeight: "82vh", display: "flex", flexDirection: "column", background: "#101012", border: "1px solid rgba(255,255,255,.09)", borderRadius: 16, boxShadow: "0 24px 64px rgba(0,0,0,.55)", overflow: "hidden", color: "#e4e4e7" },
+    head: { display: "flex", alignItems: "center", gap: 8, padding: "14px 16px", borderBottom: "1px solid rgba(255,255,255,.06)" },
+    title: { margin: 0, fontSize: 15, fontWeight: 600, flex: 1 },
+    x: { background: "transparent", border: "none", color: "#a1a1aa", fontSize: 16, cursor: "pointer", lineHeight: 1, padding: 4 },
+    warn: { margin: "14px 16px 0", padding: "10px 12px", fontSize: 12.5, lineHeight: 1.55, color: "#fca5a5", background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.25)", borderRadius: 10 },
+    addRow: { display: "flex", gap: 8, padding: "12px 16px 4px" },
+    input: { flex: 1, minWidth: 0, background: "#161618", border: "1px solid rgba(255,255,255,.1)", borderRadius: 9, padding: "9px 11px", color: "#e4e4e7", fontSize: 13, outline: "none" },
+    addBtn: { background: "rgba(255,255,255,.1)", border: "none", borderRadius: 9, padding: "0 16px", color: "#fff", fontSize: 13, fontWeight: 500, cursor: "pointer" },
+    err: { margin: "6px 16px 0", fontSize: 12, color: "#fca5a5" },
+    listWrap: { margin: "10px 16px 16px", border: "1px solid rgba(255,255,255,.07)", borderRadius: 10, overflow: "auto", flex: 1, minHeight: 80 },
+    row: { display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", borderTop: "1px solid rgba(255,255,255,.05)" },
+    host: (b) => ({ flex: 1, fontFamily: "ui-monospace,SFMono-Regular,Menlo,monospace", fontSize: 13, color: b ? "#71717a" : "#e4e4e7", wordBreak: "break-all" }),
+    tag: { fontSize: 11, color: "#71717a", background: "rgba(255,255,255,.05)", borderRadius: 6, padding: "2px 7px" },
+    rm: { background: "transparent", border: "none", color: "#a1a1aa", fontSize: 12, cursor: "pointer", padding: "3px 6px", borderRadius: 6 },
+    muted: { padding: "16px", textAlign: "center", color: "#71717a", fontSize: 12.5 },
+  };
+
+  return createPortal(
+    <div style={S.overlay} onClick={onClose} data-id="TrustedSitesModal">
+      <div style={S.card} onClick={(e) => e.stopPropagation()}>
+        <div style={S.head}>
+          <h2 style={S.title}>{tr("trustedSites.title", "受信任站点")}</h2>
+          <button type="button" style={S.x} onClick={onClose} aria-label="close">✕</button>
+        </div>
+        <div style={S.warn}>
+          {tr("trustedSites.warn", "⚠ 列表中的站点可以在你的电脑上执行命令(exec)。只添加你完全信任的地址。")}
+        </div>
+        <div style={S.addRow}>
+          <input
+            data-id="trusted-sites-input"
+            style={S.input}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") doAdd(); }}
+            placeholder={tr("trustedSites.placeholder", "添加站点，如 app.cicy-ai.com 或 my-cloud.example.org")}
+          />
+          <button type="button" data-id="trusted-sites-add" style={{ ...S.addBtn, opacity: busy || !input.trim() ? 0.5 : 1 }} onClick={doAdd} disabled={busy || !input.trim()}>
+            {tr("trustedSites.add", "添加")}
+          </button>
+        </div>
+        {err && <div style={S.err}>{err}</div>}
+        <div style={S.listWrap}>
+          {rows === null ? (
+            <div style={S.muted}>{tr("trustedSites.loading", "加载中…")}</div>
+          ) : rows.length === 0 ? (
+            <div style={S.muted}>{tr("trustedSites.empty", "暂无")}</div>
+          ) : (
+            rows.map((r) => (
+              <div key={r.host} style={S.row} data-id="trusted-sites-row">
+                <span style={S.host(r.builtin)}>{r.host}</span>
+                {r.builtin ? (
+                  <span style={S.tag}>{tr("trustedSites.builtin", "系统")}</span>
+                ) : (
+                  <button type="button" style={S.rm} onClick={() => doRemove(r.host)} disabled={busy}>
+                    {tr("trustedSites.remove", "删除")}
+                  </button>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+// Read-only viewer for the RPC audit log (~/cicy-ai/db/rpc-audit.log): every
+// electronRPC call + every authorization decision (incl. temporary 本次允许 / 允许
+// 一次) + allowlist edit. Backed by window.cicy.rpcAudit.tail(); newest-first,
+// refreshable. Review-only — there is no mutation path.
+function AuditLogModal({ onClose }) {
+  const [entries, setEntries] = useState(null); // [] | null(loading)
+  const [err, setErr] = useState("");
+  const [logPath, setLogPath] = useState("");
+  const [busy, setBusy] = useState(false);
+  const api = (typeof window !== "undefined" && window.cicy && window.cicy.rpcAudit) || null;
+
+  const load = useCallback(async () => {
+    setBusy(true); setErr("");
+    try {
+      const r = api && (await api.tail(400));
+      if (!r || r.ok === false) { setErr((r && r.error) || tr("audit.loadFailed", "读取失败")); setEntries([]); }
+      else { setEntries(r.entries || []); setLogPath(r.path || ""); }
+    } catch (e) { setErr(String((e && e.message) || e)); setEntries([]); }
+    finally { setBusy(false); }
+  }, [api]);
+  useEffect(() => { load(); }, [load]);
+
+  const [filter, setFilter] = useState("all"); // all | rpc | auth
+  const [query, setQuery] = useState("");
+
+  const fmtTime = (ts) => { try { return new Date(ts).toLocaleString(); } catch { return ts || ""; } };
+  const badge = (e) => {
+    if (e.kind === "auth") {
+      const deny = /deny/.test(e.decision || "");
+      return { text: e.decision || "auth", color: deny ? "#fca5a5" : "#86efac", bg: deny ? "rgba(239,68,68,.14)" : "rgba(34,197,94,.14)" };
+    }
+    if (e.kind === "rpc") {
+      const ok = e.ok !== false && !e.error;
+      return { text: ok ? "ok" : "err", color: ok ? "#86efac" : "#fca5a5", bg: ok ? "rgba(34,197,94,.14)" : "rgba(239,68,68,.14)" };
+    }
+    return { text: e.kind || "log", color: "#a1a1aa", bg: "rgba(255,255,255,.06)" };
+  };
+  const opText = (e) => {
+    if (e.kind === "auth") return `${e.gate || ""}${e.decision ? " · " + e.decision : ""}`;
+    if (e.kind === "rpc") return `${e.tool || ""}${e.dangerous ? " ⚠" : ""}`;
+    return e.kind || "";
+  };
+  const detailText = (e) => e.error || e.args || (e.kind === "rpc" ? e.channel : "") || "";
+
+  const all = entries || [];
+  const q = query.trim().toLowerCase();
+  const view = all.filter((e) => {
+    if (filter !== "all" && e.kind !== filter) return false;
+    if (!q) return true;
+    return [e.origin, e.host, e.tool, e.gate, e.decision, e.channel, e.args, e.error, e.kind]
+      .filter(Boolean).join(" ").toLowerCase().includes(q);
+  });
+
+  const COLS = "186px 104px minmax(160px,1.1fr) minmax(150px,1.1fr) minmax(220px,1.8fr)";
+  const S = {
+    overlay: { position: "fixed", inset: 0, zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.66)", backdropFilter: "blur(4px)" },
+    card: { width: "96vw", height: "92vh", maxWidth: 1480, display: "flex", flexDirection: "column", background: "#0d0d0f", border: "1px solid rgba(255,255,255,.09)", borderRadius: 18, boxShadow: "0 32px 80px rgba(0,0,0,.6)", overflow: "hidden", color: "#e4e4e7" },
+    head: { display: "flex", alignItems: "center", gap: 14, padding: "20px 24px", borderBottom: "1px solid rgba(255,255,255,.07)" },
+    titleWrap: { flex: 1, minWidth: 0 },
+    title: { margin: 0, fontSize: 21, fontWeight: 650, letterSpacing: .2 },
+    subtitle: { margin: "3px 0 0", fontSize: 12.5, color: "#71717a", fontFamily: "ui-monospace,SFMono-Regular,Menlo,monospace", wordBreak: "break-all" },
+    count: { fontSize: 12.5, color: "#a1a1aa", whiteSpace: "nowrap" },
+    refresh: { background: "rgba(255,255,255,.1)", border: "none", borderRadius: 9, padding: "9px 16px", color: "#fff", fontSize: 13, fontWeight: 500, cursor: "pointer" },
+    x: { background: "transparent", border: "none", color: "#a1a1aa", fontSize: 20, cursor: "pointer", lineHeight: 1, padding: 6 },
+    toolbar: { display: "flex", alignItems: "center", gap: 10, padding: "14px 24px", borderBottom: "1px solid rgba(255,255,255,.05)" },
+    chips: { display: "flex", gap: 6 },
+    chip: (on) => ({ background: on ? "rgba(255,255,255,.14)" : "transparent", border: "1px solid rgba(255,255,255,.12)", borderRadius: 999, padding: "6px 16px", color: on ? "#fff" : "#a1a1aa", fontSize: 13, cursor: "pointer" }),
+    search: { flex: 1, minWidth: 0, background: "#161618", border: "1px solid rgba(255,255,255,.1)", borderRadius: 10, padding: "10px 14px", color: "#e4e4e7", fontSize: 13.5, outline: "none" },
+    err: { margin: "10px 24px 0", fontSize: 12.5, color: "#fca5a5" },
+    tableWrap: { flex: 1, overflow: "auto", margin: "0" },
+    theadRow: { position: "sticky", top: 0, zIndex: 1, display: "grid", gridTemplateColumns: COLS, gap: 16, padding: "12px 24px", background: "#141417", borderBottom: "1px solid rgba(255,255,255,.08)", fontSize: 11.5, letterSpacing: .6, textTransform: "uppercase", color: "#71717a", fontWeight: 600 },
+    row: { display: "grid", gridTemplateColumns: COLS, gap: 16, padding: "13px 24px", borderBottom: "1px solid rgba(255,255,255,.045)", alignItems: "center" },
+    time: { fontSize: 12.5, color: "#a1a1aa", fontFamily: "ui-monospace,SFMono-Regular,Menlo,monospace", whiteSpace: "nowrap" },
+    badge: (b) => ({ justifySelf: "start", fontSize: 11.5, color: b.color, background: b.bg, borderRadius: 7, padding: "3px 10px", whiteSpace: "nowrap", fontWeight: 500 }),
+    cell: { fontSize: 13, color: "#d4d4d8", fontFamily: "ui-monospace,SFMono-Regular,Menlo,monospace", wordBreak: "break-all" },
+    detail: { fontSize: 12.5, color: "#8b8b93", wordBreak: "break-all" },
+    muted: { padding: "60px 24px", textAlign: "center", color: "#71717a", fontSize: 14 },
+  };
+  const Th = (t) => <div>{t}</div>;
+
+  return createPortal(
+    <div style={S.overlay} onClick={onClose} data-id="AuditLogModal">
+      <div style={S.card} onClick={(e) => e.stopPropagation()}>
+        <div style={S.head}>
+          <div style={S.titleWrap}>
+            <h2 style={S.title}>{tr("audit.title", "审计日志")}</h2>
+            {logPath && <p style={S.subtitle}>{logPath}</p>}
+          </div>
+          <span style={S.count}>{tr("audit.count", "共")} {view.length}{filter !== "all" || q ? ` / ${all.length}` : ""}</span>
+          <button type="button" data-id="audit-refresh" style={{ ...S.refresh, opacity: busy ? 0.5 : 1 }} onClick={load} disabled={busy}>
+            {tr("audit.refresh", "刷新")}
+          </button>
+          <button type="button" style={S.x} onClick={onClose} aria-label="close">✕</button>
+        </div>
+        <div style={S.toolbar}>
+          <div style={S.chips}>
+            <button type="button" style={S.chip(filter === "all")} onClick={() => setFilter("all")}>{tr("audit.all", "全部")}</button>
+            <button type="button" style={S.chip(filter === "rpc")} onClick={() => setFilter("rpc")}>{tr("audit.rpc", "RPC 调用")}</button>
+            <button type="button" style={S.chip(filter === "auth")} onClick={() => setFilter("auth")}>{tr("audit.auth", "授权决定")}</button>
+          </div>
+          <input
+            data-id="audit-search"
+            style={S.search}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={tr("audit.search", "搜索来源 / 工具 / 命令…")}
+          />
+        </div>
+        {err && <div style={S.err}>{err}</div>}
+        <div style={S.tableWrap}>
+          <div style={S.theadRow}>
+            {Th(tr("audit.colTime", "时间"))}
+            {Th(tr("audit.colType", "类型"))}
+            {Th(tr("audit.colSource", "来源"))}
+            {Th(tr("audit.colOp", "操作"))}
+            {Th(tr("audit.colDetail", "详情"))}
+          </div>
+          {entries === null ? (
+            <div style={S.muted}>{tr("audit.loading", "加载中…")}</div>
+          ) : view.length === 0 ? (
+            <div style={S.muted}>{all.length === 0 ? tr("audit.empty", "暂无审计记录") : tr("audit.noMatch", "无匹配记录")}</div>
+          ) : (
+            view.map((e, i) => {
+              const b = badge(e);
+              return (
+                <div key={i} style={S.row} data-id="audit-row">
+                  <span style={S.time}>{fmtTime(e.ts)}</span>
+                  <span style={S.badge(b)}>{b.text}</span>
+                  <span style={S.cell}>{e.origin || e.host || "—"}</span>
+                  <span style={S.cell}>{opText(e) || "—"}</span>
+                  <span style={S.detail}>{detailText(e) || "—"}</span>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 function Header({ me, welcome, onLogout, mitmTeam }) {
   const name = me?.display_name || me?.username || "…";
   const initials = (name || "?").slice(0, 1).toUpperCase();
   const [open, setOpen] = useState(false);
+  const [trustOpen, setTrustOpen] = useState(false);
+  const [auditOpen, setAuditOpen] = useState(false);
   const wrap = useRef(null);
   // Click-outside closes the dropdown (mirrors LocalTeamCard's ⋯ menu).
   useEffect(() => {
@@ -707,6 +1053,12 @@ function Header({ me, welcome, onLogout, mitmTeam }) {
             <button type="button" data-id="UserChip-billing" className="user-chip__menu-item" onClick={() => goDash("?view=usage")}>
               我的账单
             </button>
+            <button type="button" data-id="UserChip-trusted-sites" className="user-chip__menu-item" onClick={() => { setOpen(false); setTrustOpen(true); }}>
+              {tr("trustedSites.menu", "受信任站点")}
+            </button>
+            <button type="button" data-id="UserChip-audit-log" className="user-chip__menu-item" onClick={() => { setOpen(false); setAuditOpen(true); }}>
+              {tr("audit.menu", "审计日志")}
+            </button>
             {mitmTeam && (
               <div className="user-chip__menu-mitm" data-id="UserChip-mitm" onClick={(e) => e.stopPropagation()}>
                 <MitmConsentCard team={mitmTeam} variant="menu" />
@@ -719,6 +1071,8 @@ function Header({ me, welcome, onLogout, mitmTeam }) {
           </div>
         )}
       </div>
+      {trustOpen && <TrustedSitesModal onClose={() => setTrustOpen(false)} />}
+      {auditOpen && <AuditLogModal onClose={() => setAuditOpen(false)} />}
     </header>
   );
 }
@@ -1048,15 +1402,34 @@ function DockerSetup({ onReady }) {
 function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
   const statusInfo = LOCAL_STATUS[team.status] || LOCAL_STATUS.error;
   const tone = statusInfo.tone;
-  // Inline rename: double-click the name or click ✎ → edit → Enter/blur saves.
-  // All local teams are renamable via window.cicy.localTeams.update(id,{name}).
+  // Inline rename — 产品级:点名字即编辑、乐观更新、行内"保存中/已保存"、失败回滚。
+  // 显示名 = pendingName(乐观,保存中暂显)?? team.name(props,后台对账后更新)。
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(team.name || "");
-  const startEdit = (e) => { e.stopPropagation(); setDraft(team.name || ""); setEditing(true); };
+  const [pendingName, setPendingName] = useState(null);     // 乐观名;props 追上后清
+  const [saveState, setSaveState] = useState("");            // "" | saving | saved | error
+  const displayName = pendingName != null ? pendingName : team.name;
+  // props 追上乐观名 → 清 pending(两者相等,无闪烁)
+  useEffect(() => { if (pendingName != null && team.name === pendingName) setPendingName(null); }, [team.name, pendingName]);
+  const startEdit = (e) => { e?.stopPropagation?.(); setDraft(displayName || ""); setEditing(true); };
   const commit = async () => {
     setEditing(false);
     const next = String(draft || "").trim();
-    if (onRename && next && next !== team.name) await onRename(team.id, next);
+    if (!onRename || !next || next === displayName) return;
+    setPendingName(next);            // 乐观:立即显示新名
+    setSaveState("saving");
+    let r;
+    try { r = await onRename(team.id, next); } catch (e) { r = { ok: false, error: e?.message }; }
+    // 落定:让权威值(team.name,onRename 已刷新)接管显示。服务端权威下,本端改名若与
+    // 云端并发冲突会被判负,后续 ~3s 对账会把名字换成云端版本——清掉乐观名才不会卡住。
+    setPendingName(null);
+    if (r && r.ok) {
+      setSaveState("saved");
+      setTimeout(() => setSaveState((s) => (s === "saved" ? "" : s)), 1500);
+    } else {
+      setSaveState("");
+      toast.show({ message: tr("localTeams.renameFailed", "改名没保存,已恢复"), status: "error", ttl: 4000 });
+    }
   };
 
   // Lifecycle (启动 / 重启 / 更新 / 停止) acts on the daemon the desktop OWNS —
@@ -1069,46 +1442,63 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
   const running = team.status === "running";
   const [busy, setBusy] = useState("");   // "" | start | restart | update | stop
   const [menuOpen, setMenuOpen] = useState(false);
-  const [latest, setLatest] = useState(null); // newest cicy-code on the registry
+  // cicy-code 版本统一从 sidecar.versions() 一处拿(主人令:"拿版本就一个方法")。
+  // running===undefined = 还没查到(用于区分"加载中" vs "停了/拿不到");区别于
+  // running===null(查过了但 daemon 没报版本)。latest/installed 同源。
+  const [versions, setVersions] = useState({ running: undefined, latest: null, installed: null });
+  const latest = versions.latest;
+  const runningVer = versions.running;
   const [checking, setChecking] = useState(false);
-  const [upToDateMsg, setUpToDateMsg] = useState(""); // transient "已是最新 vX"
   const menuWrap = useRef(null);
+  const kebabRef = useRef(null);   // ⋯ button — anchor for the portaled menu
+  const menuRef = useRef(null);    // portaled menu (lives on document.body)
+  const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
+  const MENU_W = 184;
+  // The ⋯ menu is rendered in a PORTAL on document.body (not inside .bcard, whose
+  // overflow:hidden — needed for the rounded card + glow — would otherwise CLIP
+  // the dropdown). Anchor it under the kebab, right-aligned, clamped on-screen.
+  const toggleMenu = () => {
+    if (!menuOpen && kebabRef.current) {
+      const r = kebabRef.current.getBoundingClientRect();
+      const left = Math.max(8, Math.min(r.right - MENU_W, window.innerWidth - MENU_W - 8));
+      setMenuPos({ top: Math.round(r.bottom + 4), left: Math.round(left) });
+    }
+    setMenuOpen((v) => !v);
+  };
 
-  // Fetch the newest cicy-code from the registry and compare. Auto-runs once on
-  // mount (passive — only surfaces 更新 when behind, no nagging when current).
-  // The ⋯ menu's 检查更新 calls it with manual=true to echo "已是最新" when current.
-  // Renderer-side via cloud.fetch — main proxies it, dodging CORS; no extra IPC.
+  // 版本统一从 sidecar.versions() 一处拿(running=活着的 /api/health 版本,
+  // latest=npm 最新,同源)。Auto-runs once on mount + 每次 daemon 起来(status→
+  // running)时重查,这样 cicy-code 刚启动那一拍拿不到版本、之后能自动补上。
+  // ⋯ 菜单"检查更新"用 manual=true 给 toast。
   const checkUpdate = useCallback(async (manual = false) => {
-    if (!local || !window.cicy?.cloud?.fetch) return;
-    if (manual) { setChecking(true); setUpToDateMsg(""); }
+    if (!local || !window.cicy?.sidecar?.versions) return;
+    if (manual) setChecking(true);
     try {
-      const r = await window.cicy.cloud.fetch("https://registry.npmmirror.com/cicy-code/latest");
-      if (r?.ok) {
-        const v = JSON.parse(r.body)?.version || null;
-        setLatest(v);
-        if (manual && v) {
-          if (!team.version) {
-            // Current version UNKNOWN (daemon stopped, or health returned no
-            // version). Do NOT claim "已是最新" and NEVER show the latest as if
-            // it were the current version (the old `team.version || v` bug made
-            // it say "已是最新 v<latest>" while the running daemon was older).
-            setUpToDateMsg(`${tr("sidecar.latestVersionIs", "最新版本")} v${v}·${tr("sidecar.startToCompare", "启动后对比当前版本")}`);
-            setTimeout(() => setUpToDateMsg(""), 3500);
-          } else if (cmpVer(v, team.version) > 0) {
-            // Behind — the 更新 badge/button drives the upgrade; no toast here.
-          } else {
-            setUpToDateMsg(`${tr("sidecar.upToDate", "已是最新")} v${team.version}`);
-            setTimeout(() => setUpToDateMsg(""), 2500);
-          }
+      const v = await window.cicy.sidecar.versions(); // { running, latest, installed }
+      setVersions({ running: v?.running ?? null, latest: v?.latest ?? null, installed: v?.installed ?? null });
+      if (manual) {
+        if (v?.running && v?.latest && cmpVer(v.latest, v.running) > 0) {
+          toast.show({ message: `${tr("sidecar.found", "发现新版本")} v${v.latest}`, status: "done", ttl: 2500 });
+        } else if (v?.running) {
+          toast.show({ message: `${tr("sidecar.upToDate", "已是最新")} v${v.running}`, status: "done", ttl: 2500 });
+        } else {
+          // daemon 没在跑 / 没报版本 — 别撒谎说最新,也别误报有更新
+          toast.show({ message: tr("sidecar.notRunning", "cicy-code 未运行"), status: "error", ttl: 4000 });
         }
       }
-    } catch { /* offline / registry hiccup — leave latest as-is */ }
+    } catch { if (manual) toast.show({ message: tr("sidecar.checkFailed", "检查更新失败"), status: "error", ttl: 5000 }); }
     finally { if (manual) setChecking(false); }
-  }, [local, team.version]);
+  }, [local]);
 
   useEffect(() => { checkUpdate(false); }, [checkUpdate]);
+  // daemon 起来后(或重启/更新后 status 翻 running)自动重查一次版本,补上启动早期的空值。
+  useEffect(() => { if (running) checkUpdate(false); }, [running, checkUpdate]);
 
-  const updateAvailable = !!(local && latest && team.version && cmpVer(latest, team.version) > 0);
+  // 只有在【确知运行版本 runningVer 且确实落后 latest】时才提示更新。runningVer 未知
+  // (undefined/null:停了或刚启动还没读到)一律不提示——修掉"版本暂时读不到就误报更新 +
+  // 卡片一直转/显示更新"的 bug。NOTE: 这跟"版本落后却不让更新"不冲突:落后是 runningVer
+  // 已知且 < latest,照样提示。
+  const updateAvailable = !!(local && latest && runningVer && cmpVer(latest, runningVer) > 0);
   // Custom (deeplink-added, non-local) nodes can be removed from the desktop —
   // it just drops them from cicyDesktopNodes; re-addable via deeplink. The
   // local sidecar isn't deletable here. So the ⋯ menu shows for a local card
@@ -1123,7 +1513,13 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
 
   useEffect(() => {
     if (!menuOpen) return;
-    const onDoc = (e) => { if (menuWrap.current && !menuWrap.current.contains(e.target)) setMenuOpen(false); };
+    // The menu is portaled to document.body, so menuWrap no longer contains it —
+    // check BOTH the kebab anchor and the portaled menu before closing.
+    const onDoc = (e) => {
+      if (kebabRef.current?.contains(e.target)) return;
+      if (menuRef.current?.contains(e.target)) return;
+      setMenuOpen(false);
+    };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, [menuOpen]);
@@ -1152,7 +1548,7 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
     const isUpdate = kind === "update";
     let unsub = null;
     if (isUpdate) {
-      updateDrawer.open({ teamId: team.id, fromVer: team.version, toVer: latest, onRetry: () => runOp("update", fn, doneText) });
+      updateDrawer.open({ teamId: team.id, fromVer: runningVer, toVer: latest, onRetry: () => runOp("update", fn, doneText) });
       if (window.cicy?.sidecar?.onOpProgress) {
         unsub = window.cicy.sidecar.onOpProgress((ev) => { if (ev?.op === "update") updateDrawer.push(ev); });
       }
@@ -1177,6 +1573,9 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
       try { unsub && unsub(); } catch {}
       setBusy("");
       onRefresh?.(); // re-probe so the status dot/chip catches up
+      // 重启/更新/启动后,daemon 版本可能变了(且 status 可能仍是 running、不会触发
+      // 上面那个 effect),所以这里强制重查一次版本,卡片立刻反映真实版本。
+      if (kind === "update" || kind === "restart" || kind === "start") checkUpdate(false);
     }
   };
   const BUSY_LABEL = { start: "启动中…", restart: "重启中…", update: "更新中…", stop: "停止中…" };
@@ -1220,16 +1619,20 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
           <div className="bcard__menuwrap" ref={menuWrap} onClick={(e) => e.stopPropagation()}>
             <button
               type="button"
+              ref={kebabRef}
               data-id="LocalTeamCard-menu-btn"
               className={`bcard__kebab${updateAvailable ? " has-dot" : ""}`}
               title={local ? tr("localTeams.manage", "管理本地 cicy-code") : tr("localTeams.more", "更多")}
               disabled={!!busy}
-              onClick={() => setMenuOpen((v) => !v)}
+              onClick={toggleMenu}
             >
               {busy ? <Spinner /> : <KebabIcon />}
             </button>
-            {menuOpen && (
-              <div className="bcard__menu" data-id="LocalTeamCard-menu" role="menu">
+            {menuOpen && createPortal(
+              <div className="bcard__menu bcard__menu--portal" data-id="LocalTeamCard-menu" role="menu"
+                ref={menuRef}
+                style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: MENU_W }}
+                onClick={(e) => e.stopPropagation()}>
                 {updateAvailable && (
                   <button
                     type="button"
@@ -1280,9 +1683,7 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
                     disabled={checking}
                     onClick={(e) => { e.stopPropagation(); checkUpdate(true); }}
                   >
-                    {checking
-                      ? tr("sidecar.checking2", "检查中…")
-                      : (upToDateMsg || tr("sidecar.checkUpdate", "检查更新"))}
+                    {checking ? tr("sidecar.checking2", "检查中…") : tr("sidecar.checkUpdate", "检查更新")}
                   </button>
                 )}
                 {team.cloud_team_id && (
@@ -1312,7 +1713,8 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
                     {confirmDel ? tr("localTeams.removeConfirm", "确认删除？") : tr("localTeams.remove", "删除")}
                   </button>
                 )}
-              </div>
+              </div>,
+              document.body
             )}
           </div>
         )}
@@ -1324,29 +1726,43 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
             autoFocus
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
+            onFocus={(e) => e.target.select()}
             onBlur={commit}
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => { if (e.key === "Enter") commit(); else if (e.key === "Escape") setEditing(false); }}
             style={{ width: "100%", font: "inherit", fontWeight: 600, padding: "2px 6px", border: "1px solid #3b82f6", borderRadius: 6, background: "#0d1117", color: "#e6edf3", boxSizing: "border-box" }}
           />
         ) : (
-          <h3 className="bcard__name" title={tr("localTeams.renameHint", "双击或点 ✎ 改名")} style={{ display: "flex", alignItems: "center", gap: 6 }} onDoubleClick={startEdit}>
-            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{team.name}</span>
-            <button
-              type="button"
-              data-id="LocalTeamCard-rename-btn"
-              title={tr("localTeams.rename", "重命名")}
+          <h3 className="bcard__name" title={tr("localTeams.renameHint", "点名字或 ✎ 改名")} style={{ display: "flex", alignItems: "center", gap: 6 }} onDoubleClick={startEdit}>
+            <span
+              data-id="LocalTeamCard-name-text"
               onClick={startEdit}
-              style={{ flex: "none", cursor: "pointer", border: "none", background: "transparent", color: "#8b949e", fontSize: 13, padding: 0, lineHeight: 1 }}
-            >✎</button>
+              style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "text" }}
+            >{displayName}</span>
+            {/* 行内保存状态:保存中 spinner / 已保存 ✓ */}
+            {saveState === "saving" && (
+              <span data-id="LocalTeamCard-save-state" title={tr("localTeams.saving", "保存中…")} style={{ flex: "none", display: "inline-flex" }}><Spinner /></span>
+            )}
+            {saveState === "saved" && (
+              <span data-id="LocalTeamCard-save-state" title={tr("localTeams.saved", "已保存")} style={{ flex: "none", color: "#3fb950", fontSize: 13, lineHeight: 1 }}>✓</span>
+            )}
+            {!saveState && (
+              <button
+                type="button"
+                data-id="LocalTeamCard-rename-btn"
+                title={tr("localTeams.rename", "重命名")}
+                onClick={startEdit}
+                style={{ flex: "none", cursor: "pointer", border: "none", background: "transparent", color: "#8b949e", fontSize: 13, padding: 0, lineHeight: 1 }}
+              >✎</button>
+            )}
           </h3>
         )}
         <div className="bcard__host">
           {team.base_url || "—"}
         </div>
         <div className="bcard__meta">
-          {team.version && (
-            <span className="bcard__ver" data-id="LocalTeamCard-version">v{team.version}</span>
+          {(runningVer || team.version) && (
+            <span className="bcard__ver" data-id="LocalTeamCard-version">v{runningVer || team.version}</span>
           )}
         </div>
       </div>
@@ -1392,13 +1808,55 @@ const LOCAL_STATUS = {
   error:         { tone: "err",  label: "error",      cta: "异常" },
 };
 
+// 私有云 / (历史)云端团队卡片。产品方向变更(w-10032):公有云不做了,主打 private
+// (用户自托管,数据不出企业)。private 字段:{name,kind:"private",status,apiKey,
+// gatewayUrl,host_url,titleVersion,deviceId:""}。卡片展示名字+host_url,点开可看/复制 apiKey。
 function TeamCard({ team, onOpen }) {
-  const kindLabel = team.team_kind === "personal" ? "个人" : "共享";
+  const isPrivate = team.kind === "private";
   const statusOk = team.status === "active";
-  const hasUrl = !!(team.workspace_url || team.workspace_direct_url);
-  const billTeamId = team.teamId || team.id; // /dash?team=<teamId> (no key in URL)
+  const name = team.name || team.title || "—";
+  const hostUrl = team.host_url || "";
+  const billTeamId = team.teamId || team.id; // /dash?team=<teamId>(URL 不带 key)
+  const kindLabel = isPrivate ? "私有云" : (team.team_kind === "personal" ? "个人" : "共享");
+  const openUrl = isPrivate ? hostUrl : (team.workspace_url || team.workspace_direct_url);
+  const hasUrl = !!openUrl;
+
+  // ⋯ menu (reload) — mirrors LocalTeamCard so EVERY card has a 刷新窗口. Reload
+  // re-loads the cloud team's tab in profile 0 (opens it if not yet open).
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
+  const menuWrap = useRef(null);
+  const kebabRef = useRef(null);
+  const menuRef = useRef(null);
+  const MENU_W = 184;
+  const toggleMenu = () => {
+    if (!menuOpen && kebabRef.current) {
+      const r = kebabRef.current.getBoundingClientRect();
+      const left = Math.max(8, Math.min(r.right - MENU_W, window.innerWidth - MENU_W - 8));
+      setMenuPos({ top: Math.round(r.bottom + 4), left: Math.round(left) });
+    }
+    setMenuOpen((v) => !v);
+  };
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDoc = (e) => {
+      if (kebabRef.current?.contains(e.target)) return;
+      if (menuRef.current?.contains(e.target)) return;
+      setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [menuOpen]);
+  const doReload = async () => {
+    if (!hasUrl || busy) return;
+    setBusy(true); setMenuOpen(false);
+    try { await window.cicy?.tabs?.reload?.(openUrl, name); } catch {}
+    finally { setBusy(false); }
+  };
+  // 主人令:私有云卡片不展示 api key(安全)。key 只在云端 dash / 注入 global.json 用。
   return (
-    <div className={`bcard bcard--cloud${statusOk ? " bcard--online" : ""}`}>
+    <div data-id="TeamCard" className={`bcard bcard--cloud${statusOk ? " bcard--online" : ""}`}>
       <div className="bcard__accent" />
       <div className="bcard__top">
         <div className="bcard__pill">
@@ -1418,16 +1876,42 @@ function TeamCard({ team, onOpen }) {
               {tr("localTeams.billing", "账单")}
             </button>
           )}
+          {hasUrl && (
+            <div className="bcard__menuwrap" ref={menuWrap} onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button"
+                ref={kebabRef}
+                data-id="TeamCard-menu-btn"
+                className="bcard__kebab"
+                title={tr("localTeams.more", "更多")}
+                disabled={busy}
+                onClick={toggleMenu}
+              >
+                {busy ? <Spinner /> : <KebabIcon />}
+              </button>
+              {menuOpen && createPortal(
+                <div className="bcard__menu bcard__menu--portal" data-id="TeamCard-menu" role="menu"
+                  ref={menuRef}
+                  style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: MENU_W }}
+                  onClick={(e) => e.stopPropagation()}>
+                  <button type="button" data-id="TeamCard-reload" className="bcard__menu-item" onClick={doReload}>
+                    {tr("localTeams.reloadWindow", "刷新窗口")}
+                  </button>
+                </div>,
+                document.body,
+              )}
+            </div>
+          )}
         </div>
       </div>
       <div className="bcard__body">
-        <h3 className="bcard__name" title={team.title}>{team.title}</h3>
-        <div className="bcard__host">
-          {team.runtime_region || team.region || "—"}
+        <h3 className="bcard__name" title={name}>{name}</h3>
+        <div className="bcard__host" title={isPrivate ? (hostUrl || "") : ""}>
+          {isPrivate ? (hostUrl || tr("teamCard.noHost", "未填访问地址")) : (team.runtime_region || team.region || "—")}
         </div>
         <div className="bcard__meta">
           <span className="bcard__chip">{kindLabel}</span>
-          {team.membership_status && team.membership_status !== "active" && (
+          {!isPrivate && team.membership_status && team.membership_status !== "active" && (
             <span className="bcard__chip">{team.membership_status}</span>
           )}
         </div>
@@ -1439,7 +1923,7 @@ function TeamCard({ team, onOpen }) {
         disabled={!hasUrl}
       >
         <ArrowIcon />
-        <span>{hasUrl ? "打开" : "无 URL"}</span>
+        <span>{hasUrl ? tr("localTeams.open", "打开") : (isPrivate ? tr("teamCard.noHost", "未填访问地址") : tr("teamCard.noUrl", "无 URL"))}</span>
       </button>
     </div>
   );

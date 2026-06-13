@@ -3,7 +3,6 @@ const path = require("path");
 const os = require("os");
 const beautify = require("js-beautify");
 const log = require("electron-log");
-const { maybeRegisterArtifact } = require("../cluster/artifact-registry");
 
 // 存储每个窗口的日志和请求
 const windowLogs = new Map();
@@ -197,20 +196,11 @@ function saveDataToFile(winId, url, content, type, contentType, isBinary, dataSi
       fs.writeFileSync(filepath, formattedContent);
     }
 
-    return maybeRegisterArtifact(
-      {
-        __file: filepath,
-        __size: dataSize,
-        __binary: isBinary,
-      },
-      {
-        kind: type,
-        url,
-        winId,
-        contentType,
-        timestamp: ts,
-      }
-    );
+    return {
+      __file: filepath,
+      __size: dataSize,
+      __binary: isBinary,
+    };
   } catch (error) {
     // 文件保存失败，返回错误信息
     log.error(`[Window ${winId}] Failed to save file for ${url}:`, error.message);

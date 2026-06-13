@@ -140,9 +140,9 @@ async function start({ port = 8008, logPath = null, emit, version = null } = {})
     PORT: String(port),
     CICY_CODE_PORT: String(port),
   };
-  // --helper=1: on Windows, boot as the single headless cicy 团队助手 on w-1001
-  // (开机即团队助手). The flag is a no-op on cicy-code builds that don't support it.
-  const child = spawn(exe, ["--helper=1"], { stdio, detached: true, windowsHide: true, env });
+  // --helper removed (主人指令): boot cicy-code in normal mode (full tmux-based
+  // multi-agent), not the single headless 团队助手.
+  const child = spawn(exe, [], { stdio, detached: true, windowsHide: true, env });
   child.unref();
   try { fs.writeFileSync(PID_FILE, String(child.pid)); } catch {}
   console.log(`[native-sidecar] spawned ${exe} pid=${child.pid} port=${port} log=${logPath || "(none)"}`);

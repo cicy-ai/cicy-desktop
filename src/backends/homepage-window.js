@@ -11,15 +11,40 @@ const path = require("path");
 const { BrowserWindow } = require("electron");
 const log = require("electron-log");
 
+// Fixed homepage window size (主人令: 写死 930*640, 不能 resize).
+const FIXED_WIDTH = 930;
+const FIXED_HEIGHT = 640;
+
 const LOCAL_INDEX = path.join(__dirname, "homepage-react", "index.html");
 
 function pickHomepageURL() {
   return `file://${LOCAL_INDEX}`;
 }
 
-let homepage = null;
+let homepage = null;    // standalone fallback window (only if the tab engine fails)
+let homeTabWc = null;   // the homepage's resident-tab webContents (primary path)
 
+// Primary entry: the homepage is the RESIDENT first tab of profile 0's tab
+// browser window (主人令: homepage = profile 0 的起始页). Clicking a team there
+// opens the team as another tab in the same window. Falls back to a standalone
+// window only if the tab engine throws, so the homepage is never unreachable.
 async function openHomepage() {
+  try {
+    const tabBrowser = require("../tools/tab-browser-tools");
+    const { win, wc } = tabBrowser.openHomeWindow(0, pickHomepageURL());
+    if (wc) {
+      homeTabWc = wc;
+      try { wc.once("destroyed", () => { if (homeTabWc === wc) homeTabWc = null; }); } catch {}
+    }
+    log.info(`[homepage] opened as profile-0 resident tab (wc=${wc && wc.id})`);
+    return win;
+  } catch (e) {
+    log.warn(`[homepage] tab route failed (${e.message}); using standalone window`);
+    return openHomepageStandalone();
+  }
+}
+
+async function openHomepageStandalone() {
   if (homepage && !homepage.isDestroyed()) {
     if (homepage.isMinimized()) homepage.restore();
     homepage.show();
@@ -27,10 +52,11 @@ async function openHomepage() {
     return homepage;
   }
   homepage = new BrowserWindow({
-    width: 1320,
-    height: 800,
-    minWidth: 360,
-    minHeight: 480,
+    width: FIXED_WIDTH,
+    height: FIXED_HEIGHT,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
     title: "CiCy Desktop",
     icon: require("../utils/app-icon").appIconPath(), // npx/unpackaged → set the
     // window+taskbar icon ourselves (no .exe to embed it on Windows).
@@ -90,7 +116,26 @@ async function openHomepage() {
 }
 
 function isOpen() {
-  return !!(homepage && !homepage.isDestroyed());
+  return !!((homeTabWc && !homeTabWc.isDestroyed()) || (homepage && !homepage.isDestroyed()));
 }
 
-module.exports = { openHomepage, isOpen, getHomepageWindow: () => homepage };
+// A stable shim that always resolves to the live homepage surface — the resident
+// tab's webContents when present, else the standalone window's. Returned object
+// identity is stable so callers that hold it across the async gap before the tab
+// exists (appUpdater.init) still work once the tab loads. Used for main→renderer
+// pushes: auth:complete (main.js), app:update-state (app-updater.js).
+const homeWinShim = {
+  get webContents() {
+    if (homeTabWc && !homeTabWc.isDestroyed()) return homeTabWc;
+    if (homepage && !homepage.isDestroyed()) return homepage.webContents;
+    return null;
+  },
+  isDestroyed() {
+    const wc = this.webContents;
+    return !wc || (typeof wc.isDestroyed === "function" && wc.isDestroyed());
+  },
+};
+
+function getHomepageWindow() { return homeWinShim; }
+
+module.exports = { openHomepage, isOpen, getHomepageWindow };

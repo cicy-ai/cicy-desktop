@@ -13,9 +13,11 @@ module.exports = [
   require("./system-tools"),
   require("./automation-tools"),
   require("./account-tools"),
+  require("./device-tools"),
   require("./download-tools"),
   require("./ipc-bridge"),
   require("./hook-gemini"),
   require("./chrome-tools"),
+  require("./tab-browser-tools"),
   require("./list-tools"),
 ];

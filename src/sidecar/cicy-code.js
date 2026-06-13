@@ -37,6 +37,9 @@ function probeExisting(port = DEFAULT_PORT, timeoutMs = 500) {
   });
 }
 
+// Running-daemon version lives in ONE place now: require("./version").running().
+// update() below uses it to verify what's actually live after a restart.
+
 let child = null;
 
 // Runtime Bundle v1 (主人指令): prefer the versioned runtime store on EVERY
@@ -139,12 +142,10 @@ async function start({ logPath, port = DEFAULT_PORT, force = false, version = nu
     CICY_CODE_PORT: String(port),
     PORT: String(port),
   };
+  // --helper removed (主人指令): Windows now runs cicy-code in normal mode (full
+  // tmux-based multi-agent via the bundled MSYS2 runtime), same as mac/linux —
+  // no longer the single headless 团队助手.
   const args = [];
-  if (process.platform === "win32") {
-    // Windows runs the single headless 团队助手 (--helper=1) on w-1001 — no tmux
-    // panes, so msys2/tmux are NOT bundled or referenced anymore (主人指令 2026-06-08).
-    args.push("--helper=1");
-  }
   child = spawn(exe, args, { stdio, detached: false, windowsHide: true, env });
   console.log(`[cicy-code-sidecar] spawned ${exe} ${args.join(" ")} pid=${child.pid} port=${port} log=${logPath || "(none)"}`);
 
@@ -160,6 +161,21 @@ async function start({ logPath, port = DEFAULT_PORT, force = false, version = nu
 // [] when lsof is missing or nothing is listening.
 const LSOF_CANDIDATES = ["/usr/sbin/lsof", "/usr/bin/lsof", "lsof"];
 function listPortPids(port) {
+  // Windows has no lsof — find the LISTENING PID on the port via netstat instead.
+  // Needed so stop()/update() can actually kill the old cicy-code.exe holding
+  // :8008 before launching the new version (else the new one can't bind and the
+  // update silently "succeeds" while the OLD version keeps running).
+  if (process.platform === "win32") {
+    try {
+      const out = execFileSync("netstat", ["-ano", "-p", "TCP"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+      const pids = new Set();
+      for (const line of out.split(/\r?\n/)) {
+        const m = line.match(/^\s*TCP\s+\S+:(\d+)\s+\S+\s+LISTENING\s+(\d+)/i);
+        if (m && Number(m[1]) === port) pids.add(parseInt(m[2], 10));
+      }
+      return [...pids].filter(n => n > 0);
+    } catch { return []; }
+  }
   for (const bin of LSOF_CANDIDATES) {
     try {
       const out = execFileSync(bin, ["-nP", `-tiTCP:${port}`, "-sTCP:LISTEN"], {
@@ -213,13 +229,17 @@ async function stop({ timeoutMs = 5000, port = DEFAULT_PORT } = {}) {
     if (p.exitCode === null) { try { p.kill("SIGKILL"); } catch {} }
   }
 
-  // 2) Anything STILL on :port we didn't spawn — a detached npx from a prior
-  //    launch, a user-run daemon, a PPID=1 orphan. The homepage 停止/重启 must
-  //    act on the REAL listener; otherwise (no tracked child) it would no-op.
-  //    Docker (win32) owns its own lifecycle, so skip the port-kill there.
-  if (process.platform !== "win32") {
-    await killPortListeners(port, timeoutMs);
+  // 2) Anything STILL on :port we didn't spawn — a detached prior launch, a
+  //    user-run daemon, an orphan. The homepage 停止/重启 + update() must act on
+  //    the REAL listener; otherwise (no tracked child) it would no-op.
+  //    Windows: the old Docker-route skip was WRONG (win is native cicy-code.exe
+  //    now) — it left the old daemon alive so update() couldn't replace the exe
+  //    (new binary on disk, but the OLD version kept running on :port → "更新完成"
+  //    yet still old). Hard-kill cicy-code.exe by image name + free the port.
+  if (process.platform === "win32") {
+    try { execFileSync("taskkill", ["/F", "/IM", "cicy-code.exe"], { stdio: "ignore" }); } catch {}
   }
+  await killPortListeners(port, timeoutMs);
 }
 
 // Remove npx's cached cicy-code installs so the next spawn re-fetches from the
@@ -256,35 +276,76 @@ async function restart({ logPath, port = DEFAULT_PORT } = {}) {
 // the latest per-platform subpackage into ~/.local/bin as a NEW version-named
 // binary, re-point cicy-code at it (re-copy on Windows), then stop + start from
 // that stable path and health-verify.
+let _updating = false;
+function isUpdating() { return _updating; }
+
 async function update({ logPath, port = DEFAULT_PORT, emit } = {}) {
   const e = emit || (() => {});
   const localbin = require("./localbin");
+  // Suspend the health watchdog for the duration: update() stops cicy-code, then
+  // downloads (~30s) before starting the new one — during that gap the watchdog
+  // would see the daemon "unreachable" and RESPAWN the OLD binary, racing the
+  // swap (holding the port / locking the .exe) so the new version never takes.
+  // main.js's watchdog tick checks isUpdating() and skips while this is true.
+  _updating = true;
   try {
+    // 主人令:更新 = 杀干净 cicy-code.exe → 起 cicy-code.exe → 探活 → 拿运行中真实
+    // version → 再判定"已是最新"。绝不凭磁盘 manifest 直接喊"已是最新"——manifest
+    // 可能比运行中的进程超前,甚至 daemon 根本没起。唯一可信的是运行中 /api/health
+    // 报的版本。所以这个流程对"已是最新"和"要升级"两种情况一视同仁:总是重启 + 验证。
     e({ phase: "download", status: "running", message: "检查最新版本…" });
-    const cur = localbin.currentVersion();
     const latest = await localbin.latestVersion();
     if (!latest) throw new Error("无法获取最新版本号");
-    if (cur && localbin.cmpVer(latest, cur) <= 0) {
-      // Already current — no download, no restart (不重复下载/更新).
-      e({ phase: "done", status: "done", message: `已是最新 ${cur}` });
-      return null;
-    }
-    await localbin.fetchToLocalBin(latest, { emit }); // download → ~/.local/bin → re-link
-    e({ phase: "swap", status: "running", message: `切换到 ${latest}，启动…` });
+    const cur = localbin.currentVersion();              // 磁盘 manifest:只用来决定要不要下载
+    const needDownload = !cur || localbin.cmpVer(latest, cur) > 0;
+
+    // 1) 杀干净
+    e({ phase: "swap", status: "running", message: "停止 cicy-code…" });
     await stop({ port });
-    await new Promise(r => setTimeout(r, 300));
+    await new Promise(r => setTimeout(r, 400));
+
+    // 2) 落后才下载(此时 cicy-code.exe 已死,Windows 也能覆盖)
+    if (needDownload) {
+      e({ phase: "download", status: "running", message: `下载 ${latest}…` });
+      await localbin.fetchToLocalBin(latest, { emit });
+    }
+
+    // 3) 起
+    e({ phase: "swap", status: "running", message: "启动 cicy-code…" });
     const c = await start({ logPath, port, force: true });
+
+    // 4) 探活:等 TCP 监听起来
+    let up = false;
     for (let i = 0; i < 120; i++) {
-      if (await probeExisting(port)) { e({ phase: "done", status: "done", message: `已更新到 ${latest}` }); return c; }
+      if (await probeExisting(port)) { up = true; break; }
       await new Promise(r => setTimeout(r, 500));
     }
-    e({ phase: "done", status: "error", message: "新版本未在 60s 内就绪" });
+    if (!up) { e({ phase: "done", status: "error", message: "cicy-code 未在 60s 内启动" }); return c; }
+
+    // 5) 拿运行中真实 version(唯一来源 version.running();可能略慢于 TCP,重试几次)
+    const version = require("./version");
+    let running = "";
+    for (let i = 0; i < 20 && !running; i++) {
+      running = await version.running(port);
+      if (!running) await new Promise(r => setTimeout(r, 500));
+    }
+
+    // 6) 以运行中真实版本判定——不撒谎
+    if (running && localbin.cmpVer(running, latest) >= 0) {
+      e({ phase: "done", status: "done", message: `已是最新 ${running}` });
+    } else if (running) {
+      e({ phase: "done", status: "done", message: `已更新到 ${running}` });
+    } else {
+      e({ phase: "done", status: "done", message: `已启动(版本未知,期望 ${latest})` });
+    }
     return c;
   } catch (err) {
     console.warn(`[cicy-code-sidecar] update failed: ${err.message}`);
     e({ phase: "done", status: "error", message: `更新失败：${err.message}` });
     return null;
+  } finally {
+    _updating = false;
   }
 }
 
-module.exports = { start, stop, restart, update, probeExisting, clearNpxCache };
+module.exports = { start, stop, restart, update, probeExisting, clearNpxCache, isUpdating };

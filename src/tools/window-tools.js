@@ -39,10 +39,15 @@ function resolveWindowId(input = {}, context = {}) {
 function registerTools(registerTool) {
   registerTool(
     "get_windows",
-    `获取当前所有 Electron 窗口的实时状态列表。返回每个窗口的详细信息，是窗口管理和自动化操作的基础工具。
-  
+    `获取窗口列表（活动窗口 + 已关闭但持久化保留的窗口）。是窗口管理和自动化操作的基础工具。
+
+  - status:"open" 的是当前活动窗口；status:"closed" 的是关闭后仍保留在持久化注册表里的记录（可用 reopen_window + windowKey 原样重开）。
+  - windowKey: 跨重启稳定的持久标识（reopen_window 用）；id 仅活动窗口有，重启后会变。
+
   返回信息包括：
-  - id: 窗口的唯一标识符（调用其他 invoke_window 工具时必需）
+  - id: 活动窗口的运行时标识符（已关闭窗口为 null；调用其他 invoke_window 工具时必需）
+  - windowKey: 持久窗口标识（重开/跨重启用）
+  - status: "open"（活动）| "closed"（已关闭，记录保留）
   - title/url: 窗口当前的标题和网址
   - debuggerIsAttached: 调试器是否已附加
   - isActive/isVisible: 窗口焦点和可见性状态
@@ -58,9 +63,31 @@ function registerTools(registerTool) {
     z.object({}),
     async () => {
       try {
-        const windows = BrowserWindow.getAllWindows()
+        const registry = require("../utils/window-registry");
+        // Live windows (status "open"), annotated with their persistent windowKey.
+        const live = BrowserWindow.getAllWindows()
           .map(getWindowInfo)
-          .filter((w) => w !== null);
+          .filter((w) => w !== null)
+          .map((w) => ({ ...w, status: "open", windowKey: registry.keyForLiveId(w.id) }));
+        // Closed windows from the persistent registry — kept (not deleted) so
+        // the list survives close + restart and can be re-opened (reopen_window).
+        const liveKeys = new Set(live.map((w) => w.windowKey).filter(Boolean));
+        const closed = registry
+          .list()
+          .filter((e) => e.status === "closed" && !liveKeys.has(e.windowKey))
+          .map((e) => ({
+            id: null,
+            windowKey: e.windowKey,
+            status: "closed",
+            title: e.title,
+            url: e.url,
+            accountIdx: e.accountIdx,
+            bounds: e.bounds,
+            isVisible: false,
+            isDestroyed: true,
+            closedAt: e.closedAt,
+          }));
+        const windows = [...live, ...closed];
         return { content: [{ type: "text", text: JSON.stringify(windows, null, 2) }] };
       } catch (error) {
         return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
@@ -94,8 +121,11 @@ function registerTools(registerTool) {
       accountIdx: z
         .number()
         .optional()
-        .default(0)
-        .describe("窗口所在帐户,帐户可以是0,1,2,3...每个相同帐户下面的所有窗口共享缓存cookie等"),
+        .default(1)
+        .describe(
+          "窗口所在帐户。账户 0 是系统级保留(平台 homepage / 系统窗口),agent 开窗请用 >0;不指定时默认 1。" +
+            "帐户可以是 1,2,3...每个相同帐户下面的所有窗口共享缓存/cookie/session/proxy。"
+        ),
       reuseWindow: z
         .boolean()
         .optional()
@@ -152,6 +182,33 @@ function registerTools(registerTool) {
           return { content: [{ type: "text", text: `Closed ${win_id}` }] };
         }
         throw new Error(`Window ${win_id} not found`);
+      } catch (error) {
+        return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
+      }
+    },
+    { tag: "Window" }
+  );
+
+  registerTool(
+    "reopen_window",
+    "重新打开一个已关闭(status:closed)的窗口。窗口关闭后记录仍保留在持久化注册表里，用 get_windows 返回的 windowKey 即可原样重开（沿用原 url / 帐户 / 位置大小）。",
+    z.object({ window_key: z.string().describe("窗口的 windowKey（来自 get_windows）") }),
+    async ({ window_key }) => {
+      try {
+        const registry = require("../utils/window-registry");
+        const entry = registry.getByKey(window_key);
+        if (!entry) throw new Error(`windowKey ${window_key} not found in registry`);
+        const opts = { url: entry.url };
+        if (entry.bounds && typeof entry.bounds === "object") Object.assign(opts, entry.bounds);
+        const win = createWindow(opts, entry.accountIdx || 0, true);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Reopened ${entry.url} as window ${win.id} (windowKey ${window_key})`,
+            },
+          ],
+        };
       } catch (error) {
         return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
       }

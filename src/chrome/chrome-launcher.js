@@ -9,7 +9,7 @@ const { config } = require("../config");
 
 // Default profile model: one user-data-dir per accountIdx
 // Directory layout:
-//   ~/chrome/account_<idx>/Default/...
+//   ~/chrome/profile_<idx>/Default/...
 const DEFAULT_USER_DATA_BASE_ROOT = path.join(os.homedir(), "chrome");
 const DEFAULT_DEBUGGER_BASE_PORT = 9320;
 
@@ -18,11 +18,12 @@ function getProfileDirectory(_accountIdx) {
 }
 
 function getDefaultUserDataDirRoot(accountIdx, baseRoot = DEFAULT_USER_DATA_BASE_ROOT) {
-  // If caller passes a concrete account dir already, respect it.
-  if (typeof baseRoot === "string" && /account_\d+$/.test(baseRoot)) {
+  // If caller passes a concrete profile dir already, respect it.
+  // (account_<n> accepted for backward-compat with pre-rename dirs.)
+  if (typeof baseRoot === "string" && /(?:profile|account)_\d+$/.test(baseRoot)) {
     return baseRoot;
   }
-  return path.join(baseRoot, `account_${accountIdx}`);
+  return path.join(baseRoot, `profile_${accountIdx}`);
 }
 
 function getDefaultDebuggerPort(accountIdx, basePort = DEFAULT_DEBUGGER_BASE_PORT) {

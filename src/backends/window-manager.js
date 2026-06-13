@@ -164,9 +164,19 @@ async function openWindowForBackend(backend, opts = {}) {
   }
 
   registry.markUsed(backend.id);
-  // forceNew=true so each "Open" produces a new BrowserWindow even when
-  // oneWindow mode is on — the whole point of the launcher is multi-window.
-  return createWindow({ url }, backendAccountIdx(backend), true);
+  const acct = 0; // all teams open as tabs in profile 0's tab window (主人令)
+  // Open as a TAB in profile 0's tab window (不弹新窗口). trusted=true so the
+  // cicy-code SPA gets its electronRPC bridge. Fallback to a real window on any
+  // failure so opening a backend is never blocked.
+  try {
+    const tabBrowser = require("../tools/tab-browser-tools");
+    const { BrowserWindow } = require("electron");
+    // tab name = the backend/team's title (not the SPA's document.title)
+    const r = await tabBrowser.openTab(acct, url, { trusted: true, systemOpen: true, title: backend.name || "" });
+    return BrowserWindow.fromId(r.winId) || createWindow({ url }, acct, true);
+  } catch (e) {
+    return createWindow({ url }, acct, true);
+  }
 }
 
 module.exports = { openWindowForBackend, buildLocalUrl, buildRemoteUrl, resolveBackendUrl, readCicyAiApiToken, backendAccountIdx };

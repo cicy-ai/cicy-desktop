@@ -323,7 +323,7 @@ function killAllElectronProcesses() {
 }
 
 function hardCleanupBeforeStart({ masterPort, workerPort }) {
-  console.log(`🧹 Cleaning up ports ${masterPort}/${workerPort} and Electron processes...`);
+  console.log("🧹 Cleaning up previous instance…");
   killListenersByPort(masterPort);
   killListenersByPort(workerPort);
   killAllElectronProcesses();
@@ -738,8 +738,7 @@ async function startWorker({ workerPort, masterBaseUrl, token, workerUiUrl }) {
 
 async function startWorkerOnly({ workerPort }) {
   const tokenManager = new MasterTokenManager();
-  const token = tokenManager.getToken();
-  const workerUiUrl = `http://localhost:${workerPort}/console/chrome?token=${token}`;
+  tokenManager.getToken(); // ensure the token file exists before the worker reads it
 
   writeClusterState({
     masterPid: null,
@@ -750,8 +749,11 @@ async function startWorkerOnly({ workerPort }) {
     startedAt: new Date().toISOString(),
   });
 
-  console.log(`🚀 Target worker http://localhost:${workerPort}`);
-  console.log(`🪟 Worker UI ${workerUiUrl}`);
+  // The worker HTTP server on :PORT is skipped by default (see main.js —
+  // httpEnabled=automationEnabled), so don't advertise http://localhost:PORT or
+  // the /console/chrome UI: those URLs are dead unless CICY_DESKTOP_HTTP=1/--mcp.
+  // Renderer RPC goes through electronRPC injected in preload, not this port.
+  console.log("🚀 Starting CiCy Desktop…");
   console.log(`📄 Token file: ${tokenManager.getConfigPath()}`);
   console.log("🛑 Press Ctrl+C to stop processes started by this command");
 
@@ -827,8 +829,6 @@ async function startMasterCluster({ masterPort, workerPort }) {
   });
 
   console.log(`🚀 Target master ${masterBaseUrl}`);
-  console.log(`🚀 Target worker http://localhost:${workerPort}`);
-  console.log(`🪟 Worker UI ${workerUiUrl}`);
   console.log(`📄 Token file: ${tokenManager.getConfigPath()}`);
 
   const masterRunning = await checkMaster(masterBaseUrl);

@@ -48,7 +48,7 @@ function getMasterChromeAccountEntry(accountIdx) {
   }
 
   const data = readMasterChromeConfig();
-  const key = `account_${accountIdx}`;
+  const key = `profile_${accountIdx}`;
   const entry = data?.[key] || null;
   if (!entry) {
     throw new ChromeProfileResolutionError(`Missing chrome.json entry on master: ${key}`);
@@ -66,7 +66,7 @@ function normalizeEffectiveChromeProfile({ accountIdx, entry }) {
   const rpaDirRaw =
     typeof safeEntry.rpaDir === "string" && safeEntry.rpaDir.length
       ? safeEntry.rpaDir
-      : `~/chrome/account_${accountIdx}`;
+      : `~/chrome/profile_${accountIdx}`;
 
   const orgPathRaw = typeof safeEntry.orgPath === "string" && safeEntry.orgPath.length ? safeEntry.orgPath : null;
 

@@ -116,11 +116,8 @@ function probeHealth(baseUrl, token) {
       res.setEncoding("utf8");
       res.on("data", (c) => { body += c; if (body.length > 8192) body = body.slice(0, 8192); });
       res.on("end", () => {
-        let ver = null;
-        try {
-          const j = JSON.parse(body);
-          ver = j?.version || j?.data?.version || null;
-        } catch {}
+        // 版本解析唯一来源:require("../sidecar/version").parseHealthVersion
+        const ver = require("../sidecar/version").parseHealthVersion(body);
         resolve({
           ok: res.statusCode >= 200 && res.statusCode < 300,
           status: res.statusCode,
@@ -276,14 +273,27 @@ async function openTeam(id) {
     }
   }
 
-  const { createWindow } = require("../utils/window-utils");
-  const win = createWindow(
-    { url, title: `Local · ${node.name || id}` },
-    0,    // accountIdx — local teams all share account 0's session partition
-    true, // forceNew — we already determined no match above
-  );
-  log.info(`[local-teams] open ${id} → new win.id=${win.id}`);
-  return { ok: true, windowId: win.id, reused: false };
+  // Open the team as a TAB in account 0's tab browser (一个 profile 一个窗口，
+  // 不再每次弹新窗口). trusted=true → the tab gets the electronRPC bridge so the
+  // cicy-code SPA keeps working. Falls back to a real window on any failure so
+  // opening a team is never blocked.
+  try {
+    const tabBrowser = require("../tools/tab-browser-tools");
+    // tab name = the team's title (not the cicy-code SPA's document.title)
+    const r = await tabBrowser.openTab(0, url, { trusted: true, systemOpen: true, title: node.name || id });
+    log.info(`[local-teams] open ${id} → tab in win.id=${r.winId} (reused=${r.reused})`);
+    return { ok: true, windowId: r.winId, reused: !!r.reused, tabbed: true };
+  } catch (e) {
+    log.warn(`[local-teams] open ${id} → tab failed (${e.message}); falling back to window`);
+    const { createWindow } = require("../utils/window-utils");
+    const win = createWindow(
+      { url, title: `Local · ${node.name || id}` },
+      0,    // accountIdx — local teams all share account 0's session partition
+      true, // forceNew — we already determined no match above
+    );
+    log.info(`[local-teams] open ${id} → new win.id=${win.id}`);
+    return { ok: true, windowId: win.id, reused: false };
+  }
 }
 
 // Is this URL served by something on the local machine (the cicy-code sidecar)?
@@ -409,17 +419,49 @@ async function syncNameToCloud(id) {
     if (!cc.loginToken || !cc.loginToken()) return; // not logged in
     const node = readNodes()[id];
     if (!node || !isLocalOrigin(node.base_url || "")) return;
-    const reg = await cc.registerTeam({ teamId: node.cloud_team_id || null, title: node.name || "" });
-    if (reg && reg.ok && reg.teamId && reg.teamId !== node.cloud_team_id) {
-      await writeNodes((nodes) => {
-        if (nodes[id]) nodes[id].cloud_team_id = reg.teamId;
-        return nodes;
-      });
-      log.info(`[local-teams] cloud name-sync ${id} → teamId=${reg.teamId}`);
-    } else if (reg && reg.ok) {
-      log.info(`[local-teams] cloud name-sync ${id} title updated (teamId=${node.cloud_team_id})`);
+    let reg = await cc.registerTeam({ teamId: node.cloud_team_id || null, title: node.name || "", titleVersion: node.titleVersion || 0 });
+    // Self-heal a STALE cached cloud_team_id: if we presented a cached id but the
+    // cloud returned ok WITHOUT an apiKey (team deleted / rotated / no longer owned
+    // cloud-side — e.g. after a cloud wipe), the cached id is dead. Re-register with
+    // teamId=null to mint a FRESH team+key instead of silently leaving the gateway
+    // key empty (the "apiKey stays empty after a cloud wipe → requests 发不出去" bug).
+    // The teamId-changed branch below persists the new id back into teams.json.
+    if (reg && reg.ok && !reg.apiKey && node.cloud_team_id) {
+      log.warn(`[local-teams] cached cloud_team_id=${node.cloud_team_id} returned no gateway key — re-creating a fresh team`);
+      reg = await cc.registerTeam({ teamId: null, title: node.name || "", titleVersion: node.titleVersion || 0 });
     }
-  } catch (e) { log.warn(`[local-teams] cloud name-sync ${id} failed: ${e.message}`); }
+    // The cloud assigns this team a sk-cicy- gateway apiKey on register — wire
+    // it (full provider items + CLI routing, 主人 spec) into this machine's
+    // global.json so cicy-code has an LLM key from the moment it starts.
+    // Idempotent: injectGatewayKey no-ops when everything is already in place.
+    if (reg && reg.ok && reg.apiKey) {
+      try {
+        const inj = cc.injectGatewayKey(reg.apiKey, reg.gatewayUrl);
+        if (inj && inj.changed) log.info(`[local-teams] gateway key injected into global.json (teamId=${reg.teamId})`);
+      } catch (e) { log.warn(`[local-teams] gateway key injection failed: ${e.message}`); }
+    }
+    if (reg && reg.ok) {
+      // 服务端权威版本号裁决(w-10032 契约):响应版本 > 本地 → 采用响应的 title+version。
+      // 一条规则覆盖三种情况:(a) 云端/别处改名下行(reg.title=云端名,版本更大);
+      // (b) 本端改名被接受(reg.title=本端名,版本=base+1);(c) 冲突被拒(base 落后→
+      // reg.title=云端名,版本更大→云端赢)。相同名服务端不 bump→版本不变→不动。
+      const respVer = Number(reg.titleVersion) || 0;
+      const localVer = Number(node.titleVersion) || 0;
+      const adopt = respVer > localVer;
+      const teamIdChanged = reg.teamId && reg.teamId !== node.cloud_team_id;
+      if (teamIdChanged || adopt) {
+        await writeNodes((nodes) => {
+          if (nodes[id]) {
+            if (teamIdChanged) nodes[id].cloud_team_id = reg.teamId;
+            if (adopt) { if (reg.title) nodes[id].name = reg.title; nodes[id].titleVersion = respVer; }
+          }
+          return nodes;
+        });
+      }
+      if (adopt) log.info(`[local-teams] cloud title-sync ${id} ← "${reg.title}" v${respVer} (was v${localVer})`);
+      else if (teamIdChanged) log.info(`[local-teams] cloud title-sync ${id} → teamId=${reg.teamId}`);
+    }
+  } catch (e) { log.warn(`[local-teams] cloud title-sync ${id} failed: ${e.message}`); }
 }
 
 // Sync EVERY existing local-origin team to cloud. Runs once at startup (after
@@ -568,17 +610,22 @@ async function updateTeam(id, patch) {
   }
 
   let existed = false;
+  const isRename = filtered.name !== undefined;
   await writeNodes((nodes) => {
     if (Object.prototype.hasOwnProperty.call(nodes, id)) {
       existed = true;
       nodes[id] = { ...nodes[id], ...filtered, updated_at: new Date().toISOString() };
+      // 改名:只改 name,titleVersion 保持「最后一次从云端看到的」作为 base 不动。
+      // syncNameToCloud 带这个 base 去注册;服务端接受后盖 base+1,响应回来再写回本地
+      // (服务端权威,w-10032 契约)。冲突(base 落后)则被拒、采用云端名,见 syncNameToCloud。
     }
     return nodes;
   });
   if (!existed) return { ok: false, error: "team not found" };
   log.info(`[local-teams] update ${id} → ${Object.keys(filtered).join(",")}`);
-  // Rename → push the new title to the cloud (best-effort, one-way).
-  if (filtered.name !== undefined) syncNameToCloud(id).catch(() => {});
+  // Rename → push the new title (with the base titleVersion) to the cloud, and
+  // pull down a newer cloud name if there is one (two-way LWW inside syncNameToCloud).
+  if (isRename) syncNameToCloud(id).catch(() => {});
   const next = readNodes()[id] || {};
   let port = null;
   try { port = parseInt(new URL(next.base_url || "").port, 10) || null; } catch {}
@@ -800,7 +847,7 @@ function fetchManifestVersion() {
         res.setEncoding("utf8");
         res.on("data", (c) => { body += c; if (body.length > 8192) body = body.slice(0, 8192); });
         res.on("end", () => {
-          try { resolve(JSON.parse(body)?.version || null); }
+          try { resolve(require("../sidecar/version").parseHealthVersion(body)); }
           catch { resolve(null); }
         });
       });
