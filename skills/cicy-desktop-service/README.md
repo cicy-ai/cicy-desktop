@@ -88,5 +88,5 @@ cicy logs
 ## Related docs
 
 - [Root README](../../README.md)
-- [CLI split](../cicy-cli/README.md)
+- [Skills index — CLI split](../README.md)
 - [RPC CLI README](../../packages/cicy-rpc/README.md)
