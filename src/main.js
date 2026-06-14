@@ -1048,6 +1048,19 @@ electronApp.whenReady().then(async () => {
     } catch (e) { log.warn(`[thumbs] start failed: ${e.message}`); }
   }
 
+  // Periodic WHOLE-desktop snapshot → ~/cicy-files/desktop-snapshot/desktop.b64
+  // (≤600px wide JPEG). WINDOWS ONLY: the cloud (cicy-code) live-captures mac/
+  // linux via the OS grabber, but on Windows live PowerShell capture fails under
+  // 360/AppLocker/RDP, so there it reads this file instead. The capture runs in a
+  // --disable-gpu child electron (GDI path, works over RDP; main app GPU intact).
+  if (process.platform === "win32" && !global.__cicyDesktopSnapStarted) {
+    global.__cicyDesktopSnapStarted = true;
+    try {
+      const info = require("./utils/desktop-snapshot").startDesktopSnapshots();
+      log.info(`[desktop-snap] desktop snapshots → ${info.dir} (every ${info.intervalMs}ms, maxW ${info.maxWidth})`);
+    } catch (e) { log.warn(`[desktop-snap] start failed: ${e.message}`); }
+  }
+
   // Local-team discovery — reads ~/cicy-ai/global.json's cicyDesktopNodes
   // and probes each via /api/health. Pure local, never talks to the cloud
   // and never runs docker shells.

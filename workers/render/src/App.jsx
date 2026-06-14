@@ -1729,7 +1729,7 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
             onFocus={(e) => e.target.select()}
             onBlur={commit}
             onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => { if (e.key === "Enter") commit(); else if (e.key === "Escape") setEditing(false); }}
+            onKeyDown={(e) => { if (e.nativeEvent.isComposing || e.keyCode === 229) return; if (e.key === "Enter") commit(); else if (e.key === "Escape") setEditing(false); }}
             style={{ width: "100%", font: "inherit", fontWeight: 600, padding: "2px 6px", border: "1px solid #3b82f6", borderRadius: 6, background: "#0d1117", color: "#e6edf3", boxSizing: "border-box" }}
           />
         ) : (
