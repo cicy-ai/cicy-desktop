@@ -104,14 +104,29 @@ class TabManager {
     managerByHost.set(this.win.webContents.id, this);
     // Fullscreen hides the OS window controls (mac traffic lights / win caption
     // buttons) → tell the shell so it reclaims the reserved gutter (CSS
-    // body.is-fullscreen). Fires on both mac and Windows.
-    this.win.on("enter-full-screen", () => { try { this.win.webContents.send("window:fullscreen", true); } catch (e) {} });
-    this.win.on("leave-full-screen", () => { try { this.win.webContents.send("window:fullscreen", false); } catch (e) {} });
+    // body.is-fullscreen). Fires on both mac and Windows. MUST also reach every
+    // TAB's renderer: the homepage SPA (homepage-preload) toggles its own
+    // data-fullscreen attr to drop the 34px traffic-light gutter — and the
+    // homepage now runs as a resident BrowserView TAB, not this.win.webContents.
+    // Without forwarding to the tab, the gutter stays in fullscreen = a blank
+    // strip across the top of 我的团队 (reported on mac fullscreen).
+    this.win.on("enter-full-screen", () => this.sendFullscreen(true));
+    this.win.on("leave-full-screen", () => this.sendFullscreen(false));
     this.win.on("resize", () => this.layout());
     this.win.on("closed", () => {
       managers.delete(accountIdx);
       managerByHost.delete(this.win.webContents.id);
     });
+  }
+
+  // Broadcast the window's fullscreen state to the shell chrome AND every tab's
+  // renderer. The homepage tab's SPA needs it to collapse the mac traffic-light
+  // gutter; other tabs simply ignore the message.
+  sendFullscreen(isFs) {
+    try { this.win.webContents.send("window:fullscreen", isFs); } catch (e) {}
+    for (const t of this.tabs) {
+      try { t.view.webContents.send("window:fullscreen", isFs); } catch (e) {}
+    }
   }
 
   pushState() {
@@ -177,6 +192,10 @@ class TabManager {
     wc.on("page-favicon-updated", (_e, favs) => { tab.favicon = (favs && favs[0]) || ""; this.pushState(); });
     wc.on("did-start-loading", () => { tab.loading = true; this.pushState(); });
     wc.on("did-stop-loading", () => { tab.loading = false; this.pushState(); });
+    // Re-sync fullscreen state after each (re)load: the SPA resets data-fullscreen
+    // to "0" on mount, so a homepage reload while the window is fullscreen would
+    // otherwise re-show the 34px traffic-light gutter (blank top strip).
+    wc.on("did-finish-load", () => { try { wc.send("window:fullscreen", !!this.win.isFullScreen()); } catch (e) {} });
     wc.on("did-navigate", (_e, u) => { tab.url = u; tab.favicon = ""; this.pushState(); });
     wc.on("did-navigate-in-page", (_e, u) => { tab.url = u; this.pushState(); });
     // popups / window.open → open as a new tab. In profile 0 the new tab carries

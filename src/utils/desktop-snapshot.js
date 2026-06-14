@@ -92,6 +92,21 @@ async function captureOnce() {
   return { dir, w: o.width, h: o.height, bytes: jpeg.length };
 }
 
+// One-shot in-process capture that RETURNS the base64 JPEG (does not touch disk).
+// Used by the `desktop_snapshot` RPC tool as the live fallback when the daemon's
+// desktop.b64 file is missing/stale. NOT valid on win32 in the main process —
+// desktopCapturer needs the --disable-gpu daemon there (see grabScreenImage);
+// the tool guards that and reads the daemon file instead.
+async function captureB64(maxWidth) {
+  const mw = maxWidth > 0 ? maxWidth : MAX_W;
+  let img = await grabScreenImage();
+  const o = img.getSize();
+  if (o.width > mw) img = img.resize({ width: mw, quality: "good" });
+  const jpeg = img.toJPEG(QUALITY);
+  if (!jpeg || jpeg.length < 256) throw new Error("encoded jpeg too small");
+  return { b64: jpeg.toString("base64"), w: o.width, h: o.height, bytes: jpeg.length };
+}
+
 // ── parent (started from main.js) ─────────────────────────────────────────────
 let child = null;
 let timer = null;
@@ -172,4 +187,4 @@ if (process.env.CICY_SNAP_DAEMON === "1") {
   app.on("render-process-gone", () => app.quit());
 }
 
-module.exports = { startDesktopSnapshots, stopDesktopSnapshots, snapDir, captureOnce };
+module.exports = { startDesktopSnapshots, stopDesktopSnapshots, snapDir, captureOnce, captureB64, MAX_W };

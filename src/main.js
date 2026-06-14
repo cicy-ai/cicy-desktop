@@ -1049,15 +1049,17 @@ electronApp.whenReady().then(async () => {
   }
 
   // Periodic WHOLE-desktop snapshot → ~/cicy-files/desktop-snapshot/desktop.b64
-  // (≤600px wide JPEG). WINDOWS ONLY: the cloud (cicy-code) live-captures mac/
-  // linux via the OS grabber, but on Windows live PowerShell capture fails under
-  // 360/AppLocker/RDP, so there it reads this file instead. The capture runs in a
-  // --disable-gpu child electron (GDI path, works over RDP; main app GPU intact).
-  if (process.platform === "win32" && !global.__cicyDesktopSnapStarted) {
+  // (≤600px wide JPEG). ALL PLATFORMS: the cloud (cicy-code) fetches it via the
+  // dedicated non-dangerous `desktop_snapshot` RPC tool, which reads this fresh
+  // file — so there's no per-call screen capture, hence no macOS Screen-Recording
+  // prompt and no consent dialog. On Windows the capture runs in a --disable-gpu
+  // child electron (GDI path, works over RDP; main app GPU intact); on mac/linux
+  // it's an in-process native-capture loop (screencapture / scrot).
+  if (!global.__cicyDesktopSnapStarted) {
     global.__cicyDesktopSnapStarted = true;
     try {
       const info = require("./utils/desktop-snapshot").startDesktopSnapshots();
-      log.info(`[desktop-snap] desktop snapshots → ${info.dir} (every ${info.intervalMs}ms, maxW ${info.maxWidth})`);
+      log.info(`[desktop-snap] desktop snapshots → ${info.dir} (every ${info.intervalMs}ms, maxW ${info.maxWidth}, mode ${info.mode})`);
     } catch (e) { log.warn(`[desktop-snap] start failed: ${e.message}`); }
   }
 

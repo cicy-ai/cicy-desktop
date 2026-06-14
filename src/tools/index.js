@@ -14,6 +14,7 @@ module.exports = [
   require("./automation-tools"),
   require("./account-tools"),
   require("./device-tools"),
+  require("./desktop-snapshot-tools"),
   require("./download-tools"),
   require("./ipc-bridge"),
   require("./hook-gemini"),
