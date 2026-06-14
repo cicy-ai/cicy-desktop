@@ -247,13 +247,10 @@ function findManagerByTab(webContentsId) {
 }
 
 // ── programmatic API (team-open reroute / homepage) ──────────────────────────
-// profile 0 is the system tab window: tabs may ONLY be added by the homepage
-// (team open passes systemOpen:true). The "+" button, the electron_tab_open
-// tool and the panel can't add tabs to it.
+// profile 0 is the system tab window. It used to accept tabs ONLY from the
+// homepage (team open, systemOpen:true); that restriction is lifted so the "+"
+// button / electron_tab_open / the panel can add tabs to profile 0 too.
 async function openTab(accountIdx, url, opts = {}) {
-  if (accountIdx === 0 && !opts.systemOpen) {
-    throw new Error("profile 0 的标签只能从首页点开 team");
-  }
   const m = ensureManager(accountIdx);
   const id = m.addTab(url, { trusted: !!opts.trusted, home: !!opts.home, title: opts.title || "" });
   try { m.win.show(); m.win.focus(); } catch (e) {}
@@ -280,7 +277,7 @@ function installIpc() {
   ipcInstalled = true;
   const mgr = (e) => managerByHost.get(e.sender.id);
   ipcMain.on("tabwin:ready", (e) => { const m = mgr(e); if (m) m.pushState(); });
-  ipcMain.on("tabwin:new", (e, { url }) => { const m = mgr(e); if (m && m.accountIdx !== 0) m.addTab(url || ""); });
+  ipcMain.on("tabwin:new", (e, { url }) => { const m = mgr(e); if (m) m.addTab(url || ""); });
   ipcMain.on("tabwin:activate", (e, { id }) => { const m = mgr(e); if (m) m.activate(id); });
   ipcMain.on("tabwin:close", (e, { id }) => { const m = mgr(e); if (m) m.close(id); });
   ipcMain.on("tabwin:navigate", (e, { url }) => { const m = mgr(e); const wc = m && m.activeWc(); if (wc && url) wc.loadURL(String(url)); });
