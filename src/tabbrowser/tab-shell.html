@@ -62,6 +62,15 @@
   .tab.active::before,.tab.active::after{content:"";position:absolute;bottom:0;width:5px;height:5px}
   .tab.active::before{left:-5px;background:radial-gradient(circle at top left,var(--strip) 4.5px,var(--toolbar) 5px)}
   .tab.active::after{right:-5px;background:radial-gradient(circle at top right,var(--strip) 4.5px,var(--toolbar) 5px)}
+  /* Chrome-style hairline separator between adjacent INACTIVE tabs: a faint 1px
+     vertical line sitting in the gap to the LEFT of each tab. Suppressed for the
+     first tab and around the active/hovered tab (Chrome hides the seam that would
+     touch an active or hovered tab on either side). Inactive tabs don't use
+     ::before (that's the active tab's ear), so it's free here. */
+  .tab:not(.active)::before{content:"";position:absolute;left:-3.5px;top:50%;transform:translateY(-50%);width:1px;height:16px;background:rgba(255,255,255,.12);pointer-events:none}
+  #tabs>.tab:first-child::before{display:none}                    /* nothing left of the first tab */
+  .tab:hover::before{display:none}                                /* no line on the hovered tab's left */
+  .tab.active+.tab::before,.tab:hover+.tab::before{display:none}  /* none on the active/hovered tab's right */
   .fav{width:16px;height:16px;flex:0 0 16px;border-radius:4px;display:flex;align-items:center;justify-content:center;overflow:hidden}
   .fav img{width:16px;height:16px;object-fit:contain}
   .spin{width:14px;height:14px;border:2px solid rgba(255,255,255,.25);border-top-color:var(--accent);border-radius:50%;animation:sp .7s linear infinite}
