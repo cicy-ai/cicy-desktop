@@ -17,7 +17,31 @@ async function getTargets(debuggerPort, host = "127.0.0.1") {
 }
 
 async function createTarget(debuggerPort, targetUrl = "about:blank", host = "127.0.0.1") {
-  const url = `http://${host}:${debuggerPort}/json/new?${encodeURIComponent(String(targetUrl || "about:blank"))}`;
+  const wantUrl = String(targetUrl || "about:blank");
+  // Prefer the browser-level CDP endpoint (Target.createTarget over the browser
+  // websocket). Newer Chrome (149+) rejects/closes the HTTP /json/new endpoint,
+  // and — crucially — the browser websocket can open a tab even when there are
+  // 0 page targets: the windowless Chrome that lingers on macOS after its last
+  // window is closed. Without this, /json/new fails, ensurePageTargets can't
+  // create a tab, and the profile is stuck at "No inspectable targets".
+  try {
+    const version = await getVersion(debuggerPort, host);
+    const browserWs = version && version.webSocketDebuggerUrl;
+    if (browserWs) {
+      const res = await callCdp({
+        debuggerPort,
+        host,
+        target: browserWs,
+        method: "Target.createTarget",
+        params: { url: wantUrl },
+      });
+      const id = res && res.targetId;
+      if (id) return { id, targetId: id };
+    }
+  } catch (_) {
+    // Fall through to the legacy HTTP endpoint (older Chrome / unexpected shape).
+  }
+  const url = `http://${host}:${debuggerPort}/json/new?${encodeURIComponent(wantUrl)}`;
   const response = await fetch(url, { method: "PUT" });
   if (!response.ok) {
     throw new Error(`Request failed ${response.status} ${response.statusText} for ${url}`);

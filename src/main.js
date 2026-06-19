@@ -267,6 +267,11 @@ const {
 const automationEnabled =
   process.env.CICY_DESKTOP_HTTP === "1" || enableMcp || !!process.env.CICY_MASTER_URL;
 
+// CDP 调试口(9221)默认开(主人令),只绑 127.0.0.1 回环、不暴露到网络。与上面的
+// HTTP/MCP server 解耦:HTTP server 仍按 automationEnabled 控制(避免对外 0.0.0.0
+// 暴露 / 防火墙弹窗),CDP 单独默认开。要关 CDP:显式设 CICY_DESKTOP_CDP=0。
+const cdpEnabled = process.env.CICY_DESKTOP_CDP !== "0";
+
 config.port = PORT;
 if (chromeBinary) {
   config.chromeBinary = chromeBinary;
@@ -458,12 +463,12 @@ const server = http.createServer(app);
 
 // 必须在 whenReady 之前设置调试端口。CDP 无鉴权,仅在自动化启用时才开,并显式
 // 绑回环地址(默认已是 127.0.0.1,显式设置防止意外暴露到 0.0.0.0)。
-if (automationEnabled) {
+if (cdpEnabled) {
   electronApp.commandLine.appendSwitch("remote-debugging-port", "9221");
   electronApp.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
-  log.info("[MCP] Remote debugging enabled on 127.0.0.1:9221 (automation enabled)");
+  log.info("[MCP] Remote debugging enabled on 127.0.0.1:9221 (default on; set CICY_DESKTOP_CDP=0 to disable)");
 } else {
-  log.info("[MCP] Remote debugging port NOT opened (automation disabled — set --mcp / CICY_DESKTOP_HTTP=1 / CICY_MASTER_URL to enable)");
+  log.info("[MCP] Remote debugging port NOT opened (CICY_DESKTOP_CDP=0)");
 }
 
 // Register the cicy:// scheme (tab-browser start page) — must run before ready.

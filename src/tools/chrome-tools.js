@@ -62,6 +62,25 @@ function normalizePrivateProxy(proxyValue) {
   return p.enabled && p.url ? p.url : null;
 }
 
+// All Chrome profiles share the single chrome-profile-1 mihomo listener (20001):
+// cicy-mihomo's default config only emits that one listener (profile-2/3 are
+// commented out), so a profile pointing at a dead per-profile port (20002…) or
+// at no proxy at all can't load pages. Self-heal at launch — empty proxy or a
+// local chrome-profile-range port (20000–20099) collapses to 20001; a genuine
+// external proxy is left untouched. Non-destructive: only the launch arg is
+// rewritten, chrome.json is not.
+const SHARED_CHROME_PROXY = "socks5://127.0.0.1:20001";
+function canonicalChromeProxy(proxyUrl) {
+  if (!proxyUrl) return SHARED_CHROME_PROXY;
+  try {
+    const u = new URL(proxyUrl);
+    const isLocal = u.hostname === "127.0.0.1" || u.hostname === "localhost";
+    const port = Number(u.port);
+    if (isLocal && port >= 20000 && port <= 20099) return SHARED_CHROME_PROXY;
+  } catch {}
+  return proxyUrl;
+}
+
 function readPrivateChromeConfig() {
   if (!fs.existsSync(PRIVATE_CHROME_JSON)) return {};
   return JSON.parse(fs.readFileSync(PRIVATE_CHROME_JSON, "utf-8"));
@@ -317,7 +336,7 @@ async function launchOrActivateProfile({
     throw new Error("Chrome debugger port 9221 is reserved by Electron. Please use another port.");
   }
 
-  const effectiveProxy = normalized.proxyUrl;
+  const effectiveProxy = canonicalChromeProxy(normalized.proxyUrl);
   const effectiveUserDataDirRoot =
     normalized.expanded.rpaDir ||
     getDefaultUserDataDirRoot(accountIdx, config.chromeUserDataRoot || DEFAULT_USER_DATA_BASE_ROOT);
@@ -327,38 +346,72 @@ async function launchOrActivateProfile({
   // Script parity: if /json/version reachable => activate first page target and return reused
   const liveStatus = await probeChromeDebugger(effectivePort);
   if (liveStatus.isRunning) {
-    const { targets, activatedTargetId } = await ensurePageTargets({
-      debuggerPort: effectivePort,
-      url,
-      activateIfRunning,
-    });
-    if (activateIfRunning) bringChromeAppToForeground();
+    // Detect a windowless Chrome — debugger up but 0 page targets. It lingers on
+    // macOS after its last window is closed; reusing it is unreliable because a
+    // CDP-created tab has no browser window and Chrome discards it, leaving the
+    // profile stuck at "No inspectable targets". Only trust an explicit empty
+    // list (a transient /json/list failure must NOT be read as windowless, or we
+    // could kill a Chrome that actually has the user's tabs open).
+    let windowless = false;
+    try {
+      const live = await getTargets(effectivePort);
+      windowless = Array.isArray(live) && live.filter((t) => t.type === "page").length === 0;
+    } catch (_) {
+      windowless = false;
+    }
 
-    const nextRuntime = registry.upsert(accountIdx, {
-      status: "running",
-      debuggerPort: effectivePort,
-      proxy: effectiveProxy || null,
-      userDataDirRoot: displayUserDataDir,
-      profileDirectory: getProfileDirectory(accountIdx),
-      url: url || null,
-      webSocketDebuggerUrl: liveStatus.webSocketDebuggerUrl || null,
-      error: null,
-    });
+    if (!windowless) {
+      const { targets, activatedTargetId } = await ensurePageTargets({
+        debuggerPort: effectivePort,
+        url,
+        activateIfRunning,
+      });
+      if (activateIfRunning) bringChromeAppToForeground();
 
-    return {
-      reused: true,
-      activatedTargetId,
-      profileKey,
-      profileSource,
-      accountIdx,
-      gmail: normalized.gmail,
-      port: effectivePort,
-      proxy: effectiveProxy || null,
-      userDataDirRoot: displayUserDataDir,
-      runtime: nextRuntime,
-      liveStatus,
-      targetsPreview: buildTargetsPreview(targets),
-    };
+      const nextRuntime = registry.upsert(accountIdx, {
+        status: "running",
+        debuggerPort: effectivePort,
+        proxy: effectiveProxy || null,
+        userDataDirRoot: displayUserDataDir,
+        profileDirectory: getProfileDirectory(accountIdx),
+        url: url || null,
+        webSocketDebuggerUrl: liveStatus.webSocketDebuggerUrl || null,
+        error: null,
+      });
+
+      return {
+        reused: true,
+        activatedTargetId,
+        profileKey,
+        profileSource,
+        accountIdx,
+        gmail: normalized.gmail,
+        port: effectivePort,
+        proxy: effectiveProxy || null,
+        userDataDirRoot: displayUserDataDir,
+        runtime: nextRuntime,
+        liveStatus,
+        targetsPreview: buildTargetsPreview(targets),
+      };
+    }
+
+    // Windowless: tear the lingering process down (release its SingletonLock on
+    // the user-data-dir) before falling through to the fresh-launch path, which
+    // spawns Chrome with a real, persistent window.
+    const lingering = registry.get(accountIdx);
+    if (lingering?.pid) {
+      closeChromeProcess(lingering.pid);
+    } else if (liveStatus.webSocketDebuggerUrl) {
+      try {
+        await callCdp({
+          debuggerPort: effectivePort,
+          target: liveStatus.webSocketDebuggerUrl,
+          method: "Browser.close",
+          params: {},
+        });
+      } catch (_) {}
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
   }
 
   ensureRpaProfileInitialized({
@@ -910,11 +963,25 @@ function registerChromeTools(registerTool) {
       }
 
       try {
+        // Browser-level CDP methods (Target.*, Browser.*) must attach to the
+        // browser endpoint, not a page target. Without an explicit target, CRI
+        // defaults to the first page target and fails with "No inspectable
+        // targets" when the profile has 0 page targets — a windowless Chrome
+        // lingering after its last window was closed, or Chrome 149 where the
+        // HTTP /json/new tab-create endpoint is disabled. Resolve the browser
+        // websocket so "add tab" (Target.createTarget) works from any state.
+        let effectiveTarget = target;
+        if (!effectiveTarget && /^(Target|Browser)\./.test(method)) {
+          try {
+            const v = await getVersion(port);
+            if (v && v.webSocketDebuggerUrl) effectiveTarget = v.webSocketDebuggerUrl;
+          } catch (_) {}
+        }
         const result = await callCdp({
           debuggerPort: port,
           method,
           params: params || {},
-          target,
+          target: effectiveTarget,
         });
         registry.upsert(accountIdx, {
           status: "running",
