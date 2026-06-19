@@ -64,12 +64,26 @@ async function execShell(command, opts = {}) {
 
 contextBridge.exposeInMainWorld("electronRPC", (tool, args) => rpc(tool, args));
 
-// i18n: expose t(key, opts) and current locale to render. Resources are
-// loaded once in the main process and shipped synchronously over IPC. Since
-// preload runs in the main process for context-isolated windows, we can
-// require the i18n module directly.
+// i18n: expose t(key, opts) and current locale to render.
+//
+// IMPORTANT: this preload runs in the RENDERER process, so `require("../i18n")`
+// gives a SEPARATE i18n instance from the main process — it has no idea what
+// locale the app resolved. Left to its own lazy init() it would fall back to
+// English (pickLocale(undefined) → FALLBACK), which is exactly why the homepage
+// (e.g. the first-run terms gate) showed English even on zh-CN systems. So we
+// pull the resolved locale from main over a synchronous IPC and init THIS
+// instance with it. i18next.init() with inline resources is synchronous, so the
+// language is set immediately and `locale` below reads the correct value.
 let __i18n;
-try { __i18n = require("../i18n"); } catch (e) { __i18n = null; }
+try {
+  __i18n = require("../i18n");
+  let mainLng = "";
+  try { mainLng = ipcRenderer.sendSync("i18n:locale"); } catch (_) {}
+  __i18n.init(mainLng || undefined);
+  if (mainLng && __i18n.i18next.language !== __i18n.pickLocale(mainLng)) {
+    __i18n.i18next.changeLanguage(__i18n.pickLocale(mainLng));
+  }
+} catch (e) { __i18n = null; }
 contextBridge.exposeInMainWorld("cicyI18n", {
   t: (key, opts) => {
     if (!__i18n) return key;

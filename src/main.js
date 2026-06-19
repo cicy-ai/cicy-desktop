@@ -81,6 +81,18 @@ const __initialLocale = (() => {
 })();
 i18n.init(__initialLocale);
 
+// Synchronous bridge so the homepage preload — which runs in the RENDERER
+// process and therefore holds its OWN separate i18n module instance — can
+// resolve the same locale the main process picked. Without this the preload's
+// lazy init() falls back to English regardless of OS language, so
+// window.cicyI18n.t() returned English even on zh-CN systems. Read live at call
+// time, so it reflects the ready-time changeLanguage() below.
+try {
+  require("electron").ipcMain.on("i18n:locale", (e) => {
+    e.returnValue = (i18n.i18next && i18n.i18next.language) || i18n.FALLBACK || "en";
+  });
+} catch {}
+
 // Single-instance lock: only one cicy-desktop process can hold the primary
 // instance. A second launch sends `second-instance` with argv to the primary
 // and exits itself. The primary focuses its homepage so the user sees the
