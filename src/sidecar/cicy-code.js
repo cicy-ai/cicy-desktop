@@ -20,9 +20,7 @@ const net = require("net");
 const path = require("path");
 const { spawn, execFileSync } = require("child_process");
 
-// Default cicy-code port: 8007 on Windows, 8008 elsewhere (主人令). CICY_CODE_PORT
-// overrides on every platform.
-const DEFAULT_PORT = Number(process.env.CICY_CODE_PORT || (process.platform === "win32" ? 8007 : 8008));
+const DEFAULT_PORT = Number(process.env.CICY_CODE_PORT || 8008);
 
 // Liveness = "is something LISTENING on :port", via a raw TCP connect — NOT an
 // HTTP GET. /health can block (mid-boot, busy, hung) and time out even while the

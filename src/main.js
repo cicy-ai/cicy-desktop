@@ -867,7 +867,7 @@ electronApp.whenReady().then(async () => {
   // cloud team register + gateway-key injection when logged in. A fresh boot
   // may npm-seed the runtime first, so probe for up to ~90s before giving up.
   (async () => {
-    const sidecarPort = Number(process.env.CICY_CODE_PORT || (process.platform === "win32" ? 8007 : 8008));
+    const sidecarPort = Number(process.env.CICY_CODE_PORT || 8008);
     const lt = require("./backends/local-teams");
     for (let i = 0; i < 30; i++) {
       try {

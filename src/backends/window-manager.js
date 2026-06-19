@@ -11,7 +11,7 @@ const sidecar = require("../sidecar/cicy-code");
 const { createWindow } = require("../utils/window-utils");
 const registry = require("./registry");
 
-const LOCAL_PORT = Number(process.env.CICY_CODE_PORT || (process.platform === "win32" ? 8007 : 8008));
+const LOCAL_PORT = Number(process.env.CICY_CODE_PORT || 8008);
 const LOCAL_HOST = "127.0.0.1";
 
 // On a typical install cicy-code runs as the same user as cicy-desktop,

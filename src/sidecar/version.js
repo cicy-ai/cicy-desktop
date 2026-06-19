@@ -5,8 +5,7 @@
 //   installed()   → 磁盘 binary 版本(localbin manifest,诊断用)
 const http = require("http");
 
-// Match the sidecar default: 8007 on Windows, 8008 elsewhere (CICY_CODE_PORT wins).
-const DEFAULT_PORT = Number(process.env.CICY_CODE_PORT || (process.platform === "win32" ? 8007 : 8008));
+const DEFAULT_PORT = 8008;
 
 // The ONE running-version reader. GET /api/health → version. Returns the version
 // string, or null on any failure / missing field. Used by the update flow's

@@ -16,7 +16,7 @@ const { ipcMain } = require("electron");
 const sidecar = require("../sidecar/cicy-code");
 const docker = require("../sidecar/docker");
 
-const PORT = Number(process.env.CICY_CODE_PORT || (process.platform === "win32" ? 8007 : 8008));
+const PORT = Number(process.env.CICY_CODE_PORT || 8008);
 let registered = false;
 
 function register({ sidecarLogPath } = {}) {
