@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-const { spawn, execSync } = require("child_process");
+const { spawn, execSync, execFileSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -76,13 +76,50 @@ function globalElectronDir() {
   } catch { return null; }
 }
 
+// The per-platform Electron artifact (mirror zip name + the in-dist executable
+// that path.txt must point at).
+function electronArtifact() {
+  const plat = process.platform === "win32" ? "win32" : process.platform === "darwin" ? "darwin" : "linux";
+  const arch = process.arch === "arm64" ? "arm64" : "x64";
+  return {
+    zip: `electron-v${ELECTRON_VERSION}-${plat}-${arch}.zip`,
+    exe: process.platform === "win32" ? "electron.exe"
+       : process.platform === "darwin" ? "Electron.app/Contents/MacOS/Electron"
+       : "electron",
+  };
+}
+
+// Provision the Electron binary INTO the bundled npx copy ourselves: download the
+// platform zip from the mirror (R2) with curl, extract with the OS's own unzip,
+// then write path.txt. We deliberately do NOT use electron's install.js /
+// @electron/get: on Windows its bundled extract-zip only PARTIALLY unpacks
+// electron 41 (leaves no path.txt → "Electron failed to install correctly") even
+// though the downloaded zip is valid. curl + Expand-Archive/unzip is reliable,
+// mirror-only (no GitHub), and writes a complete dist/.
+function provisionElectronFromMirror(bundledDir) {
+  const { zip, exe } = electronArtifact();
+  const url = `${ELECTRON_MIRROR}v${ELECTRON_VERSION}/${zip}`;
+  const tmpZip = path.join(os.tmpdir(), `cicy-${zip}`);
+  const curl = isWindows ? "curl.exe" : "curl";
+  execFileSync(curl, ["-fL", "--retry", "5", "--retry-delay", "2", "--connect-timeout", "20", "-o", tmpZip, url], { stdio: "inherit" });
+  const distDir = path.join(bundledDir, "dist");
+  fs.rmSync(distDir, { recursive: true, force: true });
+  fs.mkdirSync(distDir, { recursive: true });
+  if (isWindows) {
+    execFileSync("powershell", ["-NoProfile", "-Command", `Expand-Archive -LiteralPath "${tmpZip}" -DestinationPath "${distDir}" -Force`], { stdio: "inherit" });
+  } else {
+    execFileSync("unzip", ["-o", "-q", tmpZip, "-d", distDir], { stdio: "inherit" });
+    try { fs.chmodSync(path.join(distDir, exe), 0o755); } catch {}
+  }
+  fs.writeFileSync(path.join(bundledDir, "path.txt"), exe);
+  try { fs.rmSync(tmpZip, { force: true }); } catch {}
+}
+
 // Make sure a USABLE electron exists before spawning the worker. A pre-existing
-// GLOBAL electron is reused if present (downloaded once, shared). Otherwise we
-// provision the electron binary LOCALLY into the bundled npx copy by re-running
-// electron's own install.js against our R2 mirror — NO `npm i -g`, NO GitHub.
-// This is what lets a single `npx cicy-desktop` self-provision electron and
-// start first-try even when the install-time postinstall couldn't fetch the
-// binary (GitHub blocked/slow). Runs once per process.
+// GLOBAL electron is reused if present. Otherwise we provision the binary LOCALLY
+// into the bundled npx copy straight from the R2 mirror — NO `npm i -g`, NO
+// GitHub, NO @electron/get. This is what lets a single `npx cicy-desktop`
+// self-provision electron and start first-try. Runs once per process.
 let _electronEnsured = false;
 function ensureElectron() {
   if (_electronEnsured) return;
@@ -96,20 +133,13 @@ function ensureElectron() {
     console.warn(`⚠️  electron package not resolvable under ${PACKAGE_ROOT}; cannot self-provision.`);
     return;
   }
-  // The electron package is installed but its binary wasn't downloaded. Fetch it
-  // INTO node_modules/electron from the mirror (R2) by invoking electron's own
-  // installer — @electron/get reads ELECTRON_MIRROR and pulls
-  // <mirror>v<version>/electron-v<version>-<platform>.zip. Local, no global.
   console.log(`⚙️  Fetching Electron ${ELECTRON_VERSION} from mirror (one-time)…`);
   try {
-    execSync(`node "${path.join(bundledDir, "install.js")}"`, {
-      stdio: "inherit",
-      cwd: bundledDir,
-      env: { ...process.env, ELECTRON_MIRROR, npm_config_registry: NPM_REGISTRY },
-    });
+    provisionElectronFromMirror(bundledDir);
+    if (electronBinaryHealthy(bundledDir)) return;
+    console.warn(`⚠️  Electron provisioned but health check still failing.`);
   } catch (e) {
-    console.warn(`⚠️  Electron download from mirror failed: ${e.message}`);
-    console.warn(`   Retry: ELECTRON_MIRROR=${ELECTRON_MIRROR} node "${path.join(bundledDir, "install.js")}"`);
+    console.warn(`⚠️  Electron provision from mirror failed: ${e.message}`);
   }
 }
 
