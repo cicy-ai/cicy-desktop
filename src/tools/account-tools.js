@@ -244,7 +244,9 @@ module.exports = (registerTool) => {
         const data = {
           accountIdx: next, createdAt: now, updatedAt: now, windows: [],
           metadata: { description: `Account ${next}`, ...(name ? { name } : {}), tags: [] },
-          proxy: { url: "", enabled: false }, logins: [],
+          // New electron profiles (next is always ≥1, so account-0 is never created
+          // here) default to the chrome-profile-1 mihomo listener.
+          proxy: { url: "socks5://127.0.0.1:20001", enabled: true }, logins: [],
         };
         fs.writeFileSync(file, JSON.stringify(data, null, 2));
         return toResult({ success: true, accountIdx: next, profile: profileStore.getProfile("electron", next) });

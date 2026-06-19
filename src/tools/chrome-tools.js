@@ -648,7 +648,8 @@ function registerChromeTools(registerTool) {
         orgPath: typeof orgPath === "string" && orgPath.length ? orgPath : DEFAULT_ADD_ORG_PATH,
         rpaDir: rpaDirTilde,
         port,
-        proxy: "",
+        // New chrome profiles default to the chrome-profile-1 mihomo listener.
+        proxy: "socks5://127.0.0.1:20001",
       };
 
       writePrivateChromeConfig(data);
