@@ -13,10 +13,13 @@ const GLOBAL_CONFIG_FILE = path.join(HOME, "global.json");
 const STATE_FILE = path.join(HOME, ".cicy-cluster.json");
 const LOGS_DIR = path.join(HOME, "logs");
 const PACKAGE_ROOT = path.join(__dirname, "..");
-// CN defaults: a fresh machine has no cached electron binary, so npx's electron
-// postinstall would hit GitHub releases and fail (ECOMPROMISED). Mirror it +
-// the npm registry to npmmirror (overridable via the same-named env vars).
-const ELECTRON_MIRROR = process.env.ELECTRON_MIRROR || "https://npmmirror.com/mirrors/electron/";
+// CN/global defaults: a fresh machine has no cached electron binary, so the
+// electron postinstall (and our own self-provisioning below) would otherwise
+// hit GitHub releases, which is slow/blocked on many networks. Default to our
+// own Cloudflare R2 mirror — the three platform zips we ship are mirrored at
+// <ELECTRON_MIRROR>v<version>/electron-v<version>-<platform>.zip (+ SHASUMS256.txt),
+// the exact layout @electron/get expects. Overridable via the env var.
+const ELECTRON_MIRROR = process.env.ELECTRON_MIRROR || "https://r2.deepfetch.de5.net/electron/";
 const NPM_REGISTRY = process.env.CICY_NPM_REGISTRY || process.env.npm_config_registry || "https://registry.npmmirror.com";
 const MASTER_ENTRY = path.join(PACKAGE_ROOT, "src", "master", "master-main.js");
 
@@ -73,32 +76,40 @@ function globalElectronDir() {
   } catch { return null; }
 }
 
-// Make sure a USABLE electron exists before spawning the worker. Prefer a shared
-// GLOBAL electron (downloaded once, survives npx-cache eviction, and
-// resolveElectronSpawn() picks it first). If nothing healthy is found anywhere,
-// auto-install the PINNED version GLOBALLY with the npmmirror mirror — i.e. do the
-// `npm i -g electron@<pin>` step for the user, so a fresh `npx cicy-desktop`
-// self-provisions electron and starts first-try. Runs once per process.
+// Make sure a USABLE electron exists before spawning the worker. A pre-existing
+// GLOBAL electron is reused if present (downloaded once, shared). Otherwise we
+// provision the electron binary LOCALLY into the bundled npx copy by re-running
+// electron's own install.js against our R2 mirror — NO `npm i -g`, NO GitHub.
+// This is what lets a single `npx cicy-desktop` self-provision electron and
+// start first-try even when the install-time postinstall couldn't fetch the
+// binary (GitHub blocked/slow). Runs once per process.
 let _electronEnsured = false;
 function ensureElectron() {
   if (_electronEnsured) return;
   _electronEnsured = true;
-  // Already usable (global, or the resolvable bundled/npx copy)? nothing to do.
+  // Already usable (a shared global, or the resolvable bundled/npx copy)? done.
   if (electronBinaryHealthy(globalElectronDir())) return;
   let bundledDir = null;
   try { bundledDir = path.dirname(require.resolve("electron/package.json", { paths: [PACKAGE_ROOT] })); } catch {}
   if (electronBinaryHealthy(bundledDir)) return;
-  // None usable → install the pinned electron globally (with the mirror).
-  console.log(`⚙️  No usable Electron — installing electron@${ELECTRON_VERSION} -g (mirror), one-time…`);
+  if (!bundledDir) {
+    console.warn(`⚠️  electron package not resolvable under ${PACKAGE_ROOT}; cannot self-provision.`);
+    return;
+  }
+  // The electron package is installed but its binary wasn't downloaded. Fetch it
+  // INTO node_modules/electron from the mirror (R2) by invoking electron's own
+  // installer — @electron/get reads ELECTRON_MIRROR and pulls
+  // <mirror>v<version>/electron-v<version>-<platform>.zip. Local, no global.
+  console.log(`⚙️  Fetching Electron ${ELECTRON_VERSION} from mirror (one-time)…`);
   try {
-    execSync(`npm i -g electron@${ELECTRON_VERSION} --registry=${NPM_REGISTRY}`, {
+    execSync(`node "${path.join(bundledDir, "install.js")}"`, {
       stdio: "inherit",
+      cwd: bundledDir,
       env: { ...process.env, ELECTRON_MIRROR, npm_config_registry: NPM_REGISTRY },
     });
-    _globalElectronBin = undefined; // bust the memo so resolveElectronSpawn re-finds the new global bin
   } catch (e) {
-    console.warn(`⚠️  Global electron install failed: ${e.message}`);
-    console.warn(`   Fix manually: set ELECTRON_MIRROR=${ELECTRON_MIRROR} && npm i -g electron@${ELECTRON_VERSION}`);
+    console.warn(`⚠️  Electron download from mirror failed: ${e.message}`);
+    console.warn(`   Retry: ELECTRON_MIRROR=${ELECTRON_MIRROR} node "${path.join(bundledDir, "install.js")}"`);
   }
 }
 
