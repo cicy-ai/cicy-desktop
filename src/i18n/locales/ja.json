@@ -104,20 +104,21 @@
     "retry": "Retry"
   },
   "firstRunTerms": {
-    "_TODO": "professional ja translation pending — using en (do not machine-translate legal text)",
-    "title": "Terms of Use & Authorization Notice",
-    "subtitle": "Please read and accept the following before using CiCy Desktop",
-    "summaryTitle": "At a glance",
-    "summary1": "CiCy Desktop is an AI agent orchestration tool that runs on your own computer, helping you coordinate third-party AI assistants (Claude Code, Codex, Gemini, etc.) to get work done.",
-    "summary2": "Third-party AI and accounts are between you and the respective provider: which AI you use, whose account you log in with, and the usage and fees are your decision and responsibility, not CiCy's.",
-    "summary3": "To do the work, this software needs a range of authorizations on your computer (running programs, executing scripts, controlling the browser, accessing files, etc.). You are fully responsible for the operations initiated through this software.",
-    "summary4": "Your data stays on your machine by default; CiCy does not upload your work content for operational purposes.",
-    "summary5": "Two high-risk capabilities require your separate, explicit authorization and are off by default: (a) local HTTPS traffic auditing (installs a certificate, requires administrator); (b) local command/script execution. Accepting these Terms does not enable them.",
-    "summary6": "You must not use this software to control unauthorized devices, conduct unlawful multi-accounting / traffic faking, circumvent platform risk controls, or scrape in violation of terms.",
-    "viewFull": "View full Terms",
-    "agree": "Agree and continue",
-    "decline": "Decline and exit",
-    "mustAgree": "You cannot use this software without accepting the Terms.",
-    "scrollHint": "Please read to the end to continue"
+    "title": "利用規約と権限に関する説明",
+    "subtitle": "CiCy Desktop をご利用になる前に、以下の規約をお読みのうえ同意してください",
+    "summaryTitle": "概要",
+    "summary1": "CiCy Desktop は、お使いのコンピューター上で動作する AI エージェントのオーケストレーションツールで、サードパーティの AI アシスタント（Claude Code、Codex、Gemini など）を連携させて作業を進めるのを支援します。",
+    "summary2": "サードパーティの AI とアカウントは、あなたと各プロバイダーとの間の事項です。どの AI を使うか、誰のアカウントでログインするか、それに伴う利用量や費用は、あなたの判断と責任であり、CiCy は関与しません。",
+    "summary3": "作業を行うため、本ソフトウェアはお使いのコンピューターに対する一連の権限（プログラムの実行、スクリプトの実行、ブラウザの制御、ファイルへのアクセスなど）を必要とします。本ソフトウェアを通じて開始された操作については、あなたが全責任を負います。",
+    "summary4": "あなたのデータは既定でこの端末内に留まります。CiCy は運営目的であなたの作業内容をアップロードしません。",
+    "summary5": "2 つの高リスク機能は、あなたの個別かつ明示的な許可が必要で、既定では無効です。(a) ローカルでの HTTPS トラフィック監査（証明書のインストールと管理者権限が必要）、(b) ローカルでのコマンド／スクリプト実行。本規約への同意だけではこれらは有効になりません。",
+    "summary6": "本ソフトウェアを、許可されていないデバイスの制御、違法な複数アカウント運用／不正なトラフィック生成、プラットフォームのリスク管理の回避、規約に違反するスクレイピングに使用してはなりません。",
+    "viewFull": "規約全文を見る",
+    "agree": "同意して続行",
+    "decline": "同意せず終了",
+    "mustAgree": "規約に同意しない場合、本ソフトウェアはご利用いただけません。",
+    "scrollHint": "続行するには最後までお読みください",
+    "menu": "利用規約",
+    "close": "閉じる"
   }
 }

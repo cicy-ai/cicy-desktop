@@ -118,6 +118,8 @@
     "agree": "同意并继续",
     "decline": "不同意并退出",
     "mustAgree": "未同意则无法使用本软件。",
-    "scrollHint": "请阅读至底部以继续"
+    "scrollHint": "请阅读至底部以继续",
+    "menu": "用户协议",
+    "close": "关闭"
   }
 }

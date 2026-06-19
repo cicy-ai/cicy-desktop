@@ -104,20 +104,21 @@
     "retry": "Retry"
   },
   "firstRunTerms": {
-    "_TODO": "professional fr translation pending — using en (do not machine-translate legal text)",
-    "title": "Terms of Use & Authorization Notice",
-    "subtitle": "Please read and accept the following before using CiCy Desktop",
-    "summaryTitle": "At a glance",
-    "summary1": "CiCy Desktop is an AI agent orchestration tool that runs on your own computer, helping you coordinate third-party AI assistants (Claude Code, Codex, Gemini, etc.) to get work done.",
-    "summary2": "Third-party AI and accounts are between you and the respective provider: which AI you use, whose account you log in with, and the usage and fees are your decision and responsibility, not CiCy's.",
-    "summary3": "To do the work, this software needs a range of authorizations on your computer (running programs, executing scripts, controlling the browser, accessing files, etc.). You are fully responsible for the operations initiated through this software.",
-    "summary4": "Your data stays on your machine by default; CiCy does not upload your work content for operational purposes.",
-    "summary5": "Two high-risk capabilities require your separate, explicit authorization and are off by default: (a) local HTTPS traffic auditing (installs a certificate, requires administrator); (b) local command/script execution. Accepting these Terms does not enable them.",
-    "summary6": "You must not use this software to control unauthorized devices, conduct unlawful multi-accounting / traffic faking, circumvent platform risk controls, or scrape in violation of terms.",
-    "viewFull": "View full Terms",
-    "agree": "Agree and continue",
-    "decline": "Decline and exit",
-    "mustAgree": "You cannot use this software without accepting the Terms.",
-    "scrollHint": "Please read to the end to continue"
+    "title": "Conditions d'utilisation et autorisations",
+    "subtitle": "Veuillez lire et accepter les conditions suivantes avant d'utiliser CiCy Desktop",
+    "summaryTitle": "En bref",
+    "summary1": "CiCy Desktop est un outil d'orchestration d'agents IA qui s'exécute sur votre propre ordinateur et vous aide à coordonner des assistants IA tiers (Claude Code, Codex, Gemini, etc.) pour accomplir votre travail.",
+    "summary2": "Les IA et comptes tiers relèvent de votre relation avec chaque fournisseur : le choix de l'IA, le compte utilisé, ainsi que l'usage et les frais qui en découlent relèvent de votre décision et de votre responsabilité, et non de CiCy.",
+    "summary3": "Pour effectuer le travail, ce logiciel nécessite une série d'autorisations sur votre ordinateur (exécuter des programmes, exécuter des scripts, contrôler le navigateur, accéder aux fichiers, etc.). Vous êtes entièrement responsable des opérations lancées via ce logiciel.",
+    "summary4": "Vos données restent par défaut sur votre machine ; CiCy ne téléverse pas le contenu de votre travail à des fins d'exploitation.",
+    "summary5": "Deux capacités à haut risque nécessitent votre autorisation distincte et explicite et sont désactivées par défaut : (a) l'audit local du trafic HTTPS (installe un certificat, nécessite l'administrateur) ; (b) l'exécution locale de commandes/scripts. L'acceptation des présentes conditions ne les active pas.",
+    "summary6": "Vous ne devez pas utiliser ce logiciel pour contrôler des appareils non autorisés, pratiquer la multi-connexion illicite / la falsification de trafic, contourner les contrôles de risque des plateformes ou collecter des données en violation des conditions.",
+    "viewFull": "Voir les conditions complètes",
+    "agree": "Accepter et continuer",
+    "decline": "Refuser et quitter",
+    "mustAgree": "Vous ne pouvez pas utiliser ce logiciel sans accepter les conditions.",
+    "scrollHint": "Veuillez lire jusqu'au bout pour continuer",
+    "menu": "Conditions d'utilisation",
+    "close": "Fermer"
   }
 }

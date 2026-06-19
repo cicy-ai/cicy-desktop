@@ -1008,6 +1008,7 @@ function Header({ me, welcome, onLogout, mitmTeam }) {
   const [open, setOpen] = useState(false);
   const [trustOpen, setTrustOpen] = useState(false);
   const [auditOpen, setAuditOpen] = useState(false);
+  const [termsOpen, setTermsOpen] = useState(false);
   const wrap = useRef(null);
   // Click-outside closes the dropdown (mirrors LocalTeamCard's ⋯ menu).
   useEffect(() => {
@@ -1051,6 +1052,9 @@ function Header({ me, welcome, onLogout, mitmTeam }) {
             <button type="button" data-id="UserChip-audit-log" className="user-chip__menu-item" onClick={() => { setOpen(false); setAuditOpen(true); }}>
               {tr("audit.menu", "审计日志")}
             </button>
+            <button type="button" data-id="UserChip-terms" className="user-chip__menu-item" onClick={() => { setOpen(false); setTermsOpen(true); }}>
+              {tr("firstRunTerms.menu", "用户协议")}
+            </button>
             {mitmTeam && (
               <div className="user-chip__menu-mitm" data-id="UserChip-mitm" onClick={(e) => e.stopPropagation()}>
                 <MitmConsentCard team={mitmTeam} variant="menu" />
@@ -1065,6 +1069,7 @@ function Header({ me, welcome, onLogout, mitmTeam }) {
       </div>
       {trustOpen && <TrustedSitesModal onClose={() => setTrustOpen(false)} />}
       {auditOpen && <AuditLogModal onClose={() => setAuditOpen(false)} />}
+      {termsOpen && <FirstRunTermsGate onClose={() => setTermsOpen(false)} />}
     </header>
   );
 }
@@ -1095,12 +1100,13 @@ const DOCKER_STEPS = [
 
 // 首启门控:整体条款的第一道同意。未同意不进主界面;读到底部才解锁"同意"。
 // 与 MitmConsentCard(HTTPS 审计第二道同意)完全独立 —— 同意条款 ≠ 开启审计。
-function FirstRunTermsGate({ onAgree }) {
+function FirstRunTermsGate({ onAgree, onClose }) {
   const [scrolledEnd, setScrolledEnd] = useState(false);
   const [showFull, setShowFull] = useState(false);
   const [busy, setBusy] = useState(false);
   const locale = (window.cicyI18n?.locale || "en").startsWith("zh") ? "zh-CN" : "en";
   const t = (k, fb) => tr(`firstRunTerms.${k}`, fb);
+  const review = !!onClose; // opened from the avatar menu to re-read — not the blocking first-run gate
   const summaries = [1, 2, 3, 4, 5, 6].map((i) => t(`summary${i}`, ""));
 
   const onScroll = (e) => {
@@ -1123,7 +1129,12 @@ function FirstRunTermsGate({ onAgree }) {
   const decline = () => { try { window.cicy?.terms?.decline?.(); } catch {} };
 
   return (
-    <div className="shell terms-gate" data-id="FirstRunTermsGate">
+    <div
+      className={review ? "terms-gate terms-gate--review" : "shell terms-gate"}
+      data-id="FirstRunTermsGate"
+      style={review ? { position: "fixed", inset: 0, zIndex: 1000, background: "rgba(8,9,14,.72)", backdropFilter: "blur(4px)" } : undefined}
+      onClick={review ? (e) => { if (e.target === e.currentTarget) onClose(); } : undefined}
+    >
       <div className="glow" aria-hidden />
       <div className="terms-gate__panel">
         <h1 className="terms-gate__title" data-id="FirstRunTermsGate-title">{t("title", "用户协议与授权说明")}</h1>
@@ -1142,16 +1153,26 @@ function FirstRunTermsGate({ onAgree }) {
           )}
         </div>
 
-        {!scrolledEnd && <div className="terms-gate__scrollhint" data-id="FirstRunTermsGate-scrollhint">{t("scrollHint", "请阅读至底部以继续")}</div>}
-        <div className="terms-gate__actions">
-          <button data-id="FirstRunTermsGate-decline" className="terms-gate__btn terms-gate__btn--ghost" onClick={decline}>
-            {t("decline", "不同意并退出")}
-          </button>
-          <button data-id="FirstRunTermsGate-agree" className="terms-gate__btn" disabled={!scrolledEnd || busy}
-            title={!scrolledEnd ? t("mustAgree", "未同意则无法使用本软件。") : ""} onClick={agree}>
-            {t("agree", "同意并继续")}
-          </button>
-        </div>
+        {review ? (
+          <div className="terms-gate__actions">
+            <button data-id="FirstRunTermsGate-close" className="terms-gate__btn" onClick={onClose}>
+              {t("close", "关闭")}
+            </button>
+          </div>
+        ) : (
+          <>
+            {!scrolledEnd && <div className="terms-gate__scrollhint" data-id="FirstRunTermsGate-scrollhint">{t("scrollHint", "请阅读至底部以继续")}</div>}
+            <div className="terms-gate__actions">
+              <button data-id="FirstRunTermsGate-decline" className="terms-gate__btn terms-gate__btn--ghost" onClick={decline}>
+                {t("decline", "不同意并退出")}
+              </button>
+              <button data-id="FirstRunTermsGate-agree" className="terms-gate__btn" disabled={!scrolledEnd || busy}
+                title={!scrolledEnd ? t("mustAgree", "未同意则无法使用本软件。") : ""} onClick={agree}>
+                {t("agree", "同意并继续")}
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

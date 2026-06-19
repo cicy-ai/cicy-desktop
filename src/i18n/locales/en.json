@@ -118,6 +118,8 @@
     "agree": "Agree and continue",
     "decline": "Decline and exit",
     "mustAgree": "You cannot use this software without accepting the Terms.",
-    "scrollHint": "Please read to the end to continue"
+    "scrollHint": "Please read to the end to continue",
+    "menu": "Terms of Use",
+    "close": "Close"
   }
 }
