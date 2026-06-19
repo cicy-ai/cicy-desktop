@@ -223,7 +223,7 @@ contextBridge.exposeInMainWorld("cicy", {
   localTeams: {
     list:    (opts)        => logInvoke("localTeams:list", opts),
     open:    (id)          => logInvoke("localTeams:open", id),
-    reload:  (id)          => logInvoke("localTeams:reload", id),
+    reload:  (id, opts)    => logInvoke("localTeams:reload", id, opts),
     add:     (spec)        => logInvoke("localTeams:add", spec),
     remove:  (id)          => logInvoke("localTeams:remove", id),
     update:  (id, patch)   => logInvoke("localTeams:update", { id, patch }),

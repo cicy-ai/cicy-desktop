@@ -20,7 +20,9 @@ const net = require("net");
 const path = require("path");
 const { spawn, execFileSync } = require("child_process");
 
-const DEFAULT_PORT = Number(process.env.CICY_CODE_PORT || 8008);
+// Default cicy-code port: 8007 on Windows, 8008 elsewhere (主人令). CICY_CODE_PORT
+// overrides on every platform.
+const DEFAULT_PORT = Number(process.env.CICY_CODE_PORT || (process.platform === "win32" ? 8007 : 8008));
 
 // Liveness = "is something LISTENING on :port", via a raw TCP connect — NOT an
 // HTTP GET. /health can block (mid-boot, busy, hung) and time out even while the
@@ -88,8 +90,8 @@ async function startFromRuntime({ logPath, port }) {
       if (msys) env.CICY_MSYS_ROOT = msys; // w-10084 exe 探测约定
     } catch {}
   }
-  const c = spawn(exe, [], { stdio, detached: false, windowsHide: true, env });
-  console.log(`[cicy-code-sidecar] spawned runtime ${exe} (v${runtime.currentVersion("cicy-code")}) pid=${c.pid} port=${port}`);
+  const c = spawn(exe, ["--desktop"], { stdio, detached: false, windowsHide: true, env });
+  console.log(`[cicy-code-sidecar] spawned runtime ${exe} --desktop (v${runtime.currentVersion("cicy-code")}) pid=${c.pid} port=${port}`);
   c.on("exit", (code, signal) => {
     console.log(`[cicy-code-sidecar] exited code=${code} signal=${signal}`);
     child = null;
@@ -145,7 +147,7 @@ async function start({ logPath, port = DEFAULT_PORT, force = false, version = nu
   // --helper removed (主人指令): Windows now runs cicy-code in normal mode (full
   // tmux-based multi-agent via the bundled MSYS2 runtime), same as mac/linux —
   // no longer the single headless 团队助手.
-  const args = [];
+  const args = ["--desktop"];
   child = spawn(exe, args, { stdio, detached: false, windowsHide: true, env });
   console.log(`[cicy-code-sidecar] spawned ${exe} ${args.join(" ")} pid=${child.pid} port=${port} log=${logPath || "(none)"}`);
 
@@ -314,13 +316,20 @@ async function update({ logPath, port = DEFAULT_PORT, emit } = {}) {
     e({ phase: "swap", status: "running", message: "启动 cicy-code…" });
     const c = await start({ logPath, port, force: true });
 
-    // 4) 探活:等 TCP 监听起来
+    // 4) 探活:等 TCP 监听起来。注意:cicy-code 启动会先恢复团队的 agent 面板
+    //    (w-1xx,可能十几个),:8008 在这些 REPL 拉起之后才 bind —— 繁忙团队这一步
+    //    可能要 1~2 分钟。所以探活窗口放到 180s(原 60s 太短,会把"还在恢复 agent"
+    //    误判成"启动失败",抽屉卡在「启动 cicy-code…」)。子进程一旦真退出(崩了)
+    //    立即停手,不空等满 180s。
+    const PROBE_TRIES = 360; // 360 * 500ms = 180s
     let up = false;
-    for (let i = 0; i < 120; i++) {
+    for (let i = 0; i < PROBE_TRIES; i++) {
       if (await probeExisting(port)) { up = true; break; }
+      if (c && c.exitCode != null) break;     // 进程已退出 = 真失败,别空等
+      if (i === 30) e({ phase: "swap", status: "running", message: "启动 cicy-code…(正在恢复 agent 面板,稍候)" });
       await new Promise(r => setTimeout(r, 500));
     }
-    if (!up) { e({ phase: "done", status: "error", message: "cicy-code 未在 60s 内启动" }); return c; }
+    if (!up) { e({ phase: "done", status: "error", message: `cicy-code 未在 ${PROBE_TRIES / 2}s 内启动` }); return c; }
 
     // 5) 拿运行中真实 version(唯一来源 version.running();可能略慢于 TCP,重试几次)
     const version = require("./version");

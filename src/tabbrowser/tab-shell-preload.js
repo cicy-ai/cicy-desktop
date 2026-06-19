@@ -8,6 +8,9 @@ contextBridge.exposeInMainWorld("tabAPI", {
   newTab: (url) => ipcRenderer.send("tabwin:new", { url: url || "" }),
   activate: (id) => ipcRenderer.send("tabwin:activate", { id }),
   close: (id) => ipcRenderer.send("tabwin:close", { id }),
+  // Reorder tabs (Chrome-style drag). `ids` = the new order of NON-home tab ids;
+  // main keeps the resident homepage tab pinned first.
+  reorder: (ids) => ipcRenderer.send("tabwin:reorder", { ids }),
   navigate: (url) => ipcRenderer.send("tabwin:navigate", { url }),
   back: () => ipcRenderer.send("tabwin:back"),
   fwd: () => ipcRenderer.send("tabwin:fwd"),

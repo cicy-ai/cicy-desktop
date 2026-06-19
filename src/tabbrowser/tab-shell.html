@@ -81,6 +81,10 @@
   .cls:hover{background:rgba(255,255,255,.16);color:#fff;opacity:1}
   #newtab{flex:0 0 30px;width:30px;height:30px;margin:2px 0 2px 2px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--muted);cursor:default}
   #newtab:hover{background:rgba(255,255,255,.08);color:#fff}
+  /* ── drag-to-reorder (Chrome-style) ── */
+  .tab.dragging{opacity:.4}
+  /* vertical insertion bar shown between tabs while dragging */
+  #dropmarker{position:fixed;width:2px;background:var(--accent);border-radius:1px;pointer-events:none;z-index:20;display:none;box-shadow:0 0 4px var(--accent)}
 
   /* ── toolbar ── */
   #bar{position:relative;height:40px;display:flex;align-items:center;gap:4px;padding:0 8px;background:var(--toolbar)}
@@ -137,6 +141,8 @@
   try { window.tabAPI.onFullscreen((fs) => document.body.classList.toggle('is-fullscreen', !!fs)); } catch (e) {}
   let state = { tabs: [], nav: {} };
   let urlFocused = false;
+  let dragId = null;            // id of the tab being dragged (Chrome-style reorder)
+  let dropMarker = null;       // the vertical insertion bar element
 
   function faviconNode(t) {
     const w = document.createElement('span');
@@ -149,6 +155,51 @@
       w.appendChild(img);
     } else { w.innerHTML = ICON_GLOBE; }
     return w;
+  }
+
+  // ── drag-to-reorder (Chrome-style) ──────────────────────────────────────────
+  function clearDropMarker() { if (dropMarker) dropMarker.style.display = 'none'; }
+  function showDropMarker(tabEl, after) {
+    if (!dropMarker) { dropMarker = document.createElement('div'); dropMarker.id = 'dropmarker'; document.body.appendChild(dropMarker); }
+    const r = tabEl.getBoundingClientRect();
+    dropMarker.style.left = ((after ? r.right : r.left) - 1) + 'px';
+    dropMarker.style.top = r.top + 'px';
+    dropMarker.style.height = r.height + 'px';
+    dropMarker.style.display = 'block';
+  }
+  // Compute the new order of NON-home tab ids and hand it to main.
+  function reorderTabs(srcId, targetId, after) {
+    if (srcId === targetId) return;
+    const ids = state.tabs.filter((x) => !x.home).map((x) => x.id);
+    const from = ids.indexOf(srcId); if (from < 0) return;
+    ids.splice(from, 1);
+    let to = ids.indexOf(targetId); if (to < 0) return;
+    if (after) to += 1;
+    ids.splice(to, 0, srcId);
+    window.tabAPI.reorder(ids);
+  }
+  function attachDrag(d, id) {
+    d.draggable = true;
+    d.addEventListener('dragstart', (e) => {
+      dragId = id;
+      try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(id)); } catch (_) {}
+      d.classList.add('dragging');
+    });
+    d.addEventListener('dragend', () => { dragId = null; clearDropMarker(); render(); });
+    d.addEventListener('dragover', (e) => {
+      if (dragId == null || dragId === id) return;
+      e.preventDefault();
+      try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
+      const r = d.getBoundingClientRect();
+      showDropMarker(d, (e.clientX - r.left) > r.width / 2);
+    });
+    d.addEventListener('drop', (e) => {
+      if (dragId == null) return;
+      e.preventDefault();
+      const r = d.getBoundingClientRect();
+      reorderTabs(dragId, id, (e.clientX - r.left) > r.width / 2);
+      dragId = null; clearDropMarker();
+    });
   }
 
   function render() {
@@ -184,6 +235,7 @@
         cls.onclick = (e) => { e.stopPropagation(); window.tabAPI.close(t.id); };
         d.appendChild(cls);
       }
+      attachDrag(d, t.id); // Chrome-style drag-to-reorder (home tab stays pinned)
       tabsEl.appendChild(d);
     });
     if (!NO_NEW) {
@@ -214,7 +266,10 @@
     return u;
   }
 
-  window.tabAPI.onState((s) => { state = s || { tabs: [], nav: {} }; render(); });
+  // Skip re-render while a drag is in flight — rebuilding tabsEl.innerHTML mid-drag
+  // would destroy the dragged element and abort the gesture. State is still stored;
+  // dragend triggers a render to sync.
+  window.tabAPI.onState((s) => { state = s || { tabs: [], nav: {} }; if (dragId != null) return; render(); });
 
   function go() {
     let v = urlEl.value.trim(); if (!v) return;

@@ -862,7 +862,7 @@ electronApp.whenReady().then(async () => {
   // cloud team register + gateway-key injection when logged in. A fresh boot
   // may npm-seed the runtime first, so probe for up to ~90s before giving up.
   (async () => {
-    const sidecarPort = Number(process.env.CICY_CODE_PORT || 8008);
+    const sidecarPort = Number(process.env.CICY_CODE_PORT || (process.platform === "win32" ? 8007 : 8008));
     const lt = require("./backends/local-teams");
     for (let i = 0; i < 30; i++) {
       try {
@@ -1071,7 +1071,7 @@ electronApp.whenReady().then(async () => {
     const { ipcMain: __ipcLT } = require("electron");
     __ipcLT.handle("localTeams:list",    (_e, opts) => lt.list(opts || {}));
     __ipcLT.handle("localTeams:open",    (_e, id)   => lt.openTeam(id));
-    __ipcLT.handle("localTeams:reload",  (_e, id)   => lt.reloadTeam(id));
+    __ipcLT.handle("localTeams:reload",  (_e, id, opts) => lt.reloadTeam(id, opts));
     __ipcLT.handle("localTeams:add",     (_e, spec)    => lt.addTeam(spec || {}));
     __ipcLT.handle("localTeams:remove",  (_e, id)      => lt.removeTeam(id));
     __ipcLT.handle("localTeams:update",  (_e, payload) => lt.updateTeam(payload?.id, payload?.patch || {}));

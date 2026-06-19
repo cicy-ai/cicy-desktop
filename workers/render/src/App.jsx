@@ -737,14 +737,6 @@ export default function App() {
               }}
             />
           ))}
-          {showLocal && (
-            <button type="button" className="add-card" onClick={() => {
-              alert("装本地 cicy-code（npx cicy-code / docker run）后会自动出现，或在云端创建团队。");
-            }}>
-              <span className="add-card__plus">+</span>
-              <span className="add-card__label">新建本地团队</span>
-            </button>
-          )}
         </div>
 
         {!profileLoading && !profileError && teams && teams.length === 0 && !localTeams?.length && (
@@ -1562,6 +1554,10 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
       const errMsg = tr("sidecar.failed", "操作失败") + (r?.error ? `: ${r.error}` : "");
       if (isUpdate) {
         updateDrawer.finish({ ok, message: ok ? okMsg : errMsg });
+        // 更新成功 = 新 cicy-code 已切换并启动。若该团队的 :8008 窗口正开着,
+        // 直接刷新它,让用户立刻用上新版(没开窗口则 reload 返回 no_open_window,no-op)。
+        // ignoreCache:绕过 HTTP 缓存重载,否则可能复用缓存的旧 index.html → 仍跑旧版。
+        if (ok) { try { await window.cicy?.localTeams?.reload?.(team.id, { ignoreCache: true }); } catch {} }
       } else {
         toast.show({ id: opToastId, message: ok ? okMsg : errMsg, progress: undefined, status: ok ? "done" : "error", ttl: ok ? 4000 : 8000 });
       }
@@ -1633,6 +1629,17 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
                 ref={menuRef}
                 style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: MENU_W }}
                 onClick={(e) => e.stopPropagation()}>
+                {local && (
+                  <button
+                    type="button"
+                    data-id="LocalTeamCard-check-update"
+                    className="bcard__menu-item"
+                    disabled={checking}
+                    onClick={(e) => { e.stopPropagation(); checkUpdate(true); }}
+                  >
+                    {checking ? tr("sidecar.checking2", "检查中…") : tr("sidecar.checkUpdate", "检查更新")}
+                  </button>
+                )}
                 {updateAvailable && (
                   <button
                     type="button"
@@ -1651,8 +1658,10 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
                       className="bcard__menu-item"
                       onClick={() => runOp("reload", async () => {
                         const r = await window.cicy.localTeams.reload(team.id);
-                        // not open yet → open it (still a "refresh" of the team)
-                        return (!r?.ok && r?.error === "no_open_window") ? window.cicy.localTeams.open(team.id) : r;
+                        // 没开就不刷、也不偷偷开新标签(主人令):明确提示"窗口未打开",
+                        // 而不是替用户开一个 tab。开着才真刷(reloadTeam 走标签管理器)。
+                        if (!r?.ok && r?.error === "no_open_window") return { ok: false, error: tr("localTeams.windowNotOpen", "窗口未打开,请先点「打开」") };
+                        return r;
                       }, tr("localTeams.reloaded", "已刷新窗口"))}
                     >
                       {tr("localTeams.reloadWindow", "刷新窗口")}
@@ -1674,17 +1683,6 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
                       {tr("sidecar.stop", "停止")}
                     </button>
                   </>
-                )}
-                {local && (
-                  <button
-                    type="button"
-                    data-id="LocalTeamCard-check-update"
-                    className="bcard__menu-item"
-                    disabled={checking}
-                    onClick={(e) => { e.stopPropagation(); checkUpdate(true); }}
-                  >
-                    {checking ? tr("sidecar.checking2", "检查中…") : tr("sidecar.checkUpdate", "检查更新")}
-                  </button>
                 )}
                 {team.cloud_team_id && (
                   <button

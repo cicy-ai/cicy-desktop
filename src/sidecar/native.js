@@ -142,10 +142,10 @@ async function start({ port = 8008, logPath = null, emit, version = null } = {})
   };
   // --helper removed (主人指令): boot cicy-code in normal mode (full tmux-based
   // multi-agent), not the single headless 团队助手.
-  const child = spawn(exe, [], { stdio, detached: true, windowsHide: true, env });
+  const child = spawn(exe, ["--desktop"], { stdio, detached: true, windowsHide: true, env });
   child.unref();
   try { fs.writeFileSync(PID_FILE, String(child.pid)); } catch {}
-  console.log(`[native-sidecar] spawned ${exe} pid=${child.pid} port=${port} log=${logPath || "(none)"}`);
+  console.log(`[native-sidecar] spawned ${exe} --desktop pid=${child.pid} port=${port} log=${logPath || "(none)"}`);
 
   const up = await docker.waitUntil(() => probeHealth(port), { totalMs: 60000, everyMs: 2000 });
   if (!up) {

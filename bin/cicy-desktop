@@ -40,10 +40,49 @@ function globalElectronBin() {
   return _globalElectronBin;
 }
 
+// Self-heal electron's downloaded binary so a FRESH `npx cicy-desktop` starts
+// first-try. cicy-desktop pins electron 41.0.3 as a dependency; its postinstall
+// downloads the platform binary. If that never ran (--ignore-scripts), failed
+// (GitHub blocked in CN with no mirror) or got wiped (AV touched node_modules),
+// `npx electron` throws "Electron failed to install correctly" and the worker
+// crash-loops. Detect a missing binary and re-run electron's OWN install.js with
+// the npmmirror ELECTRON_MIRROR. Uses the pinned 41.0.3 already on disk — never
+// pulls latest (latest's native extract-zip is unpublished for win32-x64 →
+// "Cannot find native binding"). Runs once per process.
+let _electronEnsured = false;
+function ensureElectron() {
+  if (_electronEnsured) return;
+  _electronEnsured = true;
+  let electronDir;
+  try { electronDir = path.dirname(require.resolve("electron/package.json", { paths: [PACKAGE_ROOT] })); }
+  catch { return; } // not resolvable from here → leave it to npx
+  try {
+    const pathTxt = path.join(electronDir, "path.txt");
+    if (fs.existsSync(pathTxt)) {
+      const exe = fs.readFileSync(pathTxt, "utf8").trim();
+      if (exe && fs.existsSync(path.join(electronDir, "dist", exe))) return; // healthy
+    }
+  } catch {}
+  const installJs = path.join(electronDir, "install.js");
+  if (!fs.existsSync(installJs)) return;
+  console.log("⚙️  Electron binary missing — repairing via electron/install.js (mirror)…");
+  try {
+    execSync(`"${process.execPath}" "${installJs}"`, {
+      cwd: electronDir,
+      stdio: "inherit",
+      env: { ...process.env, ELECTRON_MIRROR, npm_config_registry: NPM_REGISTRY },
+    });
+  } catch (e) {
+    console.warn(`⚠️  Electron repair failed: ${e.message}`);
+    console.warn(`   Fix manually: set ELECTRON_MIRROR=${ELECTRON_MIRROR} && npm i -g electron@41.0.3`);
+  }
+}
+
 // Resolve the electron binary to spawn. Order: (C) a shared GLOBAL electron,
 // then the project-local copy, then `npx electron` as a last resort.
 // Windows uses `npx.cmd electron` to handle the shim correctly.
 function resolveElectronSpawn() {
+  ensureElectron();
   const g = globalElectronBin();
   if (g) return { cmd: g, prefixArgs: [] };
   if (isWindows) return { cmd: "npx.cmd", prefixArgs: ["electron"] };

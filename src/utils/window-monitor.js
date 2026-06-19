@@ -6,6 +6,12 @@ const log = require("electron-log");
 
 // 存储每个窗口的日志和请求
 const windowLogs = new Map();
+// Tab (BrowserView) console logs, keyed by the TAB's webContents.id. SEPARATE
+// from windowLogs because window-monitor keys windowLogs by BrowserWindow.id —
+// a different counter from webContents.id, so the two id spaces overlap and must
+// not share one Map. Read via getTabConsoleLogs(webContentsId).
+const tabConsoleLogs = new Map();
+const tabConsoleCounters = new Map();
 const windowRequests = new Map(); // 已废弃，保留兼容性
 const windowRequestDetails = new Map();
 const windowIndexCounters = new Map();
@@ -538,6 +544,41 @@ function getConsoleLogs(winId) {
   return windowLogs.get(winId) || [];
 }
 
+// Attach a console-message listener to ONE tab's webContents, buffering into
+// tabConsoleLogs keyed by its webContents.id. Mirrors the windowLogs entry shape
+// (index/timestamp/level/message/line/source) so get_tab_console_logs formats it
+// the same way. Idempotent per webContents; auto-cleans on destroy.
+function attachTabConsole(wc) {
+  if (!wc || wc.isDestroyed?.()) return;
+  const id = wc.id;
+  if (tabConsoleLogs.has(id)) return;
+  tabConsoleLogs.set(id, []);
+  tabConsoleCounters.set(id, { log: 0 });
+  wc.on("console-message", (_event, level, message, line, sourceId) => {
+    const logs = tabConsoleLogs.get(id);
+    const counters = tabConsoleCounters.get(id);
+    if (!logs || !counters) return;
+    logs.push({
+      index: ++counters.log,
+      timestamp: Date.now(),
+      level: ["verbose", "info", "warning", "error"][level] || "log",
+      message,
+      line,
+      source: sourceId,
+    });
+    // Cap so a chatty page can't grow it unbounded.
+    if (logs.length > 5000) logs.splice(0, logs.length - 5000);
+  });
+  wc.once("destroyed", () => {
+    tabConsoleLogs.delete(id);
+    tabConsoleCounters.delete(id);
+  });
+}
+
+function getTabConsoleLogs(webContentsId) {
+  return tabConsoleLogs.get(webContentsId) || [];
+}
+
 function getRequests(winId) {
   return windowRequests.get(winId) || [];
 }
@@ -602,6 +643,8 @@ function getRequestDetail(winId, index) {
 module.exports = {
   initWindowMonitoring,
   getConsoleLogs,
+  attachTabConsole,
+  getTabConsoleLogs,
   getRequests,
   getBeforeSendRequests,
   getLoadingFinishedRequests,

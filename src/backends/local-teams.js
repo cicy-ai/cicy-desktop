@@ -331,13 +331,25 @@ function stripVolatile(u) {
 // Reload the web content of this team's already-open window (the homepage's
 // 刷新 action). Matches the window the same way openTeam reuses one — by
 // origin+pathname. No-op-with-error if no window is open for the team.
-function reloadTeam(id) {
+function reloadTeam(id, opts = {}) {
+  const { ignoreCache = false } = opts || {};
   const node = readNodes()[id];
   if (!node) return { ok: false, error: "team not found" };
   const baseUrl = (node.base_url || "").replace(/\/$/, "");
   if (!baseUrl) return { ok: false, error: "no base_url" };
   const token = node.api_token || "";
   const url = token ? `${baseUrl}/?token=${encodeURIComponent(token)}` : baseUrl;
+  // 本地团队都开在 **profile 0** 的标签窗口里(BrowserView tab),不是顶层
+  // BrowserWindow。所以先走 account-0 的标签管理器按 URL 找那个标签 IN-PLACE 刷
+  // (ignoreCache 绕缓存,cicy-code 升级后才能拿到新资源而非缓存的旧 index.html)。
+  // 找不到 = 标签没开 → no_open_window,绝不偷偷开新标签。
+  // (旧版 reloadTeam 在顶层 BrowserWindow 里找,永远找不到 BrowserView 标签 →
+  //  永远 no_open_window:刷新窗口从没真刷、更新后自动刷静默失效,都是这个 bug。)
+  try {
+    const r = require("../tools/tab-browser-tools").reloadTabIfOpen(0, url, { ignoreCache });
+    if (r && r.ok) { log.info(`[local-teams] reload ${id} → tab in win.id=${r.winId} ignoreCache=${ignoreCache}`); return r; }
+  } catch (e) { log.warn(`[local-teams] reload ${id} tab path failed: ${e.message}`); }
+  // 兜底:极少数情况下 openTeam 退化成真窗口(openTab 抛错时),按老方式找顶层窗口。
   const targetKey = stripVolatile(url);
   const win = BrowserWindow.getAllWindows().find((w) => {
     if (!w || w.isDestroyed()) return false;
@@ -346,10 +358,11 @@ function reloadTeam(id) {
   });
   if (!win) return { ok: false, error: "no_open_window" };
   try {
-    win.webContents.reload();
+    if (ignoreCache) win.webContents.reloadIgnoringCache();
+    else win.webContents.reload();
     if (win.isMinimized()) win.restore();
     win.show(); win.focus();
-    log.info(`[local-teams] reload ${id} → win.id=${win.id}`);
+    log.info(`[local-teams] reload ${id} → win.id=${win.id} ignoreCache=${ignoreCache}`);
     return { ok: true, windowId: win.id };
   } catch (e) {
     return { ok: false, error: e.message };

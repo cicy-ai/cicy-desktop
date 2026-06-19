@@ -183,6 +183,10 @@ class TabManager {
     // attaches to BrowserWindows + webviews), so give each tab exactly one
     // right-click menu (copy/paste/inspect) — without this, right-click did nothing.
     try { attachContextMenu(wc); } catch (e) {}
+    // Buffer this tab's console (keyed by its webContents.id) so
+    // get_tab_console_logs(<wcId>) can read it — window-monitor only listens on
+    // BrowserWindow main webContents, never BrowserView tabs.
+    try { require("../utils/window-monitor").attachTabConsole(wc); } catch (e) {}
     // home = the resident homepage tab (pinned, first, user-icon, no close).
     // fixedTitle = a caller-supplied tab name (e.g. the team title) that the
     // page's own document.title must NOT override.
@@ -245,6 +249,38 @@ class TabManager {
     return true;
   }
 
+  // Chrome-style drag reorder. `orderedIds` is the desired order of the NON-home
+  // tabs (the resident homepage tab stays pinned first regardless). Unknown/missing
+  // ids are ignored; any movable tab not named keeps its relative order at the end.
+  reorder(orderedIds) {
+    if (!Array.isArray(orderedIds)) return false;
+    const home = this.tabs.filter((t) => t.home);
+    const movable = this.tabs.filter((t) => !t.home);
+    const byId = new Map(movable.map((t) => [t.id, t]));
+    const next = [];
+    for (const id of orderedIds) { const t = byId.get(id); if (t && !next.includes(t)) next.push(t); }
+    for (const t of movable) { if (!next.includes(t)) next.push(t); } // keep any unnamed tabs
+    this.tabs = [...home, ...next];
+    this.pushState();
+    return true;
+  }
+
+  // Reload the tab whose URL matches (origin+pathname) IN PLACE — used by the
+  // homepage team card's 刷新窗口 / 更新后自动刷. ignoreCache → reloadIgnoringCache
+  // (re-fetch new assets after a cicy-code update, not the cached index.html).
+  // Returns true iff a matching tab was found+reloaded; NEVER opens a new tab.
+  reloadTabByUrlInPlace(url, { ignoreCache = false } = {}) {
+    const key = stripVol(url);
+    const tab = this.tabs.find((t) => stripVol(t.url) === key);
+    if (!tab) return false;
+    try {
+      if (ignoreCache) tab.view.webContents.reloadIgnoringCache();
+      else tab.view.webContents.reload();
+    } catch (e) {}
+    try { this.activate(tab.id); this.win.show(); this.win.focus(); } catch (e) {}
+    return true;
+  }
+
   list() { return this.tabs.map((t) => ({ webContentsId: t.id, title: t.title, url: t.url, active: t.id === this.activeId })); }
 
   activeWc() { const t = this.tabs.find((x) => x.id === this.activeId); return t ? t.view.webContents : null; }
@@ -299,6 +335,7 @@ function installIpc() {
   ipcMain.on("tabwin:new", (e, { url }) => { const m = mgr(e); if (m) m.addTab(url || ""); });
   ipcMain.on("tabwin:activate", (e, { id }) => { const m = mgr(e); if (m) m.activate(id); });
   ipcMain.on("tabwin:close", (e, { id }) => { const m = mgr(e); if (m) m.close(id); });
+  ipcMain.on("tabwin:reorder", (e, { ids }) => { const m = mgr(e); if (m) m.reorder(ids); });
   ipcMain.on("tabwin:navigate", (e, { url }) => { const m = mgr(e); const wc = m && m.activeWc(); if (wc && url) wc.loadURL(String(url)); });
   ipcMain.on("tabwin:back", (e) => { const m = mgr(e); const wc = m && m.activeWc(); if (wc && wc.canGoBack()) wc.goBack(); });
   ipcMain.on("tabwin:fwd", (e) => { const m = mgr(e); const wc = m && m.activeWc(); if (wc && wc.canGoForward()) wc.goForward(); });
@@ -443,6 +480,36 @@ function registerTabBrowserTools(registerTool) {
     },
     { tag: "TabBrowser" }
   );
+
+  registerTool(
+    "get_tab_console_logs",
+    "获取某个标签（按 webContentsId）的控制台日志：自该标签创建以来捕获的所有 console 输出（log/info/warning/error）。支持关键词/级别过滤、分页；最新在前。",
+    z.object({
+      webContentsId: z.number().describe("标签的 webContentsId"),
+      page: z.number().optional().default(1).describe("页码，从 1 开始"),
+      page_size: z.number().optional().default(50).describe("每页数量"),
+      keyword: z.string().optional().describe("关键词过滤，匹配日志消息"),
+      level: z.enum(["verbose", "info", "warning", "error"]).optional().describe("日志级别过滤"),
+    }),
+    async ({ webContentsId, page, page_size, keyword, level }) => {
+      try {
+        let logs = require("../utils/window-monitor").getTabConsoleLogs(webContentsId);
+        if (keyword) logs = logs.filter((l) => l.message.includes(keyword));
+        if (level) logs = logs.filter((l) => l.level === level);
+        logs = [...logs].sort((a, b) => b.timestamp - a.timestamp);
+        const start = (page - 1) * page_size;
+        const paginated = logs.slice(start, start + page_size);
+        const header = `Tab Console Logs (wc=${webContentsId}, ${logs.length} total, page ${page}/${Math.ceil(logs.length / page_size) || 1}):\n`;
+        const lines = paginated.map((l) => {
+          const time = new Date(l.timestamp).toISOString().replace("T", " ").substring(0, 23);
+          const src = l.source ? ` (${String(l.source).split("/").pop()}:${l.line})` : "";
+          return `${time} ${l.level.toUpperCase().padEnd(7)} ${String(l.message).replace(/\n/g, " ").substring(0, 200)}${src}`;
+        });
+        return { content: [{ type: "text", text: header + (lines.join("\n") || "(no console output)") }] };
+      } catch (e) { return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true }; }
+    },
+    { tag: "TabBrowser" }
+  );
 }
 
 // Reload the profile-N tab whose URL matches (origin+pathname); if none is open,
@@ -462,8 +529,20 @@ async function reloadTabByUrl(accountIdx, url, opts = {}) {
   return { ok: true, winId: r.winId, opened: true };
 }
 
+// Reload an OPEN team tab in `accountIdx`'s window, in place (no open-if-missing).
+// Returns { ok:true, reloaded:true } if a matching tab was found, else
+// { ok:false, error:"no_open_window" }. Used by local-teams.reloadTeam (profile 0).
+function reloadTabIfOpen(accountIdx, url, opts = {}) {
+  const m = managers.get(accountIdx);
+  if (!m || m.win.isDestroyed()) return { ok: false, error: "no_open_window" };
+  return m.reloadTabByUrlInPlace(url, opts)
+    ? { ok: true, winId: m.win.id, reloaded: true }
+    : { ok: false, error: "no_open_window" };
+}
+
 registerTabBrowserTools.openTab = openTab;
 registerTabBrowserTools.reloadTabByUrl = reloadTabByUrl;
+registerTabBrowserTools.reloadTabIfOpen = reloadTabIfOpen;
 registerTabBrowserTools.openHomeWindow = openHomeWindow;
 registerTabBrowserTools.ensureManager = ensureManager;
 module.exports = registerTabBrowserTools;
