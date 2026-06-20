@@ -8,7 +8,7 @@
 //   https://r2.deepfetch.de5.net/docker/cicy-code-latest.tar.gz
 //
 // The container maps :8008 and persists ~/cicy-ai in a named volume.
-const { execFile, spawn } = require("child_process");
+const { execFile, execFileSync, spawn } = require("child_process");
 const https = require("https");
 const http = require("http");
 const fs = require("fs");
@@ -449,6 +449,35 @@ function launchElevated(exe, args, { emit } = {}) {
   });
 }
 
+// Docker Desktop on Windows needs a WSL2 (or Hyper-V) backend — without it the
+// engine never starts and `docker version` can't reach the daemon, so the card
+// hangs on "正在启动 Docker Desktop". Detect a missing WSL. `wsl` prints UTF-16
+// and a fresh Windows without the feature says "未安装 / not installed / can be
+// installed by running wsl.exe --install".
+function wslMissing() {
+  if (process.platform !== "win32") return false;
+  try {
+    const out = execFileSync("wsl", ["--status"], { timeout: 8000, windowsHide: true, encoding: "utf16le", stdio: ["ignore", "pipe", "pipe"] });
+    return /未安装|not installed|--install/i.test(String(out));
+  } catch (e) {
+    const s = String((e.stdout || "") + (e.stderr || ""));
+    if (/未安装|not installed|--install/i.test(s)) return true;
+    return false; // wsl present but errored for another reason — assume OK
+  }
+}
+
+// Ensure the WSL2 backend exists; install it (elevated) if missing. Returns
+// { ok } when present, or { needsReboot } after kicking off `wsl --install`
+// (which requires admin + a Windows reboot before Docker can use it).
+async function ensureWsl({ emit } = {}) {
+  if (!wslMissing()) return { ok: true };
+  emit && emit({ phase: "install-docker", status: "running", message: "Docker 需要 WSL2 后端，正在安装 WSL（请在管理员授权框点「是」，装完需重启 Windows）…" });
+  // --no-distribution: just the WSL2 platform (Docker brings its own distro);
+  // falls back to plain `wsl --install` on older builds that reject the flag.
+  await launchElevated("wsl", ["--install", "--no-distribution"], { emit });
+  return { ok: false, needsReboot: true };
+}
+
 // One-shot, idempotent, resumable bootstrap of the whole local-team stack on
 // Windows: install Docker (if missing) → load the base image (if missing) →
 // start the container → wait for :8008. Every step CHECKS first and SKIPS if
@@ -470,10 +499,14 @@ async function bootstrap({ onProgress, port = 8008, container = CONTAINER, volum
     // re-download/re-run the installer (主人: 装了就别再下 Docker Desktop 了).
     emit({ phase: "install-docker", status: "running", message: "Docker 已安装，正在启动 Docker Desktop…" });
     if (needImage) imgDl = downloadImageTarball({ emit }).catch((e) => { emit({ phase: "image", status: "error", message: `镜像下载失败：${e.message}` }); return null; });
+    // Docker Desktop installed but the engine needs the WSL2 backend — install
+    // it (elevated) if missing; it requires a reboot before the daemon can run.
+    const wsl1 = await ensureWsl({ emit });
+    if (wsl1.needsReboot) { emit({ phase: "install-docker", status: "error", message: "WSL2 正在安装——装好后请【重启 Windows】，重启后回来点「重试」即可继续。" }); return { ok: false, reason: "wsl_reboot_required" }; }
     startDockerDesktop();
     const up = await waitUntil(dockerOk, { totalMs: 300000, everyMs: 5000 });
     if (!up) {
-      emit({ phase: "install-docker", status: "error", message: "Docker Desktop 启动超时——手动打开它等图标变绿，再点「重试」" });
+      emit({ phase: "install-docker", status: "error", message: "Docker Desktop 启动超时——确认 Docker 图标变绿（首次可能要重启 Windows），再点「重试」" });
       return { ok: false, reason: "docker_not_ready" };
     }
     emit({ phase: "install-docker", status: "done", message: "Docker 就绪" });
@@ -482,6 +515,9 @@ async function bootstrap({ onProgress, port = 8008, container = CONTAINER, volum
     // running + the daemon coming up (主人: 装 Docker 的同时下载 R2 镜像).
     if (needImage) imgDl = downloadImageTarball({ emit }).catch((e) => { emit({ phase: "image", status: "error", message: `镜像下载失败：${e.message}` }); return null; });
     await installDocker({ emit, dest: installDest });
+    // Docker Desktop needs WSL2 — install it (elevated) if missing; reboot first.
+    const wsl2 = await ensureWsl({ emit });
+    if (wsl2.needsReboot) { emit({ phase: "install-docker", status: "error", message: "Docker 和 WSL2 已装好——请【重启 Windows】，重启后回来点「重试」即可继续。" }); return { ok: false, reason: "wsl_reboot_required" }; }
     // A silent install doesn't auto-launch the daemon — explicitly start Docker
     // Desktop once its exe lands so the user doesn't have to (主人: 安装启动有问题).
     emit({ phase: "install-docker", status: "running", message: "启动 Docker Desktop…" });
