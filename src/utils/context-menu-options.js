@@ -58,17 +58,19 @@ const OPTIONS = {
   },
 };
 
-// Attach the menu to the host window + BrowserView tabs only. <webview> guests
-// are EXCLUDED on purpose: they carry their OWN custom context menu (e.g.
-// cicy-code's WebFrame / the gotty terminal), and an ecm native menu would cover
-// it. Idempotent via __cicyCtxMenu so the web-contents-created hook + the
-// tab-browser's per-tab call never double-pop.
+// Attach the menu to the host window, BrowserView tabs AND <webview> guests, so
+// right-click → 复制/粘贴 works on EVERY surface. Webviews used to be excluded on
+// the assumption they carry their own copy menu, but on Windows that left
+// selections uncopyable: the app menu's Ctrl+C / role:"copy" doesn't reach the
+// focused <webview> guest, and no own-menu filled the gap. Giving guests the ecm
+// 复制/粘贴 menu fixes copy cross-platform. Idempotent via __cicyCtxMenu so the
+// web-contents-created hook + the tab-browser's per-tab call never double-pop.
 function attachContextMenu(wc) {
   try {
     if (!wc || (wc.isDestroyed && wc.isDestroyed())) return;
     if (wc.__cicyCtxMenu) return;
     const t = wc.getType && wc.getType();
-    if (t !== "window" && t !== "browserView") return; // skip <webview> + others
+    if (t !== "window" && t !== "browserView" && t !== "webview") return; // host + tabs + <webview>
     wc.__cicyCtxMenu = true;
     contextMenu({ ...OPTIONS, window: wc });
   } catch (e) {}

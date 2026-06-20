@@ -20,7 +20,25 @@ const appUpdater = require("./app-updater");
 // and guests fell back to the OS-native menu; this unifies them and adds 重新加载
 // + 切换开发者工具 + 检查元素 everywhere (see utils/context-menu-options.js).
 const { attachContextMenu } = require("./utils/context-menu-options");
-electronApp.on("web-contents-created", (_e, wc) => attachContextMenu(wc));
+electronApp.on("web-contents-created", (_e, wc) => {
+  attachContextMenu(wc);
+  // Ctrl/Cmd+C inside a <webview> guest: on Windows the application menu's
+  // role:"copy" accelerator doesn't reach the focused guest, so a selection
+  // couldn't be copied with the keyboard (right-click 复制 is fixed separately via
+  // attachContextMenu). Wire copy directly on the guest. COPY-ONLY and WITHOUT
+  // preventDefault, so the gotty terminal's Ctrl+C=SIGINT and any web app's own
+  // copy handler still fire; wc.copy() is a no-op when there's no selection.
+  try {
+    if (wc.getType && wc.getType() === "webview") {
+      wc.on("before-input-event", (_ev, input) => {
+        if (input.type === "keyDown" && (input.control || input.meta) &&
+            !input.alt && !input.shift && (input.key === "c" || input.key === "C")) {
+          try { wc.copy(); } catch (_) {}
+        }
+      });
+    }
+  } catch (_) {}
+});
 
 // Setup Electron flags IMMEDIATELY after require
 electronApp.commandLine.appendSwitch("ignore-certificate-errors");
