@@ -146,7 +146,9 @@
     "busy": "進行中",
     "preparing": "準備中…",
     "installing2": "インストール中…",
-    "background": "バックグラウンドで継続"
+    "background": "バックグラウンドで継続",
+    "rebootNeeded": "WSL2 をインストールしました。Windows を再起動してから「再試行」を押してください",
+    "rebootShort": "Windows 再起動"
   },
   "common": {
     "close": "閉じる",

@@ -1055,6 +1055,9 @@ body {
 .drawer__foot-status { font-size: 12.5px; color: var(--text-dim, #9da7b3); margin-right: auto; }
 .drawer__foot-status.is-error { color: #f87171; }
 .drawer__foot-status.is-done { color: #4ade80; }
+.drawer__foot-status.is-reboot { color: #f5b342; }
+.drawer__spark--reboot { color: #f5b342; }
+.drawer-min--reboot .drawer-min__spark { color: #f5b342; }
 .drawer__btn {
   padding: 7px 16px; border-radius: 8px; cursor: pointer; font-size: 12.5px; font-weight: 550;
   background: rgba(125, 135, 150, 0.14); border: 1px solid rgba(125, 135, 150, 0.2); color: var(--text, #e6eaf0);

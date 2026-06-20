@@ -141,7 +141,7 @@ function UpdateDrawerHost() {
   if (st.minimized) {
     return (
       <button type="button" className={`drawer-min drawer-min--${st.status}`} data-id="UpdateDrawer-restore" onClick={() => updateDrawer.restore()}>
-        <span className="drawer-min__spark">{running ? <Spinner /> : st.status === "done" ? "✓" : "!"}</span>
+        <span className="drawer-min__spark">{running ? <Spinner /> : st.status === "done" ? "✓" : st.status === "reboot" ? "⟳" : "!"}</span>
         <span className="drawer-min__label">更新 cicy-code{st.toVer ? ` · v${st.toVer}` : ""}</span>
       </button>
     );
@@ -152,7 +152,7 @@ function UpdateDrawerHost() {
         <div className="drawer__head">
           <div className="drawer__title">
             <span className={`drawer__spark drawer__spark--${st.status}`}>
-              {running ? <Spinner /> : st.status === "done" ? "✓" : "!"}
+              {running ? <Spinner /> : st.status === "done" ? "✓" : st.status === "reboot" ? "⟳" : "!"}
             </span>
             <div>
               <div className="drawer__h">更新 cicy-code</div>
@@ -1489,12 +1489,13 @@ const dockerDrawer = {
     dockerDrawerState = next;
     emitDockerDrawer();
   },
-  finish({ ok, message } = {}) {
+  finish({ ok, message, status } = {}) {
     if (!dockerDrawerState) return;
-    const status = ok ? "done" : "error";
-    const line = { id: ++dockerDrawerLogSeq, t: clockHHMMSS(), phase: "done", status, message: message || (ok ? "完成" : "失败") };
+    // status can be forced (e.g. "reboot" — not a failure, just needs a restart).
+    const st = status || (ok ? "done" : "error");
+    const line = { id: ++dockerDrawerLogSeq, t: clockHHMMSS(), phase: "done", status: st, message: message || (ok ? "完成" : "失败") };
     // Pop back open on finish so the user sees the result even if minimized.
-    dockerDrawerState = { ...dockerDrawerState, status, phase: "done", minimized: false, logs: [...dockerDrawerState.logs, line], lastAt: Date.now() };
+    dockerDrawerState = { ...dockerDrawerState, status: st, phase: "done", minimized: false, logs: [...dockerDrawerState.logs, line], lastAt: Date.now() };
     emitDockerDrawer();
   },
   close() { dockerDrawerState = null; emitDockerDrawer(); },
@@ -1541,7 +1542,7 @@ function DockerInstallDrawerHost() {
     const overall = pcts.length ? Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length) : null;
     return (
       <button type="button" className={`drawer-min drawer-min--${st.status}`} data-id="DockerDrawer-restore" onClick={() => dockerDrawer.restore()}>
-        <span className="drawer-min__spark">{running ? <Spinner /> : st.status === "done" ? "✓" : "!"}</span>
+        <span className="drawer-min__spark">{running ? <Spinner /> : st.status === "done" ? "✓" : st.status === "reboot" ? "⟳" : "!"}</span>
         <span className="drawer-min__label">{tr("docker.setupTitle", "安装 Docker cicy-code")}{overall != null ? ` · ${overall}%` : ""}</span>
       </button>
     );
@@ -1552,7 +1553,7 @@ function DockerInstallDrawerHost() {
         <div className="drawer__head">
           <div className="drawer__title">
             <span className={`drawer__spark drawer__spark--${st.status}`}>
-              {running ? <Spinner /> : st.status === "done" ? "✓" : "!"}
+              {running ? <Spinner /> : st.status === "done" ? "✓" : st.status === "reboot" ? "⟳" : "!"}
             </span>
             <div>
               <div className="drawer__h">{tr("docker.setupTitle", "安装 Docker cicy-code")}</div>
@@ -1601,6 +1602,12 @@ function DockerInstallDrawerHost() {
           {running ? (
             <>
               <span className="drawer__foot-status">{tr("docker.installing2", "安装进行中…")}</span>
+            </>
+          ) : st.status === "reboot" ? (
+            <>
+              <span className="drawer__foot-status is-reboot">{tr("docker.rebootShort", "需重启 Windows")}</span>
+              {st.onRetry && <button type="button" className="drawer__btn is-accent" data-id="DockerDrawer-retry" onClick={() => st.onRetry()}>{tr("common.retry", "重试")}</button>}
+              <button type="button" className="drawer__btn" data-id="DockerDrawer-dismiss" onClick={() => dockerDrawer.close()}>{tr("common.close", "关闭")}</button>
             </>
           ) : st.status === "error" ? (
             <>
@@ -1670,7 +1677,11 @@ function DockerCard({ dockerTeam, onOpen, onRefresh }) {
     const unsub = window.cicy?.docker?.onAppProgress?.((ev) => dockerDrawer.push(ev));
     try {
       const r = await window.cicy?.docker?.appBootstrap?.();
-      dockerDrawer.finish({ ok: !!r?.ok, message: r?.ok ? tr("docker.ready", "Docker cicy-code 已就绪") : (r?.error || tr("docker.failed", "安装失败")) });
+      if (r?.reason === "wsl_reboot_required") {
+        dockerDrawer.finish({ status: "reboot", message: tr("docker.rebootNeeded", "WSL2 已安装，请【重启 Windows】后回来点「重试」继续") });
+      } else {
+        dockerDrawer.finish({ ok: !!r?.ok, message: r?.ok ? tr("docker.ready", "Docker cicy-code 已就绪") : (r?.error || tr("docker.failed", "安装失败")) });
+      }
       if (r?.ok) onRefresh?.();
     } catch (e) {
       dockerDrawer.finish({ ok: false, message: e.message });
@@ -1688,7 +1699,11 @@ function DockerCard({ dockerTeam, onOpen, onRefresh }) {
     const unsub = window.cicy?.docker?.onAppProgress?.((ev) => dockerDrawer.push(ev));
     try {
       const r = await window.cicy?.docker?.appUpgrade?.();
-      dockerDrawer.finish({ ok: !!r?.ok, message: r?.ok ? tr("docker.upgraded", "已升级到最新") : (r?.error || tr("docker.upgradeFailed", "升级失败")) });
+      if (r?.reason === "wsl_reboot_required") {
+        dockerDrawer.finish({ status: "reboot", message: tr("docker.rebootNeeded", "WSL2 已安装，请【重启 Windows】后回来点「重试」继续") });
+      } else {
+        dockerDrawer.finish({ ok: !!r?.ok, message: r?.ok ? tr("docker.upgraded", "已升级到最新") : (r?.error || tr("docker.upgradeFailed", "升级失败")) });
+      }
       if (r?.ok) onRefresh?.();
     } catch (e) {
       dockerDrawer.finish({ ok: false, message: e.message });

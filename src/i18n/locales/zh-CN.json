@@ -147,7 +147,9 @@
     "busy": "进行中",
     "preparing": "准备中…",
     "installing2": "安装进行中…",
-    "background": "在后台继续"
+    "background": "在后台继续",
+    "rebootNeeded": "WSL2 已安装，请【重启 Windows】后回来点「重试」继续",
+    "rebootShort": "需重启 Windows"
   },
   "common": {
     "close": "关闭",

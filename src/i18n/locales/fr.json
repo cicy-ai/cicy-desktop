@@ -146,7 +146,9 @@
     "busy": "En cours",
     "preparing": "Préparation…",
     "installing2": "Installation…",
-    "background": "Continuer en arrière-plan"
+    "background": "Continuer en arrière-plan",
+    "rebootNeeded": "WSL2 installé — REDÉMARREZ Windows, puis cliquez sur Réessayer",
+    "rebootShort": "Redémarrer Windows"
   },
   "common": {
     "close": "Fermer",
