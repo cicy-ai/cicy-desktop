@@ -213,6 +213,13 @@ body {
 .user-chip__menu-item.is-danger { color: #f7a3a3; }
 .user-chip__menu-item.is-danger:hover { background: rgba(239,68,68,.16); color: #fff; }
 .user-chip__menu-sep { height: 1px; margin: 4px 2px; background: rgba(255,255,255,.08); }
+/* cicy-desktop version — bottom of the avatar dropdown (主人) */
+.user-chip__menu-version {
+  margin-top: 4px; padding: 8px 11px 4px;
+  font-size: 11px; color: #6b7280; text-align: center;
+  font-variant-numeric: tabular-nums; user-select: text;
+  border-top: 1px solid rgba(255,255,255,.06);
+}
 /* HTTPS audit tip, rendered as a flat menu row with an on/off switch */
 .user-chip__mitm-row {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
@@ -968,6 +975,34 @@ body {
   margin: 10px 14px; padding: 10px 12px;
   background: rgba(10, 12, 16, 0.7); border: 1px solid rgba(125, 135, 150, 0.12); border-radius: 10px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px; line-height: 1.7;
+}
+/* Custom thin scrollbar for the install log (主人: scroll 用自定义 style) */
+.drawer__log--scroll { max-height: 168px; scrollbar-width: thin; scrollbar-color: rgba(125,135,150,.4) transparent; }
+.drawer__log--scroll::-webkit-scrollbar { width: 7px; }
+.drawer__log--scroll::-webkit-scrollbar-track { background: transparent; margin: 4px 0; }
+.drawer__log--scroll::-webkit-scrollbar-thumb { background: rgba(125,135,150,.32); border-radius: 6px; border: 1.5px solid transparent; background-clip: padding-box; }
+.drawer__log--scroll::-webkit-scrollbar-thumb:hover { background: rgba(125,135,150,.55); background-clip: padding-box; }
+
+/* Fixed download progress bars (Docker Desktop / 基础镜像) — no scroll spam */
+.drawer__dlbars { display: flex; flex-direction: column; gap: 10px; margin: 12px 14px 2px; }
+.dlbar {
+  padding: 10px 12px; border-radius: 10px;
+  background: rgba(10, 12, 16, 0.55); border: 1px solid rgba(125, 135, 150, 0.14);
+}
+.dlbar__head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 7px; }
+.dlbar__name { font-size: 12.5px; font-weight: 600; color: var(--text, #e6eaf0); }
+.dlbar__pct { font-size: 11px; color: var(--text-dim, #9da7b3); font-variant-numeric: tabular-nums; }
+.dlbar__track { height: 6px; border-radius: 4px; background: rgba(125, 135, 150, 0.16); overflow: hidden; }
+.dlbar__fill {
+  height: 100%; border-radius: 4px;
+  background: linear-gradient(90deg, #5b8df7, #2496ed);
+  transition: width .2s ease;
+}
+.dlbar__fill.is-done { background: #4ade80; }
+.dlbar__url {
+  margin-top: 7px; font-size: 10.5px; color: #6b7686;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .drawer__log-empty { color: var(--text-dim, #9da7b3); }
 .drawer__line { display: flex; align-items: baseline; gap: 8px; padding: 1px 0; }

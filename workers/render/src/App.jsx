@@ -189,7 +189,6 @@ function UpdateDrawerHost() {
           {running ? (
             <>
               <span className="drawer__foot-status">更新进行中…</span>
-              <button type="button" className="drawer__btn" data-id="UpdateDrawer-background" onClick={() => updateDrawer.close()}>在后台继续</button>
             </>
           ) : st.status === "error" ? (
             <>
@@ -1022,7 +1021,14 @@ function Header({ me, welcome, onLogout, mitmTeam }) {
   const [trustOpen, setTrustOpen] = useState(false);
   const [auditOpen, setAuditOpen] = useState(false);
   const [termsOpen, setTermsOpen] = useState(false);
+  const [appVer, setAppVer] = useState("");
   const wrap = useRef(null);
+  // cicy-desktop's own version, shown at the very bottom of this menu (主人).
+  useEffect(() => {
+    let alive = true;
+    window.cicy?.app?.getVersion?.().then((v) => { if (alive) setAppVer(String(v || "")); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
   // Click-outside closes the dropdown (mirrors LocalTeamCard's ⋯ menu).
   useEffect(() => {
     if (!open) return;
@@ -1077,6 +1083,9 @@ function Header({ me, welcome, onLogout, mitmTeam }) {
             <button type="button" data-id="UserChip-logout" className="user-chip__menu-item is-danger" onClick={() => { setOpen(false); onLogout(); }}>
               退出
             </button>
+            <div className="user-chip__menu-version" data-id="UserChip-version">
+              CiCy Desktop {appVer ? `v${appVer}` : "…"}
+            </div>
           </div>
         )}
       </div>
@@ -1435,14 +1444,30 @@ let dockerDrawerState = null; // null = closed
 function emitDockerDrawer() { dockerDrawerListeners.forEach((l) => l(dockerDrawerState)); }
 const dockerDrawer = {
   open({ onRetry } = {}) {
-    dockerDrawerState = { status: "running", phase: "install-docker", logs: [], onRetry: onRetry || null, lastAt: Date.now() };
+    dockerDrawerState = { status: "running", phase: "install-docker", logs: [], bars: {}, onRetry: onRetry || null, lastAt: Date.now() };
     emitDockerDrawer();
   },
   push(ev = {}) {
     if (!dockerDrawerState) return;
     const phase = ev.phase === "health" ? "container" : (ev.phase || dockerDrawerState.phase);
-    const line = { id: ++dockerDrawerLogSeq, t: clockHHMMSS(), phase, status: ev.status || "running", message: ev.message || "", progress: ev.progress };
-    dockerDrawerState = { ...dockerDrawerState, phase, logs: [...dockerDrawerState.logs, line], lastAt: Date.now() };
+    const next = { ...dockerDrawerState, phase, lastAt: Date.now() };
+    const hasPct = Number.isFinite(ev.progress);
+    // Per-byte download ticks (status running + a %) drive a PROGRESS BAR, not a
+    // log line — so the log doesn't scroll-spam (主人: 下载不要输出滚动/日志太多).
+    const isDownloadTick = ev.status === "running" && hasPct && (phase === "install-docker" || phase === "image");
+    if (isDownloadTick) {
+      const prev = dockerDrawerState.bars?.[phase] || {};
+      next.bars = { ...dockerDrawerState.bars, [phase]: { progress: ev.progress, received: ev.received, total: ev.total, url: ev.url || prev.url, message: ev.message || prev.message } };
+    } else {
+      // Meaningful event → one log line (phase change / skip / done / error / retry).
+      const line = { id: ++dockerDrawerLogSeq, t: clockHHMMSS(), phase, status: ev.status || "running", message: ev.message || "" };
+      next.logs = [...dockerDrawerState.logs, line];
+      if (ev.url) {
+        const prev = dockerDrawerState.bars?.[phase] || {};
+        next.bars = { ...dockerDrawerState.bars, [phase]: { ...prev, url: ev.url } };
+      }
+    }
+    dockerDrawerState = next;
     emitDockerDrawer();
   },
   finish({ ok, message } = {}) {
@@ -1456,6 +1481,30 @@ const dockerDrawer = {
 };
 const DOCKER_PHASES = [["install-docker", "装 Docker"], ["image", "加载镜像"], ["container", "启动容器"], ["done", "完成"]];
 const DOCKER_BADGE = { "install-docker": "Docker", image: "镜像", container: "容器", health: "容器", done: "完成" };
+const DOCKER_DL_LABEL = { "install-docker": "Docker Desktop", image: "基础镜像" };
+function fmtBytes(n) {
+  if (!Number.isFinite(n)) return "?";
+  if (n < 1024) return n + " B";
+  if (n < 1048576) return (n / 1024).toFixed(0) + " KB";
+  if (n < 1073741824) return (n / 1048576).toFixed(1) + " MB";
+  return (n / 1073741824).toFixed(2) + " GB";
+}
+// One fixed (non-scrolling) progress bar per download (Docker Desktop / image),
+// showing the source URL + % + bytes (主人: 下载做进度条、显示地址、不要滚动).
+function DownloadBar({ phaseKey, bar }) {
+  const pct = Number.isFinite(bar?.progress) ? Math.max(0, Math.min(100, bar.progress)) : 0;
+  const done = pct >= 100;
+  return (
+    <div className="dlbar" data-id={`DockerDrawer-dlbar-${phaseKey}`}>
+      <div className="dlbar__head">
+        <span className="dlbar__name">{DOCKER_DL_LABEL[phaseKey] || phaseKey}</span>
+        <span className="dlbar__pct">{pct}%{bar?.total ? ` · ${fmtBytes(bar.received)} / ${fmtBytes(bar.total)}` : ""}</span>
+      </div>
+      <div className="dlbar__track"><div className={`dlbar__fill${done ? " is-done" : ""}`} style={{ width: `${pct}%` }} /></div>
+      {bar?.url && <div className="dlbar__url" title={bar.url}>{bar.url}</div>}
+    </div>
+  );
+}
 function DockerInstallDrawerHost() {
   const [st, setSt] = useState(dockerDrawerState);
   useEffect(() => { dockerDrawerListeners.add(setSt); return () => { dockerDrawerListeners.delete(setSt); }; }, []);
@@ -1464,6 +1513,7 @@ function DockerInstallDrawerHost() {
   if (!st) return null;
   const running = st.status === "running";
   const phaseIdx = DOCKER_PHASES.findIndex(([k]) => k === st.phase);
+  const dlBars = ["install-docker", "image"].filter((k) => st.bars?.[k]);
   return (
     <div className="drawer-scrim" data-id="DockerDrawer-scrim" onClick={() => { if (!running) dockerDrawer.close(); }}>
       <div className="drawer" data-id="DockerDrawer" data-status={st.status} onClick={(e) => e.stopPropagation()}>
@@ -1495,14 +1545,20 @@ function DockerInstallDrawerHost() {
           })}
         </div>
 
-        <div className="drawer__log" data-id="DockerDrawer-log" ref={logRef}>
+        {dlBars.length > 0 && (
+          <div className="drawer__dlbars" data-id="DockerDrawer-dlbars">
+            {dlBars.map((k) => <DownloadBar key={k} phaseKey={k} bar={st.bars[k]} />)}
+          </div>
+        )}
+
+        <div className="drawer__log drawer__log--scroll" data-id="DockerDrawer-log" ref={logRef}>
           {st.logs.length === 0
             ? <div className="drawer__log-empty">{tr("docker.preparing", "准备中…")}</div>
             : st.logs.map((l) => (
               <div key={l.id} className="drawer__line" data-status={l.status}>
                 <span className="drawer__t">{l.t}</span>
                 <span className={`drawer__badge drawer__badge--${l.phase}`}>{DOCKER_BADGE[l.phase] || l.phase}</span>
-                <span className="drawer__linemsg">{l.message}{Number.isFinite(l.progress) ? ` ${l.progress}%` : ""}</span>
+                <span className="drawer__linemsg">{l.message}</span>
               </div>
             ))}
         </div>
@@ -1511,7 +1567,6 @@ function DockerInstallDrawerHost() {
           {running ? (
             <>
               <span className="drawer__foot-status">{tr("docker.installing2", "安装进行中…")}</span>
-              <button type="button" className="drawer__btn" data-id="DockerDrawer-background" onClick={() => dockerDrawer.close()}>{tr("docker.background", "在后台继续")}</button>
             </>
           ) : st.status === "error" ? (
             <>

@@ -178,13 +178,17 @@ async function ensureDownloaded(url, dest, mirror, { emit, phase, label, freshOn
   let lastPct = -1; // throttle: chunks arrive dozens/s — only emit on whole-percent change
   const attempted = withRetry(async (attempt) => {
     const src = sources[Math.min(attempt - 1, sources.length - 1)];
+    // 断点续传 (主人): resume the partial via a Range request instead of
+    // restarting from 0 — efficient on a flaky network. The post-download size
+    // check below + loadImage's load-failure cleanup guard against a bad partial.
     await download(src, dest, {
       resume: true,
       onProgress: ({ received, total }) => {
         const pct = total ? Math.round((received / total) * 100) : 0;
         if (pct === lastPct) return;
         lastPct = pct;
-        emit && emit({ phase, status: "running", message: label, progress: pct, received, total });
+        // `url` lets the drawer show the actual source (incl. mirror fallback).
+        emit && emit({ phase, status: "running", message: label, progress: pct, received, total, url: src });
       },
     });
     if (expected > 0) {
@@ -251,7 +255,7 @@ function imageTarballPath() {
 // install (主人: 装 Docker 的同时下载 R2 镜像). Returns the tarball path.
 async function downloadImageTarball({ emit } = {}) {
   const dest = imageTarballPath();
-  await ensureDownloaded(R2_TARBALL, dest, null, { emit, phase: "image", label: "下载镜像", freshOnIncomplete: true });
+  await ensureDownloaded(R2_TARBALL, dest, null, { emit, phase: "image", label: "下载镜像" });
   return dest;
 }
 
@@ -260,7 +264,16 @@ async function downloadImageTarball({ emit } = {}) {
 async function loadImageFromTarball(tmp, { emit } = {}) {
   emit && emit({ phase: "image", status: "running", message: "docker load…", progress: 100 });
   console.log(`[docker-sidecar] docker load…`);
-  const { stdout } = await run(["load", "-i", tmp], { timeout: 300000 });
+  let stdout;
+  try {
+    ({ stdout } = await run(["load", "-i", tmp], { timeout: 300000 }));
+  } catch (e) {
+    // A resumed download can leave a byte-correct-size but corrupt tarball that
+    // `docker load` rejects. Delete it so the next attempt re-downloads fresh
+    // (断点续传 normally, fresh only when proven bad).
+    try { fs.unlinkSync(tmp); } catch {}
+    throw e;
+  }
   // The tarball's embedded tag may be a pinned version (e.g. :2.1.6) while we
   // run IMAGE (:latest). Re-tag whatever was loaded so imagePresent()/start()
   // match — otherwise every start() re-downloads the tarball forever.
@@ -364,7 +377,7 @@ async function installDocker({ emit, dest } = {}) {
   try { fs.mkdirSync(path.dirname(target), { recursive: true }); } catch {}
   e({ phase: "install-docker", status: "running", message: "下载 Docker Desktop 安装包…", progress: 0 });
   await ensureDownloaded(DOCKER_DESKTOP_URL, target, DOCKER_DESKTOP_MIRROR, {
-    emit, phase: "install-docker", label: "下载 Docker Desktop", freshOnIncomplete: true,
+    emit, phase: "install-docker", label: "下载 Docker Desktop",
   });
   e({ phase: "install-docker", status: "running", message: "安装 Docker Desktop（请在弹出的授权框点「是」，装完可能需重启）…" });
   await new Promise((resolve) => {

@@ -1,7 +1,7 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { spawn } = require("child_process");
+const { spawn, execFileSync } = require("child_process");
 const { isPortOpen } = require("../utils/process-utils");
 const { waitForDebugger, getVersion } = require("./chrome-cdp-client");
 
@@ -73,18 +73,78 @@ function isDirectPath(binaryPath) {
   return binaryPath.includes(path.sep) || (process.platform === "win32" && /^[a-zA-Z]:\\/.test(binaryPath));
 }
 
-function resolveChromeBinary(binaryPath) {
-  const candidates = [binaryPath, ...getBinaryCandidates()].filter(Boolean);
+// Windows: Chrome registers its exact install path under "App Paths" on install,
+// independent of where it landed (per-user vs per-machine, custom drive). This is
+// far more reliable than the %ProgramFiles% guesses — those miss per-user installs
+// and break when the launching process runs with a stripped env (e.g. the
+// StartElectron scheduled task), which is why an installed Chrome can still read
+// as "not found".
+function queryWindowsChromeFromRegistry() {
+  if (process.platform !== "win32") return null;
+  const keys = [
+    "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chrome.exe",
+    "HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chrome.exe",
+    "HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chrome.exe",
+  ];
+  for (const key of keys) {
+    try {
+      const out = execFileSync("reg", ["query", key, "/ve"], {
+        encoding: "utf8",
+        windowsHide: true,
+        timeout: 5000,
+      });
+      const m = out.match(/REG_SZ\s+(.+?\.exe)\s*$/im);
+      if (m && fs.existsSync(m[1].trim())) return m[1].trim();
+    } catch (_) {}
+  }
+  return null;
+}
 
+// PATH lookup for a bare command — `where` on Windows, `which` on posix. Returns
+// the first existing match, else null.
+function whichBinary(cmd) {
+  try {
+    const tool = process.platform === "win32" ? "where" : "which";
+    const out = execFileSync(tool, [cmd], { encoding: "utf8", windowsHide: true, timeout: 5000 });
+    const first = out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)[0];
+    if (first && fs.existsSync(first)) return first;
+  } catch (_) {}
+  return null;
+}
+
+function resolveChromeBinary(binaryPath) {
+  // 1) Explicit override (config.chromeBinary / --chrome-binary) that exists.
+  if (binaryPath && isDirectPath(binaryPath) && fs.existsSync(binaryPath)) return binaryPath;
+
+  // 2) Windows registry App Paths — authoritative, install-location independent.
+  const regPath = queryWindowsChromeFromRegistry();
+  if (regPath) return regPath;
+
+  // 3) Platform candidates: concrete paths checked for existence; bare commands
+  //    resolved via PATH (where/which) so we only accept a Chrome that's actually
+  //    present.
+  const candidates = [binaryPath, ...getBinaryCandidates()].filter(Boolean);
+  const bareCommands = [];
   for (const candidate of candidates) {
     if (isDirectPath(candidate)) {
-      if (fs.existsSync(candidate)) {
-        return candidate;
-      }
-      continue;
+      if (fs.existsSync(candidate)) return candidate;
+    } else {
+      bareCommands.push(candidate);
+      const resolved = whichBinary(candidate);
+      if (resolved) return resolved;
     }
-    return candidate;
   }
+
+  // 4) Name-based last resort.
+  const byName =
+    whichBinary(process.platform === "win32" ? "chrome" : "google-chrome") ||
+    whichBinary(process.platform === "win32" ? "chrome.exe" : "chromium");
+  if (byName) return byName;
+
+  // 5) Nothing concrete found. On posix, let spawn try the first bare command
+  //    (covers exotic PATH setups where `which` itself isn't available); on
+  //    Windows everything is a concrete path, so fail with a clear message.
+  if (bareCommands.length) return bareCommands[0];
 
   throw new Error(
     "Chrome/Chromium binary not found. Please configure chromeBinary or --chrome-binary."
