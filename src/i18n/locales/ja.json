@@ -123,11 +123,11 @@
   },
   "docker": {
     "title": "Docker cicy-code",
-    "install": "ダウンロードしてインストール",
+    "install": "インストール",
     "start": "起動",
     "running": "実行中 · :8009",
     "notRunning": "停止中 · 「起動」をクリック",
-    "notInstalled": "Docker Desktop 未インストール",
+    "notInstalled": "未インストール · クリックでインストール",
     "working": "処理中…",
     "ready": "Docker cicy-code の準備完了",
     "failed": "インストール失敗",

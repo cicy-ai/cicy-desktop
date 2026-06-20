@@ -612,6 +612,7 @@ module.exports = {
   start, stop, stopContainer, restart, checkStatus, loadImage, loadImageFromTarball,
   downloadImageTarball, imagePresent, dockerOk, installDocker,
   bootstrap, probeHealth, readContainerToken, dockerDesktopExe, desktopDir, downloadsDir, imageTarballPath,
+  launchElevated, wslMissing, ensureWsl,
   // platform-agnostic download/retry primitives, reused by native.js
   ensureDownloaded, withRetry, waitUntil, run,
 };

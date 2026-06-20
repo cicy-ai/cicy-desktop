@@ -124,11 +124,11 @@
   },
   "docker": {
     "title": "Docker cicy-code",
-    "install": "下载安装",
+    "install": "一键安装",
     "start": "启动",
     "running": "运行中 · :8009",
     "notRunning": "未启动 · 点「启动」",
-    "notInstalled": "Docker Desktop 未安装",
+    "notInstalled": "未安装 · 点安装",
     "working": "处理中…",
     "ready": "Docker cicy-code 已就绪",
     "failed": "安装失败",

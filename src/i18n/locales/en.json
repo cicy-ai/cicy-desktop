@@ -124,11 +124,11 @@
   },
   "docker": {
     "title": "Docker cicy-code",
-    "install": "Download & Install",
+    "install": "Install",
     "start": "Start",
     "running": "Running · :8009",
     "notRunning": "Stopped · click Start",
-    "notInstalled": "Docker Desktop not installed",
+    "notInstalled": "Not installed · click Install",
     "working": "Working…",
     "ready": "Docker cicy-code is ready",
     "failed": "Install failed",

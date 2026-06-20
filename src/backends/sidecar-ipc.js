@@ -18,6 +18,7 @@ const os = require("os");
 const path = require("path");
 const sidecar = require("../sidecar/cicy-code");
 const docker = require("../sidecar/docker");
+const wslDocker = require("../sidecar/wsl-docker"); // Docker-版 via WSL2+Ubuntu (方案 A)
 
 const PORT = Number(process.env.CICY_CODE_PORT || 8008);
 
@@ -106,52 +107,45 @@ function register({ sidecarLogPath } = {}) {
     }
   });
 
-  // ---- Docker-版 cicy-code on :8009 (homepage "Docker cicy-code" card) ----
-  // Distinct states so the card shows the RIGHT button (主人: 状态要分清楚):
-  //   installed     — Docker Desktop is on disk
-  //   dockerRunning — the Docker daemon/engine is up
-  //   running       — the :8009 cicy-code container is healthy
-  // `installed` kept (= dockerRunning) for back-compat with older renderers.
+  // ---- Docker-版 cicy-code on :8009 — WSL2 + Ubuntu + Docker Engine (方案 A) ----
+  // Card states (主人: 状态分清楚): running(:8009 healthy)→打开 / dockerRunning
+  // (engine up)→启动 / installed(Ubuntu present)→启动 Docker / else→下载安装.
   ipcMain.handle("docker:app-status", async () => {
     try {
-      const dockerRunning = await docker.dockerOk();
-      const installed = !!docker.dockerDesktopExe();
-      const running = dockerRunning ? await docker.probeHealth(APP_PORT) : false;
-      return { installed, dockerRunning, running, port: APP_PORT, platform: process.platform };
+      const s = await wslDocker.status(APP_PORT); // { wsl, distro, engineUp, running }
+      return { installed: !!s.distro, dockerRunning: !!s.engineUp, running: !!s.running, port: APP_PORT, platform: process.platform };
     } catch (e) {
       return { installed: false, dockerRunning: false, running: false, port: APP_PORT, platform: process.platform, error: e.message };
     }
   });
 
-  // Common run options for the :8009 instance: its own container/volume, the
-  // whole-home mount, and the LLM gateway env keyed by the 8008 team's token.
+  // Common run options for the :8009 instance: its own container/volume + the
+  // LLM gateway env keyed by the 8008 team's token. (WSL: whole-home mount via
+  // -v <volume>:/home/cicy inside wsl-docker.)
   const appOpts = () => {
     const token = readLocalApiToken();
     const env = { CICY_AI_GATEWAY_LLM_ENDPOINT: GATEWAY_ENDPOINT };
     if (token) env.CICY_AI_GATEWAY_LLM_API_KEY = token;
-    return { port: APP_PORT, container: APP_CONTAINER, volume: APP_VOLUME, mountTarget: APP_MOUNT, env };
+    return { port: APP_PORT, container: APP_CONTAINER, volume: APP_VOLUME, env };
   };
   // Register the running :8009 instance as a (custom) team so the card's "打开"
   // reuses the token-injected open/reload flow. addTeam dedups by host:port.
   const registerAppTeam = async () => {
     try {
       const lt = require("./local-teams");
-      const tok = await docker.readContainerToken(APP_PORT);
+      const tok = await wslDocker.readContainerToken(APP_PORT);
       await lt.addTeam({ base_url: `http://127.0.0.1:${APP_PORT}`, name: "Docker cicy-code", ...(tok ? { api_token: tok } : {}) });
     } catch { /* best-effort — the container itself is up */ }
   };
 
-  // One-click bootstrap of the Docker-版 instance: install Docker Desktop if
-  // missing (installer → Desktop) WHILE downloading the R2 image (→ ~/Downloads)
-  // in parallel, import it, start the :8009 container, wait for health. Streams
-  // phase/progress on 'docker:app-progress' so the card's modal mirrors the
-  // cicy-code 升级 modal. Idempotent + resumable → the modal's 重试 just re-runs.
+  // One-click bootstrap (方案 A): ensure WSL2 → Ubuntu → Docker Engine → load
+  // image → start :8009 container → health. Streams phase/progress on
+  // 'docker:app-progress'. Idempotent + resumable → the modal's 重试 just re-runs.
   ipcMain.handle("docker:app-bootstrap", async (e) => {
     if (process.platform !== "win32") return { ok: false, error: "Docker cicy-code is Windows-only" };
     try {
-      const installDest = path.join(docker.downloadsDir(), "Docker Desktop Installer.exe");
-      const result = await docker.bootstrap({
-        ...appOpts(), installDest,
+      const result = await wslDocker.bootstrap({
+        ...appOpts(),
         onProgress: (ev) => { try { e.sender.send("docker:app-progress", ev); } catch {} },
       });
       if (result && result.ok) await registerAppTeam();
@@ -161,44 +155,29 @@ function register({ sidecarLogPath } = {}) {
     }
   });
 
-  // ⋯ menu → 重启: `docker restart` the :8009 container, wait for health.
+  // ⋯ menu → 重启 the :8009 container, wait for health.
   ipcMain.handle("docker:app-restart", async () => {
-    try {
-      await docker.restart({ container: APP_CONTAINER });
-      const ok = await docker.waitUntil(() => docker.probeHealth(APP_PORT), { totalMs: 60000, everyMs: 2000 });
-      return { ok };
-    } catch (e) { return { ok: false, error: e.message }; }
-  });
-
-  // ⋯ menu → 停止: graceful `docker stop` (keeps the container; data persists in
-  // the named volume). The card's 启动 path re-creates/starts it.
-  ipcMain.handle("docker:app-stop", async () => {
-    try { await docker.stopContainer({ container: APP_CONTAINER }); return { ok: true }; }
+    try { const ok = await wslDocker.restart({ container: APP_CONTAINER, port: APP_PORT }); return { ok: !!ok }; }
     catch (e) { return { ok: false, error: e.message }; }
   });
 
-  // ⋯ menu → 升级: re-pull the latest R2 image (→ ~/Downloads, resume/skip + bad-
-  // partial delete), import it, re-create the :8009 container on the new image.
-  // Streams on 'docker:app-progress' so the same modal shows the upgrade.
+  // ⋯ menu → 停止: graceful `docker stop` (data persists in the named volume).
+  ipcMain.handle("docker:app-stop", async () => {
+    try { await wslDocker.stop({ container: APP_CONTAINER }); return { ok: true }; }
+    catch (e) { return { ok: false, error: e.message }; }
+  });
+
+  // ⋯ menu → 升级: re-pull the latest R2 image, re-create the :8009 container.
   ipcMain.handle("docker:app-upgrade", async (e) => {
     if (process.platform !== "win32") return { ok: false, error: "Docker cicy-code is Windows-only" };
-    const emit = (ev) => { try { e.sender.send("docker:app-progress", ev); } catch {} };
     try {
-      if (!(await docker.dockerOk())) { emit({ phase: "done", status: "error", message: "Docker 未运行" }); return { ok: false, error: "docker_not_running" }; }
-      const tmp = await docker.downloadImageTarball({ emit });
-      await docker.loadImageFromTarball(tmp, { emit });
-      emit({ phase: "image", status: "done", message: "镜像已更新" });
-      emit({ phase: "container", status: "running", message: "用新镜像重建容器…" });
-      await docker.stop({ container: APP_CONTAINER });
-      const child = await docker.start(appOpts());
-      if (!child) { emit({ phase: "done", status: "error", message: "容器启动失败" }); return { ok: false, error: "container_start_failed" }; }
-      emit({ phase: "health", status: "running", message: "等待就绪…" });
-      const ok = await docker.waitUntil(() => docker.probeHealth(APP_PORT), { totalMs: 120000, everyMs: 3000 });
-      emit({ phase: "done", status: ok ? "done" : "error", message: ok ? "升级完成 🎉" : "启动了但 :8009 还没响应" });
-      if (ok) await registerAppTeam();
-      return { ok };
+      const result = await wslDocker.upgrade({
+        ...appOpts(),
+        onProgress: (ev) => { try { e.sender.send("docker:app-progress", ev); } catch {} },
+      });
+      if (result && result.ok) await registerAppTeam();
+      return result;
     } catch (err) {
-      emit({ phase: "done", status: "error", message: `升级失败：${err.message}` });
       return { ok: false, error: err.message };
     }
   });

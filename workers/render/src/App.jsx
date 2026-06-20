@@ -1500,7 +1500,7 @@ const dockerDrawer = {
   },
   close() { dockerDrawerState = null; emitDockerDrawer(); },
 };
-const DOCKER_PHASES = [["install-docker", "装 Docker"], ["image", "加载镜像"], ["container", "启动容器"], ["done", "完成"]];
+const DOCKER_PHASES = [["install-docker", "准备环境"], ["image", "加载镜像"], ["container", "启动容器"], ["done", "完成"]];
 const DOCKER_BADGE = { "install-docker": "Docker", image: "镜像", container: "容器", health: "容器", done: "完成" };
 const DOCKER_DL_LABEL = { "install-docker": "Docker Desktop", image: "基础镜像" };
 function fmtBytes(n) {
