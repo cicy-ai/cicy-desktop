@@ -11,7 +11,7 @@
 // → health-probe :8009 from Windows. Every step checks-then-acts and is
 // idempotent, so 重试 resumes.
 
-const { execFile, execFileSync } = require("child_process");
+const { execFile, execFileSync, spawn } = require("child_process");
 const path = require("path");
 const docker = require("./docker"); // shared: downloads, waitUntil, probeHealth, launchElevated, ensureWsl…
 
@@ -29,6 +29,34 @@ function wslRun(cmd, { timeout = 60000, distro = DISTRO } = {}) {
         if (err) { err.stdout = String(stdout || ""); err.stderr = String(stderr || ""); return reject(err); }
         resolve({ stdout: String(stdout), stderr: String(stderr) });
       });
+  });
+}
+
+// Like wslRun, but STREAMS each output line to the install drawer so the user
+// (and the customer) watch the real install proceed — apt fetching/unpacking,
+// `docker load` layers — instead of staring at a frozen spinner. Throttled so
+// rapid output doesn't flood the log; resolves { stdout } with the full tail.
+function wslRunStream(cmd, { emit, phase = "install-docker", timeout = 900000, distro = DISTRO } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn("wsl", ["-d", distro, "-u", "root", "--", "bash", "-lc", cmd], { windowsHide: true });
+    let buf = "", tail = "", last = 0;
+    const pump = (chunk) => {
+      buf += chunk.toString("utf8");
+      let nl;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl).replace(/\r$/, "").trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        tail += line + "\n";
+        const now = Date.now();
+        if (emit && now - last > 350) { last = now; emit({ phase, status: "running", message: line.slice(0, 200) }); }
+      }
+    };
+    child.stdout.on("data", pump);
+    child.stderr.on("data", pump);
+    const timer = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} reject(Object.assign(new Error("timeout"), { stdout: tail })); }, timeout);
+    child.on("error", (e) => { clearTimeout(timer); reject(e); });
+    child.on("close", (code) => { clearTimeout(timer); code === 0 ? resolve({ stdout: tail }) : reject(Object.assign(new Error(`exit ${code}`), { stdout: tail })); });
   });
 }
 
@@ -66,8 +94,8 @@ async function dockerInstalled() {
 
 // Install Docker Engine (docker.io) inside the distro.
 async function installDockerEngine({ emit } = {}) {
-  emit && emit({ phase: "install-docker", status: "running", message: "在 Ubuntu 里安装 Docker（apt，几分钟）…" });
-  await wslRun("apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io", { timeout: 900000 });
+  emit && emit({ phase: "install-docker", status: "running", message: "在 Ubuntu 里安装 Docker（apt,几分钟,下面是实时进度）…" });
+  await wslRunStream("apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io 2>&1", { emit, phase: "install-docker", timeout: 900000 });
 }
 
 // dockerd reachable inside the distro?
@@ -96,9 +124,9 @@ function toWslPath(winPath) {
 
 // docker load the (Windows-side) tarball into the distro's Docker + retag.
 async function loadImage(winTarballPath, { emit } = {}) {
-  emit && emit({ phase: "image", status: "loading", message: "正在导入镜像到 Docker（较大，约 1-3 分钟，请稍候）…" });
+  emit && emit({ phase: "image", status: "loading", message: "正在导入镜像到 Docker（较大,约 1-3 分钟,下面是实时进度）…" });
   const p = toWslPath(winTarballPath);
-  const { stdout } = await wslRun(`docker load -i "${p}"`, { timeout: 600000 });
+  const { stdout } = await wslRunStream(`docker load -i "${p}"`, { emit, phase: "image", timeout: 600000 });
   const m = String(stdout).match(/Loaded image:\s*(\S+)/i);
   if (m && m[1] !== IMAGE) { try { await wslRun(`docker tag ${m[1]} ${IMAGE}`, { timeout: 15000 }); } catch {} }
 }
@@ -155,7 +183,8 @@ async function bootstrap({ onProgress, port = 8009, container = "cicy-code-docke
   // 2) Ubuntu distro
   if (!distroInstalled()) {
     try { await installDistro({ emit }); } catch (e) { emit({ phase: "done", status: "error", message: `Ubuntu 安装失败：${e.message}（点重试）` }); return { ok: false, reason: "distro_install_failed" }; }
-    const ok = await docker.waitUntil(() => distroInstalled(), { totalMs: 600000, everyMs: 5000 });
+    const t0 = Date.now();
+    const ok = await docker.waitUntil(() => distroInstalled(), { totalMs: 600000, everyMs: 5000, onTick: () => emit({ phase: "install-docker", status: "running", message: `正在下载/注册 Ubuntu…（已 ${Math.round((Date.now() - t0) / 1000)}s,首次较慢请耐心）` }) });
     if (!ok) { emit({ phase: "done", status: "error", message: "Ubuntu 还没装好——稍等或点「重试」" }); return { ok: false, reason: "distro_not_ready" }; }
   }
 

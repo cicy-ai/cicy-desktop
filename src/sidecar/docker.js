@@ -504,15 +504,51 @@ function wslMissing() {
   }
 }
 
+// Read-only, works without elevation. True iff a Windows optional feature
+// reports State : Enabled.
+function featureEnabled(feature) {
+  return new Promise((resolve) => {
+    execFile("dism", ["/english", "/online", "/get-featureinfo", `/featurename:${feature}`],
+      { timeout: 30000, windowsHide: true },
+      (_e, out) => resolve(/State\s*:\s*Enabled/i.test(String(out || ""))));
+  });
+}
+
+// Enable ONE Windows optional feature, elevated, and WAIT until it actually
+// reports Enabled. The old `wsl --install` was fire-and-forget — it could
+// silently no-op, leaving the card stuck on "reboot required" forever. Here we
+// drive DISM and verify, streaming every step to the install drawer.
+async function dismEnableFeature(feature, label, { emit } = {}) {
+  if (await featureEnabled(feature)) {
+    emit && emit({ phase: "install-docker", status: "running", message: `${label}：已启用，跳过` });
+    return true;
+  }
+  emit && emit({ phase: "install-docker", status: "running", message: `${label}：正在启用（约 1–2 分钟，请稍候）…` });
+  await launchElevated("dism", ["/online", "/enable-feature", `/featurename:${feature}`, "/all", "/norestart"], { emit }).catch(() => {});
+  // launchElevated fires the elevated task and returns immediately; poll the
+  // real feature state (DISM exits 3010 = success + reboot-required).
+  const ok = await waitUntil(() => featureEnabled(feature), { totalMs: 240000, everyMs: 5000 });
+  emit && emit({ phase: "install-docker", status: ok ? "running" : "error", message: ok ? `${label}：已启用 ✓` : `${label}：未能确认启用（点「重试」）` });
+  return ok;
+}
+
 // Ensure the WSL2 backend exists; install it (elevated) if missing. Returns
-// { ok } when present, or { needsReboot } after kicking off `wsl --install`
-// (which requires admin + a Windows reboot before Docker can use it).
+// { ok } when already present, { needsReboot } after the two required Windows
+// features are verified-enabled (a Windows reboot is then needed before Docker
+// can use WSL2), or { failed } if a feature couldn't be enabled.
 async function ensureWsl({ emit } = {}) {
   if (!wslMissing()) return { ok: true };
-  emit && emit({ phase: "install-docker", status: "running", message: "Docker 需要 WSL2 后端，正在安装 WSL（请在管理员授权框点「是」，装完需重启 Windows）…" });
-  // --no-distribution: just the WSL2 platform (Docker brings its own distro);
-  // falls back to plain `wsl --install` on older builds that reject the flag.
-  await launchElevated("wsl", ["--install", "--no-distribution"], { emit });
+  emit && emit({ phase: "install-docker", status: "running", message: "Docker 需要 WSL2 后端，开始启用所需的 Windows 功能…" });
+  const a = await dismEnableFeature("Microsoft-Windows-Subsystem-Linux", "启用 WSL 功能 1/2 · Linux 子系统", { emit });
+  const b = await dismEnableFeature("VirtualMachinePlatform", "启用 WSL 功能 2/2 · 虚拟机平台", { emit });
+  if (!a || !b) {
+    emit && emit({ phase: "done", status: "error", message: "WSL 功能未能全部启用——请点「重试」" });
+    return { ok: false, needsReboot: false, failed: true };
+  }
+  // Best-effort: also pull the WSL2 kernel/plumbing (no-op until reboot on some
+  // builds; harmless if it errors).
+  await launchElevated("wsl", ["--install", "--no-distribution"], { emit }).catch(() => {});
+  emit && emit({ phase: "install-docker", status: "running", message: "WSL2 功能已启用 ✓，需【重启 Windows】后回来点「重试」继续。" });
   return { ok: false, needsReboot: true };
 }
 
