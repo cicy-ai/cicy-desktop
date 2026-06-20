@@ -107,15 +107,19 @@ function register({ sidecarLogPath } = {}) {
   });
 
   // ---- Docker-版 cicy-code on :8009 (homepage "Docker cicy-code" card) ----
-  // Status: is Docker Desktop installed, and is the :8009 container healthy?
-  // platform tells the card to render only on Windows.
+  // Distinct states so the card shows the RIGHT button (主人: 状态要分清楚):
+  //   installed     — Docker Desktop is on disk
+  //   dockerRunning — the Docker daemon/engine is up
+  //   running       — the :8009 cicy-code container is healthy
+  // `installed` kept (= dockerRunning) for back-compat with older renderers.
   ipcMain.handle("docker:app-status", async () => {
     try {
-      const installed = await docker.dockerOk();
-      const running = await docker.probeHealth(APP_PORT);
-      return { installed, running, port: APP_PORT, platform: process.platform };
+      const dockerRunning = await docker.dockerOk();
+      const installed = !!docker.dockerDesktopExe();
+      const running = dockerRunning ? await docker.probeHealth(APP_PORT) : false;
+      return { installed, dockerRunning, running, port: APP_PORT, platform: process.platform };
     } catch (e) {
-      return { installed: false, running: false, port: APP_PORT, platform: process.platform, error: e.message };
+      return { installed: false, dockerRunning: false, running: false, port: APP_PORT, platform: process.platform, error: e.message };
     }
   });
 

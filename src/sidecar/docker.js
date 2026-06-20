@@ -307,7 +307,11 @@ async function downloadImageTarball({ emit } = {}) {
 // `docker load` an already-downloaded tarball + re-tag to IMAGE. Needs the
 // daemon up, so this runs AFTER Docker is ready (主人: 再导入 docker).
 async function loadImageFromTarball(tmp, { emit } = {}) {
-  emit && emit({ phase: "image", status: "running", message: "docker load…", progress: 100 });
+  // NO progress:100 here — `docker load` is a separate, no-byte-progress step.
+  // Emitting 100% made the bar look "done" while the (slow) load was still
+  // running, so the user saw 100% but it wasn't finished (主人 bug). The drawer
+  // shows this as the active "导入镜像" step with a spinner instead.
+  emit && emit({ phase: "image", status: "loading", message: "正在导入镜像到 Docker（较大，约 1-3 分钟，请稍候）…" });
   console.log(`[docker-sidecar] docker load…`);
   let stdout;
   try {
@@ -574,7 +578,6 @@ async function bootstrap({ onProgress, port = 8008, container = CONTAINER, volum
     try {
       let tmp = imgDl ? await imgDl : null;
       if (!tmp) tmp = await downloadImageTarball({ emit }); // not pre-dl'd / parallel dl failed → fetch now
-      emit({ phase: "image", status: "running", message: "导入 Docker 镜像…", progress: 100 });
       await loadImageFromTarball(tmp, { emit });
       emit({ phase: "image", status: "done", message: "镜像就绪" });
     } catch (e) {

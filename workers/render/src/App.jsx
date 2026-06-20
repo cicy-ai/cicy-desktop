@@ -1586,6 +1586,14 @@ function DockerInstallDrawerHost() {
           </div>
         )}
 
+        {/* Prominent "what's happening NOW" line — so a download bar at 100% is
+            never mistaken for the whole flow being done (主人 bug). */}
+        {running && st.logs.length > 0 && (
+          <div className="drawer__now" data-id="DockerDrawer-now">
+            <Spinner /><span>{st.logs[st.logs.length - 1].message}</span>
+          </div>
+        )}
+
         <div className="drawer__log drawer__log--scroll" data-id="DockerDrawer-log" ref={logRef}>
           {st.logs.length === 0
             ? <div className="drawer__log-empty">{tr("docker.preparing", "准备中…")}</div>
@@ -1646,7 +1654,14 @@ function DockerCard({ dockerTeam, onOpen, onRefresh }) {
     catch (e) { console.warn("[DockerCard]", e); }
   }, []);
 
-  useEffect(() => { checkStatus(); }, [checkStatus]);
+  // Poll so the card reflects reality even when Docker changes outside the app
+  // (user installs Docker / the engine comes up after a reboot / a container
+  // starts). Pause polling while an op is running (the op refreshes itself).
+  useEffect(() => {
+    checkStatus();
+    const id = setInterval(() => { if (!busy) checkStatus(); }, 12000);
+    return () => clearInterval(id);
+  }, [checkStatus, busy]);
 
   // Close the ⋯ menu on outside-click / Esc (mirrors LocalTeamCard).
   useEffect(() => {
@@ -1733,23 +1748,33 @@ function DockerCard({ dockerTeam, onOpen, onRefresh }) {
   const platform = window.cicy?.platform || status?.platform;
   if (platform !== "win32") return null;
 
+  // Distinct states (主人: 状态分清楚):
+  //   running       — :8009 container healthy → 打开
+  //   dockerRunning — engine up, no container → 启动 (build/start container)
+  //   installed     — Docker on disk but engine down → 启动 Docker
+  //   else          — not installed → 下载安装
   const running = !!status?.running || dockerTeam?.status === "running";
+  const dockerRunning = !!status?.dockerRunning;
   const installed = !!status?.installed;
-  const tone = running ? "ok" : installed ? "warn" : "off";
+  const tone = running ? "ok" : (dockerRunning || installed) ? "warn" : "off";
   const isBusy = !!busy;
   const stateText = running
     ? tr("docker.running", "运行中 · :8009")
-    : installed
+    : dockerRunning
       ? tr("docker.notRunning", "未启动 · 点「启动」")
-      : tr("docker.notInstalled", "Docker Desktop 未安装");
+      : installed
+        ? tr("docker.engineDown", "Docker 未运行 · 点启动")
+        : tr("docker.notInstalled", "Docker Desktop 未安装");
 
   const ctaLabel = isBusy
     ? tr("docker.working", "处理中…")
     : running
       ? tr("localTeams.open", "打开")
-      : installed
+      : dockerRunning
         ? tr("docker.start", "启动")
-        : tr("docker.install", "下载安装");
+        : installed
+          ? tr("docker.startDocker", "启动 Docker")
+          : tr("docker.install", "下载安装");
 
   const onCta = () => {
     if (isBusy) return;
@@ -1757,8 +1782,8 @@ function DockerCard({ dockerTeam, onOpen, onRefresh }) {
     runBootstrap();
   };
 
-  // The ⋯ menu (重启 / 停止 / 升级) is only meaningful once Docker is installed.
-  const showMenu = installed;
+  // The ⋯ menu (重启 / 停止 / 升级) only makes sense once the container is up.
+  const showMenu = running;
 
   return (
     <div data-id="DockerCard" className={`bcard bcard--docker${running ? " bcard--online" : ""}`}>

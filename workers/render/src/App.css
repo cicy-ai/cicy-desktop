@@ -984,6 +984,16 @@ body {
 .drawer__log--scroll::-webkit-scrollbar-thumb:hover { background: rgba(125,135,150,.55); background-clip: padding-box; }
 
 /* Fixed download progress bars (Docker Desktop / 基础镜像) — no scroll spam */
+/* "What's happening now" line — prominent so a 100% download bar is never
+   mistaken for the whole flow being finished (主人 bug). */
+.drawer__now {
+  display: flex; align-items: center; gap: 9px;
+  margin: 12px 14px 2px; padding: 9px 12px;
+  background: rgba(91,141,247,.08); border: 1px solid rgba(91,141,247,.2); border-radius: 10px;
+  font-size: 12.5px; color: var(--text, #e6eaf0);
+}
+.drawer__now span { flex: 1; min-width: 0; }
+
 .drawer__dlbars { display: flex; flex-direction: column; gap: 10px; margin: 12px 14px 2px; }
 .dlbar {
   padding: 10px 12px; border-radius: 10px;

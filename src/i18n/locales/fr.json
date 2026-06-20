@@ -149,7 +149,9 @@
     "background": "Continuer en arrière-plan",
     "rebootNeeded": "WSL2 installé — REDÉMARREZ Windows, puis cliquez sur Réessayer",
     "rebootShort": "Redémarrer Windows",
-    "installerLaunched": "Programme d installation Docker ouvert — terminez-le (WSL2/redemarrage), puis Reessayer"
+    "installerLaunched": "Programme d installation Docker ouvert — terminez-le (WSL2/redemarrage), puis Reessayer",
+    "engineDown": "Moteur Docker arrete · Demarrer",
+    "startDocker": "Demarrer Docker"
   },
   "common": {
     "close": "Fermer",
