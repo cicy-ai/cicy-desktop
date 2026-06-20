@@ -17,7 +17,8 @@ const os = require("os");
 const fs = require("fs");
 const docker = require("./docker"); // shared: downloads, waitUntil, probeHealth, launchElevated, ensureWsl…
 
-const DISTRO   = process.env.CICY_WSL_DISTRO || "Ubuntu";
+// Dedicated distro name — NEVER reuse/clobber a user's own "Ubuntu" distro.
+const DISTRO   = process.env.CICY_WSL_DISTRO || "cicy-code-wsl";
 const IMAGE    = process.env.CICY_DOCKER_IMAGE || "cicybot/cicy-code:latest";
 // PRE-BAKED WSL rootfs (built in CI, .github/workflows/build-wsl-package.yml):
 // Ubuntu 22.04 + Docker Engine + the cicy-code image already loaded into
@@ -99,32 +100,43 @@ function distroInstalled(distro = DISTRO) {
 // Install the Ubuntu distro WITHOUT launching its interactive first-run setup
 // (--no-launch). We always run commands as root afterwards, so no user account
 // is needed. Elevated via the scheduled-task path (reliable on these machines).
-async function installDistro({ emit } = {}) {
-  // 1) Download the PRE-BAKED rootfs (Ubuntu+Docker+image, ~444MB) with a real
-  //    progress bar. curl is ~10× faster than node's downloader on OSS/R2.
-  const dest = rootfsPath();
-  try { await docker.curlDownload(ROOTFS_URL, dest, { emit, phase: "install-docker", label: "下载运行环境(Ubuntu+Docker+镜像)" }); }
-  catch (e) {
-    emit && emit({ phase: "install-docker", status: "running", message: `curl 下载失败(${e.message}),改用内置下载…` });
-    await docker.ensureDownloaded(ROOTFS_URL, dest, null, { emit, phase: "install-docker", label: "下载运行环境" });
-  }
-  // 2) Ensure the WSL2 KERNEL. On the inbox WSL of Win10/11 (no Store WSL),
-  //    `wsl --update` isn't even a recognized arg, and a feature-enable + reboot
-  //    leaves the kernel component missing → `--import --version 2` fails with
-  //    "WSL 2 requires an update to its kernel component". So install the kernel
-  //    MSI ourselves (download + elevated msiexec), then set v2 default.
-  await ensureWslKernel({ emit });
-  try { await new Promise((res) => execFile("wsl", ["--set-default-version", "2"], { timeout: 15000, windowsHide: true }, () => res())); } catch {}
-  // 3) Import it as a WSL2 distro (creates the VHD under installDir; no MS Store,
-  //    no interactive first-run — we run everything as root afterwards).
-  emit && emit({ phase: "install-docker", status: "running", message: "导入 Ubuntu 到 WSL2…" });
-  const installDir = path.join(process.env["LOCALAPPDATA"] || path.join(os.homedir(), "AppData", "Local"), "cicy-ubuntu");
-  try { fs.mkdirSync(installDir, { recursive: true }); } catch {}
-  await new Promise((resolve, reject) => {
+// Raw `wsl --import` of the rootfs as an ISOLATED v2 distro.
+function importTarball(dest, installDir) {
+  return new Promise((resolve, reject) => {
     execFile("wsl", ["--import", DISTRO, installDir, dest, "--version", "2"],
       { timeout: 600000, windowsHide: true },
-      (err, _so, se) => err ? reject(Object.assign(err, { stderr: String(se || "") })) : resolve());
+      (err, _so, se) => { if (err) { err.stderr = String(se || ""); return reject(err); } resolve(); });
   });
+}
+
+async function installDistro({ emit } = {}) {
+  // 1) Download the PRE-BAKED rootfs (Ubuntu+Docker+image baked in, ~444MB) with
+  //    a real progress bar. curl is ~10× faster than node's downloader on OSS.
+  const dest = rootfsPath();
+  try { await docker.curlDownload(ROOTFS_URL, dest, { emit, phase: "image", label: "下载运行环境" }); }
+  catch (e) {
+    emit && emit({ phase: "image", status: "running", message: `下载器异常(${e.message}),改用备用下载…` });
+    await docker.ensureDownloaded(ROOTFS_URL, dest, null, { emit, phase: "image", label: "下载运行环境" });
+  }
+  // 2) Import as an ISOLATED WSL2 distro: its OWN VHDX under a dedicated dir, so
+  //    it never touches the user's existing distros. `--version 2` sets just THIS
+  //    distro to v2 — we do NOT run `--set-default-version` (that would change the
+  //    user's global default). The WSL2 kernel is shared; we install it ONLY when
+  //    import actually fails for lack of it (never downgrade an existing kernel).
+  const installDir = path.join(process.env["LOCALAPPDATA"] || path.join(os.homedir(), "AppData", "Local"), "cicy-code-wsl");
+  try { fs.mkdirSync(installDir, { recursive: true }); } catch {}
+  emit && emit({ phase: "container", status: "running", message: "导入运行环境到 WSL2…" });
+  try {
+    await importTarball(dest, installDir);
+  } catch (e) {
+    // Most likely the shared WSL2 kernel component is missing — install it
+    // (idempotent) and retry once.
+    emit && emit({ phase: "container", status: "running", message: "需要 WSL2 内核,正在安装后重试…" });
+    await ensureWslKernel({ emit });
+    await importTarball(dest, installDir);
+  }
+  // 3) Free the ~444MB package now that the distro has everything.
+  try { fs.unlinkSync(dest); } catch {}
 }
 
 // docker CLI present inside the distro?
@@ -231,6 +243,20 @@ async function readContainerToken(port = 8009, container = "cicy-code-docker") {
   } catch { return ""; }
 }
 
+// Register a Windows logon task that starts dockerd in our distro on every
+// logon — old inbox WSL ignores wsl.conf [boot], so without this :8009 is dead
+// after a Windows reboot until the user clicks 启动. The container's
+// --restart unless-stopped then brings cicy-code back automatically. Idempotent
+// (start-dockerd.sh is `pgrep dockerd || dockerd`); /f overwrites a stale task.
+function ensureAutostart() {
+  if (process.platform !== "win32") return Promise.resolve();
+  return new Promise((res) => {
+    const tr = `wsl.exe -d ${DISTRO} -u root -e /usr/local/sbin/start-dockerd.sh`;
+    execFile("schtasks", ["/create", "/tn", "cicy-docker-autostart", "/tr", tr, "/sc", "onlogon", "/rl", "HIGHEST", "/f"],
+      { windowsHide: true }, () => res());
+  });
+}
+
 // Composite status for the card.
 async function status(port = 8009) {
   const wsl = !docker.wslMissing();
@@ -277,37 +303,36 @@ async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-dock
     try { await installDockerEngine({ emit }); } catch (e) { emit({ phase: "install-docker", status: "error", message: `Docker 安装失败：${e.message}（点重试）` }); return { ok: false, reason: "docker_install_failed" }; }
   }
 
-  // 4) dockerd up
+  // 4) dockerd up (phase "container" = 启动服务)
   if (!(await dockerEngineUp())) {
-    emit({ phase: "install-docker", status: "running", message: "启动 Docker 引擎…" });
+    emit({ phase: "container", status: "running", message: "启动 Docker 引擎…" });
     await startEngine();
     const up = await docker.waitUntil(dockerEngineUp, { totalMs: 60000, everyMs: 3000 });
-    if (!up) { emit({ phase: "install-docker", status: "error", message: "Docker 引擎没起来——点「重试」" }); return { ok: false, reason: "dockerd_not_up" }; }
+    if (!up) { emit({ phase: "container", status: "error", message: "Docker 引擎没起来——点「重试」" }); return { ok: false, reason: "dockerd_not_up" }; }
   }
-  emit({ phase: "install-docker", status: "done", message: "Docker 环境就绪" });
 
-  // 5) Base image
+  // 5) Base image — pre-baked into the package, so this normally just confirms.
+  //    The download-tarball path is a fallback for a non-pre-baked rootfs.
   if (!(await imagePresent())) {
     let tarball;
     try { tarball = await docker.downloadImageTarball({ emit }); }
     catch (e) { emit({ phase: "image", status: "error", message: `镜像下载失败：${e.message}（点重试续传）` }); return { ok: false, reason: "image_download_failed" }; }
-    try { await loadImage(tarball, { emit }); emit({ phase: "image", status: "done", message: "镜像就绪" }); }
+    try { await loadImage(tarball, { emit }); }
     catch (e) { emit({ phase: "image", status: "error", message: `镜像导入失败：${e.message}（点重试）` }); return { ok: false, reason: "image_load_failed" }; }
-  } else {
-    emit({ phase: "image", status: "skip", message: "镜像已就绪，跳过" });
   }
 
-  // 6) Container
+  // 6) Container (phase "container" = 启动服务)
   if (!(await probeHealth(port))) {
-    emit({ phase: "container", status: "running", message: "启动 cicy-code 容器…" });
+    emit({ phase: "container", status: "running", message: "启动 cicy-code 服务…" });
     try { await runContainer({ port, container, volume, env }); }
-    catch (e) { emit({ phase: "container", status: "error", message: `容器启动失败：${e.message}（点重试）` }); return { ok: false, reason: "container_start_failed" }; }
+    catch (e) { emit({ phase: "container", status: "error", message: `服务启动失败：${e.message}（点重试）` }); return { ok: false, reason: "container_start_failed" }; }
   }
 
   // 7) Health — the ONLY path to ok:true.
-  emit({ phase: "health", status: "running", message: "等待 cicy-code 就绪…" });
+  emit({ phase: "container", status: "running", message: "等待 cicy-code 就绪…" });
   const healthy = await docker.waitUntil(() => probeHealth(port), { totalMs: 120000, everyMs: 3000 });
-  emit({ phase: healthy ? "done" : "container", status: healthy ? "done" : "error", message: healthy ? "Docker cicy-code 已就绪 🎉" : `容器起来了但 :${port} 还没响应——稍等或点「重试」` });
+  if (healthy) await ensureAutostart(); // survive Windows reboot
+  emit({ phase: healthy ? "done" : "container", status: healthy ? "done" : "error", message: healthy ? "Docker cicy-code 已就绪 🎉" : `服务起来了但 :${port} 还没响应——稍等或点「重试」` });
   return { ok: healthy, container };
 }
 
