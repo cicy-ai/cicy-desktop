@@ -199,6 +199,12 @@ async function loadImage(winTarballPath, { emit } = {}) {
 const probeHealth = docker.probeHealth;
 
 // Start (or adopt) the container on :port inside the distro.
+//
+// cicy-code binds 127.0.0.1 inside the container (localhost-only by design), so
+// `-p 8009:8008` doesn't work — docker-proxy can't reach a loopback-bound app.
+// Instead use host networking + PORT=<port>: the app listens on <port> in the
+// distro's network namespace, and WSL2's localhost relay forwards it to Windows
+// 127.0.0.1:<port>. Verified: HEALTH 200 from Windows.
 async function runContainer({ port = 8009, container = "cicy-code-docker", volume = "cicy-team", env = {} } = {}) {
   if (await probeHealth(port)) return { adopted: true };
   // Replace any stale same-named container.
@@ -207,16 +213,17 @@ async function runContainer({ port = 8009, container = "cicy-code-docker", volum
     .filter(([, v]) => v != null && v !== "")
     .map(([k, v]) => `-e ${k}='${String(v).replace(/'/g, "'\\''")}'`)
     .join(" ");
-  const cmd = `docker run -d --name ${container} --restart unless-stopped -p ${port}:8008 -v ${volume}:/home/cicy ${envArgs} ${IMAGE}`;
+  const cmd = `docker run -d --name ${container} --restart unless-stopped --network host -e PORT=${port} -v ${volume}:/home/cicy ${envArgs} ${IMAGE}`;
   await wslRun(cmd, { timeout: 60000 });
   return { started: true };
 }
 
 // Read the container's own api_token (its volume-persisted global.json) for the
 // team registration — the host token is a different credential.
-async function readContainerToken(port = 8009) {
+async function readContainerToken(port = 8009, container = "cicy-code-docker") {
   try {
-    const { stdout } = await wslRun(`docker ps --filter "publish=${port}" --format '{{.Names}}'`, { timeout: 10000 });
+    // Host networking has no "publish" mapping, so look the container up by name.
+    const { stdout } = await wslRun(`docker ps --filter "name=${container}" --format '{{.Names}}'`, { timeout: 10000 });
     const name = stdout.trim().split("\n")[0];
     if (!name) return "";
     const r = await wslRun(`docker exec ${name} cat /home/cicy/cicy-ai/global.json`, { timeout: 10000 });
