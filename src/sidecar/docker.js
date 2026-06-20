@@ -309,7 +309,10 @@ function curlDownload(url, dest, { emit, phase = "image", label = "下载镜像"
   return new Promise(async (resolve, reject) => {
     let total = 0; try { total = await headSize(url); } catch {}
     const bin = process.platform === "win32" ? "curl.exe" : "curl";
-    const args = ["-sL", "-A", DL_UA, "-C", "-", "--retry", "5", "--retry-delay", "3", "-o", dest, url];
+    // --retry-all-errors so a transient DNS blip (curl exit 6, common right after
+    // the app starts) retries on the fast curl path instead of falling back to
+    // the slow node downloader. --retry-connrefused covers a not-yet-ready net.
+    const args = ["-sL", "-A", DL_UA, "-C", "-", "--retry", "8", "--retry-delay", "3", "--retry-all-errors", "--retry-connrefused", "-o", dest, url];
     let child;
     try { child = spawn(bin, args, { windowsHide: true }); }
     catch (e) { return reject(e); }
