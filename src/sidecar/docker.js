@@ -28,9 +28,30 @@ const DOCKER_DESKTOP_MIRROR = process.env.CICY_DOCKER_DESKTOP_MIRROR
 // CICY_* env vars forwarded into the container (team onboarding, version pin…).
 const PASS_ENV = ["CICY_TEAM_TOKEN", "CICY_CODE_VERSION", "NPM_REGISTRY", "CICY_NPM_REGISTRY", "CICY_AGENTS", "ENABLE_CDN", "CICY_CLOUDFLARED_TOKEN"];
 
+// Resolve the docker CLI. CRITICAL on Windows: right after Docker Desktop
+// installs, it adds `...\Docker\resources\bin` to the SYSTEM PATH — but the
+// ALREADY-RUNNING cicy-desktop process keeps its stale PATH, so a bare
+// `execFile("docker", …)` ENOENTs and dockerOk() stays false forever (the
+// "已安装但起不来 / 卡在正在启动" bug). Probe the known absolute install paths
+// first; only fall back to PATH (and never cache that fallback, so a later
+// install is picked up).
+let _dockerBin = null;
+function dockerBin() {
+  if (_dockerBin) return _dockerBin;
+  if (process.platform === "win32") {
+    const cands = [
+      path.join(process.env["ProgramFiles"] || "C:\\Program Files", "Docker", "Docker", "resources", "bin", "docker.exe"),
+      path.join(process.env["ProgramW6432"] || "", "Docker", "Docker", "resources", "bin", "docker.exe"),
+      path.join(process.env["LOCALAPPDATA"] || "", "Docker", "Docker", "resources", "bin", "docker.exe"),
+    ].filter((c) => c && !c.startsWith("Docker"));
+    for (const c of cands) { try { if (fs.existsSync(c)) { _dockerBin = c; return c; } } catch {} }
+  }
+  return "docker"; // PATH fallback (mac/linux, or before Docker is installed)
+}
+
 function run(args, { timeout = 30000 } = {}) {
   return new Promise((resolve, reject) => {
-    execFile("docker", args, { timeout, windowsHide: true }, (err, stdout, stderr) => {
+    execFile(dockerBin(), args, { timeout, windowsHide: true }, (err, stdout, stderr) => {
       if (err) { err.stdout = String(stdout || ""); err.stderr = String(stderr || ""); return reject(err); }
       resolve({ stdout: String(stdout), stderr: String(stderr) });
     });
