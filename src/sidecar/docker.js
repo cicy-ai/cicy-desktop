@@ -16,7 +16,10 @@ const os = require("os");
 const path = require("path");
 
 const IMAGE     = process.env.CICY_DOCKER_IMAGE || "cicybot/cicy-code:latest";
-const R2_TARBALL = process.env.CICY_DOCKER_URL  || "https://r2.deepfetch.de5.net/docker/cicy-code-latest.tar.gz";
+// Image tarball on Aliyun OSS (oss-cn-shanghai, public-read) — CN-domestic and
+// fast (~13MB/s upload); R2 was throttled to ~150KB/s from CN. Override via env.
+const R2_TARBALL = process.env.CICY_DOCKER_URL  || "https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/images/cicy-code-latest.tar.gz";
+const DL_UA     = process.env.CICY_DL_UA || "cicy-desktop"; // download UA (CN mirrors 403 empty/Mozilla UAs)
 const CONTAINER = process.env.CICY_DOCKER_CONTAINER || "cicy-code";
 const VOLUME    = process.env.CICY_DOCKER_VOLUME || "cicy-ai-data";
 // Docker Desktop installer (Windows). Direct from docker.com, with a COS mirror
@@ -99,7 +102,10 @@ function download(url, dest, { hops = 5, onProgress = null, resume = false } = {
     let offset = 0;
     if (resume) { try { offset = fs.statSync(dest).size; } catch {} }
     const lib = url.startsWith("https:") ? https : http;
-    const headers = offset > 0 ? { Range: `bytes=${offset}-` } : {};
+    // A non-empty, non-browser UA is required by some CN mirrors (Tsinghua TUNA
+    // 403s an empty UA AND a Mozilla/browser UA — anti-hotlink — but allows a
+    // plain client UA like this).
+    const headers = { "User-Agent": DL_UA, ...(offset > 0 ? { Range: `bytes=${offset}-` } : {}) };
     const req = lib.get(url, { timeout: 60000, headers }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         res.resume();
@@ -162,7 +168,7 @@ function headSize(url, hops = 5) {
   return new Promise((resolve) => {
     if (hops <= 0) return resolve(0);
     const lib = url.startsWith("https:") ? https : http;
-    const req = lib.request(url, { method: "HEAD", timeout: 15000 }, (res) => {
+    const req = lib.request(url, { method: "HEAD", timeout: 15000, headers: { "User-Agent": DL_UA } }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         res.resume();
         return headSize(res.headers.location, hops - 1).then(resolve);
@@ -295,12 +301,49 @@ function findExistingInstaller() {
   } catch { return null; }
 }
 
+// Download via the OS `curl` binary. node's http.get stalls at ~150KB/s on this
+// R2 endpoint while curl.exe sustains ~1.4MB/s (10×) — so for the big image
+// tarball we shell out to curl. `-C -` resumes a partial; progress comes from
+// polling the file size against the HEAD content-length.
+function curlDownload(url, dest, { emit, phase = "image", label = "下载镜像" } = {}) {
+  return new Promise(async (resolve, reject) => {
+    let total = 0; try { total = await headSize(url); } catch {}
+    const bin = process.platform === "win32" ? "curl.exe" : "curl";
+    const args = ["-sL", "-A", DL_UA, "-C", "-", "--retry", "5", "--retry-delay", "3", "-o", dest, url];
+    let child;
+    try { child = spawn(bin, args, { windowsHide: true }); }
+    catch (e) { return reject(e); }
+    let lastPct = -1;
+    const timer = setInterval(() => {
+      let have = 0; try { have = fs.statSync(dest).size; } catch {}
+      const pct = total ? Math.round((have / total) * 100) : 0;
+      if (pct === lastPct) return;
+      lastPct = pct;
+      emit && emit({ phase, status: "running", message: label, progress: pct, received: have, total, url, dest });
+    }, 1000);
+    child.on("error", (e) => { clearInterval(timer); reject(e); });
+    child.on("close", (code) => {
+      clearInterval(timer);
+      if (code !== 0) return reject(new Error(`curl exit ${code}`));
+      let have = 0; try { have = fs.statSync(dest).size; } catch {}
+      if (total && have < total) return reject(new Error(`incomplete ${have}/${total}`));
+      emit && emit({ phase, status: "running", message: label, progress: 100, received: have, total, url, dest });
+      resolve(dest);
+    });
+  });
+}
+
 // Download the R2 base-env image tarball (no docker needed yet). Split out of
-// loadImage so bootstrap can run this IN PARALLEL with the Docker Desktop
-// install (主人: 装 Docker 的同时下载 R2 镜像). Returns the tarball path.
+// loadImage so bootstrap can run this IN PARALLEL with the Docker install
+// (主人: 装 Docker 的同时下载 R2 镜像). Returns the tarball path. Prefers curl
+// (much faster here); falls back to the node downloader if curl is unavailable.
 async function downloadImageTarball({ emit } = {}) {
   const dest = imageTarballPath();
-  await ensureDownloaded(R2_TARBALL, dest, null, { emit, phase: "image", label: "下载镜像" });
+  try { await curlDownload(R2_TARBALL, dest, { emit, phase: "image", label: "下载镜像" }); }
+  catch (e) {
+    emit && emit({ phase: "image", status: "running", message: `curl 下载失败(${e.message}),改用内置下载…` });
+    await ensureDownloaded(R2_TARBALL, dest, null, { emit, phase: "image", label: "下载镜像" });
+  }
   return dest;
 }
 

@@ -26,6 +26,20 @@ const ROOTFS_URL = process.env.CICY_WSL_ROOTFS_URL ||
   "https://mirrors.tuna.tsinghua.edu.cn/ubuntu-cloud-images/wsl/jammy/current/ubuntu-jammy-wsl-amd64-ubuntu22.04lts.rootfs.tar.gz";
 
 function rootfsPath() { return path.join(docker.downloadsDir(), "ubuntu-jammy-wsl-rootfs.tar.gz"); }
+// WSL2 kernel update package (the small ~17MB MSI behind aka.ms/wsl2kernel).
+const KERNEL_MSI_URL = process.env.CICY_WSL_KERNEL_URL || "https://wslstorestorage.blob.core.windows.net/wslblob/wsl_update_x64.msi";
+
+// Install the WSL2 kernel component (idempotent — msiexec on an already-present
+// kernel is a fast no-op). Streams a progress bar; non-fatal on download failure
+// so we still attempt the import (the kernel may already be there).
+async function ensureWslKernel({ emit } = {}) {
+  const msi = path.join(docker.downloadsDir(), "wsl_update_x64.msi");
+  try { await docker.ensureDownloaded(KERNEL_MSI_URL, msi, null, { emit, phase: "install-docker", label: "下载 WSL2 内核" }); }
+  catch (e) { emit && emit({ phase: "install-docker", status: "running", message: `WSL2 内核下载失败:${e.message}（尝试继续）` }); return; }
+  emit && emit({ phase: "install-docker", status: "running", message: "安装 WSL2 内核组件…" });
+  await docker.launchElevated("msiexec", ["/i", msi, "/qn", "/norestart"], { emit });
+  await new Promise((r) => setTimeout(r, 8000)); // let msiexec register the kernel
+}
 
 // Run a bash command as root inside the distro. execFile (no host shell) → the
 // command string is passed verbatim to `bash -lc`, so only bash-level quoting
@@ -86,10 +100,12 @@ async function installDistro({ emit } = {}) {
   // 1) Download the rootfs with a REAL progress bar (Tsinghua mirror, resumable).
   const dest = rootfsPath();
   await docker.ensureDownloaded(ROOTFS_URL, dest, null, { emit, phase: "install-docker", label: "下载 Ubuntu" });
-  // 2) Ensure the WSL2 kernel exists (a feature-enable + reboot leaves the kernel
-  //    component missing → `--import --version 2` errors). Best-effort, non-fatal.
-  emit && emit({ phase: "install-docker", status: "running", message: "检查/更新 WSL2 内核…" });
-  await new Promise((res) => execFile("wsl", ["--update", "--web-download"], { timeout: 180000, windowsHide: true }, () => res()));
+  // 2) Ensure the WSL2 KERNEL. On the inbox WSL of Win10/11 (no Store WSL),
+  //    `wsl --update` isn't even a recognized arg, and a feature-enable + reboot
+  //    leaves the kernel component missing → `--import --version 2` fails with
+  //    "WSL 2 requires an update to its kernel component". So install the kernel
+  //    MSI ourselves (download + elevated msiexec), then set v2 default.
+  await ensureWslKernel({ emit });
   try { await new Promise((res) => execFile("wsl", ["--set-default-version", "2"], { timeout: 15000, windowsHide: true }, () => res())); } catch {}
   // 3) Import it as a WSL2 distro (creates the VHD under installDir; no MS Store,
   //    no interactive first-run — we run everything as root afterwards).
@@ -112,7 +128,18 @@ async function dockerInstalled() {
 // Install Docker Engine (docker.io) inside the distro.
 async function installDockerEngine({ emit } = {}) {
   emit && emit({ phase: "install-docker", status: "running", message: "在 Ubuntu 里安装 Docker（apt,几分钟,下面是实时进度）…" });
-  await wslRunStream("apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io 2>&1", { emit, phase: "install-docker", timeout: 900000 });
+  // Point apt at the Tsinghua TUNA mirror (CN-fast; archive.ubuntu.com is slow
+  // from CN) WITH the universe component (docker.io lives there). DPkg::Lock::
+  // Timeout waits out the first-boot apt locks instead of failing with exit 100.
+  const M = process.env.CICY_APT_MIRROR || "https://mirrors.tuna.tsinghua.edu.cn/ubuntu/";
+  const setSources =
+    `{ echo 'deb ${M} jammy main restricted universe multiverse'; ` +
+    `echo 'deb ${M} jammy-updates main restricted universe multiverse'; ` +
+    `echo 'deb ${M} jammy-security main restricted universe multiverse'; } > /etc/apt/sources.list`;
+  await wslRunStream(
+    `${setSources} && apt-get -o DPkg::Lock::Timeout=300 update && ` +
+    `DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y docker.io 2>&1`,
+    { emit, phase: "install-docker", timeout: 900000 });
 }
 
 // dockerd reachable inside the distro?
@@ -121,11 +148,22 @@ async function dockerEngineUp() {
   catch { return false; }
 }
 
-// Start the Docker daemon (SysV service; docker.io ships an init script).
+// Start the Docker daemon inside WSL2. Modern docker.io (29.x) ships ONLY a
+// systemd unit (no SysV init → `service docker start` says "unrecognized
+// service"), and WSL distros have no systemd by default. So we launch dockerd
+// directly. Two WSL2-specific prerequisites, both verified on a clean machine:
+//   • iptables must use the LEGACY backend (Ubuntu defaults to nft, which
+//     dockerd can't drive in WSL2 → daemon fails to set up networking).
+//   • run dockerd detached and wait for /var/run/docker.sock.
 async function startEngine() {
-  // `service docker start` works without systemd; the `|| dockerd &` keeps it
-  // up on distros where the service script is absent.
-  try { await wslRun("service docker start 2>/dev/null || (nohup dockerd >/var/log/cicy-dockerd.log 2>&1 &)", { timeout: 30000 }); } catch {}
+  try {
+    await wslRun(
+      "update-alternatives --set iptables /usr/sbin/iptables-legacy >/dev/null 2>&1; " +
+      "update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy >/dev/null 2>&1; " +
+      "pgrep dockerd >/dev/null 2>&1 || (nohup dockerd >/var/log/cicy-dockerd.log 2>&1 &); " +
+      "for i in $(seq 1 20); do [ -S /var/run/docker.sock ] && docker version >/dev/null 2>&1 && break; sleep 1; done",
+      { timeout: 40000 });
+  } catch {}
 }
 
 // The cicy-code base image present inside the distro's Docker?
@@ -187,8 +225,22 @@ async function status(port = 8009) {
   return { wsl, distro, engineUp, running };
 }
 
+// Guard against overlapping bootstrap runs (double-click 重试 / re-entrancy):
+// two concurrent runs would race on the same download file + apt lock → corrupt
+// downloads and exit-100. A second caller just attaches to the in-flight run.
+let _bootstrapInFlight = null;
+
 // Full bootstrap. Honest progress + honest terminal (ok only when :port healthy).
-async function bootstrap({ onProgress, port = 8009, container = "cicy-code-docker", volume = "cicy-team", env = {} } = {}) {
+async function bootstrap(opts = {}) {
+  if (_bootstrapInFlight) {
+    try { opts.onProgress && opts.onProgress({ phase: "install-docker", status: "running", message: "安装已在进行中,正在跟随同一进度…" }); } catch {}
+    return _bootstrapInFlight;
+  }
+  _bootstrapInFlight = _bootstrap(opts).finally(() => { _bootstrapInFlight = null; });
+  return _bootstrapInFlight;
+}
+
+async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-docker", volume = "cicy-team", env = {} } = {}) {
   const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
 
   // 1) WSL2 platform
@@ -199,15 +251,15 @@ async function bootstrap({ onProgress, port = 8009, container = "cicy-code-docke
 
   // 2) Ubuntu distro
   if (!distroInstalled()) {
-    try { await installDistro({ emit }); } catch (e) { emit({ phase: "done", status: "error", message: `Ubuntu 安装失败：${e.message}（点重试）` }); return { ok: false, reason: "distro_install_failed" }; }
+    try { await installDistro({ emit }); } catch (e) { emit({ phase: "install-docker", status: "error", message: `Ubuntu 安装失败：${e.message}（点重试）` }); return { ok: false, reason: "distro_install_failed" }; }
     const t0 = Date.now();
     const ok = await docker.waitUntil(() => distroInstalled(), { totalMs: 600000, everyMs: 5000, onTick: () => emit({ phase: "install-docker", status: "running", message: `正在下载/注册 Ubuntu…（已 ${Math.round((Date.now() - t0) / 1000)}s,首次较慢请耐心）` }) });
-    if (!ok) { emit({ phase: "done", status: "error", message: "Ubuntu 还没装好——稍等或点「重试」" }); return { ok: false, reason: "distro_not_ready" }; }
+    if (!ok) { emit({ phase: "install-docker", status: "error", message: "Ubuntu 还没装好——稍等或点「重试」" }); return { ok: false, reason: "distro_not_ready" }; }
   }
 
   // 3) Docker Engine inside Ubuntu
   if (!(await dockerInstalled())) {
-    try { await installDockerEngine({ emit }); } catch (e) { emit({ phase: "done", status: "error", message: `Docker 安装失败：${e.message}（点重试）` }); return { ok: false, reason: "docker_install_failed" }; }
+    try { await installDockerEngine({ emit }); } catch (e) { emit({ phase: "install-docker", status: "error", message: `Docker 安装失败：${e.message}（点重试）` }); return { ok: false, reason: "docker_install_failed" }; }
   }
 
   // 4) dockerd up
@@ -215,7 +267,7 @@ async function bootstrap({ onProgress, port = 8009, container = "cicy-code-docke
     emit({ phase: "install-docker", status: "running", message: "启动 Docker 引擎…" });
     await startEngine();
     const up = await docker.waitUntil(dockerEngineUp, { totalMs: 60000, everyMs: 3000 });
-    if (!up) { emit({ phase: "done", status: "error", message: "Docker 引擎没起来——点「重试」" }); return { ok: false, reason: "dockerd_not_up" }; }
+    if (!up) { emit({ phase: "install-docker", status: "error", message: "Docker 引擎没起来——点「重试」" }); return { ok: false, reason: "dockerd_not_up" }; }
   }
   emit({ phase: "install-docker", status: "done", message: "Docker 环境就绪" });
 
@@ -223,9 +275,9 @@ async function bootstrap({ onProgress, port = 8009, container = "cicy-code-docke
   if (!(await imagePresent())) {
     let tarball;
     try { tarball = await docker.downloadImageTarball({ emit }); }
-    catch (e) { emit({ phase: "done", status: "error", message: `镜像下载失败：${e.message}（点重试续传）` }); return { ok: false, reason: "image_download_failed" }; }
+    catch (e) { emit({ phase: "image", status: "error", message: `镜像下载失败：${e.message}（点重试续传）` }); return { ok: false, reason: "image_download_failed" }; }
     try { await loadImage(tarball, { emit }); emit({ phase: "image", status: "done", message: "镜像就绪" }); }
-    catch (e) { emit({ phase: "done", status: "error", message: `镜像导入失败：${e.message}（点重试）` }); return { ok: false, reason: "image_load_failed" }; }
+    catch (e) { emit({ phase: "image", status: "error", message: `镜像导入失败：${e.message}（点重试）` }); return { ok: false, reason: "image_load_failed" }; }
   } else {
     emit({ phase: "image", status: "skip", message: "镜像已就绪，跳过" });
   }
@@ -234,13 +286,13 @@ async function bootstrap({ onProgress, port = 8009, container = "cicy-code-docke
   if (!(await probeHealth(port))) {
     emit({ phase: "container", status: "running", message: "启动 cicy-code 容器…" });
     try { await runContainer({ port, container, volume, env }); }
-    catch (e) { emit({ phase: "done", status: "error", message: `容器启动失败：${e.message}（点重试）` }); return { ok: false, reason: "container_start_failed" }; }
+    catch (e) { emit({ phase: "container", status: "error", message: `容器启动失败：${e.message}（点重试）` }); return { ok: false, reason: "container_start_failed" }; }
   }
 
   // 7) Health — the ONLY path to ok:true.
   emit({ phase: "health", status: "running", message: "等待 cicy-code 就绪…" });
   const healthy = await docker.waitUntil(() => probeHealth(port), { totalMs: 120000, everyMs: 3000 });
-  emit({ phase: "done", status: healthy ? "done" : "error", message: healthy ? "Docker cicy-code 已就绪 🎉" : `容器起来了但 :${port} 还没响应——稍等或点「重试」` });
+  emit({ phase: healthy ? "done" : "container", status: healthy ? "done" : "error", message: healthy ? "Docker cicy-code 已就绪 🎉" : `容器起来了但 :${port} 还没响应——稍等或点「重试」` });
   return { ok: healthy, container };
 }
 
