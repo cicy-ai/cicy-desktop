@@ -387,15 +387,44 @@ async function installDocker({ emit, dest } = {}) {
   await ensureDownloaded(DOCKER_DESKTOP_URL, target, DOCKER_DESKTOP_MIRROR, {
     emit, phase: "install-docker", label: "下载 Docker Desktop",
   });
-  e({ phase: "install-docker", status: "running", message: "安装 Docker Desktop（请在弹出的授权框点「是」，装完可能需重启）…" });
-  await new Promise((resolve) => {
+  e({ phase: "install-docker", status: "running", message: "安装 Docker Desktop（请在弹出的管理员授权框点「是」，装完可能需重启）…" });
+  await launchElevated(target, ["install", "--quiet", "--accept-license"], { emit: e });
+}
+
+// Run an admin-manifest exe (Docker Desktop Installer) ELEVATED. A plain
+// child_process.spawn of a requireAdministrator exe from a non-elevated process
+// fails with ERROR_ELEVATION_REQUIRED (740) and never shows UAC — which is why
+// the installer "downloaded but didn't auto-install". ShellExecute with the
+// "runas" verb is the only way to raise the UAC prompt + elevate. We drive it
+// via VBScript/cscript because PowerShell is blocked by 360 on these machines.
+// ShellExecute returns immediately (installer runs in the background); bootstrap
+// then polls dockerOk(). Falls back to a direct spawn if cscript is unavailable.
+function launchElevated(exe, args, { emit } = {}) {
+  return new Promise((resolve) => {
     try {
-      const child = spawn(target, ["install", "--quiet", "--accept-license"], {
-        windowsHide: false, detached: true, stdio: "ignore",
+      const vbs = path.join(os.tmpdir(), "cicy-docker-elevate.vbs");
+      const argStr = args.join(" ").replace(/"/g, '""');
+      const exeEsc = String(exe).replace(/"/g, '""');
+      // chr(34) = a literal double-quote inside the VBS string literals.
+      fs.writeFileSync(vbs,
+        `Set s = CreateObject("Shell.Application")\r\n` +
+        `s.ShellExecute "${exeEsc}", "${argStr}", "", "runas", 1\r\n`,
+        "utf8");
+      const child = spawn("cscript", ["//nologo", vbs], { windowsHide: true, detached: true, stdio: "ignore" });
+      let done = false;
+      const fin = (ok) => { if (done) return; done = true; resolve(ok); };
+      child.on("error", () => {
+        // cscript missing/blocked → best-effort direct spawn (works if elevated).
+        try {
+          emit && emit({ phase: "install-docker", status: "running", message: "提权脚本不可用，尝试直接启动安装包…" });
+          const c2 = spawn(exe, args, { windowsHide: false, detached: true, stdio: "ignore" });
+          c2.on("error", () => fin(false));
+          c2.on("spawn", () => fin(true));
+          c2.on("exit", () => fin(true));
+        } catch { fin(false); }
       });
-      child.on("error", () => resolve());
-      child.on("exit", () => resolve());
-    } catch { resolve(); }
+      child.on("exit", () => fin(true));
+    } catch { resolve(false); }
   });
 }
 
