@@ -19,13 +19,16 @@ const docker = require("./docker"); // shared: downloads, waitUntil, probeHealth
 
 const DISTRO   = process.env.CICY_WSL_DISTRO || "Ubuntu";
 const IMAGE    = process.env.CICY_DOCKER_IMAGE || "cicybot/cicy-code:latest";
-// Ubuntu WSL rootfs from the Tsinghua TUNA mirror (CN-fast). We download it
-// ourselves (real progress bar) and `wsl --import` it, instead of
-// `wsl --install -d Ubuntu` (no parseable progress, needs the MS Store).
+// PRE-BAKED WSL rootfs (built in CI, .github/workflows/build-wsl-package.yml):
+// Ubuntu 22.04 + Docker Engine + the cicy-code image already loaded into
+// /var/lib/docker, with dockerd auto-start via /etc/wsl.conf. We just download
+// it (Aliyun OSS, CN-fast ~2.7MB/s) and `wsl --import` it — so the bootstrap's
+// apt-install + image download/load steps are already done inside the tarball
+// (their checks see docker present + image present and SKIP). ~444MB.
 const ROOTFS_URL = process.env.CICY_WSL_ROOTFS_URL ||
-  "https://mirrors.tuna.tsinghua.edu.cn/ubuntu-cloud-images/wsl/jammy/current/ubuntu-jammy-wsl-amd64-ubuntu22.04lts.rootfs.tar.gz";
+  "https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/rootfs/cicy-wsl-latest.tar.gz";
 
-function rootfsPath() { return path.join(docker.downloadsDir(), "ubuntu-jammy-wsl-rootfs.tar.gz"); }
+function rootfsPath() { return path.join(docker.downloadsDir(), "cicy-wsl-rootfs.tar.gz"); }
 // WSL2 kernel update package (the small ~17MB MSI behind aka.ms/wsl2kernel).
 const KERNEL_MSI_URL = process.env.CICY_WSL_KERNEL_URL || "https://wslstorestorage.blob.core.windows.net/wslblob/wsl_update_x64.msi";
 
@@ -97,9 +100,14 @@ function distroInstalled(distro = DISTRO) {
 // (--no-launch). We always run commands as root afterwards, so no user account
 // is needed. Elevated via the scheduled-task path (reliable on these machines).
 async function installDistro({ emit } = {}) {
-  // 1) Download the rootfs with a REAL progress bar (Tsinghua mirror, resumable).
+  // 1) Download the PRE-BAKED rootfs (Ubuntu+Docker+image, ~444MB) with a real
+  //    progress bar. curl is ~10× faster than node's downloader on OSS/R2.
   const dest = rootfsPath();
-  await docker.ensureDownloaded(ROOTFS_URL, dest, null, { emit, phase: "install-docker", label: "下载 Ubuntu" });
+  try { await docker.curlDownload(ROOTFS_URL, dest, { emit, phase: "install-docker", label: "下载运行环境(Ubuntu+Docker+镜像)" }); }
+  catch (e) {
+    emit && emit({ phase: "install-docker", status: "running", message: `curl 下载失败(${e.message}),改用内置下载…` });
+    await docker.ensureDownloaded(ROOTFS_URL, dest, null, { emit, phase: "install-docker", label: "下载运行环境" });
+  }
   // 2) Ensure the WSL2 KERNEL. On the inbox WSL of Win10/11 (no Store WSL),
   //    `wsl --update` isn't even a recognized arg, and a feature-enable + reboot
   //    leaves the kernel component missing → `--import --version 2` fails with
