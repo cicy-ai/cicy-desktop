@@ -152,6 +152,7 @@
   "common": {
     "close": "关闭",
     "retry": "重试",
-    "done": "完成"
+    "done": "完成",
+    "minimize": "最小化"
   }
 }

@@ -151,6 +151,7 @@
   "common": {
     "close": "閉じる",
     "retry": "再試行",
-    "done": "完了"
+    "done": "完了",
+    "minimize": "最小化"
   }
 }

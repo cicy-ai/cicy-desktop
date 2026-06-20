@@ -160,9 +160,10 @@ function headSize(url, hops = 5) {
 async function ensureDownloaded(url, dest, mirror, { emit, phase, label, freshOnIncomplete = false } = {}) {
   const expected = (await headSize(url)) || (mirror ? await headSize(mirror) : 0);
   let have = 0; try { have = fs.statSync(dest).size; } catch {}
-  // Complete file already on disk → skip (主人: 完整的 exe/镜像包就别重下了).
+  // Complete file already on disk → skip (主人: 完整的 exe/镜像包就别重下了；用户
+  // 自己下到 ~/Downloads 同名文件也走这条直接复用).
   if (expected > 0 && have === expected) {
-    emit && emit({ phase, status: "skip", message: `${label}：已下载，跳过`, progress: 100 });
+    emit && emit({ phase, status: "skip", message: `${label}：已下载，跳过`, progress: 100, received: have, total: expected, url, dest });
     return dest;
   }
   // A partial left by a PREVIOUS, interrupted/restarted session can be corrupt;
@@ -187,8 +188,9 @@ async function ensureDownloaded(url, dest, mirror, { emit, phase, label, freshOn
         const pct = total ? Math.round((received / total) * 100) : 0;
         if (pct === lastPct) return;
         lastPct = pct;
-        // `url` lets the drawer show the actual source (incl. mirror fallback).
-        emit && emit({ phase, status: "running", message: label, progress: pct, received, total, url: src });
+        // `url` = source, `dest` = local target path (主人: UI 显示下载目录; lets the
+        // user drop a manual download at the same path and have it reused).
+        emit && emit({ phase, status: "running", message: label, progress: pct, received, total, url: src, dest });
       },
     });
     if (expected > 0) {
@@ -244,10 +246,16 @@ function probeHealth(port = 8008, timeoutMs = 2500) {
 // ~/Downloads — visible, like the Docker installer on the Desktop). STABLE name
 // (no pid) so a re-run reuses an existing partial/complete file (resume-friendly
 // on a flaky network).
-function imageTarballPath() {
+// Both the Docker installer AND the image tarball download here (主人: 都下到
+// ~/Downloads). If the user manually downloads either file to this folder with
+// the SAME name, ensureDownloaded sees a complete file and skips the download.
+function downloadsDir() {
   const dir = path.join(process.env["USERPROFILE"] || os.homedir(), "Downloads");
   try { fs.mkdirSync(dir, { recursive: true }); } catch {}
-  return path.join(dir, "cicy-code-latest.tar.gz");
+  return dir;
+}
+function imageTarballPath() {
+  return path.join(downloadsDir(), "cicy-code-latest.tar.gz");
 }
 
 // Download the R2 base-env image tarball (no docker needed yet). Split out of
@@ -424,7 +432,11 @@ async function bootstrap({ onProgress, port = 8008, container = CONTAINER, volum
     // running + the daemon coming up (主人: 装 Docker 的同时下载 R2 镜像).
     if (needImage) imgDl = downloadImageTarball({ emit }).catch((e) => { emit({ phase: "image", status: "error", message: `镜像下载失败：${e.message}` }); return null; });
     await installDocker({ emit, dest: installDest });
-    emit({ phase: "install-docker", status: "running", message: "等待 Docker 启动（如需授权/重启，完成后会自动继续）…" });
+    // A silent install doesn't auto-launch the daemon — explicitly start Docker
+    // Desktop once its exe lands so the user doesn't have to (主人: 安装启动有问题).
+    emit({ phase: "install-docker", status: "running", message: "启动 Docker Desktop…" });
+    const launched = await waitUntil(() => { if (dockerDesktopExe()) { startDockerDesktop(); return true; } return false; }, { totalMs: 120000, everyMs: 5000 });
+    emit({ phase: "install-docker", status: "running", message: launched ? "等待 Docker 引擎就绪（首次启动较慢，如弹授权/重启请确认）…" : "等待 Docker 安装完成…" });
     const up = await waitUntil(dockerOk, { totalMs: 900000, everyMs: 6000 });
     if (!up) {
       emit({ phase: "install-docker", status: "error", message: "Docker 还没就绪——装好后启动 Docker Desktop，再点「重试」即可（已完成的步骤不会重来）" });
@@ -475,7 +487,7 @@ async function bootstrap({ onProgress, port = 8008, container = CONTAINER, volum
 module.exports = {
   start, stop, stopContainer, restart, checkStatus, loadImage, loadImageFromTarball,
   downloadImageTarball, imagePresent, dockerOk, installDocker,
-  bootstrap, probeHealth, readContainerToken, dockerDesktopExe, desktopDir,
+  bootstrap, probeHealth, readContainerToken, dockerDesktopExe, desktopDir, downloadsDir, imageTarballPath,
   // platform-agnostic download/retry primitives, reused by native.js
   ensureDownloaded, withRetry, waitUntil, run,
 };

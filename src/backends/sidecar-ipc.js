@@ -145,7 +145,7 @@ function register({ sidecarLogPath } = {}) {
   ipcMain.handle("docker:app-bootstrap", async (e) => {
     if (process.platform !== "win32") return { ok: false, error: "Docker cicy-code is Windows-only" };
     try {
-      const installDest = path.join(docker.desktopDir(), "Docker Desktop Installer.exe");
+      const installDest = path.join(docker.downloadsDir(), "Docker Desktop Installer.exe");
       const result = await docker.bootstrap({
         ...appOpts(), installDest,
         onProgress: (ev) => { try { e.sender.send("docker:app-progress", ev); } catch {} },

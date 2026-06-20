@@ -152,6 +152,7 @@
   "common": {
     "close": "Close",
     "retry": "Retry",
-    "done": "Done"
+    "done": "Done",
+    "minimize": "Minimize"
   }
 }

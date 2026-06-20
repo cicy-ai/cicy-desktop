@@ -151,6 +151,7 @@
   "common": {
     "close": "Fermer",
     "retry": "Réessayer",
-    "done": "Terminé"
+    "done": "Terminé",
+    "minimize": "Réduire"
   }
 }

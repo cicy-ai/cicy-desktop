@@ -109,11 +109,13 @@ const updateDrawer = {
     };
     emitDrawer();
   },
+  minimize() { if (drawerState) { drawerState = { ...drawerState, minimized: true }; emitDrawer(); } },
+  restore() { if (drawerState) { drawerState = { ...drawerState, minimized: false }; emitDrawer(); } },
   finish({ ok, message } = {}) {
     if (!drawerState) return;
     const status = ok ? "done" : "error";
     const line = { id: ++drawerLogSeq, t: clockHHMMSS(), phase: "done", status, message: message || (ok ? "更新完成" : "更新失败") };
-    drawerState = { ...drawerState, status, phase: "done", logs: [...drawerState.logs, line], lastAt: Date.now() };
+    drawerState = { ...drawerState, status, phase: "done", minimized: false, logs: [...drawerState.logs, line], lastAt: Date.now() };
     emitDrawer();
   },
   close() { drawerState = null; emitDrawer(); },
@@ -136,8 +138,16 @@ function UpdateDrawerHost() {
   if (!st) return null;
   const running = st.status === "running";
   const phaseIdx = DRAWER_PHASES.findIndex(([k]) => k === st.phase);
+  if (st.minimized) {
+    return (
+      <button type="button" className={`drawer-min drawer-min--${st.status}`} data-id="UpdateDrawer-restore" onClick={() => updateDrawer.restore()}>
+        <span className="drawer-min__spark">{running ? <Spinner /> : st.status === "done" ? "✓" : "!"}</span>
+        <span className="drawer-min__label">更新 cicy-code{st.toVer ? ` · v${st.toVer}` : ""}</span>
+      </button>
+    );
+  }
   return (
-    <div className="drawer-scrim" data-id="UpdateDrawer-scrim" onClick={() => { if (!running) updateDrawer.close(); }}>
+    <div className="drawer-scrim" data-id="UpdateDrawer-scrim" onClick={() => running ? updateDrawer.minimize() : updateDrawer.close()}>
       <div className="drawer" data-id="UpdateDrawer" data-status={st.status} onClick={(e) => e.stopPropagation()}>
         <div className="drawer__head">
           <div className="drawer__title">
@@ -149,7 +159,10 @@ function UpdateDrawerHost() {
               <div className="drawer__sub">{st.fromVer ? `v${st.fromVer}` : "当前"} → {st.toVer ? `v${st.toVer}` : "最新版"}</div>
             </div>
           </div>
-          <button type="button" className="drawer__x" data-id="UpdateDrawer-close" disabled={running} title={running ? "更新进行中" : "关闭"} onClick={() => updateDrawer.close()} aria-label="close">×</button>
+          <div className="drawer__headbtns">
+            <button type="button" className="drawer__x" data-id="UpdateDrawer-min" title="最小化" onClick={() => updateDrawer.minimize()} aria-label="minimize">‒</button>
+            <button type="button" className="drawer__x" data-id="UpdateDrawer-close" title="关闭" onClick={() => running ? updateDrawer.minimize() : updateDrawer.close()} aria-label="close">×</button>
+          </div>
         </div>
 
         <div className="drawer__steps" data-id="UpdateDrawer-steps">
@@ -1024,9 +1037,14 @@ function Header({ me, welcome, onLogout, mitmTeam }) {
   const [appVer, setAppVer] = useState("");
   const wrap = useRef(null);
   // cicy-desktop's own version, shown at the very bottom of this menu (主人).
+  // app.getVersion() returns { desktop, cicyCodeRef, electron, node } — pick the
+  // desktop version string (was rendering as [object Object]).
   useEffect(() => {
     let alive = true;
-    window.cicy?.app?.getVersion?.().then((v) => { if (alive) setAppVer(String(v || "")); }).catch(() => {});
+    window.cicy?.app?.getVersion?.().then((v) => {
+      if (!alive) return;
+      setAppVer(typeof v === "string" ? v : String(v?.desktop || ""));
+    }).catch(() => {});
     return () => { alive = false; };
   }, []);
   // Click-outside closes the dropdown (mirrors LocalTeamCard's ⋯ menu).
@@ -1444,28 +1462,30 @@ let dockerDrawerState = null; // null = closed
 function emitDockerDrawer() { dockerDrawerListeners.forEach((l) => l(dockerDrawerState)); }
 const dockerDrawer = {
   open({ onRetry } = {}) {
-    dockerDrawerState = { status: "running", phase: "install-docker", logs: [], bars: {}, onRetry: onRetry || null, lastAt: Date.now() };
+    dockerDrawerState = { status: "running", phase: "install-docker", logs: [], bars: {}, minimized: false, onRetry: onRetry || null, lastAt: Date.now() };
     emitDockerDrawer();
   },
+  minimize() { if (dockerDrawerState) { dockerDrawerState = { ...dockerDrawerState, minimized: true }; emitDockerDrawer(); } },
+  restore() { if (dockerDrawerState) { dockerDrawerState = { ...dockerDrawerState, minimized: false }; emitDockerDrawer(); } },
   push(ev = {}) {
     if (!dockerDrawerState) return;
     const phase = ev.phase === "health" ? "container" : (ev.phase || dockerDrawerState.phase);
     const next = { ...dockerDrawerState, phase, lastAt: Date.now() };
     const hasPct = Number.isFinite(ev.progress);
-    // Per-byte download ticks (status running + a %) drive a PROGRESS BAR, not a
-    // log line — so the log doesn't scroll-spam (主人: 下载不要输出滚动/日志太多).
-    const isDownloadTick = ev.status === "running" && hasPct && (phase === "install-docker" || phase === "image");
-    if (isDownloadTick) {
+    const isDl = phase === "install-docker" || phase === "image";
+    // Any download-related event (running %, skip, done — they carry url/dest)
+    // drives a per-phase PROGRESS BAR, not a log line, so the log doesn't
+    // scroll-spam (主人: 下载不要输出滚动/日志太多).
+    if (isDl && (hasPct || ev.dest || ev.url)) {
       const prev = dockerDrawerState.bars?.[phase] || {};
-      next.bars = { ...dockerDrawerState.bars, [phase]: { progress: ev.progress, received: ev.received, total: ev.total, url: ev.url || prev.url, message: ev.message || prev.message } };
-    } else {
-      // Meaningful event → one log line (phase change / skip / done / error / retry).
+      const progress = hasPct ? ev.progress : (ev.status === "skip" || ev.status === "done") ? 100 : prev.progress;
+      next.bars = { ...dockerDrawerState.bars, [phase]: { progress, received: ev.received ?? prev.received, total: ev.total ?? prev.total, url: ev.url || prev.url, dest: ev.dest || prev.dest } };
+    }
+    // Log only milestone events — never the per-% running download ticks.
+    const isRunningTick = ev.status === "running" && hasPct && isDl;
+    if (!isRunningTick) {
       const line = { id: ++dockerDrawerLogSeq, t: clockHHMMSS(), phase, status: ev.status || "running", message: ev.message || "" };
       next.logs = [...dockerDrawerState.logs, line];
-      if (ev.url) {
-        const prev = dockerDrawerState.bars?.[phase] || {};
-        next.bars = { ...dockerDrawerState.bars, [phase]: { ...prev, url: ev.url } };
-      }
     }
     dockerDrawerState = next;
     emitDockerDrawer();
@@ -1474,7 +1494,8 @@ const dockerDrawer = {
     if (!dockerDrawerState) return;
     const status = ok ? "done" : "error";
     const line = { id: ++dockerDrawerLogSeq, t: clockHHMMSS(), phase: "done", status, message: message || (ok ? "完成" : "失败") };
-    dockerDrawerState = { ...dockerDrawerState, status, phase: "done", logs: [...dockerDrawerState.logs, line], lastAt: Date.now() };
+    // Pop back open on finish so the user sees the result even if minimized.
+    dockerDrawerState = { ...dockerDrawerState, status, phase: "done", minimized: false, logs: [...dockerDrawerState.logs, line], lastAt: Date.now() };
     emitDockerDrawer();
   },
   close() { dockerDrawerState = null; emitDockerDrawer(); },
@@ -1501,7 +1522,8 @@ function DownloadBar({ phaseKey, bar }) {
         <span className="dlbar__pct">{pct}%{bar?.total ? ` · ${fmtBytes(bar.received)} / ${fmtBytes(bar.total)}` : ""}</span>
       </div>
       <div className="dlbar__track"><div className={`dlbar__fill${done ? " is-done" : ""}`} style={{ width: `${pct}%` }} /></div>
-      {bar?.url && <div className="dlbar__url" title={bar.url}>{bar.url}</div>}
+      {bar?.url && <div className="dlbar__url" title={bar.url}><span className="dlbar__urlk">源</span> {bar.url}</div>}
+      {bar?.dest && <div className="dlbar__url" title={bar.dest}><span className="dlbar__urlk">存</span> {bar.dest}</div>}
     </div>
   );
 }
@@ -1514,8 +1536,19 @@ function DockerInstallDrawerHost() {
   const running = st.status === "running";
   const phaseIdx = DOCKER_PHASES.findIndex(([k]) => k === st.phase);
   const dlBars = ["install-docker", "image"].filter((k) => st.bars?.[k]);
+  // Minimized → a floating restore chip (op keeps running in the background).
+  if (st.minimized) {
+    const pcts = dlBars.map((k) => st.bars[k]?.progress).filter(Number.isFinite);
+    const overall = pcts.length ? Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length) : null;
+    return (
+      <button type="button" className={`drawer-min drawer-min--${st.status}`} data-id="DockerDrawer-restore" onClick={() => dockerDrawer.restore()}>
+        <span className="drawer-min__spark">{running ? <Spinner /> : st.status === "done" ? "✓" : "!"}</span>
+        <span className="drawer-min__label">{tr("docker.setupTitle", "安装 Docker cicy-code")}{overall != null ? ` · ${overall}%` : ""}</span>
+      </button>
+    );
+  }
   return (
-    <div className="drawer-scrim" data-id="DockerDrawer-scrim" onClick={() => { if (!running) dockerDrawer.close(); }}>
+    <div className="drawer-scrim" data-id="DockerDrawer-scrim" onClick={() => running ? dockerDrawer.minimize() : dockerDrawer.close()}>
       <div className="drawer" data-id="DockerDrawer" data-status={st.status} onClick={(e) => e.stopPropagation()}>
         <div className="drawer__head">
           <div className="drawer__title">
@@ -1527,7 +1560,10 @@ function DockerInstallDrawerHost() {
               <div className="drawer__sub">127.0.0.1:8009</div>
             </div>
           </div>
-          <button type="button" className="drawer__x" data-id="DockerDrawer-close" disabled={running} title={running ? tr("docker.busy", "进行中") : tr("common.close", "关闭")} onClick={() => dockerDrawer.close()} aria-label="close">×</button>
+          <div className="drawer__headbtns">
+            <button type="button" className="drawer__x" data-id="DockerDrawer-min" title={tr("common.minimize", "最小化")} onClick={() => dockerDrawer.minimize()} aria-label="minimize">‒</button>
+            <button type="button" className="drawer__x" data-id="DockerDrawer-close" title={tr("common.close", "关闭")} onClick={() => running ? dockerDrawer.minimize() : dockerDrawer.close()} aria-label="close">×</button>
+          </div>
         </div>
 
         <div className="drawer__steps" data-id="DockerDrawer-steps">
