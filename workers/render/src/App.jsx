@@ -625,11 +625,16 @@ export default function App() {
 
   // Logged in: unified tabs + cards grid on the left, full-height webview
   // drawer on the right.
+  // The Docker-版 cicy-code on :8009 has its own dedicated <DockerCard> (right of
+  // the local card), so pull it out of the generic node list — else it'd ALSO
+  // render as a 自定义 card (the bootstrap registers it as a team for the
+  // token-injected 打开/刷新 flow).
+  const dockerTeam = (localTeams || []).find((t) => isDockerApp(t.base_url)) || null;
   // Split the cicyDesktopNodes list into 本地 (the localhost:8008 sidecar the
   // desktop owns — full lifecycle) vs 自定义 (deeplink-added nodes, usually
   // remote — probe-only, no restart/stop/update, just 打开).
   const localList  = (localTeams || []).filter((t) => isLocalSidecar(t.base_url));
-  const customList = (localTeams || []).filter((t) => !isLocalSidecar(t.base_url));
+  const customList = (localTeams || []).filter((t) => !isLocalSidecar(t.base_url) && !isDockerApp(t.base_url));
   const localCount = localList.length;
   const customCount = customList.length;
   // /api/teams returns ALL of this owner's teams — including kind=local ones
@@ -721,6 +726,13 @@ export default function App() {
               </button>
             </div>
           )}
+          {showLocal && (
+            <DockerCard
+              dockerTeam={dockerTeam}
+              onOpen={(id) => { if (id) openLocalTeam(id); else window.cicy?.tabs?.open?.("http://127.0.0.1:8009", "Docker cicy-code"); }}
+              onRefresh={fetchLocalTeams}
+            />
+          )}
           {showCustom && customList.map((t) => (
             <LocalTeamCard key={"custom:" + t.id} team={t} onOpen={() => openLocalTeam(t.id)} onRename={renameLocalTeam} onRefresh={fetchLocalTeams} />
           ))}
@@ -748,6 +760,7 @@ export default function App() {
       </div>{/* /.shell__left */}
       <ToastHost />
       <UpdateDrawerHost />
+      <DockerInstallDrawerHost />
     </div>
   );
 }
@@ -1412,6 +1425,204 @@ function DockerSetup({ onReady }) {
   );
 }
 
+// ── Docker install drawer: streams the Docker-版 cicy-code setup (装 Docker→
+// 加载镜像→启动容器→就绪), mirroring the cicy-code 升级 drawer. The bootstrap
+// emits {phase,status,message,progress} on 'docker:app-progress'; the card tees
+// those here via dockerDrawer.push. Single global instance at shell root.
+const dockerDrawerListeners = new Set();
+let dockerDrawerLogSeq = 0;
+let dockerDrawerState = null; // null = closed
+function emitDockerDrawer() { dockerDrawerListeners.forEach((l) => l(dockerDrawerState)); }
+const dockerDrawer = {
+  open({ onRetry } = {}) {
+    dockerDrawerState = { status: "running", phase: "install-docker", logs: [], onRetry: onRetry || null, lastAt: Date.now() };
+    emitDockerDrawer();
+  },
+  push(ev = {}) {
+    if (!dockerDrawerState) return;
+    const phase = ev.phase === "health" ? "container" : (ev.phase || dockerDrawerState.phase);
+    const line = { id: ++dockerDrawerLogSeq, t: clockHHMMSS(), phase, status: ev.status || "running", message: ev.message || "", progress: ev.progress };
+    dockerDrawerState = { ...dockerDrawerState, phase, logs: [...dockerDrawerState.logs, line], lastAt: Date.now() };
+    emitDockerDrawer();
+  },
+  finish({ ok, message } = {}) {
+    if (!dockerDrawerState) return;
+    const status = ok ? "done" : "error";
+    const line = { id: ++dockerDrawerLogSeq, t: clockHHMMSS(), phase: "done", status, message: message || (ok ? "完成" : "失败") };
+    dockerDrawerState = { ...dockerDrawerState, status, phase: "done", logs: [...dockerDrawerState.logs, line], lastAt: Date.now() };
+    emitDockerDrawer();
+  },
+  close() { dockerDrawerState = null; emitDockerDrawer(); },
+};
+const DOCKER_PHASES = [["install-docker", "装 Docker"], ["image", "加载镜像"], ["container", "启动容器"], ["done", "完成"]];
+const DOCKER_BADGE = { "install-docker": "Docker", image: "镜像", container: "容器", health: "容器", done: "完成" };
+function DockerInstallDrawerHost() {
+  const [st, setSt] = useState(dockerDrawerState);
+  useEffect(() => { dockerDrawerListeners.add(setSt); return () => { dockerDrawerListeners.delete(setSt); }; }, []);
+  const logRef = useRef(null);
+  useEffect(() => { const el = logRef.current; if (el) el.scrollTop = el.scrollHeight; }, [st?.logs?.length]);
+  if (!st) return null;
+  const running = st.status === "running";
+  const phaseIdx = DOCKER_PHASES.findIndex(([k]) => k === st.phase);
+  return (
+    <div className="drawer-scrim" data-id="DockerDrawer-scrim" onClick={() => { if (!running) dockerDrawer.close(); }}>
+      <div className="drawer" data-id="DockerDrawer" data-status={st.status} onClick={(e) => e.stopPropagation()}>
+        <div className="drawer__head">
+          <div className="drawer__title">
+            <span className={`drawer__spark drawer__spark--${st.status}`}>
+              {running ? <Spinner /> : st.status === "done" ? "✓" : "!"}
+            </span>
+            <div>
+              <div className="drawer__h">{tr("docker.setupTitle", "安装 Docker cicy-code")}</div>
+              <div className="drawer__sub">127.0.0.1:8009</div>
+            </div>
+          </div>
+          <button type="button" className="drawer__x" data-id="DockerDrawer-close" disabled={running} title={running ? tr("docker.busy", "进行中") : tr("common.close", "关闭")} onClick={() => dockerDrawer.close()} aria-label="close">×</button>
+        </div>
+
+        <div className="drawer__steps" data-id="DockerDrawer-steps">
+          {DOCKER_PHASES.map(([k, label], i) => {
+            const done = st.status === "done" || (phaseIdx >= 0 && i < phaseIdx);
+            const active = i === phaseIdx && running;
+            const err = st.status === "error" && i === phaseIdx;
+            return (
+              <div key={k} className={`drawer__step${active ? " is-active" : ""}${done ? " is-done" : ""}${err ? " is-error" : ""}`}>
+                <span className="drawer__step-dot">{done ? "✓" : err ? "!" : i + 1}</span>
+                <span className="drawer__step-label">{label}</span>
+                {i < DOCKER_PHASES.length - 1 && <span className="drawer__step-bar" />}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="drawer__log" data-id="DockerDrawer-log" ref={logRef}>
+          {st.logs.length === 0
+            ? <div className="drawer__log-empty">{tr("docker.preparing", "准备中…")}</div>
+            : st.logs.map((l) => (
+              <div key={l.id} className="drawer__line" data-status={l.status}>
+                <span className="drawer__t">{l.t}</span>
+                <span className={`drawer__badge drawer__badge--${l.phase}`}>{DOCKER_BADGE[l.phase] || l.phase}</span>
+                <span className="drawer__linemsg">{l.message}{Number.isFinite(l.progress) ? ` ${l.progress}%` : ""}</span>
+              </div>
+            ))}
+        </div>
+
+        <div className="drawer__foot">
+          {running ? (
+            <>
+              <span className="drawer__foot-status">{tr("docker.installing2", "安装进行中…")}</span>
+              <button type="button" className="drawer__btn" data-id="DockerDrawer-background" onClick={() => dockerDrawer.close()}>{tr("docker.background", "在后台继续")}</button>
+            </>
+          ) : st.status === "error" ? (
+            <>
+              <span className="drawer__foot-status is-error">{tr("docker.failed", "安装失败")}</span>
+              {st.onRetry && <button type="button" className="drawer__btn is-accent" data-id="DockerDrawer-retry" onClick={() => st.onRetry()}>{tr("common.retry", "重试")}</button>}
+              <button type="button" className="drawer__btn" data-id="DockerDrawer-dismiss" onClick={() => dockerDrawer.close()}>{tr("common.close", "关闭")}</button>
+            </>
+          ) : (
+            <>
+              <span className="drawer__foot-status is-done">{tr("docker.ready", "已就绪")}</span>
+              <button type="button" className="drawer__btn is-accent" data-id="DockerDrawer-finish" onClick={() => dockerDrawer.close()}>{tr("common.done", "完成")}</button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Docker-版 cicy-code card (Windows only): a SECOND cicy-code instance running
+// in Docker on :8009, alongside the native local daemon (:8008). If Docker
+// Desktop is missing, the install flow downloads its installer to the user's
+// Desktop and runs it (主人指令), streaming progress through the drawer above.
+function DockerCard({ dockerTeam, onOpen, onRefresh }) {
+  const [status, setStatus] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const DOCKER_BLUE = "#2496ed";
+
+  const checkStatus = useCallback(async () => {
+    try { setStatus(await window.cicy?.docker?.appStatus?.()); }
+    catch (e) { console.warn("[DockerCard]", e); }
+  }, []);
+
+  useEffect(() => { checkStatus(); }, [checkStatus]);
+
+  const runBootstrap = useCallback(async () => {
+    setBusy(true);
+    dockerDrawer.open({ onRetry: runBootstrap });
+    const unsub = window.cicy?.docker?.onAppProgress?.((ev) => dockerDrawer.push(ev));
+    try {
+      const r = await window.cicy?.docker?.appBootstrap?.();
+      dockerDrawer.finish({ ok: !!r?.ok, message: r?.ok ? tr("docker.ready", "Docker cicy-code 已就绪") : (r?.error || tr("docker.failed", "安装失败")) });
+      if (r?.ok) onRefresh?.();
+    } catch (e) {
+      dockerDrawer.finish({ ok: false, message: e.message });
+    } finally {
+      try { unsub && unsub(); } catch {}
+      setBusy(false);
+      checkStatus();
+    }
+  }, [checkStatus, onRefresh]);
+
+  // Render only on Windows. window.cicy.platform is sync, so we can decide
+  // immediately without waiting on the async appStatus probe.
+  const platform = window.cicy?.platform || status?.platform;
+  if (platform !== "win32") return null;
+
+  const running = !!status?.running || dockerTeam?.status === "running";
+  const installed = !!status?.installed;
+  const tone = running ? "ok" : installed ? "warn" : "off";
+  const stateText = running
+    ? tr("docker.running", "运行中 · :8009")
+    : installed
+      ? tr("docker.notRunning", "未启动 · 点「启动」")
+      : tr("docker.notInstalled", "Docker Desktop 未安装");
+
+  const ctaLabel = busy
+    ? tr("docker.working", "处理中…")
+    : running
+      ? tr("localTeams.open", "打开")
+      : installed
+        ? tr("docker.start", "启动")
+        : tr("docker.install", "下载安装");
+
+  const onCta = () => {
+    if (busy) return;
+    if (running) { onOpen?.(dockerTeam?.id); return; }
+    runBootstrap();
+  };
+
+  return (
+    <div data-id="DockerCard" className={`bcard bcard--docker${running ? " bcard--online" : ""}`}>
+      <div className="bcard__accent" style={{ background: DOCKER_BLUE }} />
+      <div className="bcard__top">
+        <div className="bcard__pill" style={{ color: DOCKER_BLUE }}>
+          <span className="bcard__dot" data-tone={tone} />
+          <svg style={{ width: 18, height: 18 }} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+            <path d="M21.81 10.25c-.06-.05-.67-.51-1.95-.51-.34 0-.68.03-1.01.09-.25-1.69-1.64-2.51-1.7-2.55l-.34-.2-.22.32a4.5 4.5 0 0 0-.59 1.4c-.23.94-.09 1.83.39 2.59-.58.32-1.51.4-1.7.41H2.62a.61.61 0 0 0-.61.61 9.32 9.32 0 0 0 .57 3.35 4.9 4.9 0 0 0 1.95 2.53c.92.52 2.42.82 4.12.82.77 0 1.54-.07 2.3-.21a9.6 9.6 0 0 0 3-1.09 8.3 8.3 0 0 0 2.05-1.68c.98-1.11 1.56-2.35 1.99-3.45h.17c1.36 0 2.2-.55 2.66-1l.13-.16zM4.7 11.33h1.78a.16.16 0 0 0 .16-.16V9.58a.16.16 0 0 0-.16-.16H4.7a.16.16 0 0 0-.16.16v1.59c0 .09.07.16.16.16m2.46 0h1.78a.16.16 0 0 0 .16-.16V9.58a.16.16 0 0 0-.16-.16H7.16a.16.16 0 0 0-.16.16v1.59c0 .09.07.16.16.16m2.5 0h1.78a.16.16 0 0 0 .16-.16V9.58a.16.16 0 0 0-.16-.16H9.66a.16.16 0 0 0-.16.16v1.59c0 .09.07.16.16.16m2.47 0h1.78a.16.16 0 0 0 .16-.16V9.58a.16.16 0 0 0-.16-.16h-1.78a.16.16 0 0 0-.16.16v1.59c0 .09.07.16.16.16M7.16 9.06h1.78a.16.16 0 0 0 .16-.16V7.31a.16.16 0 0 0-.16-.16H7.16a.16.16 0 0 0-.16.16v1.59c0 .09.07.16.16.16m2.5 0h1.78a.16.16 0 0 0 .16-.16V7.31a.16.16 0 0 0-.16-.16H9.66a.16.16 0 0 0-.16.16v1.59c0 .09.07.16.16.16m2.47 0h1.78a.16.16 0 0 0 .16-.16V7.31a.16.16 0 0 0-.16-.16h-1.78a.16.16 0 0 0-.16.16v1.59c0 .09.07.16.16.16" />
+          </svg>
+        </div>
+      </div>
+      <div className="bcard__body">
+        <h3 className="bcard__name">{tr("docker.title", "Docker cicy-code")}</h3>
+        <div className="bcard__host">http://127.0.0.1:8009</div>
+        <div className="bcard__meta" style={{ fontSize: 12, color: "#8b949e" }}>{stateText}</div>
+      </div>
+      <button
+        type="button"
+        className="bcard__cta"
+        data-id="DockerCard-cta"
+        disabled={busy}
+        onClick={onCta}
+        style={!running ? { background: DOCKER_BLUE, color: "white" } : undefined}
+      >
+        {busy ? <Spinner /> : <ArrowIcon />}
+        <span>{ctaLabel}</span>
+      </button>
+    </div>
+  );
+}
+
 function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
   const statusInfo = LOCAL_STATUS[team.status] || LOCAL_STATUS.error;
   const tone = statusInfo.tone;
@@ -1806,6 +2017,16 @@ function isLocalSidecar(baseUrl) {
     const p = new URL(baseUrl);
     const local = p.hostname === "127.0.0.1" || p.hostname === "localhost" || p.hostname === "::1";
     return local && (p.port === "8008" || p.port === "");
+  } catch { return false; }
+}
+
+// The Docker-版 cicy-code instance — localhost:8009. Owned by <DockerCard>, so
+// it's filtered out of the generic node lists.
+function isDockerApp(baseUrl) {
+  try {
+    const p = new URL(baseUrl);
+    const local = p.hostname === "127.0.0.1" || p.hostname === "localhost" || p.hostname === "::1";
+    return local && p.port === "8009";
   } catch { return false; }
 }
 

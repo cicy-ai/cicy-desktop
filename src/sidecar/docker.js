@@ -252,16 +252,25 @@ async function checkStatus() {
   return { installed, imagePresent: installed ? await imagePresent() : false };
 }
 
+// Resolve the user's Desktop folder (主人指令: docker-desktop.exe 下到 Desktop).
+// %USERPROFILE%\Desktop is the canonical location; OneDrive redirection is rare
+// on the target machines and the file is only a transient installer anyway.
+function desktopDir() {
+  return path.join(process.env["USERPROFILE"] || os.homedir(), "Desktop");
+}
+
 // Start the container. Returns a sidecar child token { docker:true, container,
 // id } or null when Docker isn't ready (homepage guides the user to install
-// Docker Desktop).
-async function start({ port = 8008 } = {}) {
+// Docker Desktop). `container`/`volume` are parameterized so a SECOND instance
+// (the Docker-版 cicy-code on :8009) can run alongside the native local one
+// without a name/volume collision.
+async function start({ port = 8008, container = CONTAINER, volume = VOLUME } = {}) {
   // Something already serves a healthy cicy-code on :port (a legacy-named
   // container auto-revived by `--restart unless-stopped`, a manual run…).
   // Adopt it — `docker run` would just lose the port-bind fight.
   if (await probeHealth(port)) {
     console.log(`[docker-sidecar] :${port} already healthy — adopting existing instance`);
-    return { docker: true, container: CONTAINER, adopted: true };
+    return { docker: true, container, adopted: true };
   }
   if (!(await dockerOk())) {
     console.warn("[docker-sidecar] Docker not available — homepage will guide install");
@@ -272,12 +281,12 @@ async function start({ port = 8008 } = {}) {
     catch (e) { console.warn(`[docker-sidecar] image load failed: ${e.message}`); return null; }
   }
   // Replace any stale container of the same name.
-  try { await run(["rm", "-f", CONTAINER]); } catch {}
+  try { await run(["rm", "-f", container]); } catch {}
 
   const args = [
-    "run", "-d", "--name", CONTAINER, "--restart", "unless-stopped",
+    "run", "-d", "--name", container, "--restart", "unless-stopped",
     "-p", `${port}:8008`,
-    "-v", `${VOLUME}:/home/cicy/cicy-ai`,
+    "-v", `${volume}:/home/cicy/cicy-ai`,
   ];
   for (const k of PASS_ENV) {
     if (process.env[k]) args.push("-e", `${k}=${process.env[k]}`);
@@ -286,28 +295,31 @@ async function start({ port = 8008 } = {}) {
 
   const { stdout } = await run(args, { timeout: 60000 });
   const id = stdout.trim().slice(0, 12);
-  console.log(`[docker-sidecar] started container ${CONTAINER} (${id}) on :${port}`);
-  return { docker: true, container: CONTAINER, id };
+  console.log(`[docker-sidecar] started container ${container} (${id}) on :${port}`);
+  return { docker: true, container, id };
 }
 
-async function stop() {
-  try { await run(["rm", "-f", CONTAINER]); } catch {}
+async function stop({ container = CONTAINER } = {}) {
+  try { await run(["rm", "-f", container]); } catch {}
 }
 
 // Download + run the Docker Desktop installer (Windows). The installer needs
 // admin → Windows shows a UAC prompt the user accepts; first run may want a
 // reboot. We download (skip/resume aware) then launch silent and return.
-async function installDocker({ emit } = {}) {
+// `dest` defaults to tmp (the legacy local-team path); the Docker-版 card passes
+// the Desktop folder so the user can see/keep the installer (主人指令).
+async function installDocker({ emit, dest } = {}) {
   const e = emit || (() => {});
-  const dest = path.join(os.tmpdir(), "DockerDesktopInstaller.exe");
+  const target = dest || path.join(os.tmpdir(), "DockerDesktopInstaller.exe");
+  try { fs.mkdirSync(path.dirname(target), { recursive: true }); } catch {}
   e({ phase: "install-docker", status: "running", message: "下载 Docker Desktop 安装包…", progress: 0 });
-  await ensureDownloaded(DOCKER_DESKTOP_URL, dest, DOCKER_DESKTOP_MIRROR, {
+  await ensureDownloaded(DOCKER_DESKTOP_URL, target, DOCKER_DESKTOP_MIRROR, {
     emit, phase: "install-docker", label: "下载 Docker Desktop",
   });
   e({ phase: "install-docker", status: "running", message: "安装 Docker Desktop（请在弹出的授权框点「是」，装完可能需重启）…" });
   await new Promise((resolve) => {
     try {
-      const child = spawn(dest, ["install", "--quiet", "--accept-license"], {
+      const child = spawn(target, ["install", "--quiet", "--accept-license"], {
         windowsHide: false, detached: true, stdio: "ignore",
       });
       child.on("error", () => resolve());
@@ -321,7 +333,7 @@ async function installDocker({ emit } = {}) {
 // start the container → wait for :8008. Every step CHECKS first and SKIPS if
 // already done, emits coarse phase events + byte progress, and the downloads
 // resume. Safe to call again after a failure — it picks up where it left off.
-async function bootstrap({ onProgress, port = 8008 } = {}) {
+async function bootstrap({ onProgress, port = 8008, container = CONTAINER, volume = VOLUME, installDest } = {}) {
   const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
 
   // 1) Docker present?
@@ -339,7 +351,7 @@ async function bootstrap({ onProgress, port = 8008 } = {}) {
     }
     emit({ phase: "install-docker", status: "done", message: "Docker 就绪" });
   } else {
-    await installDocker({ emit });
+    await installDocker({ emit, dest: installDest });
     emit({ phase: "install-docker", status: "running", message: "等待 Docker 启动（如需授权/重启，完成后会自动继续）…" });
     const up = await waitUntil(dockerOk, { totalMs: 900000, everyMs: 6000 });
     if (!up) {
@@ -369,7 +381,7 @@ async function bootstrap({ onProgress, port = 8008 } = {}) {
   } else {
     emit({ phase: "container", status: "running", message: "启动 cicy-code 容器…" });
     let child = null;
-    try { child = await start({ port }); }
+    try { child = await start({ port, container, volume }); }
     catch (e) { emit({ phase: "container", status: "error", message: `容器启动失败：${e.message}` }); return { ok: false, reason: "container_start_failed" }; }
     if (!child) {
       emit({ phase: "container", status: "error", message: "容器启动失败" });
@@ -378,15 +390,15 @@ async function bootstrap({ onProgress, port = 8008 } = {}) {
   }
 
   // 4) Health
-  emit({ phase: "health", status: "running", message: "等待本地团队就绪…" });
+  emit({ phase: "health", status: "running", message: "等待容器就绪…" });
   const healthy = await waitUntil(() => probeHealth(port), { totalMs: 120000, everyMs: 3000 });
-  emit({ phase: "done", status: healthy ? "done" : "error", message: healthy ? "本地团队已就绪 🎉" : "容器起来了但 :8008 还没响应,稍等或点重试" });
-  return { ok: healthy, container: CONTAINER };
+  emit({ phase: "done", status: healthy ? "done" : "error", message: healthy ? "Docker cicy-code 已就绪 🎉" : `容器起来了但 :${port} 还没响应,稍等或点重试` });
+  return { ok: healthy, container };
 }
 
 module.exports = {
   start, stop, checkStatus, loadImage, imagePresent, dockerOk, installDocker,
-  bootstrap, probeHealth, readContainerToken,
+  bootstrap, probeHealth, readContainerToken, dockerDesktopExe, desktopDir,
   // platform-agnostic download/retry primitives, reused by native.js
   ensureDownloaded, withRetry, waitUntil, run,
 };

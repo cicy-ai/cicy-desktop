@@ -13,10 +13,21 @@
 // along with src/sidecar/installer.js and src/sidecar/wsl.js.)
 
 const { ipcMain } = require("electron");
+const path = require("path");
 const sidecar = require("../sidecar/cicy-code");
 const docker = require("../sidecar/docker");
 
 const PORT = Number(process.env.CICY_CODE_PORT || 8008);
+
+// Docker-版 cicy-code: a SECOND, optional instance that runs inside Docker on
+// :8009 (its own container + volume), alongside the native local daemon on
+// :8008. The homepage "Docker cicy-code" card owns its lifecycle; if Docker
+// Desktop is missing the card installs it first (installer downloads to the
+// user's Desktop).
+const APP_PORT = Number(process.env.CICY_DOCKER_APP_PORT || 8009);
+const APP_CONTAINER = process.env.CICY_DOCKER_APP_CONTAINER || "cicy-code-docker";
+const APP_VOLUME = process.env.CICY_DOCKER_APP_VOLUME || "cicy-ai-docker-data";
+
 let registered = false;
 
 function register({ sidecarLogPath } = {}) {
@@ -78,6 +89,55 @@ function register({ sidecarLogPath } = {}) {
     } catch (err) {
       return { ok: false, error: err.message };
     }
+  });
+
+  // ---- Docker-版 cicy-code on :8009 (homepage "Docker cicy-code" card) ----
+  // Status: is Docker Desktop installed, and is the :8009 container healthy?
+  // platform tells the card to render only on Windows.
+  ipcMain.handle("docker:app-status", async () => {
+    try {
+      const installed = await docker.dockerOk();
+      const running = await docker.probeHealth(APP_PORT);
+      return { installed, running, port: APP_PORT, platform: process.platform };
+    } catch (e) {
+      return { installed: false, running: false, port: APP_PORT, platform: process.platform, error: e.message };
+    }
+  });
+
+  // One-click bootstrap of the Docker-版 instance: install Docker Desktop if
+  // missing (installer → user's Desktop), load the image, start the :8009
+  // container (its own name/volume), wait for health. Streams phase/progress on
+  // 'docker:app-progress' so the card's modal mirrors the cicy-code 升级 modal.
+  ipcMain.handle("docker:app-bootstrap", async (e) => {
+    if (process.platform !== "win32") return { ok: false, error: "Docker cicy-code is Windows-only" };
+    try {
+      const installDest = path.join(docker.desktopDir(), "Docker Desktop Installer.exe");
+      const result = await docker.bootstrap({
+        port: APP_PORT, container: APP_CONTAINER, volume: APP_VOLUME, installDest,
+        onProgress: (ev) => { try { e.sender.send("docker:app-progress", ev); } catch {} },
+      });
+      // Healthy → register :8009 as a (custom) team so the card's "打开" reuses
+      // the token-injected open/reload flow. addTeam dedups by host:port.
+      if (result && result.ok) {
+        try {
+          const lt = require("./local-teams");
+          const tok = await docker.readContainerToken(APP_PORT);
+          await lt.addTeam({
+            base_url: `http://127.0.0.1:${APP_PORT}`, name: "Docker cicy-code",
+            ...(tok ? { api_token: tok } : {}),
+          });
+        } catch { /* best-effort — the container itself is up */ }
+      }
+      return result;
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  // Stop + remove the :8009 Docker container (card's "停止").
+  ipcMain.handle("docker:app-stop", async () => {
+    try { await docker.stop({ container: APP_CONTAINER }); return { ok: true }; }
+    catch (e) { return { ok: false, error: e.message }; }
   });
 
   // Start (or reuse) the cicy-code daemon. probeExisting inside start() reuses

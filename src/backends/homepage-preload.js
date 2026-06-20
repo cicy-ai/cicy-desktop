@@ -155,6 +155,18 @@ contextBridge.exposeInMainWorld("cicy", {
       ipcRenderer.on("docker:bootstrap-progress", handler);
       return () => ipcRenderer.removeListener("docker:bootstrap-progress", handler);
     },
+    // Docker-版 cicy-code on :8009 (the homepage "Docker cicy-code" card).
+    // appStatus → { installed, running, port, platform }; appBootstrap installs
+    // Docker (if missing, installer → Desktop) + starts the :8009 container,
+    // streaming phase/progress on 'docker:app-progress'.
+    appStatus:    ()  => logInvoke("docker:app-status"),
+    appBootstrap: ()  => logInvoke("docker:app-bootstrap"),
+    appStop:      ()  => logInvoke("docker:app-stop"),
+    onAppProgress: (cb) => {
+      const handler = (_e, ev) => { try { cb(ev); } catch {} };
+      ipcRenderer.on("docker:app-progress", handler);
+      return () => ipcRenderer.removeListener("docker:app-progress", handler);
+    },
   },
   windows: {
     list:  ()   => logInvoke("windows:list"),
