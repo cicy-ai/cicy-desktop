@@ -1,0 +1,89 @@
+name: Build WSL Package
+
+# Bakes a single WSL2 rootfs that already contains Ubuntu 22.04 + Docker Engine
+# + the cicy-code image (pre-loaded into /var/lib/docker), so a Windows install
+# is just: wsl --import <this> → dockerd auto-starts → docker run. No apt, no
+# image pull/load on the customer machine. Uploaded to Aliyun OSS (CN-fast).
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: cicy-code image to embed
+        default: cicybot/cicy-code:latest
+      oss_key:
+        description: OSS object key
+        default: rootfs/cicy-wsl-latest.tar.gz
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build base rootfs image (Ubuntu + Docker + autostart)
+        run: |
+          mkdir -p ctx
+          # dockerd auto-start on WSL boot: legacy iptables (WSL2 needs it) + detached dockerd.
+          cat > ctx/start-dockerd.sh <<'EOS'
+          #!/bin/sh
+          update-alternatives --set iptables /usr/sbin/iptables-legacy 2>/dev/null || true
+          update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy 2>/dev/null || true
+          pgrep dockerd >/dev/null 2>&1 || nohup dockerd >/var/log/dockerd.log 2>&1 &
+          EOS
+          cat > ctx/wsl.conf <<'EOS'
+          [boot]
+          command = /usr/local/sbin/start-dockerd.sh
+          [user]
+          default = root
+          [automount]
+          enabled = true
+          EOS
+          cat > ctx/Dockerfile <<'EOF'
+          FROM ubuntu:22.04
+          ENV DEBIAN_FRONTEND=noninteractive
+          RUN sed -i 's|http://archive.ubuntu.com/ubuntu|https://mirrors.tuna.tsinghua.edu.cn/ubuntu|g; s|http://security.ubuntu.com/ubuntu|https://mirrors.tuna.tsinghua.edu.cn/ubuntu|g' /etc/apt/sources.list \
+            && apt-get update \
+            && apt-get install -y --no-install-recommends docker.io ca-certificates iptables iproute2 \
+            && apt-get clean && rm -rf /var/lib/apt/lists/*
+          RUN update-alternatives --set iptables /usr/sbin/iptables-legacy || true; \
+              update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy || true
+          COPY start-dockerd.sh /usr/local/sbin/start-dockerd.sh
+          COPY wsl.conf /etc/wsl.conf
+          RUN chmod +x /usr/local/sbin/start-dockerd.sh
+          EOF
+          docker build -t cicy-wsl-base ctx
+
+      - name: Pre-load cicy-code image into the rootfs
+        run: |
+          docker pull "${{ inputs.image }}"
+          docker save "${{ inputs.image }}" -o /tmp/cicy-image.tar
+          # Run the base privileged, start an inner dockerd, load the image into
+          # its /var/lib/docker (kept in the container fs, NOT a volume), then stop.
+          cid=$(docker run -d --privileged -v /tmp/cicy-image.tar:/img.tar:ro cicy-wsl-base \
+            bash -c '
+              nohup dockerd >/var/log/dind.log 2>&1 &
+              for i in $(seq 1 60); do docker info >/dev/null 2>&1 && break; sleep 1; done
+              docker load -i /img.tar
+              docker images
+              pkill dockerd || true
+              sleep 4
+            ')
+          docker logs -f "$cid" || true
+          rc=$(docker wait "$cid"); echo "inner exit=$rc"
+          # Export the whole container filesystem (incl. /var/lib/docker) = the WSL rootfs.
+          docker export "$cid" | gzip > cicy-wsl.tar.gz
+          ls -lh cicy-wsl.tar.gz
+
+      - name: Upload to Aliyun OSS (public-read)
+        run: |
+          curl -sL https://gosspublic.alicdn.com/ossutil/1.7.19/ossutil64 -o ossutil && chmod +x ossutil
+          ./ossutil config -e oss-cn-shanghai.aliyuncs.com \
+            -i "${{ secrets.OSS_ACCESS_KEY_ID }}" -k "${{ secrets.OSS_ACCESS_KEY_SECRET }}"
+          ./ossutil cp cicy-wsl.tar.gz "oss://cicy-1372193042-cn/${{ inputs.oss_key }}" -f --acl public-read
+          echo "Uploaded: https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/${{ inputs.oss_key }}"
+
+      - name: Upload artifact (backup)
+        uses: actions/upload-artifact@v4
+        with:
+          name: cicy-wsl-package
+          path: cicy-wsl.tar.gz
+          retention-days: 7
