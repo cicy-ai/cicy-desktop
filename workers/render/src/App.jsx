@@ -161,7 +161,6 @@ function UpdateDrawerHost() {
           </div>
           <div className="drawer__headbtns">
             <button type="button" className="drawer__x" data-id="UpdateDrawer-min" title="最小化" onClick={() => updateDrawer.minimize()} aria-label="minimize">‒</button>
-            <button type="button" className="drawer__x" data-id="UpdateDrawer-close" title="关闭" onClick={() => running ? updateDrawer.minimize() : updateDrawer.close()} aria-label="close">×</button>
           </div>
         </div>
 
@@ -1562,7 +1561,6 @@ function DockerInstallDrawerHost() {
           </div>
           <div className="drawer__headbtns">
             <button type="button" className="drawer__x" data-id="DockerDrawer-min" title={tr("common.minimize", "最小化")} onClick={() => dockerDrawer.minimize()} aria-label="minimize">‒</button>
-            <button type="button" className="drawer__x" data-id="DockerDrawer-close" title={tr("common.close", "关闭")} onClick={() => running ? dockerDrawer.minimize() : dockerDrawer.close()} aria-label="close">×</button>
           </div>
         </div>
 
