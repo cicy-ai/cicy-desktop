@@ -76,7 +76,8 @@ jobs:
 
       - name: Upload to Aliyun OSS (public-read)
         run: |
-          curl -sL https://gosspublic.alicdn.com/ossutil/1.7.19/ossutil64 -o ossutil && chmod +x ossutil
+          curl -sL https://gosspublic.alicdn.com/ossutil/1.7.18/ossutil64 -o ossutil && chmod +x ossutil
+          test -s ossutil && head -c4 ossutil | grep -q ELF || { echo "ossutil download bad"; exit 1; }
           ./ossutil config -e oss-cn-shanghai.aliyuncs.com \
             -i "${{ secrets.OSS_ACCESS_KEY_ID }}" -k "${{ secrets.OSS_ACCESS_KEY_SECRET }}"
           ./ossutil cp cicy-wsl.tar.gz "oss://cicy-1372193042-cn/${{ inputs.oss_key }}" -f --acl public-read
