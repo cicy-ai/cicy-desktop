@@ -13,6 +13,8 @@
 // along with src/sidecar/installer.js and src/sidecar/wsl.js.)
 
 const { ipcMain } = require("electron");
+const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const sidecar = require("../sidecar/cicy-code");
 const docker = require("../sidecar/docker");
@@ -23,10 +25,23 @@ const PORT = Number(process.env.CICY_CODE_PORT || 8008);
 // :8009 (its own container + volume), alongside the native local daemon on
 // :8008. The homepage "Docker cicy-code" card owns its lifecycle; if Docker
 // Desktop is missing the card installs it first (installer downloads to the
-// user's Desktop).
+// user's Desktop). The whole cicy home is persisted to a named volume so the
+// entire container state survives recreation (主人: "把整个 docker 挂出来").
 const APP_PORT = Number(process.env.CICY_DOCKER_APP_PORT || 8009);
 const APP_CONTAINER = process.env.CICY_DOCKER_APP_CONTAINER || "cicy-code-docker";
-const APP_VOLUME = process.env.CICY_DOCKER_APP_VOLUME || "cicy-ai-docker-data";
+const APP_VOLUME = process.env.CICY_DOCKER_APP_VOLUME || "cicy-team";
+const APP_MOUNT = process.env.CICY_DOCKER_APP_MOUNT || "/home/cicy";
+// The Docker-版 instance reaches the LLM through the cicy gateway, authenticated
+// with the LOCAL 8008 team's api_token (主人: "key 用 local team 8008 的"). 8008
+// is started by default on Windows and its token is already minted by the time
+// the user opens the Docker card.
+const GATEWAY_ENDPOINT = process.env.CICY_AI_GATEWAY_LLM_ENDPOINT || "https://gateway.cicy-ai.com";
+function readLocalApiToken() {
+  try {
+    const p = path.join(os.homedir(), "cicy-ai", "global.json");
+    return String(JSON.parse(fs.readFileSync(p, "utf8")).api_token || "");
+  } catch { return ""; }
+}
 
 let registered = false;
 
@@ -104,40 +119,84 @@ function register({ sidecarLogPath } = {}) {
     }
   });
 
+  // Common run options for the :8009 instance: its own container/volume, the
+  // whole-home mount, and the LLM gateway env keyed by the 8008 team's token.
+  const appOpts = () => {
+    const token = readLocalApiToken();
+    const env = { CICY_AI_GATEWAY_LLM_ENDPOINT: GATEWAY_ENDPOINT };
+    if (token) env.CICY_AI_GATEWAY_LLM_API_KEY = token;
+    return { port: APP_PORT, container: APP_CONTAINER, volume: APP_VOLUME, mountTarget: APP_MOUNT, env };
+  };
+  // Register the running :8009 instance as a (custom) team so the card's "打开"
+  // reuses the token-injected open/reload flow. addTeam dedups by host:port.
+  const registerAppTeam = async () => {
+    try {
+      const lt = require("./local-teams");
+      const tok = await docker.readContainerToken(APP_PORT);
+      await lt.addTeam({ base_url: `http://127.0.0.1:${APP_PORT}`, name: "Docker cicy-code", ...(tok ? { api_token: tok } : {}) });
+    } catch { /* best-effort — the container itself is up */ }
+  };
+
   // One-click bootstrap of the Docker-版 instance: install Docker Desktop if
-  // missing (installer → user's Desktop), load the image, start the :8009
-  // container (its own name/volume), wait for health. Streams phase/progress on
-  // 'docker:app-progress' so the card's modal mirrors the cicy-code 升级 modal.
+  // missing (installer → Desktop) WHILE downloading the R2 image (→ ~/Downloads)
+  // in parallel, import it, start the :8009 container, wait for health. Streams
+  // phase/progress on 'docker:app-progress' so the card's modal mirrors the
+  // cicy-code 升级 modal. Idempotent + resumable → the modal's 重试 just re-runs.
   ipcMain.handle("docker:app-bootstrap", async (e) => {
     if (process.platform !== "win32") return { ok: false, error: "Docker cicy-code is Windows-only" };
     try {
       const installDest = path.join(docker.desktopDir(), "Docker Desktop Installer.exe");
       const result = await docker.bootstrap({
-        port: APP_PORT, container: APP_CONTAINER, volume: APP_VOLUME, installDest,
+        ...appOpts(), installDest,
         onProgress: (ev) => { try { e.sender.send("docker:app-progress", ev); } catch {} },
       });
-      // Healthy → register :8009 as a (custom) team so the card's "打开" reuses
-      // the token-injected open/reload flow. addTeam dedups by host:port.
-      if (result && result.ok) {
-        try {
-          const lt = require("./local-teams");
-          const tok = await docker.readContainerToken(APP_PORT);
-          await lt.addTeam({
-            base_url: `http://127.0.0.1:${APP_PORT}`, name: "Docker cicy-code",
-            ...(tok ? { api_token: tok } : {}),
-          });
-        } catch { /* best-effort — the container itself is up */ }
-      }
+      if (result && result.ok) await registerAppTeam();
       return result;
     } catch (err) {
       return { ok: false, error: err.message };
     }
   });
 
-  // Stop + remove the :8009 Docker container (card's "停止").
+  // ⋯ menu → 重启: `docker restart` the :8009 container, wait for health.
+  ipcMain.handle("docker:app-restart", async () => {
+    try {
+      await docker.restart({ container: APP_CONTAINER });
+      const ok = await docker.waitUntil(() => docker.probeHealth(APP_PORT), { totalMs: 60000, everyMs: 2000 });
+      return { ok };
+    } catch (e) { return { ok: false, error: e.message }; }
+  });
+
+  // ⋯ menu → 停止: graceful `docker stop` (keeps the container; data persists in
+  // the named volume). The card's 启动 path re-creates/starts it.
   ipcMain.handle("docker:app-stop", async () => {
-    try { await docker.stop({ container: APP_CONTAINER }); return { ok: true }; }
+    try { await docker.stopContainer({ container: APP_CONTAINER }); return { ok: true }; }
     catch (e) { return { ok: false, error: e.message }; }
+  });
+
+  // ⋯ menu → 升级: re-pull the latest R2 image (→ ~/Downloads, resume/skip + bad-
+  // partial delete), import it, re-create the :8009 container on the new image.
+  // Streams on 'docker:app-progress' so the same modal shows the upgrade.
+  ipcMain.handle("docker:app-upgrade", async (e) => {
+    if (process.platform !== "win32") return { ok: false, error: "Docker cicy-code is Windows-only" };
+    const emit = (ev) => { try { e.sender.send("docker:app-progress", ev); } catch {} };
+    try {
+      if (!(await docker.dockerOk())) { emit({ phase: "done", status: "error", message: "Docker 未运行" }); return { ok: false, error: "docker_not_running" }; }
+      const tmp = await docker.downloadImageTarball({ emit });
+      await docker.loadImageFromTarball(tmp, { emit });
+      emit({ phase: "image", status: "done", message: "镜像已更新" });
+      emit({ phase: "container", status: "running", message: "用新镜像重建容器…" });
+      await docker.stop({ container: APP_CONTAINER });
+      const child = await docker.start(appOpts());
+      if (!child) { emit({ phase: "done", status: "error", message: "容器启动失败" }); return { ok: false, error: "container_start_failed" }; }
+      emit({ phase: "health", status: "running", message: "等待就绪…" });
+      const ok = await docker.waitUntil(() => docker.probeHealth(APP_PORT), { totalMs: 120000, everyMs: 3000 });
+      emit({ phase: "done", status: ok ? "done" : "error", message: ok ? "升级完成 🎉" : "启动了但 :8009 还没响应" });
+      if (ok) await registerAppTeam();
+      return { ok };
+    } catch (err) {
+      emit({ phase: "done", status: "error", message: `升级失败：${err.message}` });
+      return { ok: false, error: err.message };
+    }
   });
 
   // Start (or reuse) the cicy-code daemon. probeExisting inside start() reuses

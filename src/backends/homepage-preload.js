@@ -161,7 +161,9 @@ contextBridge.exposeInMainWorld("cicy", {
     // streaming phase/progress on 'docker:app-progress'.
     appStatus:    ()  => logInvoke("docker:app-status"),
     appBootstrap: ()  => logInvoke("docker:app-bootstrap"),
+    appRestart:   ()  => logInvoke("docker:app-restart"),
     appStop:      ()  => logInvoke("docker:app-stop"),
+    appUpgrade:   ()  => logInvoke("docker:app-upgrade"),
     onAppProgress: (cb) => {
       const handler = (_e, ev) => { try { cb(ev); } catch {} };
       ipcRenderer.on("docker:app-progress", handler);

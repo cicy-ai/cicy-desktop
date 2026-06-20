@@ -121,5 +121,37 @@
     "scrollHint": "请阅读至底部以继续",
     "menu": "用户协议",
     "close": "关闭"
+  },
+  "docker": {
+    "title": "Docker cicy-code",
+    "install": "下载安装",
+    "start": "启动",
+    "running": "运行中 · :8009",
+    "notRunning": "未启动 · 点「启动」",
+    "notInstalled": "Docker Desktop 未安装",
+    "working": "处理中…",
+    "ready": "Docker cicy-code 已就绪",
+    "failed": "安装失败",
+    "upgraded": "已升级到最新",
+    "upgradeFailed": "升级失败",
+    "manage": "管理 Docker cicy-code",
+    "restart": "重启",
+    "restarted": "已重启",
+    "restarting": "重启中…",
+    "stop": "停止",
+    "stopped": "已停止",
+    "stoping": "停止中…",
+    "upgrade": "升级（拉取最新镜像）",
+    "opFailed": "操作失败",
+    "setupTitle": "安装 Docker cicy-code",
+    "busy": "进行中",
+    "preparing": "准备中…",
+    "installing2": "安装进行中…",
+    "background": "在后台继续"
+  },
+  "common": {
+    "close": "关闭",
+    "retry": "重试",
+    "done": "完成"
   }
 }

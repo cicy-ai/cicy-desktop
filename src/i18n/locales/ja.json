@@ -120,5 +120,37 @@
     "scrollHint": "続行するには最後までお読みください",
     "menu": "利用規約",
     "close": "閉じる"
+  },
+  "docker": {
+    "title": "Docker cicy-code",
+    "install": "ダウンロードしてインストール",
+    "start": "起動",
+    "running": "実行中 · :8009",
+    "notRunning": "停止中 · 「起動」をクリック",
+    "notInstalled": "Docker Desktop 未インストール",
+    "working": "処理中…",
+    "ready": "Docker cicy-code の準備完了",
+    "failed": "インストール失敗",
+    "upgraded": "最新へ更新しました",
+    "upgradeFailed": "アップグレード失敗",
+    "manage": "Docker cicy-code を管理",
+    "restart": "再起動",
+    "restarted": "再起動しました",
+    "restarting": "再起動中…",
+    "stop": "停止",
+    "stopped": "停止しました",
+    "stoping": "停止中…",
+    "upgrade": "アップグレード（最新イメージ取得）",
+    "opFailed": "操作に失敗しました",
+    "setupTitle": "Docker cicy-code をインストール",
+    "busy": "進行中",
+    "preparing": "準備中…",
+    "installing2": "インストール中…",
+    "background": "バックグラウンドで継続"
+  },
+  "common": {
+    "close": "閉じる",
+    "retry": "再試行",
+    "done": "完了"
   }
 }

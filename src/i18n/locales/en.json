@@ -121,5 +121,37 @@
     "scrollHint": "Please read to the end to continue",
     "menu": "Terms of Use",
     "close": "Close"
+  },
+  "docker": {
+    "title": "Docker cicy-code",
+    "install": "Download & Install",
+    "start": "Start",
+    "running": "Running · :8009",
+    "notRunning": "Stopped · click Start",
+    "notInstalled": "Docker Desktop not installed",
+    "working": "Working…",
+    "ready": "Docker cicy-code is ready",
+    "failed": "Install failed",
+    "upgraded": "Upgraded to latest",
+    "upgradeFailed": "Upgrade failed",
+    "manage": "Manage Docker cicy-code",
+    "restart": "Restart",
+    "restarted": "Restarted",
+    "restarting": "Restarting…",
+    "stop": "Stop",
+    "stopped": "Stopped",
+    "stoping": "Stopping…",
+    "upgrade": "Upgrade (pull latest image)",
+    "opFailed": "Operation failed",
+    "setupTitle": "Install Docker cicy-code",
+    "busy": "In progress",
+    "preparing": "Preparing…",
+    "installing2": "Installing…",
+    "background": "Continue in background"
+  },
+  "common": {
+    "close": "Close",
+    "retry": "Retry",
+    "done": "Done"
   }
 }

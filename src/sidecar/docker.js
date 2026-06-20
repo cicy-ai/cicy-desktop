@@ -157,12 +157,22 @@ function headSize(url, hops = 5) {
 // Download `url`→`dest` but: SKIP if the file is already complete, RESUME if it's
 // a partial, retry with progress, fall back to `mirror`. This is the core of the
 // user's "下载了就不重复下载 / 步骤走过的不要再走".
-async function ensureDownloaded(url, dest, mirror, { emit, phase, label } = {}) {
+async function ensureDownloaded(url, dest, mirror, { emit, phase, label, freshOnIncomplete = false } = {}) {
   const expected = (await headSize(url)) || (mirror ? await headSize(mirror) : 0);
   let have = 0; try { have = fs.statSync(dest).size; } catch {}
+  // Complete file already on disk → skip (主人: 完整的 exe/镜像包就别重下了).
   if (expected > 0 && have === expected) {
     emit && emit({ phase, status: "skip", message: `${label}：已下载，跳过`, progress: 100 });
     return dest;
+  }
+  // A partial left by a PREVIOUS, interrupted/restarted session can be corrupt;
+  // when freshOnIncomplete, delete it and start clean rather than range-resuming
+  // onto a possibly-bad file (主人: 下载被重启打断的残包要删掉重下). Within THIS
+  // session, retries still resume the part we wrote ourselves.
+  if (freshOnIncomplete && have > 0 && expected > 0 && have !== expected) {
+    try { fs.unlinkSync(dest); } catch {}
+    have = 0;
+    emit && emit({ phase, status: "running", message: `${label}：删除不完整的旧包，重新下载`, progress: 0 });
   }
   const sources = mirror ? [url, mirror] : [url];
   let lastPct = -1; // throttle: chunks arrive dozens/s — only emit on whole-percent change
@@ -226,11 +236,28 @@ function probeHealth(port = 8008, timeoutMs = 2500) {
   });
 }
 
-async function loadImage({ emit } = {}) {
-  // STABLE temp name (no pid) so a re-run reuses an existing partial/complete
-  // tarball instead of starting over.
-  const tmp = path.join(os.tmpdir(), "cicy-code-latest.tar.gz");
-  await ensureDownloaded(R2_TARBALL, tmp, null, { emit, phase: "image", label: "下载镜像" });
+// The R2 image tarball downloads to ~/Downloads (主人: docker image 下到
+// ~/Downloads — visible, like the Docker installer on the Desktop). STABLE name
+// (no pid) so a re-run reuses an existing partial/complete file (resume-friendly
+// on a flaky network).
+function imageTarballPath() {
+  const dir = path.join(process.env["USERPROFILE"] || os.homedir(), "Downloads");
+  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  return path.join(dir, "cicy-code-latest.tar.gz");
+}
+
+// Download the R2 base-env image tarball (no docker needed yet). Split out of
+// loadImage so bootstrap can run this IN PARALLEL with the Docker Desktop
+// install (主人: 装 Docker 的同时下载 R2 镜像). Returns the tarball path.
+async function downloadImageTarball({ emit } = {}) {
+  const dest = imageTarballPath();
+  await ensureDownloaded(R2_TARBALL, dest, null, { emit, phase: "image", label: "下载镜像", freshOnIncomplete: true });
+  return dest;
+}
+
+// `docker load` an already-downloaded tarball + re-tag to IMAGE. Needs the
+// daemon up, so this runs AFTER Docker is ready (主人: 再导入 docker).
+async function loadImageFromTarball(tmp, { emit } = {}) {
   emit && emit({ phase: "image", status: "running", message: "docker load…", progress: 100 });
   console.log(`[docker-sidecar] docker load…`);
   const { stdout } = await run(["load", "-i", tmp], { timeout: 300000 });
@@ -242,9 +269,23 @@ async function loadImage({ emit } = {}) {
     try { await run(["tag", m[1], IMAGE]); console.log(`[docker-sidecar] tagged ${m[1]} -> ${IMAGE}`); }
     catch (e) { console.warn(`[docker-sidecar] re-tag failed: ${e.message}`); }
   }
-  // Only delete AFTER a successful load — a failed load keeps the tarball so the
-  // next attempt skips the re-download. (imagePresent() gates re-entry anyway.)
-  try { fs.unlinkSync(tmp); } catch {}
+  // Keep the tarball in ~/Downloads (主人: 下到 Downloads) — it's a visible,
+  // resume-friendly cache; imagePresent() gates re-entry so we don't re-load it.
+}
+
+// Download-then-import in one shot (sequential). Used when Docker is already up.
+async function loadImage({ emit } = {}) {
+  const tmp = await downloadImageTarball({ emit });
+  await loadImageFromTarball(tmp, { emit });
+}
+
+// `docker restart` / graceful `docker stop` for a given container — the Docker-版
+// card's ⋯ menu (重启 / 停止), mirroring the 8008 local card's lifecycle menu.
+async function restart({ container = CONTAINER } = {}) {
+  await run(["restart", container], { timeout: 60000 });
+}
+async function stopContainer({ container = CONTAINER } = {}) {
+  try { await run(["stop", container], { timeout: 30000 }); } catch {}
 }
 
 async function checkStatus() {
@@ -264,7 +305,7 @@ function desktopDir() {
 // Docker Desktop). `container`/`volume` are parameterized so a SECOND instance
 // (the Docker-版 cicy-code on :8009) can run alongside the native local one
 // without a name/volume collision.
-async function start({ port = 8008, container = CONTAINER, volume = VOLUME } = {}) {
+async function start({ port = 8008, container = CONTAINER, volume = VOLUME, mountTarget = "/home/cicy/cicy-ai", env = {} } = {}) {
   // Something already serves a healthy cicy-code on :port (a legacy-named
   // container auto-revived by `--restart unless-stopped`, a manual run…).
   // Adopt it — `docker run` would just lose the port-bind fight.
@@ -283,13 +324,22 @@ async function start({ port = 8008, container = CONTAINER, volume = VOLUME } = {
   // Replace any stale container of the same name.
   try { await run(["rm", "-f", container]); } catch {}
 
+  // mountTarget defaults to /home/cicy/cicy-ai (legacy local-team layout); the
+  // Docker-版 instance passes /home/cicy to persist the WHOLE cicy home (主人:
+  // "把整个 docker 挂出来" — everything mutable lives under /home/cicy: global.json,
+  // db, agents, files, the npm-installed cicy-code itself).
   const args = [
     "run", "-d", "--name", container, "--restart", "unless-stopped",
     "-p", `${port}:8008`,
-    "-v", `${volume}:/home/cicy/cicy-ai`,
+    "-v", `${volume}:${mountTarget}`,
   ];
   for (const k of PASS_ENV) {
     if (process.env[k]) args.push("-e", `${k}=${process.env[k]}`);
+  }
+  // Caller-supplied env (e.g. the LLM gateway endpoint + key for the Docker-版
+  // instance, which bills through the 8008 local team's token).
+  for (const [k, v] of Object.entries(env || {})) {
+    if (v != null && v !== "") args.push("-e", `${k}=${v}`);
   }
   args.push(IMAGE);
 
@@ -314,7 +364,7 @@ async function installDocker({ emit, dest } = {}) {
   try { fs.mkdirSync(path.dirname(target), { recursive: true }); } catch {}
   e({ phase: "install-docker", status: "running", message: "下载 Docker Desktop 安装包…", progress: 0 });
   await ensureDownloaded(DOCKER_DESKTOP_URL, target, DOCKER_DESKTOP_MIRROR, {
-    emit, phase: "install-docker", label: "下载 Docker Desktop",
+    emit, phase: "install-docker", label: "下载 Docker Desktop", freshOnIncomplete: true,
   });
   e({ phase: "install-docker", status: "running", message: "安装 Docker Desktop（请在弹出的授权框点「是」，装完可能需重启）…" });
   await new Promise((resolve) => {
@@ -333,16 +383,22 @@ async function installDocker({ emit, dest } = {}) {
 // start the container → wait for :8008. Every step CHECKS first and SKIPS if
 // already done, emits coarse phase events + byte progress, and the downloads
 // resume. Safe to call again after a failure — it picks up where it left off.
-async function bootstrap({ onProgress, port = 8008, container = CONTAINER, volume = VOLUME, installDest } = {}) {
+async function bootstrap({ onProgress, port = 8008, container = CONTAINER, volume = VOLUME, mountTarget, env, installDest } = {}) {
   const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
+
+  // Decide up-front whether the base image needs fetching, so we can download
+  // the R2 tarball IN PARALLEL with the Docker Desktop install below.
+  const needImage = !(await imagePresent());
+  let imgDl = null; // Promise<tarballPath|null> when downloading in parallel
 
   // 1) Docker present?
   if (await dockerOk()) {
     emit({ phase: "install-docker", status: "skip", message: "Docker 已安装，跳过" });
   } else if (dockerDesktopExe()) {
     // Installed but the daemon is down — just launch Docker Desktop, never
-    // re-download/re-run the installer ("步骤走过的不要再走").
+    // re-download/re-run the installer (主人: 装了就别再下 Docker Desktop 了).
     emit({ phase: "install-docker", status: "running", message: "Docker 已安装，正在启动 Docker Desktop…" });
+    if (needImage) imgDl = downloadImageTarball({ emit }).catch((e) => { emit({ phase: "image", status: "error", message: `镜像下载失败：${e.message}` }); return null; });
     startDockerDesktop();
     const up = await waitUntil(dockerOk, { totalMs: 300000, everyMs: 5000 });
     if (!up) {
@@ -351,6 +407,9 @@ async function bootstrap({ onProgress, port = 8008, container = CONTAINER, volum
     }
     emit({ phase: "install-docker", status: "done", message: "Docker 就绪" });
   } else {
+    // Docker missing → download the R2 image IN PARALLEL with the installer
+    // running + the daemon coming up (主人: 装 Docker 的同时下载 R2 镜像).
+    if (needImage) imgDl = downloadImageTarball({ emit }).catch((e) => { emit({ phase: "image", status: "error", message: `镜像下载失败：${e.message}` }); return null; });
     await installDocker({ emit, dest: installDest });
     emit({ phase: "install-docker", status: "running", message: "等待 Docker 启动（如需授权/重启，完成后会自动继续）…" });
     const up = await waitUntil(dockerOk, { totalMs: 900000, everyMs: 6000 });
@@ -361,12 +420,16 @@ async function bootstrap({ onProgress, port = 8008, container = CONTAINER, volum
     emit({ phase: "install-docker", status: "done", message: "Docker 就绪" });
   }
 
-  // 2) Base image present?
-  if (await imagePresent()) {
+  // 2) Base image — import it (docker load). If pre-downloaded in parallel, just
+  // load; otherwise (re)download now. Downloads resume/skip + delete bad partials.
+  if (!needImage) {
     emit({ phase: "image", status: "skip", message: "镜像已就绪，跳过" });
   } else {
     try {
-      await loadImage({ emit });
+      let tmp = imgDl ? await imgDl : null;
+      if (!tmp) tmp = await downloadImageTarball({ emit }); // not pre-dl'd / parallel dl failed → fetch now
+      emit({ phase: "image", status: "running", message: "导入 Docker 镜像…", progress: 100 });
+      await loadImageFromTarball(tmp, { emit });
       emit({ phase: "image", status: "done", message: "镜像就绪" });
     } catch (e) {
       emit({ phase: "image", status: "error", message: `镜像加载失败：${e.message}（点重试,下载会续传）` });
@@ -381,7 +444,7 @@ async function bootstrap({ onProgress, port = 8008, container = CONTAINER, volum
   } else {
     emit({ phase: "container", status: "running", message: "启动 cicy-code 容器…" });
     let child = null;
-    try { child = await start({ port, container, volume }); }
+    try { child = await start({ port, container, volume, mountTarget, env }); }
     catch (e) { emit({ phase: "container", status: "error", message: `容器启动失败：${e.message}` }); return { ok: false, reason: "container_start_failed" }; }
     if (!child) {
       emit({ phase: "container", status: "error", message: "容器启动失败" });
@@ -397,7 +460,8 @@ async function bootstrap({ onProgress, port = 8008, container = CONTAINER, volum
 }
 
 module.exports = {
-  start, stop, checkStatus, loadImage, imagePresent, dockerOk, installDocker,
+  start, stop, stopContainer, restart, checkStatus, loadImage, loadImageFromTarball,
+  downloadImageTarball, imagePresent, dockerOk, installDocker,
   bootstrap, probeHealth, readContainerToken, dockerDesktopExe, desktopDir,
   // platform-agnostic download/retry primitives, reused by native.js
   ensureDownloaded, withRetry, waitUntil, run,

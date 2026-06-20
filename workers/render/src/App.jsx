@@ -1537,7 +1537,12 @@ function DockerInstallDrawerHost() {
 // Desktop and runs it (主人指令), streaming progress through the drawer above.
 function DockerCard({ dockerTeam, onOpen, onRefresh }) {
   const [status, setStatus] = useState(null);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState("");   // "" | bootstrap | restart | stop | upgrade
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
+  const kebabRef = useRef(null);
+  const menuRef = useRef(null);
+  const MENU_W = 184;
   const DOCKER_BLUE = "#2496ed";
 
   const checkStatus = useCallback(async () => {
@@ -1547,8 +1552,31 @@ function DockerCard({ dockerTeam, onOpen, onRefresh }) {
 
   useEffect(() => { checkStatus(); }, [checkStatus]);
 
+  // Close the ⋯ menu on outside-click / Esc (mirrors LocalTeamCard).
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDoc = (e) => {
+      if (kebabRef.current?.contains(e.target) || menuRef.current?.contains(e.target)) return;
+      setMenuOpen(false);
+    };
+    const onKey = (e) => { if (e.key === "Escape") setMenuOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
+  }, [menuOpen]);
+
+  const toggleMenu = () => {
+    if (!menuOpen && kebabRef.current) {
+      const r = kebabRef.current.getBoundingClientRect();
+      const left = Math.max(8, Math.min(r.right - MENU_W, window.innerWidth - MENU_W - 8));
+      setMenuPos({ top: Math.round(r.bottom + 4), left: Math.round(left) });
+    }
+    setMenuOpen((v) => !v);
+  };
+
+  // Install / start: streams through the drawer modal (logs + progress + retry).
   const runBootstrap = useCallback(async () => {
-    setBusy(true);
+    setBusy("bootstrap");
     dockerDrawer.open({ onRetry: runBootstrap });
     const unsub = window.cicy?.docker?.onAppProgress?.((ev) => dockerDrawer.push(ev));
     try {
@@ -1559,10 +1587,40 @@ function DockerCard({ dockerTeam, onOpen, onRefresh }) {
       dockerDrawer.finish({ ok: false, message: e.message });
     } finally {
       try { unsub && unsub(); } catch {}
-      setBusy(false);
-      checkStatus();
+      setBusy(""); checkStatus();
     }
   }, [checkStatus, onRefresh]);
+
+  // Upgrade: re-pull the R2 image + recreate the container — also through the
+  // drawer so the user sees the pull/import/restart log (主人: 升级要能看日志).
+  const runUpgrade = useCallback(async () => {
+    setMenuOpen(false); setBusy("upgrade");
+    dockerDrawer.open({ onRetry: runUpgrade });
+    const unsub = window.cicy?.docker?.onAppProgress?.((ev) => dockerDrawer.push(ev));
+    try {
+      const r = await window.cicy?.docker?.appUpgrade?.();
+      dockerDrawer.finish({ ok: !!r?.ok, message: r?.ok ? tr("docker.upgraded", "已升级到最新") : (r?.error || tr("docker.upgradeFailed", "升级失败")) });
+      if (r?.ok) onRefresh?.();
+    } catch (e) {
+      dockerDrawer.finish({ ok: false, message: e.message });
+    } finally {
+      try { unsub && unsub(); } catch {}
+      setBusy(""); checkStatus();
+    }
+  }, [checkStatus, onRefresh]);
+
+  // Restart / stop: quick lifecycle ops with a toast (no full drawer needed).
+  const runOp = useCallback(async (op, fn, okMsg) => {
+    setMenuOpen(false); setBusy(op);
+    toast.show({ id: "docker-op", message: tr(`docker.${op}ing`, op === "restart" ? "重启中…" : "停止中…"), status: "running" });
+    try {
+      const r = await fn();
+      if (r?.ok) toast.show({ id: "docker-op", message: okMsg, status: "done", ttl: 2500 });
+      else toast.show({ id: "docker-op", message: (r?.error || tr("docker.opFailed", "操作失败")), status: "error", ttl: 6000 });
+    } catch (e) {
+      toast.show({ id: "docker-op", message: e.message, status: "error", ttl: 6000 });
+    } finally { setBusy(""); checkStatus(); }
+  }, [checkStatus]);
 
   // Render only on Windows. window.cicy.platform is sync, so we can decide
   // immediately without waiting on the async appStatus probe.
@@ -1572,13 +1630,14 @@ function DockerCard({ dockerTeam, onOpen, onRefresh }) {
   const running = !!status?.running || dockerTeam?.status === "running";
   const installed = !!status?.installed;
   const tone = running ? "ok" : installed ? "warn" : "off";
+  const isBusy = !!busy;
   const stateText = running
     ? tr("docker.running", "运行中 · :8009")
     : installed
       ? tr("docker.notRunning", "未启动 · 点「启动」")
       : tr("docker.notInstalled", "Docker Desktop 未安装");
 
-  const ctaLabel = busy
+  const ctaLabel = isBusy
     ? tr("docker.working", "处理中…")
     : running
       ? tr("localTeams.open", "打开")
@@ -1587,10 +1646,13 @@ function DockerCard({ dockerTeam, onOpen, onRefresh }) {
         : tr("docker.install", "下载安装");
 
   const onCta = () => {
-    if (busy) return;
+    if (isBusy) return;
     if (running) { onOpen?.(dockerTeam?.id); return; }
     runBootstrap();
   };
+
+  // The ⋯ menu (重启 / 停止 / 升级) is only meaningful once Docker is installed.
+  const showMenu = installed;
 
   return (
     <div data-id="DockerCard" className={`bcard bcard--docker${running ? " bcard--online" : ""}`}>
@@ -1602,6 +1664,44 @@ function DockerCard({ dockerTeam, onOpen, onRefresh }) {
             <path d="M21.81 10.25c-.06-.05-.67-.51-1.95-.51-.34 0-.68.03-1.01.09-.25-1.69-1.64-2.51-1.7-2.55l-.34-.2-.22.32a4.5 4.5 0 0 0-.59 1.4c-.23.94-.09 1.83.39 2.59-.58.32-1.51.4-1.7.41H2.62a.61.61 0 0 0-.61.61 9.32 9.32 0 0 0 .57 3.35 4.9 4.9 0 0 0 1.95 2.53c.92.52 2.42.82 4.12.82.77 0 1.54-.07 2.3-.21a9.6 9.6 0 0 0 3-1.09 8.3 8.3 0 0 0 2.05-1.68c.98-1.11 1.56-2.35 1.99-3.45h.17c1.36 0 2.2-.55 2.66-1l.13-.16zM4.7 11.33h1.78a.16.16 0 0 0 .16-.16V9.58a.16.16 0 0 0-.16-.16H4.7a.16.16 0 0 0-.16.16v1.59c0 .09.07.16.16.16m2.46 0h1.78a.16.16 0 0 0 .16-.16V9.58a.16.16 0 0 0-.16-.16H7.16a.16.16 0 0 0-.16.16v1.59c0 .09.07.16.16.16m2.5 0h1.78a.16.16 0 0 0 .16-.16V9.58a.16.16 0 0 0-.16-.16H9.66a.16.16 0 0 0-.16.16v1.59c0 .09.07.16.16.16m2.47 0h1.78a.16.16 0 0 0 .16-.16V9.58a.16.16 0 0 0-.16-.16h-1.78a.16.16 0 0 0-.16.16v1.59c0 .09.07.16.16.16M7.16 9.06h1.78a.16.16 0 0 0 .16-.16V7.31a.16.16 0 0 0-.16-.16H7.16a.16.16 0 0 0-.16.16v1.59c0 .09.07.16.16.16m2.5 0h1.78a.16.16 0 0 0 .16-.16V7.31a.16.16 0 0 0-.16-.16H9.66a.16.16 0 0 0-.16.16v1.59c0 .09.07.16.16.16m2.47 0h1.78a.16.16 0 0 0 .16-.16V7.31a.16.16 0 0 0-.16-.16h-1.78a.16.16 0 0 0-.16.16v1.59c0 .09.07.16.16.16" />
           </svg>
         </div>
+        {showMenu && (
+          <div className="bcard__menuwrap" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              ref={kebabRef}
+              data-id="DockerCard-menu-btn"
+              className="bcard__kebab"
+              title={tr("docker.manage", "管理 Docker cicy-code")}
+              disabled={isBusy}
+              onClick={toggleMenu}
+            >
+              {isBusy ? <Spinner /> : <KebabIcon />}
+            </button>
+            {menuOpen && createPortal(
+              <div className="bcard__menu bcard__menu--portal" data-id="DockerCard-menu" role="menu"
+                ref={menuRef}
+                style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: MENU_W }}
+                onClick={(e) => e.stopPropagation()}>
+                {running && (
+                  <button type="button" data-id="DockerCard-restart" className="bcard__menu-item"
+                    onClick={() => runOp("restart", () => window.cicy.docker.appRestart(), tr("docker.restarted", "已重启"))}>
+                    {tr("docker.restart", "重启")}
+                  </button>
+                )}
+                <button type="button" data-id="DockerCard-upgrade" className="bcard__menu-item is-accent" onClick={runUpgrade}>
+                  {tr("docker.upgrade", "升级（拉取最新镜像）")}
+                </button>
+                {running && (
+                  <button type="button" data-id="DockerCard-stop" className="bcard__menu-item is-danger"
+                    onClick={() => runOp("stop", () => window.cicy.docker.appStop(), tr("docker.stopped", "已停止"))}>
+                    {tr("docker.stop", "停止")}
+                  </button>
+                )}
+              </div>,
+              document.body
+            )}
+          </div>
+        )}
       </div>
       <div className="bcard__body">
         <h3 className="bcard__name">{tr("docker.title", "Docker cicy-code")}</h3>
@@ -1612,11 +1712,11 @@ function DockerCard({ dockerTeam, onOpen, onRefresh }) {
         type="button"
         className="bcard__cta"
         data-id="DockerCard-cta"
-        disabled={busy}
+        disabled={isBusy}
         onClick={onCta}
         style={!running ? { background: DOCKER_BLUE, color: "white" } : undefined}
       >
-        {busy ? <Spinner /> : <ArrowIcon />}
+        {isBusy ? <Spinner /> : <ArrowIcon />}
         <span>{ctaLabel}</span>
       </button>
     </div>
