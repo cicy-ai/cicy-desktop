@@ -1677,7 +1677,9 @@ function DockerCard({ dockerTeam, onOpen, onRefresh }) {
     const unsub = window.cicy?.docker?.onAppProgress?.((ev) => dockerDrawer.push(ev));
     try {
       const r = await window.cicy?.docker?.appBootstrap?.();
-      if (r?.reason === "wsl_reboot_required") {
+      if (r?.reason === "installer_launched") {
+        dockerDrawer.finish({ status: "reboot", message: tr("docker.installerLaunched", "已打开 Docker 安装程序——请完成安装（会装 WSL2、可能需重启），装好后点「重试」") });
+      } else if (r?.reason === "wsl_reboot_required") {
         dockerDrawer.finish({ status: "reboot", message: tr("docker.rebootNeeded", "WSL2 已安装，请【重启 Windows】后回来点「重试」继续") });
       } else {
         dockerDrawer.finish({ ok: !!r?.ok, message: r?.ok ? tr("docker.ready", "Docker cicy-code 已就绪") : (r?.error || tr("docker.failed", "安装失败")) });

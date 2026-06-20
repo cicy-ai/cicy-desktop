@@ -149,7 +149,8 @@
     "installing2": "Installing…",
     "background": "Continue in background",
     "rebootNeeded": "WSL2 installed — please RESTART Windows, then click Retry to continue",
-    "rebootShort": "Restart Windows"
+    "rebootShort": "Restart Windows",
+    "installerLaunched": "Docker installer opened — finish it (installs WSL2, may reboot), then click Retry"
   },
   "common": {
     "close": "Close",

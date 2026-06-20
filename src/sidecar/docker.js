@@ -279,6 +279,22 @@ function imageTarballPath() {
   return path.join(downloadsDir(), "cicy-code-latest.tar.gz");
 }
 
+// Reuse a Docker Desktop installer the user already dropped in ~/Downloads (主人:
+// 我已把 exe 放进 Downloads 了) — skip the (slow) download entirely. Accepts the
+// canonical "Docker Desktop Installer.exe" plus common variants. Returns the
+// path to the largest matching .exe (the real ~600MB installer, not a stub).
+function findExistingInstaller() {
+  try {
+    const dir = downloadsDir();
+    const hits = fs.readdirSync(dir)
+      .filter((f) => /\.exe$/i.test(f) && /docker/i.test(f) && /(install|desktop)/i.test(f))
+      .map((f) => { const p = path.join(dir, f); let size = 0; try { size = fs.statSync(p).size; } catch {} return { p, size }; })
+      .filter((x) => x.size > 50 * 1024 * 1024) // a real installer is hundreds of MB, skip stubs
+      .sort((a, b) => b.size - a.size);
+    return hits.length ? hits[0].p : null;
+  } catch { return null; }
+}
+
 // Download the R2 base-env image tarball (no docker needed yet). Split out of
 // loadImage so bootstrap can run this IN PARALLEL with the Docker Desktop
 // install (主人: 装 Docker 的同时下载 R2 镜像). Returns the tarball path.
@@ -491,42 +507,43 @@ async function bootstrap({ onProgress, port = 8008, container = CONTAINER, volum
   const needImage = !(await imagePresent());
   let imgDl = null; // Promise<tarballPath|null> when downloading in parallel
 
-  // 1) Docker present?
+  // 1) Docker running? If not, hand off to Docker's OWN installer / app — it
+  // installs the WSL2 backend and handles the reboot far better than we can
+  // (主人: 下载完直接弹官方安装程序，让用户自己装，别搞那么复杂). We don't silent-
+  // install / auto-WSL / poll for 15 min; we open it, tell the user, and stop.
+  // They click 重试 once Docker's whale icon is green.
   if (await dockerOk()) {
     emit({ phase: "install-docker", status: "skip", message: "Docker 已安装，跳过" });
-  } else if (dockerDesktopExe()) {
-    // Installed but the daemon is down — just launch Docker Desktop, never
-    // re-download/re-run the installer (主人: 装了就别再下 Docker Desktop 了).
-    emit({ phase: "install-docker", status: "running", message: "Docker 已安装，正在启动 Docker Desktop…" });
-    if (needImage) imgDl = downloadImageTarball({ emit }).catch((e) => { emit({ phase: "image", status: "error", message: `镜像下载失败：${e.message}` }); return null; });
-    // Docker Desktop installed but the engine needs the WSL2 backend — install
-    // it (elevated) if missing; it requires a reboot before the daemon can run.
-    const wsl1 = await ensureWsl({ emit });
-    if (wsl1.needsReboot) { emit({ phase: "install-docker", status: "error", message: "WSL2 正在安装——装好后请【重启 Windows】，重启后回来点「重试」即可继续。" }); return { ok: false, reason: "wsl_reboot_required" }; }
-    startDockerDesktop();
-    const up = await waitUntil(dockerOk, { totalMs: 300000, everyMs: 5000 });
-    if (!up) {
-      emit({ phase: "install-docker", status: "error", message: "Docker Desktop 启动超时——确认 Docker 图标变绿（首次可能要重启 Windows），再点「重试」" });
-      return { ok: false, reason: "docker_not_ready" };
+  } else if (!dockerDesktopExe()) {
+    // Not installed → use the installer the user already put in ~/Downloads if
+    // present (主人: 我已把 exe 放进 Downloads 了), else download it; then OPEN it.
+    let dest = findExistingInstaller();
+    if (dest) {
+      emit({ phase: "install-docker", status: "skip", message: `使用 ~/Downloads 里已有的安装包：${path.basename(dest)}`, progress: 100, dest });
+    } else {
+      dest = installDest || path.join(downloadsDir(), "Docker Desktop Installer.exe");
+      emit({ phase: "install-docker", status: "running", message: "下载 Docker Desktop 安装包…", progress: 0 });
+      try {
+        await ensureDownloaded(DOCKER_DESKTOP_URL, dest, DOCKER_DESKTOP_MIRROR, { emit, phase: "install-docker", label: "下载 Docker Desktop" });
+      } catch (e) {
+        emit({ phase: "done", status: "error", message: `安装包下载失败：${e.message}（点重试续传）` });
+        return { ok: false, reason: "installer_download_failed" };
+      }
     }
-    emit({ phase: "install-docker", status: "done", message: "Docker 就绪" });
+    emit({ phase: "install-docker", status: "running", message: "打开 Docker Desktop 安装程序，请按提示完成安装…" });
+    await launchElevated(dest, [], { emit }); // GUI installer (UAC); user drives it
+    emit({ phase: "done", status: "installer", message: "已打开 Docker 安装程序——请完成安装（它会装 WSL2、可能需要重启），装好后回来点「重试」。" });
+    return { ok: false, reason: "installer_launched" };
   } else {
-    // Docker missing → download the R2 image IN PARALLEL with the installer
-    // running + the daemon coming up (主人: 装 Docker 的同时下载 R2 镜像).
-    if (needImage) imgDl = downloadImageTarball({ emit }).catch((e) => { emit({ phase: "image", status: "error", message: `镜像下载失败：${e.message}` }); return null; });
-    await installDocker({ emit, dest: installDest });
-    // Docker Desktop needs WSL2 — install it (elevated) if missing; reboot first.
-    const wsl2 = await ensureWsl({ emit });
-    if (wsl2.needsReboot) { emit({ phase: "install-docker", status: "error", message: "Docker 和 WSL2 已装好——请【重启 Windows】，重启后回来点「重试」即可继续。" }); return { ok: false, reason: "wsl_reboot_required" }; }
-    // A silent install doesn't auto-launch the daemon — explicitly start Docker
-    // Desktop once its exe lands so the user doesn't have to (主人: 安装启动有问题).
+    // Installed but the engine is down → just open Docker Desktop; it self-heals
+    // (prompts to enable WSL2 / restart if needed). Give it a short window to
+    // come up in case it only needed a kick; otherwise hand back to the user.
     emit({ phase: "install-docker", status: "running", message: "启动 Docker Desktop…" });
-    const launched = await waitUntil(() => { if (dockerDesktopExe()) { startDockerDesktop(); return true; } return false; }, { totalMs: 120000, everyMs: 5000 });
-    emit({ phase: "install-docker", status: "running", message: launched ? "等待 Docker 引擎就绪（首次启动较慢，如弹授权/重启请确认）…" : "等待 Docker 安装完成…" });
-    const up = await waitUntil(dockerOk, { totalMs: 900000, everyMs: 6000 });
+    startDockerDesktop();
+    const up = await waitUntil(dockerOk, { totalMs: 90000, everyMs: 5000 });
     if (!up) {
-      emit({ phase: "install-docker", status: "error", message: "Docker 还没就绪——装好后启动 Docker Desktop，再点「重试」即可（已完成的步骤不会重来）" });
-      return { ok: false, reason: "docker_not_ready" };
+      emit({ phase: "done", status: "installer", message: "已打开 Docker Desktop——请按它的提示完成设置（首次可能要装 WSL2 / 重启），等鲸鱼图标变绿后点「重试」。" });
+      return { ok: false, reason: "installer_launched" };
     }
     emit({ phase: "install-docker", status: "done", message: "Docker 就绪" });
   }

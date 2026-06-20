@@ -149,7 +149,8 @@
     "installing2": "安装进行中…",
     "background": "在后台继续",
     "rebootNeeded": "WSL2 已安装，请【重启 Windows】后回来点「重试」继续",
-    "rebootShort": "需重启 Windows"
+    "rebootShort": "需重启 Windows",
+    "installerLaunched": "已打开 Docker 安装程序——请完成安装（会装 WSL2、可能需重启），装好后点「重试」"
   },
   "common": {
     "close": "关闭",

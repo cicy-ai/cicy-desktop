@@ -148,7 +148,8 @@
     "installing2": "インストール中…",
     "background": "バックグラウンドで継続",
     "rebootNeeded": "WSL2 をインストールしました。Windows を再起動してから「再試行」を押してください",
-    "rebootShort": "Windows 再起動"
+    "rebootShort": "Windows 再起動",
+    "installerLaunched": "Docker インストーラーを開きました。完了後（WSL2/再起動あり）「再試行」を押してください"
   },
   "common": {
     "close": "閉じる",
