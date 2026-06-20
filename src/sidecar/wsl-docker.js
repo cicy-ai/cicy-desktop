@@ -13,10 +13,19 @@
 
 const { execFile, execFileSync, spawn } = require("child_process");
 const path = require("path");
+const os = require("os");
+const fs = require("fs");
 const docker = require("./docker"); // shared: downloads, waitUntil, probeHealth, launchElevated, ensureWsl…
 
 const DISTRO   = process.env.CICY_WSL_DISTRO || "Ubuntu";
 const IMAGE    = process.env.CICY_DOCKER_IMAGE || "cicybot/cicy-code:latest";
+// Ubuntu WSL rootfs from the Tsinghua TUNA mirror (CN-fast). We download it
+// ourselves (real progress bar) and `wsl --import` it, instead of
+// `wsl --install -d Ubuntu` (no parseable progress, needs the MS Store).
+const ROOTFS_URL = process.env.CICY_WSL_ROOTFS_URL ||
+  "https://mirrors.tuna.tsinghua.edu.cn/ubuntu-cloud-images/wsl/jammy/current/ubuntu-jammy-wsl-amd64-ubuntu22.04lts.rootfs.tar.gz";
+
+function rootfsPath() { return path.join(docker.downloadsDir(), "ubuntu-jammy-wsl-rootfs.tar.gz"); }
 
 // Run a bash command as root inside the distro. execFile (no host shell) → the
 // command string is passed verbatim to `bash -lc`, so only bash-level quoting
@@ -74,16 +83,24 @@ function distroInstalled(distro = DISTRO) {
 // (--no-launch). We always run commands as root afterwards, so no user account
 // is needed. Elevated via the scheduled-task path (reliable on these machines).
 async function installDistro({ emit } = {}) {
-  emit && emit({ phase: "install-docker", status: "running", message: `安装 ${DISTRO} 子系统（首次下载较大，请耐心等待）…` });
-  // Try non-elevated first (adding a distro to an existing WSL is per-user);
-  // fall back to elevated if it errors.
-  try {
-    await new Promise((resolve, reject) => {
-      execFile("wsl", ["--install", "-d", DISTRO, "--no-launch"], { timeout: 600000, windowsHide: true }, (err) => err ? reject(err) : resolve());
-    });
-  } catch {
-    await docker.launchElevated("wsl", ["--install", "-d", DISTRO, "--no-launch"], { emit });
-  }
+  // 1) Download the rootfs with a REAL progress bar (Tsinghua mirror, resumable).
+  const dest = rootfsPath();
+  await docker.ensureDownloaded(ROOTFS_URL, dest, null, { emit, phase: "install-docker", label: "下载 Ubuntu" });
+  // 2) Ensure the WSL2 kernel exists (a feature-enable + reboot leaves the kernel
+  //    component missing → `--import --version 2` errors). Best-effort, non-fatal.
+  emit && emit({ phase: "install-docker", status: "running", message: "检查/更新 WSL2 内核…" });
+  await new Promise((res) => execFile("wsl", ["--update", "--web-download"], { timeout: 180000, windowsHide: true }, () => res()));
+  try { await new Promise((res) => execFile("wsl", ["--set-default-version", "2"], { timeout: 15000, windowsHide: true }, () => res())); } catch {}
+  // 3) Import it as a WSL2 distro (creates the VHD under installDir; no MS Store,
+  //    no interactive first-run — we run everything as root afterwards).
+  emit && emit({ phase: "install-docker", status: "running", message: "导入 Ubuntu 到 WSL2…" });
+  const installDir = path.join(process.env["LOCALAPPDATA"] || path.join(os.homedir(), "AppData", "Local"), "cicy-ubuntu");
+  try { fs.mkdirSync(installDir, { recursive: true }); } catch {}
+  await new Promise((resolve, reject) => {
+    execFile("wsl", ["--import", DISTRO, installDir, dest, "--version", "2"],
+      { timeout: 600000, windowsHide: true },
+      (err, _so, se) => err ? reject(Object.assign(err, { stderr: String(se || "") })) : resolve());
+  });
 }
 
 // docker CLI present inside the distro?
