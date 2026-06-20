@@ -428,36 +428,54 @@ async function installDocker({ emit, dest } = {}) {
   await launchElevated(target, ["install", "--quiet", "--accept-license"], { emit: e });
 }
 
-// Run an admin-manifest exe (Docker Desktop Installer) ELEVATED. A plain
-// child_process.spawn of a requireAdministrator exe from a non-elevated process
-// fails with ERROR_ELEVATION_REQUIRED (740) and never shows UAC — which is why
-// the installer "downloaded but didn't auto-install". ShellExecute with the
-// "runas" verb is the only way to raise the UAC prompt + elevate. We drive it
-// via VBScript/cscript because PowerShell is blocked by 360 on these machines.
-// ShellExecute returns immediately (installer runs in the background); bootstrap
-// then polls dockerOk(). Falls back to a direct spawn if cscript is unavailable.
-function launchElevated(exe, args, { emit } = {}) {
+// Run an admin-manifest exe (the Docker Desktop installer) ELEVATED + in the
+// user's INTERACTIVE session so its GUI is visible. A plain spawn fails (740,
+// no UAC). The reliable method on these machines (verified) is a one-shot
+// scheduled task with /rl HIGHEST /it: it runs with the built-in Administrator's
+// elevated token (no UAC prompt) in the logged-on session, and — unlike
+// cscript/VBS ShellExecute "runas" — isn't blocked by 360. cscript is kept only
+// as a last-ditch fallback.
+function elevateViaTask(exe, args) {
   return new Promise((resolve) => {
+    try {
+      const user = process.env["USERNAME"] || "Administrator";
+      const stamp = `${process.pid}${Math.floor(Math.random() * 1e6)}`;
+      const tn = `cicy-elevate-${stamp}`;
+      // A wrapper .cmd in a no-space temp path avoids schtasks /tr quoting hell;
+      // the .cmd itself quotes the (space-containing) exe path.
+      const cmdPath = path.join(os.tmpdir(), `${tn}.cmd`);
+      const line = `"${exe}"` + (args.length ? " " + args.map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(" ") : "");
+      fs.writeFileSync(cmdPath, `@echo off\r\n${line}\r\n`, "utf8");
+      const sch = (a, cb) => execFile("schtasks", a, { windowsHide: true }, cb);
+      sch(["/create", "/tn", tn, "/tr", cmdPath, "/sc", "ONCE", "/st", "00:00", "/rl", "HIGHEST", "/ru", user, "/it", "/f"], (err) => {
+        if (err) return resolve(false);
+        sch(["/run", "/tn", tn], (rerr) => {
+          // clean the task + wrapper after a delay (installer keeps running).
+          setTimeout(() => { sch(["/delete", "/tn", tn, "/f"], () => {}); try { fs.unlinkSync(cmdPath); } catch {} }, 30000);
+          resolve(!rerr);
+        });
+      });
+    } catch { resolve(false); }
+  });
+}
+
+function launchElevated(exe, args, { emit } = {}) {
+  return new Promise(async (resolve) => {
+    // 1) Preferred: scheduled task /rl HIGHEST (elevated, interactive, 360-safe).
+    if (await elevateViaTask(exe, args)) return resolve(true);
+    // 2) Fallback: cscript/VBS ShellExecute "runas" (shows a UAC prompt).
     try {
       const vbs = path.join(os.tmpdir(), "cicy-docker-elevate.vbs");
       const argStr = args.join(" ").replace(/"/g, '""');
       const exeEsc = String(exe).replace(/"/g, '""');
-      // chr(34) = a literal double-quote inside the VBS string literals.
-      fs.writeFileSync(vbs,
-        `Set s = CreateObject("Shell.Application")\r\n` +
-        `s.ShellExecute "${exeEsc}", "${argStr}", "", "runas", 1\r\n`,
-        "utf8");
+      fs.writeFileSync(vbs, `Set s = CreateObject("Shell.Application")\r\ns.ShellExecute "${exeEsc}", "${argStr}", "", "runas", 1\r\n`, "utf8");
       const child = spawn("cscript", ["//nologo", vbs], { windowsHide: true, detached: true, stdio: "ignore" });
-      let done = false;
-      const fin = (ok) => { if (done) return; done = true; resolve(ok); };
+      let done = false; const fin = (ok) => { if (!done) { done = true; resolve(ok); } };
       child.on("error", () => {
-        // cscript missing/blocked → best-effort direct spawn (works if elevated).
         try {
-          emit && emit({ phase: "install-docker", status: "running", message: "提权脚本不可用，尝试直接启动安装包…" });
+          emit && emit({ phase: "install-docker", status: "running", message: "提权方式受限，尝试直接启动安装包…" });
           const c2 = spawn(exe, args, { windowsHide: false, detached: true, stdio: "ignore" });
-          c2.on("error", () => fin(false));
-          c2.on("spawn", () => fin(true));
-          c2.on("exit", () => fin(true));
+          c2.on("error", () => fin(false)); c2.on("spawn", () => fin(true)); c2.on("exit", () => fin(true));
         } catch { fin(false); }
       });
       child.on("exit", () => fin(true));
