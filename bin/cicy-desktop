@@ -16,10 +16,10 @@ const PACKAGE_ROOT = path.join(__dirname, "..");
 // CN/global defaults: a fresh machine has no cached electron binary, so the
 // electron postinstall (and our own self-provisioning below) would otherwise
 // hit GitHub releases, which is slow/blocked on many networks. Default to our
-// own Cloudflare R2 mirror — the three platform zips we ship are mirrored at
+// own Aliyun OSS mirror — the three platform zips we ship are mirrored at
 // <ELECTRON_MIRROR>v<version>/electron-v<version>-<platform>.zip (+ SHASUMS256.txt),
 // the exact layout @electron/get expects. Overridable via the env var.
-const ELECTRON_MIRROR = process.env.ELECTRON_MIRROR || "https://r2.deepfetch.de5.net/electron/";
+const ELECTRON_MIRROR = process.env.ELECTRON_MIRROR || "https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/electron/";
 const NPM_REGISTRY = process.env.CICY_NPM_REGISTRY || process.env.npm_config_registry || "https://registry.npmmirror.com";
 const MASTER_ENTRY = path.join(PACKAGE_ROOT, "src", "master", "master-main.js");
 
