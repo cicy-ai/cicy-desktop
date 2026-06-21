@@ -2179,11 +2179,6 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
                 >
                   {team.base_url || "—"}
                 </button>
-                {(runningVer || team.version) && (
-                  <div data-id="LocalTeamCard-version" className="bcard__menu-item" style={{ cursor: "default", color: "#8b949e", fontSize: 12 }}>
-                    {tr("localTeams.version", "版本")} v{runningVer || team.version}
-                  </div>
-                )}
                 {local && (
                   <button
                     type="button"
