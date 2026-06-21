@@ -1909,21 +1909,11 @@ function DockerCard({ dockerTeam, onOpen, onRename, onRefresh }) {
         )}
       </div>
       <div className="bcard__body">
-        {editing ? (
-          <input
-            data-id="DockerCard-rename-input"
-            autoFocus
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onFocus={(e) => e.target.select()}
-            onBlur={commitName}
-            onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => { if (e.nativeEvent.isComposing || e.keyCode === 229) return; if (e.key === "Enter") commitName(); else if (e.key === "Escape") setEditing(false); }}
-            style={{ width: "100%", font: "inherit", fontWeight: 600, padding: "2px 6px", border: "1px solid #3b82f6", borderRadius: 6, background: "#0d1117", color: "#e6edf3", boxSizing: "border-box" }}
-          />
-        ) : (
-          <h3 className="bcard__name" title={tr("localTeams.renameHint", "点名字或双击改名")} onDoubleClick={startEdit} style={{ cursor: "text" }}>{displayName}</h3>
-        )}
+        {/* Docker 卡身份固定为 "Docker 团队",不读会和 8008 串名的同步 team name。
+            (8008/8009 共用 cloud_team_id → 名字同步;独立改名要 8009 自己的云端 team。) */}
+        <div style={{ minHeight: 26, display: "flex", alignItems: "center" }}>
+          <h3 className="bcard__name">{tr("docker.title", "Docker 团队")}</h3>
+        </div>
         <div className="bcard__meta"><span className="bcard__chip">Docker</span></div>
       </div>
       <button
