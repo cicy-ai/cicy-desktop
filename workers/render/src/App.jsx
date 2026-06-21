@@ -1912,7 +1912,7 @@ function DockerCard({ dockerTeam, onOpen, onRename, onRefresh }) {
         {/* Docker 卡身份固定为 "Docker 团队",不读会和 8008 串名的同步 team name。
             (8008/8009 共用 cloud_team_id → 名字同步;独立改名要 8009 自己的云端 team。) */}
         <div style={{ minHeight: 26, display: "flex", alignItems: "center" }}>
-          <h3 className="bcard__name">{tr("docker.title", "Docker 团队")}</h3>
+          <h3 className="bcard__name">Docker 团队</h3>
         </div>
         <div className="bcard__meta"><span className="bcard__chip">Docker</span></div>
       </div>
