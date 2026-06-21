@@ -307,10 +307,11 @@ function ensureAutostart() {
 // cicy-team volume on the distro — so the user can browse :8009's files from
 // Windows Explorer. \\wsl$\<distro>\… is the UNC view of the WSL filesystem.
 // Idempotent: CreateShortcut overwrites. Best-effort (errors swallowed).
-function ensureDesktopShortcut(volume = "cicy-team") {
+function ensureDesktopShortcut(volume = "cicy-team-8009", port = 8009) {
   if (process.platform !== "win32") return Promise.resolve();
   return new Promise((res) => {
-    const lnk = path.join(os.homedir(), "Desktop", "cicy-8009 文件.lnk");
+    // 快捷方式名带 port —— 多个 docker(不同端口)各自一个桌面文件夹快捷方式。
+    const lnk = path.join(os.homedir(), "Desktop", `cicy-${port} 文件.lnk`);
     const target = `\\\\wsl$\\${DISTRO}\\var\\lib\\docker\\volumes\\${volume}\\_data`;
     const ps =
       `$w=New-Object -ComObject WScript.Shell;` +
@@ -318,7 +319,7 @@ function ensureDesktopShortcut(volume = "cicy-team") {
       `$s.TargetPath='explorer.exe';` +
       `$s.Arguments=${JSON.stringify(target)};` +
       `$s.IconLocation='imageres.dll,3';` +         // yellow Windows folder icon
-      `$s.Description='cicy-code :8009 /home/cicy';` +
+      `$s.Description=${JSON.stringify(`cicy-code :${port} /home/cicy`)};` +
       `$s.Save()`;
     execFile("powershell", ["-NoProfile", "-Command", ps], { windowsHide: true, timeout: 15000 }, () => res());
   });
@@ -408,7 +409,7 @@ async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-dock
   // 7) Health — the ONLY path to ok:true.
   emit({ phase: "container", status: "running", message: "等待 cicy-code 就绪…" });
   const healthy = await docker.waitUntil(() => probeHealth(port), { totalMs: 120000, everyMs: 3000 });
-  if (healthy) { await ensureAutostart(); await ensureDesktopShortcut(volume); } // survive reboot + desktop shortcut
+  if (healthy) { await ensureAutostart(); await ensureDesktopShortcut(volume, port); } // survive reboot + desktop shortcut
   emit({ phase: healthy ? "done" : "container", status: healthy ? "done" : "error", message: healthy ? "Docker cicy-code 已就绪 🎉" : `服务起来了但 :${port} 还没响应——稍等或点「重试」` });
   return { ok: healthy, container };
 }
@@ -425,7 +426,7 @@ async function restart({ container = "cicy-code-docker", port = 8009, volume = "
     try { await wslRun(`docker restart ${container}`, { timeout: 60000 }); } catch {}
   }
   const ok = await docker.waitUntil(() => probeHealth(port), { totalMs: 60000, everyMs: 2000 });
-  if (ok) await ensureDesktopShortcut(volume);
+  if (ok) await ensureDesktopShortcut(volume, port);
   return ok;
 }
 

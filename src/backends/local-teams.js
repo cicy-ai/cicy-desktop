@@ -436,8 +436,14 @@ async function syncNameToCloud(id) {
     if (!node || !isLocalOrigin(node.base_url || "")) return;
     // Docker 节点有自己独立的云端 team(POST /api/teams,sidecar ensureDockerTeam 管),
     // 绝不走这里的 device-register —— 否则会按本机 deviceId 复用回 8008 那个 team(40),
-    // cloud_team_id 被覆盖、又和 8008 串名。跳过。
-    if (node.is_docker) return;
+    // cloud_team_id 被覆盖、又和 8008 串名。按 is_docker 标记 OR 端口(docker app port)
+    // 跳过(端口判断不依赖标记的写入时机,更稳)。
+    {
+      const DOCKER_PORT = String(process.env.CICY_DOCKER_APP_PORT || 8009);
+      let isDockerNode = !!node.is_docker;
+      try { if (new URL(node.base_url).port === DOCKER_PORT) isDockerNode = true; } catch {}
+      if (isDockerNode) return;
+    }
     let reg = await cc.registerTeam({ teamId: node.cloud_team_id || null, title: node.name || "", titleVersion: node.titleVersion || 0 });
     // Self-heal a STALE cached cloud_team_id: if we presented a cached id but the
     // cloud returned ok WITHOUT an apiKey (team deleted / rotated / no longer owned

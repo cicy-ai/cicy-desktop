@@ -29,8 +29,11 @@ const PORT = Number(process.env.CICY_CODE_PORT || 8008);
 // user's Desktop). The whole cicy home is persisted to a named volume so the
 // entire container state survives recreation (主人: "把整个 docker 挂出来").
 const APP_PORT = Number(process.env.CICY_DOCKER_APP_PORT || 8009);
-const APP_CONTAINER = process.env.CICY_DOCKER_APP_CONTAINER || "cicy-code-docker";
-const APP_VOLUME = process.env.CICY_DOCKER_APP_VOLUME || "cicy-team";
+// container / volume 名都带上 port —— 一台机可以跑多个 docker(不同端口),各自
+// 独立容器 + 独立 volume(数据隔离)+ 独立云端 team。docker-teams.json 也按 volume
+// (含 port)区分。
+const APP_CONTAINER = process.env.CICY_DOCKER_APP_CONTAINER || `cicy-code-docker-${APP_PORT}`;
+const APP_VOLUME = process.env.CICY_DOCKER_APP_VOLUME || `cicy-team-${APP_PORT}`;
 const APP_MOUNT = process.env.CICY_DOCKER_APP_MOUNT || "/home/cicy";
 // 8008 and 8009 are ONE team (主人), so :8009 reaches the LLM through the cicy
 // gateway using 8008's TEAM key — the `sk-cicy-…` apiKey already minted in 8008's
