@@ -749,6 +749,7 @@ export default function App() {
                   if (!r?.ok) window.alert("拿不到容器 token,无法打开 :8009。请确认服务已就绪(或用卡片菜单「重启」)后再试。");
                 } catch (e) { console.warn("[DockerCard] open", e); }
               }}
+              onRename={renameLocalTeam}
               onRefresh={fetchLocalTeams}
             />
           )}
@@ -1652,10 +1653,21 @@ function DockerInstallDrawerHost() {
 // in Docker on :8009, alongside the native local daemon (:8008). If Docker
 // Desktop is missing, the install flow downloads its installer to the user's
 // Desktop and runs it (主人指令), streaming progress through the drawer above.
-function DockerCard({ dockerTeam, onOpen, onRefresh }) {
+function DockerCard({ dockerTeam, onOpen, onRename, onRefresh }) {
   const [status, setStatus] = useState(null);
   const [busy, setBusy] = useState("");   // "" | bootstrap | restart | stop | upgrade
   const [menuOpen, setMenuOpen] = useState(false);
+  // Inline rename (mirrors LocalTeamCard): double-click the title to edit.
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const displayName = dockerTeam?.name || tr("docker.title", "Docker 团队");
+  const startEdit = (e) => { e?.stopPropagation?.(); setDraft(displayName); setEditing(true); };
+  const commitName = async () => {
+    setEditing(false);
+    const next = String(draft || "").trim();
+    if (!next || next === displayName || !dockerTeam?.id || !onRename) return;
+    try { await onRename(dockerTeam.id, next); onRefresh?.(); } catch {}
+  };
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
   const kebabRef = useRef(null);
   const menuRef = useRef(null);
@@ -1844,6 +1856,11 @@ function DockerCard({ dockerTeam, onOpen, onRefresh }) {
                 ref={menuRef}
                 style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: MENU_W }}
                 onClick={(e) => e.stopPropagation()}>
+                <button type="button" data-id="DockerCard-addr" className="bcard__menu-item"
+                  title={tr("localTeams.copyAddr", "点击复制地址")}
+                  onClick={(e) => { e.stopPropagation(); setMenuOpen(false); try { navigator.clipboard.writeText("http://127.0.0.1:8009"); } catch {} }}>
+                  127.0.0.1:8009
+                </button>
                 <button type="button" data-id="DockerCard-update" className="bcard__menu-item is-accent" onClick={runUpdate}>
                   {tr("docker.update", "更新")}
                 </button>
@@ -1876,9 +1893,22 @@ function DockerCard({ dockerTeam, onOpen, onRefresh }) {
         )}
       </div>
       <div className="bcard__body">
-        <h3 className="bcard__name">{tr("docker.title", "Docker 团队")}</h3>
-        <div className="bcard__host">http://127.0.0.1:8009</div>
-        <div className="bcard__meta" style={{ fontSize: 12, color: "#8b949e" }}>{stateText}</div>
+        {editing ? (
+          <input
+            data-id="DockerCard-rename-input"
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onFocus={(e) => e.target.select()}
+            onBlur={commitName}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => { if (e.nativeEvent.isComposing || e.keyCode === 229) return; if (e.key === "Enter") commitName(); else if (e.key === "Escape") setEditing(false); }}
+            style={{ width: "100%", font: "inherit", fontWeight: 600, padding: "2px 6px", border: "1px solid #3b82f6", borderRadius: 6, background: "#0d1117", color: "#e6edf3", boxSizing: "border-box" }}
+          />
+        ) : (
+          <h3 className="bcard__name" title={tr("localTeams.renameHint", "点名字或双击改名")} onDoubleClick={startEdit} style={{ cursor: "text" }}>{displayName}</h3>
+        )}
+        <div className="bcard__meta"><span className="bcard__chip">Docker</span></div>
       </div>
       <button
         type="button"
