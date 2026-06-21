@@ -351,6 +351,24 @@ export default function App() {
     } catch {}
   }, []);
 
+  // 云端团队改名:PATCH /api/teams/<id> {title}(cicy-cloud-v1 handleTeamByID,
+  // owner-only,bump title_version)。成功后重拉 teams 让新名字落地。让私有云卡也能
+  // 改名,和本地/Docker 卡一致——区别是这个改的是云端、会同步到所有设备。
+  const renameCloudTeam = useCallback(async (id, title) => {
+    const at = bearerRef.current;
+    const next = String(title || "").trim();
+    if (!at || !window.cicy?.cloud?.fetch || !next) return { ok: false, error: "no session / empty" };
+    try {
+      const r = await window.cicy.cloud.fetch(`${CLOUD_BASE}/api/teams/${id}`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${at}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ title: next }),
+      });
+      if (r?.ok) { await refreshCloudTeams(); return { ok: true }; }
+      return { ok: false, error: `${r?.status || "?"} ${r?.error || ""}` };
+    } catch (e) { return { ok: false, error: e.message }; }
+  }, [refreshCloudTeams]);
+
   // First profile fetch on mount. The cloud console endpoints (/api/user/self,
   // /api/teams) authenticate the owner-bound LOGIN token (the sk-xxx from the
   // /cb callback) — NOT the console access_token (the cloud never mints one;
@@ -652,7 +670,9 @@ export default function App() {
   // (this device's AND other devices'). On the desktop the 云端 tab must show
   // ONLY cloud teams; local teams come from the local store (localList) and
   // cross-device local aggregation belongs to the web dash, not here.
-  const cloudList = (teams || []).filter((t) => !t.is_local && t.kind !== "local");
+  // 主人令:不展示「共享」团队(共享 = 非私有云 且 非个人)。只留 私有云 / 个人。
+  const cloudList = (teams || []).filter((t) => !t.is_local && t.kind !== "local"
+    && (t.kind === "private" || t.team_kind === "personal"));
   const cloudCount = cloudList.length;
   const showLocal = tab === "all" || tab === "local";
   const showCustom = tab === "all" || tab === "custom";
@@ -767,6 +787,7 @@ export default function App() {
                 const url = t.kind === "private" ? t.host_url : (t.workspace_url || t.workspace_direct_url);
                 if (url) window.cicy?.tabs?.open?.(url, t.name || t.title || "");
               }}
+              onRename={renameCloudTeam}
             />
           ))}
         </div>
@@ -2350,10 +2371,24 @@ const LOCAL_STATUS = {
 // 私有云 / (历史)云端团队卡片。产品方向变更(w-10032):公有云不做了,主打 private
 // (用户自托管,数据不出企业)。private 字段:{name,kind:"private",status,apiKey,
 // gatewayUrl,host_url,titleVersion,deviceId:""}。卡片展示名字+host_url,点开可看/复制 apiKey。
-function TeamCard({ team, onOpen }) {
+function TeamCard({ team, onOpen, onRename }) {
   const isPrivate = team.kind === "private";
   const statusOk = team.status === "active";
-  const name = team.name || team.title || "—";
+  const serverName = team.name || team.title || "—";
+  // Inline rename(和本地/Docker 卡一致):双击标题改名 → onRename 走云端 PATCH。
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [pendingName, setPendingName] = useState(null);
+  const name = pendingName != null ? pendingName : serverName;
+  useEffect(() => { if (pendingName != null && serverName === pendingName) setPendingName(null); }, [serverName, pendingName]);
+  const startEdit = (e) => { e?.stopPropagation?.(); setDraft(name === "—" ? "" : name); setEditing(true); };
+  const commitName = async () => {
+    setEditing(false);
+    const next = String(draft || "").trim();
+    if (!onRename || !next || next === name) return;
+    setPendingName(next);
+    try { const r = await onRename(team.id, next); if (!r?.ok) setPendingName(null); } catch { setPendingName(null); }
+  };
   const hostUrl = team.host_url || "";
   const billTeamId = team.teamId || team.id; // /dash?team=<teamId>(URL 不带 key)
   const kindLabel = isPrivate ? "私有云" : (team.team_kind === "personal" ? "个人" : "共享");
@@ -2446,7 +2481,21 @@ function TeamCard({ team, onOpen }) {
         </div>
       </div>
       <div className="bcard__body">
-        <h3 className="bcard__name" title={name}>{name}</h3>
+        {editing ? (
+          <input
+            data-id="TeamCard-rename-input"
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onFocus={(e) => e.target.select()}
+            onBlur={commitName}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => { if (e.nativeEvent.isComposing || e.keyCode === 229) return; if (e.key === "Enter") commitName(); else if (e.key === "Escape") setEditing(false); }}
+            style={{ width: "100%", font: "inherit", fontWeight: 600, padding: "2px 6px", border: "1px solid #3b82f6", borderRadius: 6, background: "#0d1117", color: "#e6edf3", boxSizing: "border-box" }}
+          />
+        ) : (
+          <h3 className="bcard__name" title={onRename ? tr("localTeams.renameHint", "双击改名") : name} onDoubleClick={onRename ? startEdit : undefined} style={onRename ? { cursor: "text" } : undefined}>{name}</h3>
+        )}
         <div className="bcard__meta">
           <span className="bcard__chip">{kindLabel}</span>
           {!isPrivate && team.membership_status && team.membership_status !== "active" && (
