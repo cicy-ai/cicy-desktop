@@ -29,6 +29,12 @@ const managerByHost = new Map(); // shell webContents.id -> TabManager
 
 function stripVol(u) { try { const x = new URL(u); return x.origin + x.pathname; } catch (e) { return u || ""; } }
 
+// 团队 tab 的 webContentsId 状态表:openTab 时记入、对应 webContents destroy 时删除
+// (打开/关闭都更新)。刷新窗口据此按 wcId 强制 reload(reloadIgnoringCache),避开
+// "tab 打开后 URL 漂移(登录跳转 / token / 重定向)→ 按 URL 匹配失败"的 bug。
+// 键 = stripVol(打开时传入的 url);open 与 reload 两端 stripVol 一致(token 被剥掉)。
+const openedWc = new Map(); // stripVol(url) -> webContentsId
+
 const { NEWTAB_URL, ensureForPartition } = require("../tabbrowser/newtab-protocol");
 
 // ── Per-profile privilege gate ────────────────────────────────────────────────
@@ -309,6 +315,16 @@ async function openTab(accountIdx, url, opts = {}) {
   const m = ensureManager(accountIdx);
   const id = m.addTab(url, { trusted: !!opts.trusted, home: !!opts.home, title: opts.title || "" });
   try { m.win.show(); m.win.focus(); } catch (e) {}
+  // 记下这个团队 tab 的 webContentsId(打开 → set;关闭/销毁 → delete)。
+  try {
+    const tab = m.tabs.find((t) => t.id === id);
+    const wc = tab && tab.view && tab.view.webContents;
+    if (wc) {
+      const key = stripVol(url);
+      openedWc.set(key, wc.id);
+      wc.once("destroyed", () => { if (openedWc.get(key) === wc.id) openedWc.delete(key); });
+    }
+  } catch (e) {}
   return { winId: m.win.id, accountIdx, tabId: id };
 }
 // Open (or focus) the resident homepage tab of a profile's tab window. Returns
@@ -533,9 +549,28 @@ async function reloadTabByUrl(accountIdx, url, opts = {}) {
 // Returns { ok:true, reloaded:true } if a matching tab was found, else
 // { ok:false, error:"no_open_window" }. Used by local-teams.reloadTeam (profile 0).
 function reloadTabIfOpen(accountIdx, url, opts = {}) {
+  // 首选:按打开时记下的 webContentsId 强制 reload —— tab 打开后 URL 漂移也不怕。
+  const key = stripVol(url);
+  const wcId = openedWc.get(key);
+  if (wcId != null) {
+    const wc = webContents.fromId(wcId);
+    if (wc && !wc.isDestroyed()) {
+      try { wc.reloadIgnoringCache(); } catch (e) {}
+      const mm = managers.get(accountIdx);
+      if (mm && !mm.win.isDestroyed()) {
+        try {
+          const tab = mm.tabs.find((t) => { try { return t.view.webContents.id === wcId; } catch (e) { return false; } });
+          if (tab) { mm.activate(tab.id); mm.win.show(); mm.win.focus(); }
+        } catch (e) {}
+      }
+      return { ok: true, winId: mm ? mm.win.id : undefined, reloaded: true, byWcId: true };
+    }
+    openedWc.delete(key); // 已销毁 → 清状态
+  }
+  // 兜底:旧的按 URL 就地匹配,同样强制忽略缓存。
   const m = managers.get(accountIdx);
   if (!m || m.win.isDestroyed()) return { ok: false, error: "no_open_window" };
-  return m.reloadTabByUrlInPlace(url, opts)
+  return m.reloadTabByUrlInPlace(url, { ...opts, ignoreCache: true })
     ? { ok: true, winId: m.win.id, reloaded: true }
     : { ok: false, error: "no_open_window" };
 }
