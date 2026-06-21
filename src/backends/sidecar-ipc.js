@@ -130,13 +130,33 @@ function register({ sidecarLogPath } = {}) {
   };
   // Register the running :8009 instance as a (custom) team so the card's "打开"
   // reuses the token-injected open/reload flow. addTeam dedups by host:port.
+  // Upsert the :8009 team with the CONTAINER's OWN live token. Critical: never
+  // fall back to the host 8008 token (addTeam auto-fills global.json on an empty
+  // api_token — that's the host credential, which 8009 rejects → login screen).
+  // Returns the team id, or {ok:false} when the container token can't be read.
   const registerAppTeam = async () => {
-    try {
-      const lt = require("./local-teams");
-      const tok = await wslDocker.readContainerToken(APP_PORT);
-      await lt.addTeam({ base_url: `http://127.0.0.1:${APP_PORT}`, name: "Docker cicy-code", ...(tok ? { api_token: tok } : {}) });
-    } catch { /* best-effort — the container itself is up */ }
+    const lt = require("./local-teams");
+    const tok = await wslDocker.readContainerToken(APP_PORT); // retried inside
+    if (!tok) return { ok: false, error: "no_token", id: null };
+    const r = await lt.addTeam({ base_url: `http://127.0.0.1:${APP_PORT}`, name: "Docker cicy-code", api_token: tok });
+    return { ok: true, id: r && r.id };
   };
+
+  // Card「打开」→ ALWAYS re-read the live container token and upsert the team
+  // before opening, so the URL carries the current ?token= (a token captured at
+  // install time goes stale after the container is recreated/reset). If the
+  // token can't be read we refuse to open — opening tokenless / with the host
+  // token just strands the user at a login screen (主人: 必须拿到 token 才能打开).
+  ipcMain.handle("docker:app-open", async () => {
+    if (process.platform !== "win32") return { ok: false, error: "windows_only" };
+    try {
+      const reg = await registerAppTeam();
+      if (!reg.ok || !reg.id) return { ok: false, error: reg.error || "no_token" };
+      const lt = require("./local-teams");
+      const r = await lt.openTeam(reg.id);
+      return r && r.ok ? { ok: true } : { ok: false, error: (r && r.error) || "open_failed" };
+    } catch (e) { return { ok: false, error: e.message }; }
+  });
 
   // One-click bootstrap (方案 A): ensure WSL2 → Ubuntu → Docker Engine → load
   // image → start :8009 container → health. Streams phase/progress on

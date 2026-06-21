@@ -262,17 +262,26 @@ async function runContainer({ port = 8009, container = "cicy-code-docker", volum
   return { started: true };
 }
 
-// Read the container's own api_token (its volume-persisted global.json) for the
-// team registration — the host token is a different credential.
+// Read the container's OWN api_token (its volume-persisted global.json). This is
+// the ONLY correct credential for :8009 — the host's 8008 token is different and
+// 8009 rejects it. Retries because right after start the entrypoint may not have
+// written global.json yet; returns "" only if it truly can't be read (callers
+// must then NOT open with a wrong/host token — that strands the user at login).
 async function readContainerToken(port = 8009, container = "cicy-code-docker") {
-  try {
-    // Look the container up by name and read the token from inside it.
-    const { stdout } = await wslRun(`docker ps --filter "name=${container}" --format '{{.Names}}'`, { timeout: 10000 });
-    const name = stdout.trim().split("\n")[0];
-    if (!name) return "";
-    const r = await wslRun(`docker exec ${name} cat /home/cicy/cicy-ai/global.json`, { timeout: 10000 });
-    return JSON.parse(r.stdout).api_token || "";
-  } catch { return ""; }
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      // Look the container up by name and read the token from inside it.
+      const { stdout } = await wslRun(`docker ps --filter "name=${container}" --format '{{.Names}}'`, { timeout: 10000 });
+      const name = stdout.trim().split("\n")[0];
+      if (name) {
+        const r = await wslRun(`docker exec ${name} cat /home/cicy/cicy-ai/global.json`, { timeout: 10000 });
+        const tok = JSON.parse(r.stdout).api_token || "";
+        if (tok) return tok;
+      }
+    } catch { /* container/global.json not ready yet — retry */ }
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  return "";
 }
 
 // Register a Windows logon task that starts dockerd in our distro on every

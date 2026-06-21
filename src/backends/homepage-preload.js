@@ -164,6 +164,8 @@ contextBridge.exposeInMainWorld("cicy", {
     appRestart:   ()  => logInvoke("docker:app-restart"),
     appStop:      ()  => logInvoke("docker:app-stop"),
     appUpgrade:   ()  => logInvoke("docker:app-upgrade"),
+    // Open :8009 with the live container token (refuses if it can't read it).
+    appOpen:      ()  => logInvoke("docker:app-open"),
     onAppProgress: (cb) => {
       const handler = (_e, ev) => { try { cb(ev); } catch {} };
       ipcRenderer.on("docker:app-progress", handler);

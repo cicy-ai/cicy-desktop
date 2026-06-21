@@ -740,7 +740,15 @@ export default function App() {
           {showLocal && (
             <DockerCard
               dockerTeam={dockerTeam}
-              onOpen={(id) => { if (id) openLocalTeam(id); else window.cicy?.tabs?.open?.("http://127.0.0.1:8009", "Docker cicy-code"); }}
+              onOpen={async () => {
+                // Always open via the live-token path: re-reads the container's
+                // own api_token and refuses to open a tokenless/host-token page
+                // (主人: 必须拿到 token 才能打开,否则被卡在登录页).
+                try {
+                  const r = await window.cicy?.docker?.appOpen?.();
+                  if (!r?.ok) window.alert("拿不到容器 token,无法打开 :8009。请确认服务已就绪(或用卡片菜单「重启」)后再试。");
+                } catch (e) { console.warn("[DockerCard] open", e); }
+              }}
               onRefresh={fetchLocalTeams}
             />
           )}
