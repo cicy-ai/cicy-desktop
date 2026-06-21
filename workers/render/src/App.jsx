@@ -1860,7 +1860,7 @@ function DockerCard({ dockerTeam, onOpen, onRename, onRefresh }) {
                   title={tr("localTeams.copyAddr", "点击复制地址")}
                   style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
                   onClick={(e) => { e.stopPropagation(); setMenuOpen(false); try { navigator.clipboard.writeText("http://127.0.0.1:8009"); } catch {} }}>
-                  127.0.0.1:8009
+                  http://127.0.0.1:8009
                 </button>
                 <button type="button" data-id="DockerCard-update" className="bcard__menu-item is-accent" onClick={runUpdate}>
                   {tr("docker.update", "更新")}
