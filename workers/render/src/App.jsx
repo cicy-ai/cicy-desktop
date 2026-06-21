@@ -1877,12 +1877,6 @@ function DockerCard({ dockerTeam, onOpen, onRename, onRefresh }) {
                 ref={menuRef}
                 style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: MENU_W }}
                 onClick={(e) => e.stopPropagation()}>
-                <button type="button" data-id="DockerCard-addr" className="bcard__menu-item"
-                  title={tr("localTeams.copyAddr", "点击复制地址")}
-                  style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-                  onClick={(e) => { e.stopPropagation(); setMenuOpen(false); try { navigator.clipboard.writeText("http://127.0.0.1:8009"); } catch {} }}>
-                  http://127.0.0.1:8009
-                </button>
                 <button type="button" data-id="DockerCard-update" className="bcard__menu-item is-accent" onClick={runUpdate}>
                   {tr("docker.update", "更新")}
                 </button>
@@ -1901,6 +1895,12 @@ function DockerCard({ dockerTeam, onOpen, onRename, onRefresh }) {
                 <button type="button" data-id="DockerCard-billing" className="bcard__menu-item"
                   onClick={() => { setMenuOpen(false); openCloudPage(dockerTeam?.cloud_team_id ? `?team=${encodeURIComponent(dockerTeam.cloud_team_id)}` : "?view=usage"); }}>
                   {tr("docker.billing", "帐单")}
+                </button>
+                <button type="button" data-id="DockerCard-addr" className="bcard__menu-item"
+                  title={tr("localTeams.copyAddr", "点击复制地址")}
+                  style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                  onClick={(e) => { e.stopPropagation(); setMenuOpen(false); try { navigator.clipboard.writeText("http://127.0.0.1:8009"); } catch {} }}>
+                  http://127.0.0.1:8009
                 </button>
               </div>,
               document.body
@@ -2169,16 +2169,6 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
                 ref={menuRef}
                 style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: MENU_W }}
                 onClick={(e) => e.stopPropagation()}>
-                <button
-                  type="button"
-                  data-id="LocalTeamCard-addr"
-                  className="bcard__menu-item"
-                  title={tr("localTeams.copyAddr", "点击复制地址")}
-                  style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-                  onClick={(e) => { e.stopPropagation(); setMenuOpen(false); try { navigator.clipboard.writeText(team.base_url || ""); } catch {} }}
-                >
-                  {team.base_url || "—"}
-                </button>
                 {local && (
                   <button
                     type="button"
@@ -2258,6 +2248,16 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
                     {confirmDel ? tr("localTeams.removeConfirm", "确认删除？") : tr("localTeams.remove", "删除")}
                   </button>
                 )}
+                <button
+                  type="button"
+                  data-id="LocalTeamCard-addr"
+                  className="bcard__menu-item"
+                  title={tr("localTeams.copyAddr", "点击复制地址")}
+                  style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                  onClick={(e) => { e.stopPropagation(); setMenuOpen(false); try { navigator.clipboard.writeText(team.base_url || ""); } catch {} }}
+                >
+                  {team.base_url || "—"}
+                </button>
               </div>,
               document.body
             )}
@@ -2445,14 +2445,6 @@ function TeamCard({ team, onOpen, onRename }) {
                   style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: MENU_W }}
                   onClick={(e) => e.stopPropagation()}>
                   {hasUrl && (
-                    <button type="button" data-id="TeamCard-addr" className="bcard__menu-item"
-                      title={tr("localTeams.copyAddr", "点击复制地址")}
-                      style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-                      onClick={(e) => { e.stopPropagation(); setMenuOpen(false); try { navigator.clipboard.writeText(openUrl || hostUrl || ""); } catch {} }}>
-                      {isPrivate ? (hostUrl || openUrl) : (openUrl || team.runtime_region || team.region || "—")}
-                    </button>
-                  )}
-                  {hasUrl && (
                     <button type="button" data-id="TeamCard-reload" className="bcard__menu-item" onClick={doReload}>
                       {tr("localTeams.reloadWindow", "刷新窗口")}
                     </button>
@@ -2461,6 +2453,14 @@ function TeamCard({ team, onOpen, onRename }) {
                     <button type="button" data-id="TeamCard-billing" className="bcard__menu-item"
                       onClick={(e) => { e.stopPropagation(); setMenuOpen(false); openCloudPage(`?team=${encodeURIComponent(billTeamId)}`); }}>
                       {tr("localTeams.billing", "账单")}
+                    </button>
+                  )}
+                  {hasUrl && (
+                    <button type="button" data-id="TeamCard-addr" className="bcard__menu-item"
+                      title={tr("localTeams.copyAddr", "点击复制地址")}
+                      style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                      onClick={(e) => { e.stopPropagation(); setMenuOpen(false); try { navigator.clipboard.writeText(openUrl || hostUrl || ""); } catch {} }}>
+                      {isPrivate ? (hostUrl || openUrl) : (openUrl || team.runtime_region || team.region || "—")}
                     </button>
                   )}
                 </div>,
