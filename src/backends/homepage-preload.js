@@ -203,6 +203,7 @@ contextBridge.exposeInMainWorld("cicy", {
   tabs: {
     open:   (url, title) => logInvoke("tabs:open", { url, title }),
     reload: (url, title) => logInvoke("tabs:reload", { url, title }),
+    reloadIfOpen: (url, title) => logInvoke("tabs:reloadIfOpen", { url, title }),
   },
 
   // ------- new bridges (last rebuild!) -------

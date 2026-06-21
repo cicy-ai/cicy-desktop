@@ -250,6 +250,16 @@ function register(opts = {}) {
     } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
   });
 
+  // Like tabs:reload but NEVER opens a new tab — reloads only if a matching tab
+  // is already open, else { ok:false, error:"no_open_window" }. 主人令:刷新窗口
+  // 不替用户开窗。所有团队卡(含私有云/共享 TeamCard)的"刷新窗口"走这个。
+  ipcMain.handle("tabs:reloadIfOpen", async (_e, input) => {
+    try {
+      const tb = require("../tools/tab-browser-tools");
+      return tb.reloadTabIfOpen(0, String((input && input.url) || ""), { title: (input && input.title) || "" });
+    } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+  });
+
   // ── RPC audit log (read-only viewer) ────────────────────────────────────────
   // JSONL at ~/cicy-ai/db/rpc-audit.log (utils/rpc-audit.js): every electronRPC
   // call + every authorization decision (incl. temporary ones) + allowlist edits.

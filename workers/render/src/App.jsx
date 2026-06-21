@@ -2163,6 +2163,15 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
                 ref={menuRef}
                 style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: MENU_W }}
                 onClick={(e) => e.stopPropagation()}>
+                <button
+                  type="button"
+                  data-id="LocalTeamCard-addr"
+                  className="bcard__menu-item"
+                  title={tr("localTeams.copyAddr", "点击复制地址")}
+                  onClick={(e) => { e.stopPropagation(); setMenuOpen(false); try { navigator.clipboard.writeText(team.base_url || ""); } catch {} }}
+                >
+                  {team.base_url || "—"}{(runningVer || team.version) ? ` · v${runningVer || team.version}` : ""}
+                </button>
                 {local && (
                   <button
                     type="button"
@@ -2292,13 +2301,8 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
             )}
           </h3>
         )}
-        <div className="bcard__host">
-          {team.base_url || "—"}
-        </div>
         <div className="bcard__meta">
-          {(runningVer || team.version) && (
-            <span className="bcard__ver" data-id="LocalTeamCard-version">v{runningVer || team.version}</span>
-          )}
+          <span className="bcard__chip" data-id="LocalTeamCard-kind">{local ? tr("localTeams.kindLocal", "本地") : tr("localTeams.kindCustom", "自定义")}</span>
         </div>
       </div>
       <button
@@ -2396,7 +2400,11 @@ function TeamCard({ team, onOpen }) {
   const doReload = async () => {
     if (!hasUrl || busy) return;
     setBusy(true); setMenuOpen(false);
-    try { await window.cicy?.tabs?.reload?.(openUrl, name); } catch {}
+    // 不开窗(主人令):没开 tab 就提示,不替用户开。
+    try {
+      const r = await window.cicy?.tabs?.reloadIfOpen?.(openUrl, name);
+      if (!r?.ok && r?.error === "no_open_window") window.alert(tr("localTeams.windowNotOpen", "窗口未打开,请先点「打开」"));
+    } catch {}
     finally { setBusy(false); }
   };
   // 主人令:私有云卡片不展示 api key(安全)。key 只在云端 dash / 注入 global.json 用。
@@ -2429,6 +2437,13 @@ function TeamCard({ team, onOpen }) {
                   style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: MENU_W }}
                   onClick={(e) => e.stopPropagation()}>
                   {hasUrl && (
+                    <button type="button" data-id="TeamCard-addr" className="bcard__menu-item"
+                      title={tr("localTeams.copyAddr", "点击复制地址")}
+                      onClick={(e) => { e.stopPropagation(); setMenuOpen(false); try { navigator.clipboard.writeText(openUrl || hostUrl || ""); } catch {} }}>
+                      {isPrivate ? (hostUrl || openUrl) : (openUrl || team.runtime_region || team.region || "—")}
+                    </button>
+                  )}
+                  {hasUrl && (
                     <button type="button" data-id="TeamCard-reload" className="bcard__menu-item" onClick={doReload}>
                       {tr("localTeams.reloadWindow", "刷新窗口")}
                     </button>
@@ -2448,9 +2463,6 @@ function TeamCard({ team, onOpen }) {
       </div>
       <div className="bcard__body">
         <h3 className="bcard__name" title={name}>{name}</h3>
-        <div className="bcard__host" title={isPrivate ? (hostUrl || "") : ""}>
-          {isPrivate ? (hostUrl || tr("teamCard.noHost", "未填访问地址")) : (team.runtime_region || team.region || "—")}
-        </div>
         <div className="bcard__meta">
           <span className="bcard__chip">{kindLabel}</span>
           {!isPrivate && team.membership_status && team.membership_status !== "active" && (
