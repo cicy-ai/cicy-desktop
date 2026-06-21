@@ -317,7 +317,7 @@ function ensureDesktopShortcut(volume = "cicy-team") {
       `$s=$w.CreateShortcut(${JSON.stringify(lnk)});` +
       `$s.TargetPath='explorer.exe';` +
       `$s.Arguments=${JSON.stringify(target)};` +
-      `$s.IconLocation='shell32.dll,3';` +          // 3 = standard folder icon
+      `$s.IconLocation='imageres.dll,3';` +         // yellow Windows folder icon
       `$s.Description='cicy-code :8009 /home/cicy';` +
       `$s.Save()`;
     execFile("powershell", ["-NoProfile", "-Command", ps], { windowsHide: true, timeout: 15000 }, () => res());

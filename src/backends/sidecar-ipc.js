@@ -146,7 +146,7 @@ function register({ sidecarLogPath } = {}) {
   // the HOST 8008 token (the bug that made 8009 verify with 8008's token → login).
   const registerAppTeam = async () => {
     const lt = require("./local-teams");
-    const r = await lt.addTeam({ base_url: `http://127.0.0.1:${APP_PORT}`, name: "Docker cicy-code", skipTokenAutofill: true });
+    const r = await lt.addTeam({ base_url: `http://127.0.0.1:${APP_PORT}`, name: "Docker 团队", skipTokenAutofill: true });
     return { ok: true, id: r && r.id };
   };
 

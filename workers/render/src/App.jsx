@@ -1764,7 +1764,7 @@ function DockerCard({ dockerTeam, onOpen, onRefresh }) {
   // Restart / stop: quick lifecycle ops with a toast (no full drawer needed).
   const runOp = useCallback(async (op, fn, okMsg) => {
     setMenuOpen(false); setBusy(op);
-    toast.show({ id: "docker-op", message: tr(`docker.${op}ing`, op === "restart" ? "重启中…" : "停止中…"), status: "running" });
+    toast.show({ id: "docker-op", message: tr(`docker.${op}ing`, op === "restart" ? "重启中…" : op === "reload" ? "刷新中…" : "停止中…"), status: "running" });
     try {
       const r = await fn();
       if (r?.ok) toast.show({ id: "docker-op", message: okMsg, status: "done", ttl: 2500 });
@@ -1790,7 +1790,7 @@ function DockerCard({ dockerTeam, onOpen, onRefresh }) {
   const tone = running ? "ok" : (dockerRunning || installed) ? "warn" : "off";
   const isBusy = !!busy;
   const stateText = running
-    ? tr("docker.running", "运行中 · :8009")
+    ? tr("docker.running", "运行中")
     : dockerRunning
       ? tr("docker.notRunning", "未启动 · 点「启动」")
       : installed
@@ -1844,23 +1844,29 @@ function DockerCard({ dockerTeam, onOpen, onRefresh }) {
                 ref={menuRef}
                 style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: MENU_W }}
                 onClick={(e) => e.stopPropagation()}>
-                <button type="button" data-id="DockerCard-restart" className="bcard__menu-item"
-                  onClick={() => runOp("restart", () => window.cicy.docker.appRestart(), tr("docker.restarted", "已重启 cicy-code"))}>
-                  {tr("docker.restart", "重启")}
-                </button>
                 <button type="button" data-id="DockerCard-update" className="bcard__menu-item is-accent" onClick={runUpdate}>
                   {tr("docker.update", "更新")}
                 </button>
                 <button type="button" data-id="DockerCard-reload" className="bcard__menu-item"
-                  onClick={() => { setMenuOpen(false); onOpen?.(dockerTeam?.id); }}>
+                  onClick={() => runOp("reload", async () => {
+                    // 像本地卡:开着才刷,没开就提示——绝不偷偷开新标签。Page.reload 保留
+                    // localStorage 里的 token,所以刷新后仍是登录态。
+                    const r = await window.cicy.localTeams.reload(dockerTeam?.id);
+                    if (!r?.ok && r?.error === "no_open_window") return { ok: false, error: tr("localTeams.windowNotOpen", "窗口未打开,请先点「打开」") };
+                    return r;
+                  }, tr("localTeams.reloaded", "已刷新窗口"))}>
                   {tr("docker.reloadWindow", "刷新窗口")}
+                </button>
+                <button type="button" data-id="DockerCard-restart" className="bcard__menu-item"
+                  onClick={() => runOp("restart", () => window.cicy.docker.appRestart(), tr("docker.restarted", "已重启 cicy-code"))}>
+                  {tr("docker.restart", "重启")}
                 </button>
                 <button type="button" data-id="DockerCard-stop" className="bcard__menu-item is-danger"
                   onClick={() => runOp("stop", () => window.cicy.docker.appStop(), tr("docker.stopped", "已停止 cicy-code"))}>
                   {tr("docker.stop", "停止")}
                 </button>
                 <button type="button" data-id="DockerCard-billing" className="bcard__menu-item"
-                  onClick={() => { setMenuOpen(false); openCloudPage("?view=usage"); }}>
+                  onClick={() => { setMenuOpen(false); openCloudPage(dockerTeam?.cloud_team_id ? `?team=${encodeURIComponent(dockerTeam.cloud_team_id)}` : "?view=usage"); }}>
                   {tr("docker.billing", "帐单")}
                 </button>
               </div>,
@@ -1870,7 +1876,7 @@ function DockerCard({ dockerTeam, onOpen, onRefresh }) {
         )}
       </div>
       <div className="bcard__body">
-        <h3 className="bcard__name">{tr("docker.title", "Docker cicy-code")}</h3>
+        <h3 className="bcard__name">{tr("docker.title", "Docker 团队")}</h3>
         <div className="bcard__host">http://127.0.0.1:8009</div>
         <div className="bcard__meta" style={{ fontSize: 12, color: "#8b949e" }}>{stateText}</div>
       </div>
@@ -2148,22 +2154,25 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
                     {tr("sidecar.updateTo", "更新到")} v{latest}
                   </button>
                 )}
+                {/* 刷新窗口:所有团队卡通用(local / 自定义 / 共享)——开着才刷,没开提示。*/}
+                {running && (
+                  <button
+                    type="button"
+                    data-id="LocalTeamCard-reload"
+                    className="bcard__menu-item"
+                    onClick={() => runOp("reload", async () => {
+                      const r = await window.cicy.localTeams.reload(team.id);
+                      // 没开就不刷、也不偷偷开新标签(主人令):明确提示"窗口未打开",
+                      // 而不是替用户开一个 tab。开着才真刷(reloadTeam 走标签管理器)。
+                      if (!r?.ok && r?.error === "no_open_window") return { ok: false, error: tr("localTeams.windowNotOpen", "窗口未打开,请先点「打开」") };
+                      return r;
+                    }, tr("localTeams.reloaded", "已刷新窗口"))}
+                  >
+                    {tr("localTeams.reloadWindow", "刷新窗口")}
+                  </button>
+                )}
                 {local && running && (
                   <>
-                    <button
-                      type="button"
-                      data-id="LocalTeamCard-reload"
-                      className="bcard__menu-item"
-                      onClick={() => runOp("reload", async () => {
-                        const r = await window.cicy.localTeams.reload(team.id);
-                        // 没开就不刷、也不偷偷开新标签(主人令):明确提示"窗口未打开",
-                        // 而不是替用户开一个 tab。开着才真刷(reloadTeam 走标签管理器)。
-                        if (!r?.ok && r?.error === "no_open_window") return { ok: false, error: tr("localTeams.windowNotOpen", "窗口未打开,请先点「打开」") };
-                        return r;
-                      }, tr("localTeams.reloaded", "已刷新窗口"))}
-                    >
-                      {tr("localTeams.reloadWindow", "刷新窗口")}
-                    </button>
                     <button
                       type="button"
                       data-id="LocalTeamCard-restart"
@@ -2371,18 +2380,7 @@ function TeamCard({ team, onOpen }) {
         </div>
         <div className="bcard__top-right">
           {team.is_trial && <span className="bcard__badge">trial</span>}
-          {billTeamId != null && (
-            <button
-              type="button"
-              data-id="TeamCard-billing"
-              className="bcard__billing-btn"
-              title={tr("localTeams.billing", "账单")}
-              onClick={(e) => { e.stopPropagation(); openCloudPage(`?team=${encodeURIComponent(billTeamId)}`); }}
-            >
-              {tr("localTeams.billing", "账单")}
-            </button>
-          )}
-          {hasUrl && (
+          {(hasUrl || billTeamId != null) && (
             <div className="bcard__menuwrap" ref={menuWrap} onClick={(e) => e.stopPropagation()}>
               <button
                 type="button"
@@ -2400,9 +2398,17 @@ function TeamCard({ team, onOpen }) {
                   ref={menuRef}
                   style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: MENU_W }}
                   onClick={(e) => e.stopPropagation()}>
-                  <button type="button" data-id="TeamCard-reload" className="bcard__menu-item" onClick={doReload}>
-                    {tr("localTeams.reloadWindow", "刷新窗口")}
-                  </button>
+                  {hasUrl && (
+                    <button type="button" data-id="TeamCard-reload" className="bcard__menu-item" onClick={doReload}>
+                      {tr("localTeams.reloadWindow", "刷新窗口")}
+                    </button>
+                  )}
+                  {billTeamId != null && (
+                    <button type="button" data-id="TeamCard-billing" className="bcard__menu-item"
+                      onClick={(e) => { e.stopPropagation(); setMenuOpen(false); openCloudPage(`?team=${encodeURIComponent(billTeamId)}`); }}>
+                      {tr("localTeams.billing", "账单")}
+                    </button>
+                  )}
                 </div>,
                 document.body,
               )}
