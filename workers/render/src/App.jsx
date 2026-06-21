@@ -2190,8 +2190,9 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
                     {tr("sidecar.updateTo", "更新到")} v{latest}
                   </button>
                 )}
-                {/* 刷新窗口:所有团队卡通用(local / 自定义 / 共享)——开着才刷,没开提示。*/}
-                {running && (
+                {/* 刷新窗口:所有团队卡通用(本地/自定义)——不依赖 running(自定义节点
+                    status 常非 running)。reloadIfOpen 没开 tab 自动不操作,所以总能显示。*/}
+                {team.base_url && (
                   <button
                     type="button"
                     data-id="LocalTeamCard-reload"
