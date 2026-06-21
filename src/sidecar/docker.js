@@ -305,14 +305,32 @@ function findExistingInstaller() {
 // R2 endpoint while curl.exe sustains ~1.4MB/s (10×) — so for the big image
 // tarball we shell out to curl. `-C -` resumes a partial; progress comes from
 // polling the file size against the HEAD content-length.
+// --retry-all-errors was added in curl 7.71. Older builds (e.g. Win10's bundled
+// curl 7.55.1) reject it with "option ... is unknown" → exit 2, which then
+// dropped us to the slow node downloader on EVERY image pull. Probe the version
+// once and only pass the flag when supported.
+let _curlRetryAllErrors = null;
+function curlSupportsRetryAllErrors(bin) {
+  if (_curlRetryAllErrors !== null) return _curlRetryAllErrors;
+  try {
+    const out = execFileSync(bin, ["-V"], { encoding: "utf8", windowsHide: true });
+    const m = /libcurl\/(\d+)\.(\d+)/.exec(out);
+    const major = m ? Number(m[1]) : 0, minor = m ? Number(m[2]) : 0;
+    _curlRetryAllErrors = major > 7 || (major === 7 && minor >= 71);
+  } catch { _curlRetryAllErrors = false; }
+  return _curlRetryAllErrors;
+}
+
 function curlDownload(url, dest, { emit, phase = "image", label = "下载镜像" } = {}) {
   return new Promise(async (resolve, reject) => {
     let total = 0; try { total = await headSize(url); } catch {}
     const bin = process.platform === "win32" ? "curl.exe" : "curl";
-    // --retry-all-errors so a transient DNS blip (curl exit 6, common right after
-    // the app starts) retries on the fast curl path instead of falling back to
-    // the slow node downloader. --retry-connrefused covers a not-yet-ready net.
-    const args = ["-sL", "-A", DL_UA, "-C", "-", "--retry", "8", "--retry-delay", "3", "--retry-all-errors", "--retry-connrefused", "-o", dest, url];
+    // --retry-connrefused (curl 7.52+) covers a not-yet-ready net. On curl 7.71+
+    // also add --retry-all-errors so a transient DNS blip (exit 6, common right
+    // after app start) retries on the fast curl path instead of the slow node one.
+    const args = ["-sL", "-A", DL_UA, "-C", "-", "--retry", "8", "--retry-delay", "3", "--retry-connrefused"];
+    if (curlSupportsRetryAllErrors(bin)) args.push("--retry-all-errors");
+    args.push("-o", dest, url);
     let child;
     try { child = spawn(bin, args, { windowsHide: true }); }
     catch (e) { return reject(e); }

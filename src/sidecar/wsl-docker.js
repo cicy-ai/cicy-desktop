@@ -465,8 +465,9 @@ async function dockerRestart({ container = "cicy-code-docker-8009" } = {}) {
 // key)。**保留 volume**(数据/api_token/deviceId 不丢),只是换掉容器本身 + env。
 // 破坏性(短暂中断 + 换 key)→ 调用方要 confirm。
 async function recreate({ port = 8009, container = "cicy-code-docker-8009", volume = "cicy-team-8009", env = {} } = {}) {
-  try { await wslRun(`docker rm -f ${container}`, { timeout: 30000 }); } catch {}
-  // runContainer 内部还会 rm 一次并 run;它开头的 probeHealth 此时已无容器 → 直接重建。
+  // 强删占用该端口的**任何**容器(含老名字 cicy-code-docker)+ 目标容器 —— 否则
+  // runContainer 开头的 probeHealth 看到旧容器还健康会 adopt 它、不重建,key 就换不了。
+  try { await wslRun(`docker ps -aq --filter publish=${port} | xargs -r docker rm -f 2>/dev/null; docker rm -f ${container} 2>/dev/null; true`, { timeout: 30000 }); } catch {}
   const r = await runContainer({ port, container, volume, env });
   try { await ensureDesktopShortcut(volume, port); } catch {}
   return r;
