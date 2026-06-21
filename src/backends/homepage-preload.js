@@ -162,6 +162,7 @@ contextBridge.exposeInMainWorld("cicy", {
     appStatus:    ()  => logInvoke("docker:app-status"),
     appBootstrap: ()  => logInvoke("docker:app-bootstrap"),
     appRestart:   ()  => logInvoke("docker:app-restart"),
+    appUpdate:    ()  => logInvoke("docker:app-update"),
     appStop:      ()  => logInvoke("docker:app-stop"),
     appUpgrade:   ()  => logInvoke("docker:app-upgrade"),
     // Open :8009 with the live container token (refuses if it can't read it).

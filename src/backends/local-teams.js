@@ -219,12 +219,14 @@ async function list({ refresh = false } = {}) {
 // dom-ready electronRPC injection — bare `new BrowserWindow` strips
 // the SPA of every desktop tool, which was the regression in the
 // previous implementation.
-async function openTeam(id) {
+async function openTeam(id, opts = {}) {
   const node = readNodes()[id];
   if (!node) return { ok: false, error: "team not found" };
   const baseUrl = (node.base_url || "").replace(/\/$/, "");
   if (!baseUrl) return { ok: false, error: "no base_url" };
-  const token = node.api_token || "";
+  // opts.token (a LIVE-read token, e.g. the :8009 container's own) takes
+  // precedence over any stored token — the Docker team stores none.
+  const token = (opts && opts.token) || node.api_token || "";
   const url = token ? `${baseUrl}/?token=${encodeURIComponent(token)}` : baseUrl;
 
   // Compare by origin+pathname only — token + hash both vary per
@@ -512,7 +514,11 @@ async function addTeam(spec) {
   // pass it, leaving the swap URL with no `?token=` and stranding the user
   // at a login screen. Auto-fill from local global.json (top-level api_token)
   // so the common case "Just Works", even when spec.api_token is empty.
-  if (!spec.api_token) {
+  // skipTokenAutofill: the :8009 Docker team must NEVER store a token — its token
+  // is read LIVE from the container on every open (主人: teams.json 不存 8009 的
+  // token / docker 的 token 是实时拿的). Without this guard the auto-fill below
+  // back-fills the HOST 8008 token, which 8009 rejects → endless login screen.
+  if (!spec.api_token && !spec.skipTokenAutofill) {
     try {
       const host = new URL(baseUrl).hostname;
       if (host === "127.0.0.1" || host === "localhost" || host === "::1") {
@@ -550,7 +556,8 @@ async function addTeam(spec) {
   const patch = {
     name:           spec.name           !== undefined ? String(spec.name || unnamedName()) : undefined,
     base_url:       baseUrl,
-    api_token:      spec.api_token      !== undefined ? String(spec.api_token || "") : undefined,
+    // skipTokenAutofill → force-clear any stored token (Docker :8009 reads live).
+    api_token:      spec.skipTokenAutofill ? "" : (spec.api_token !== undefined ? String(spec.api_token || "") : undefined),
     install_source: spec.install_source ?? undefined,
     install_os:     spec.install_os     ?? undefined,
     install_arch:   spec.install_arch   ?? undefined,

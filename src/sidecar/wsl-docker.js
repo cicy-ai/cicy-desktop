@@ -267,18 +267,23 @@ async function runContainer({ port = 8009, container = "cicy-code-docker", volum
 // 8009 rejects it. Retries because right after start the entrypoint may not have
 // written global.json yet; returns "" only if it truly can't be read (callers
 // must then NOT open with a wrong/host token — that strands the user at login).
-async function readContainerToken(port = 8009, container = "cicy-code-docker") {
+async function readContainerToken(port = 8009, container = "cicy-code-docker", volume = "cicy-team") {
   for (let attempt = 1; attempt <= 5; attempt++) {
+    // 1) Fast + reliable: read the volume-backed global.json straight from the
+    //    distro fs. `docker exec` into a just-loaded/busy container is slow and
+    //    frequently times out — and a timeout here was returning "" → callers
+    //    fell back to the stale host token. The bind volume read never does that.
     try {
-      // Look the container up by name and read the token from inside it.
-      const { stdout } = await wslRun(`docker ps --filter "name=${container}" --format '{{.Names}}'`, { timeout: 10000 });
-      const name = stdout.trim().split("\n")[0];
-      if (name) {
-        const r = await wslRun(`docker exec ${name} cat /home/cicy/cicy-ai/global.json`, { timeout: 10000 });
-        const tok = JSON.parse(r.stdout).api_token || "";
-        if (tok) return tok;
-      }
-    } catch { /* container/global.json not ready yet — retry */ }
+      const { stdout } = await wslRun(`cat /var/lib/docker/volumes/${volume}/_data/cicy-ai/global.json 2>/dev/null`, { timeout: 8000 });
+      const m = String(stdout).match(/"api_token"\s*:\s*"(cicy_[A-Za-z0-9]+)"/);
+      if (m) return m[1];
+    } catch { /* not ready yet — retry */ }
+    // 2) Fallback: exec into the container.
+    try {
+      const { stdout } = await wslRun(`docker exec ${container} cat /home/cicy/cicy-ai/global.json`, { timeout: 10000 });
+      const tok = JSON.parse(stdout).api_token || "";
+      if (tok) return tok;
+    } catch { /* retry */ }
     await new Promise((r) => setTimeout(r, 2000));
   }
   return "";
@@ -295,6 +300,27 @@ function ensureAutostart() {
     const tr = `wsl.exe -d ${DISTRO} -u root -e /usr/local/sbin/start-dockerd.sh`;
     execFile("schtasks", ["/create", "/tn", "cicy-docker-autostart", "/tr", tr, "/sc", "onlogon", "/rl", "HIGHEST", "/f"],
       { windowsHide: true }, () => res());
+  });
+}
+
+// Drop a desktop shortcut (folder icon) to the container's /home/cicy — i.e. the
+// cicy-team volume on the distro — so the user can browse :8009's files from
+// Windows Explorer. \\wsl$\<distro>\… is the UNC view of the WSL filesystem.
+// Idempotent: CreateShortcut overwrites. Best-effort (errors swallowed).
+function ensureDesktopShortcut(volume = "cicy-team") {
+  if (process.platform !== "win32") return Promise.resolve();
+  return new Promise((res) => {
+    const lnk = path.join(os.homedir(), "Desktop", "cicy-8009 文件.lnk");
+    const target = `\\\\wsl$\\${DISTRO}\\var\\lib\\docker\\volumes\\${volume}\\_data`;
+    const ps =
+      `$w=New-Object -ComObject WScript.Shell;` +
+      `$s=$w.CreateShortcut(${JSON.stringify(lnk)});` +
+      `$s.TargetPath='explorer.exe';` +
+      `$s.Arguments=${JSON.stringify(target)};` +
+      `$s.IconLocation='shell32.dll,3';` +          // 3 = standard folder icon
+      `$s.Description='cicy-code :8009 /home/cicy';` +
+      `$s.Save()`;
+    execFile("powershell", ["-NoProfile", "-Command", ps], { windowsHide: true, timeout: 15000 }, () => res());
   });
 }
 
@@ -382,16 +408,45 @@ async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-dock
   // 7) Health — the ONLY path to ok:true.
   emit({ phase: "container", status: "running", message: "等待 cicy-code 就绪…" });
   const healthy = await docker.waitUntil(() => probeHealth(port), { totalMs: 120000, everyMs: 3000 });
-  if (healthy) await ensureAutostart(); // survive Windows reboot
+  if (healthy) { await ensureAutostart(); await ensureDesktopShortcut(volume); } // survive reboot + desktop shortcut
   emit({ phase: healthy ? "done" : "container", status: healthy ? "done" : "error", message: healthy ? "Docker cicy-code 已就绪 🎉" : `服务起来了但 :${port} 还没响应——稍等或点「重试」` });
   return { ok: healthy, container };
 }
 
 // Lifecycle (card ⋯ menu).
-async function restart({ container = "cicy-code-docker", port = 8009 } = {}) {
+// Restart ONLY cicy-code via supervisor — cron / sshd / user daemons keep
+// running (that's the whole point of the supervisor layout). Falls back to a
+// full container restart on the pre-supervisor image.
+async function restart({ container = "cicy-code-docker", port = 8009, volume = "cicy-team" } = {}) {
   await startEngine();
-  await wslRun(`docker restart ${container}`, { timeout: 60000 });
-  return await docker.waitUntil(() => probeHealth(port), { totalMs: 60000, everyMs: 2000 });
+  try {
+    await wslRun(`docker exec ${container} supervisorctl -c /etc/supervisor/supervisord.conf restart cicy-code`, { timeout: 30000 });
+  } catch {
+    try { await wslRun(`docker restart ${container}`, { timeout: 60000 }); } catch {}
+  }
+  const ok = await docker.waitUntil(() => probeHealth(port), { totalMs: 60000, everyMs: 2000 });
+  if (ok) await ensureDesktopShortcut(volume);
+  return ok;
+}
+
+// Update cicy-code IN PLACE: the supervisor image ships cicy-code-update.sh,
+// which installs the latest version side-by-side, repoints the symlink, and
+// `supervisorctl restart cicy-code` — no container recreate, daemons untouched.
+// Streamed to the drawer so the user sees the npm pull + restart.
+async function update({ onProgress, container = "cicy-code-docker", port = 8009 } = {}) {
+  const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
+  await startEngine();
+  emit({ phase: "image", status: "running", message: "更新 cicy-code（拉取最新版）…" });
+  try {
+    await wslRunStream(`docker exec ${container} bash -lc "command -v cicy-code-update.sh >/dev/null && cicy-code-update.sh || /usr/local/bin/cicy-code-update.sh"`,
+      { emit, phase: "image", timeout: 300000 });
+  } catch (e) {
+    emit({ phase: "done", status: "error", message: `更新失败：${e.message}（此镜像可能不支持，试试「升级」重装）` });
+    return { ok: false, reason: "update_failed" };
+  }
+  const healthy = await docker.waitUntil(() => probeHealth(port), { totalMs: 120000, everyMs: 3000 });
+  emit({ phase: "done", status: healthy ? "done" : "error", message: healthy ? "cicy-code 已更新到最新 🎉" : "更新了但 :8009 还没响应——稍等或点重试" });
+  return { ok: healthy };
 }
 async function stop({ container = "cicy-code-docker" } = {}) {
   try { await wslRun(`docker stop ${container}`, { timeout: 30000 }); } catch {}
@@ -420,6 +475,6 @@ async function upgrade({ onProgress, port = 8009, container = "cicy-code-docker"
 }
 
 module.exports = {
-  bootstrap, status, restart, stop, upgrade, runContainer, readContainerToken,
+  bootstrap, status, restart, stop, update, upgrade, runContainer, readContainerToken,
   distroInstalled, dockerInstalled, dockerEngineUp, imagePresent, probeHealth, wslRun,
 };

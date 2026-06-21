@@ -32,15 +32,22 @@ const APP_PORT = Number(process.env.CICY_DOCKER_APP_PORT || 8009);
 const APP_CONTAINER = process.env.CICY_DOCKER_APP_CONTAINER || "cicy-code-docker";
 const APP_VOLUME = process.env.CICY_DOCKER_APP_VOLUME || "cicy-team";
 const APP_MOUNT = process.env.CICY_DOCKER_APP_MOUNT || "/home/cicy";
-// The Docker-版 instance reaches the LLM through the cicy gateway, authenticated
-// with the LOCAL 8008 team's api_token (主人: "key 用 local team 8008 的"). 8008
-// is started by default on Windows and its token is already minted by the time
-// the user opens the Docker card.
+// 8008 and 8009 are ONE team (主人), so :8009 reaches the LLM through the cicy
+// gateway using 8008's TEAM key — the `sk-cicy-…` apiKey already minted in 8008's
+// global.json providers (NOT the api_token, which is only the local access
+// credential). 8008 is up by the time the Docker card is used, so the key is
+// ready — we just read it and pass it to the container. Same key ⇒ same billing.
 const GATEWAY_ENDPOINT = process.env.CICY_AI_GATEWAY_LLM_ENDPOINT || "https://gateway.cicy-ai.com";
-function readLocalApiToken() {
+function readLocalGatewayKey() {
   try {
     const p = path.join(os.homedir(), "cicy-ai", "global.json");
-    return String(JSON.parse(fs.readFileSync(p, "utf8")).api_token || "");
+    const g = JSON.parse(fs.readFileSync(p, "utf8"));
+    const items = (g.providers && g.providers.items) || [];
+    const pick =
+      items.find((it) => it && it.apiKey && String(it.url || "").includes("gateway.cicy-ai.com")) ||
+      items.find((it) => it && it.key === "defaultAnthropic" && it.apiKey) ||
+      items.find((it) => it && it.apiKey);
+    return pick ? String(pick.apiKey || "") : "";
   } catch { return ""; }
 }
 
@@ -123,9 +130,9 @@ function register({ sidecarLogPath } = {}) {
   // LLM gateway env keyed by the 8008 team's token. (WSL: whole-home mount via
   // -v <volume>:/home/cicy inside wsl-docker.)
   const appOpts = () => {
-    const token = readLocalApiToken();
+    const gwKey = readLocalGatewayKey(); // 8008's team gateway key (sk-cicy-…)
     const env = { CICY_AI_GATEWAY_LLM_ENDPOINT: GATEWAY_ENDPOINT };
-    if (token) env.CICY_AI_GATEWAY_LLM_API_KEY = token;
+    if (gwKey) env.CICY_AI_GATEWAY_LLM_API_KEY = gwKey;
     return { port: APP_PORT, container: APP_CONTAINER, volume: APP_VOLUME, env };
   };
   // Register the running :8009 instance as a (custom) team so the card's "打开"
@@ -134,26 +141,28 @@ function register({ sidecarLogPath } = {}) {
   // fall back to the host 8008 token (addTeam auto-fills global.json on an empty
   // api_token — that's the host credential, which 8009 rejects → login screen).
   // Returns the team id, or {ok:false} when the container token can't be read.
+  // Register the :8009 team WITHOUT a token. 主人: teams.json 不存 8009 的 token;
+  // docker 的 token 是实时拿的. skipTokenAutofill stops addTeam from back-filling
+  // the HOST 8008 token (the bug that made 8009 verify with 8008's token → login).
   const registerAppTeam = async () => {
     const lt = require("./local-teams");
-    const tok = await wslDocker.readContainerToken(APP_PORT); // retried inside
-    if (!tok) return { ok: false, error: "no_token", id: null };
-    const r = await lt.addTeam({ base_url: `http://127.0.0.1:${APP_PORT}`, name: "Docker cicy-code", api_token: tok });
+    const r = await lt.addTeam({ base_url: `http://127.0.0.1:${APP_PORT}`, name: "Docker cicy-code", skipTokenAutofill: true });
     return { ok: true, id: r && r.id };
   };
 
-  // Card「打开」→ ALWAYS re-read the live container token and upsert the team
-  // before opening, so the URL carries the current ?token= (a token captured at
-  // install time goes stale after the container is recreated/reset). If the
-  // token can't be read we refuse to open — opening tokenless / with the host
-  // token just strands the user at a login screen (主人: 必须拿到 token 才能打开).
+  // Card「打开」→ read the container's OWN token LIVE from its volume right now,
+  // then open the tab with THAT token. Never a stored/host token (主人: 打开前去
+  // docker 里实时拿 token 再 open tab). Refuse to open if it can't be read —
+  // opening tokenless / with the host token just strands the user at login.
   ipcMain.handle("docker:app-open", async () => {
     if (process.platform !== "win32") return { ok: false, error: "windows_only" };
     try {
+      const tok = await wslDocker.readContainerToken(APP_PORT, APP_CONTAINER, APP_VOLUME);
+      if (!tok) return { ok: false, error: "no_token" };
       const reg = await registerAppTeam();
-      if (!reg.ok || !reg.id) return { ok: false, error: reg.error || "no_token" };
+      if (!reg.id) return { ok: false, error: "register_failed" };
       const lt = require("./local-teams");
-      const r = await lt.openTeam(reg.id);
+      const r = await lt.openTeam(reg.id, { token: tok }); // open with the LIVE token
       return r && r.ok ? { ok: true } : { ok: false, error: (r && r.error) || "open_failed" };
     } catch (e) { return { ok: false, error: e.message }; }
   });
@@ -175,13 +184,25 @@ function register({ sidecarLogPath } = {}) {
     }
   });
 
-  // ⋯ menu → 重启 the :8009 container, wait for health.
+  // ⋯ menu → 重启 cicy-code (supervisorctl restart cicy-code; daemons stay up).
   ipcMain.handle("docker:app-restart", async () => {
-    try { const ok = await wslDocker.restart({ container: APP_CONTAINER, port: APP_PORT }); return { ok: !!ok }; }
+    try { const ok = await wslDocker.restart({ container: APP_CONTAINER, port: APP_PORT, volume: APP_VOLUME }); return { ok: !!ok }; }
     catch (e) { return { ok: false, error: e.message }; }
   });
 
-  // ⋯ menu → 停止: graceful `docker stop` (data persists in the named volume).
+  // ⋯ menu → 更新 cicy-code: pull the latest cicy-code into the container +
+  // restart it (no container recreate). Streams progress to the drawer.
+  ipcMain.handle("docker:app-update", async (e) => {
+    if (process.platform !== "win32") return { ok: false, error: "Docker cicy-code is Windows-only" };
+    try {
+      return await wslDocker.update({
+        container: APP_CONTAINER, port: APP_PORT,
+        onProgress: (ev) => { try { e.sender.send("docker:app-progress", ev); } catch {} },
+      });
+    } catch (err) { return { ok: false, error: err.message }; }
+  });
+
+  // ⋯ menu → 停止 cicy-code.
   ipcMain.handle("docker:app-stop", async () => {
     try { await wslDocker.stop({ container: APP_CONTAINER }); return { ok: true }; }
     catch (e) { return { ok: false, error: e.message }; }

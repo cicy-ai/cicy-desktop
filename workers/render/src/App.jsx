@@ -1743,6 +1743,24 @@ function DockerCard({ dockerTeam, onOpen, onRefresh }) {
     }
   }, [checkStatus, onRefresh]);
 
+  // Update cicy-code (in-place: pull latest + supervisorctl restart). Drawer so
+  // the user sees the npm pull + restart log.
+  const runUpdate = useCallback(async () => {
+    setMenuOpen(false); setBusy("update");
+    dockerDrawer.open({ onRetry: runUpdate });
+    const unsub = window.cicy?.docker?.onAppProgress?.((ev) => dockerDrawer.push(ev));
+    try {
+      const r = await window.cicy?.docker?.appUpdate?.();
+      dockerDrawer.finish({ ok: !!r?.ok, message: r?.ok ? tr("docker.updated", "cicy-code 已更新到最新") : (r?.error || tr("docker.updateFailed", "更新失败")) });
+      if (r?.ok) onRefresh?.();
+    } catch (e) {
+      dockerDrawer.finish({ ok: false, message: e.message });
+    } finally {
+      try { unsub && unsub(); } catch {}
+      setBusy(""); checkStatus();
+    }
+  }, [checkStatus, onRefresh]);
+
   // Restart / stop: quick lifecycle ops with a toast (no full drawer needed).
   const runOp = useCallback(async (op, fn, okMsg) => {
     setMenuOpen(false); setBusy(op);
@@ -1826,21 +1844,25 @@ function DockerCard({ dockerTeam, onOpen, onRefresh }) {
                 ref={menuRef}
                 style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: MENU_W }}
                 onClick={(e) => e.stopPropagation()}>
-                {running && (
-                  <button type="button" data-id="DockerCard-restart" className="bcard__menu-item"
-                    onClick={() => runOp("restart", () => window.cicy.docker.appRestart(), tr("docker.restarted", "已重启"))}>
-                    {tr("docker.restart", "重启")}
-                  </button>
-                )}
-                <button type="button" data-id="DockerCard-upgrade" className="bcard__menu-item is-accent" onClick={runUpgrade}>
-                  {tr("docker.upgrade", "升级（拉取最新镜像）")}
+                <button type="button" data-id="DockerCard-restart" className="bcard__menu-item"
+                  onClick={() => runOp("restart", () => window.cicy.docker.appRestart(), tr("docker.restarted", "已重启 cicy-code"))}>
+                  {tr("docker.restart", "重启")}
                 </button>
-                {running && (
-                  <button type="button" data-id="DockerCard-stop" className="bcard__menu-item is-danger"
-                    onClick={() => runOp("stop", () => window.cicy.docker.appStop(), tr("docker.stopped", "已停止"))}>
-                    {tr("docker.stop", "停止")}
-                  </button>
-                )}
+                <button type="button" data-id="DockerCard-update" className="bcard__menu-item is-accent" onClick={runUpdate}>
+                  {tr("docker.update", "更新")}
+                </button>
+                <button type="button" data-id="DockerCard-reload" className="bcard__menu-item"
+                  onClick={() => { setMenuOpen(false); onOpen?.(dockerTeam?.id); }}>
+                  {tr("docker.reloadWindow", "刷新窗口")}
+                </button>
+                <button type="button" data-id="DockerCard-stop" className="bcard__menu-item is-danger"
+                  onClick={() => runOp("stop", () => window.cicy.docker.appStop(), tr("docker.stopped", "已停止 cicy-code"))}>
+                  {tr("docker.stop", "停止")}
+                </button>
+                <button type="button" data-id="DockerCard-billing" className="bcard__menu-item"
+                  onClick={() => { setMenuOpen(false); openCloudPage("?view=usage"); }}>
+                  {tr("docker.billing", "帐单")}
+                </button>
               </div>,
               document.body
             )}
