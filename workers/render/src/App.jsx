@@ -1858,6 +1858,7 @@ function DockerCard({ dockerTeam, onOpen, onRename, onRefresh }) {
                 onClick={(e) => e.stopPropagation()}>
                 <button type="button" data-id="DockerCard-addr" className="bcard__menu-item"
                   title={tr("localTeams.copyAddr", "点击复制地址")}
+                  style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
                   onClick={(e) => { e.stopPropagation(); setMenuOpen(false); try { navigator.clipboard.writeText("http://127.0.0.1:8009"); } catch {} }}>
                   127.0.0.1:8009
                 </button>
@@ -2168,6 +2169,7 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
                   data-id="LocalTeamCard-addr"
                   className="bcard__menu-item"
                   title={tr("localTeams.copyAddr", "点击复制地址")}
+                  style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
                   onClick={(e) => { e.stopPropagation(); setMenuOpen(false); try { navigator.clipboard.writeText(team.base_url || ""); } catch {} }}
                 >
                   {team.base_url || "—"}{(runningVer || team.version) ? ` · v${runningVer || team.version}` : ""}
@@ -2439,6 +2441,7 @@ function TeamCard({ team, onOpen }) {
                   {hasUrl && (
                     <button type="button" data-id="TeamCard-addr" className="bcard__menu-item"
                       title={tr("localTeams.copyAddr", "点击复制地址")}
+                      style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
                       onClick={(e) => { e.stopPropagation(); setMenuOpen(false); try { navigator.clipboard.writeText(openUrl || hostUrl || ""); } catch {} }}>
                       {isPrivate ? (hostUrl || openUrl) : (openUrl || team.runtime_region || team.region || "—")}
                     </button>
