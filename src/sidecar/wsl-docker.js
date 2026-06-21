@@ -176,21 +176,32 @@ async function dockerEngineUp() {
 //     dockerd can't drive in WSL2 → daemon fails to set up networking).
 //   • run dockerd detached and wait for /var/run/docker.sock.
 async function startEngine() {
-  try {
-    await wslRun(
-      "update-alternatives --set iptables /usr/sbin/iptables-legacy >/dev/null 2>&1; " +
-      "update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy >/dev/null 2>&1; " +
-      // A pre-baked rootfs (docker export after an inner dind dockerd) can ship a
-      // STALE /var/run/docker.{pid,sock}: a fresh dockerd then refuses to start
-      // ("pid file found, ensure docker is not running"). Clear them when dockerd
-      // is NOT already running — that was the 烤制包「引擎没起来」failure.
-      "if ! pgrep dockerd >/dev/null 2>&1; then rm -f /var/run/docker.pid /run/docker.pid /var/run/docker.sock /run/docker.sock; fi; " +
-      "pgrep dockerd >/dev/null 2>&1 || (nohup dockerd >/var/log/cicy-dockerd.log 2>&1 &); " +
-      // First boot of a freshly-imported distro: cold WSL2 VM + large pre-baked
-      // /var/lib/docker → give it longer than 20s.
-      "for i in $(seq 1 40); do [ -S /var/run/docker.sock ] && docker version >/dev/null 2>&1 && break; sleep 1; done",
-      { timeout: 60000 });
-  } catch {}
+  // Up to 3 clean attempts: on a cold first boot dockerd can die mid-init (e.g.
+  // networking not ready yet) and only succeed on a fresh relaunch — that race
+  // was the main "一次装不上、要点几次重试" culprit. Each attempt clears stale
+  // runtime files, (re)launches dockerd, and waits for the socket; between
+  // attempts we hard-kill any half-dead daemon so the next launch is clean.
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await wslRun(
+        "update-alternatives --set iptables /usr/sbin/iptables-legacy >/dev/null 2>&1; " +
+        "update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy >/dev/null 2>&1; " +
+        // A pre-baked rootfs (docker export after an inner dind dockerd) can ship a
+        // STALE /var/run/docker.{pid,sock}: a fresh dockerd then refuses to start
+        // ("pid file found, ensure docker is not running"). Clear them when dockerd
+        // is NOT already running — that was the 烤制包「引擎没起来」failure.
+        "if ! pgrep dockerd >/dev/null 2>&1; then rm -f /var/run/docker.pid /run/docker.pid /var/run/docker.sock /run/docker.sock; fi; " +
+        "pgrep dockerd >/dev/null 2>&1 || (nohup dockerd >/var/log/cicy-dockerd.log 2>&1 &); " +
+        // First boot of a freshly-imported distro: cold WSL2 VM + large pre-baked
+        // /var/lib/docker → give it longer than 20s.
+        "for i in $(seq 1 40); do [ -S /var/run/docker.sock ] && docker version >/dev/null 2>&1 && break; sleep 1; done",
+        { timeout: 60000 });
+    } catch {}
+    if (await dockerEngineUp()) return true;
+    // Failed: kill the half-dead daemon + clear runtime files for a clean retry.
+    try { await wslRun("pkill -9 dockerd 2>/dev/null; rm -f /var/run/docker.pid /run/docker.pid /var/run/docker.sock /run/docker.sock; sleep 1", { timeout: 15000 }); } catch {}
+  }
+  return false;
 }
 
 // Tail dockerd's log so a "引擎没起来" failure is diagnosable instead of blind.
@@ -229,11 +240,15 @@ const probeHealth = docker.probeHealth;
 
 // Start (or adopt) the container on :port inside the distro.
 //
-// cicy-code binds 127.0.0.1 inside the container (localhost-only by design), so
-// `-p 8009:8008` doesn't work — docker-proxy can't reach a loopback-bound app.
-// Instead use host networking + PORT=<port>: the app listens on <port> in the
-// distro's network namespace, and WSL2's localhost relay forwards it to Windows
-// 127.0.0.1:<port>. Verified: HEALTH 200 from Windows.
+// We do NOT use --network host (it shares the distro's whole network namespace,
+// exposing every container port — sshd:22, cron, etc. — and offers no
+// isolation). Instead publish a single mapped port:
+//   • CICY_PUBLIC=1 makes cicy-code bind 0.0.0.0:8008 INSIDE the container
+//     (it binds 127.0.0.1 by default, which docker-proxy can't reach).
+//   • -p 127.0.0.1:<port>:8008 pins the host side to loopback, so it's never
+//     network-exposed; the api_token gates access. WSL2's localhost relay then
+//     forwards the distro's 127.0.0.1:<port> to Windows 127.0.0.1:<port>.
+// Only :<port> is published — sshd/cron stay inside the container's own netns.
 async function runContainer({ port = 8009, container = "cicy-code-docker", volume = "cicy-team", env = {} } = {}) {
   if (await probeHealth(port)) return { adopted: true };
   // Replace any stale same-named container.
@@ -242,7 +257,7 @@ async function runContainer({ port = 8009, container = "cicy-code-docker", volum
     .filter(([, v]) => v != null && v !== "")
     .map(([k, v]) => `-e ${k}='${String(v).replace(/'/g, "'\\''")}'`)
     .join(" ");
-  const cmd = `docker run -d --name ${container} --restart unless-stopped --network host -e PORT=${port} -v ${volume}:/home/cicy ${envArgs} ${IMAGE}`;
+  const cmd = `docker run -d --name ${container} --restart unless-stopped -p 127.0.0.1:${port}:8008 -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${envArgs} ${IMAGE}`;
   await wslRun(cmd, { timeout: 60000 });
   return { started: true };
 }
@@ -251,7 +266,7 @@ async function runContainer({ port = 8009, container = "cicy-code-docker", volum
 // team registration — the host token is a different credential.
 async function readContainerToken(port = 8009, container = "cicy-code-docker") {
   try {
-    // Host networking has no "publish" mapping, so look the container up by name.
+    // Look the container up by name and read the token from inside it.
     const { stdout } = await wslRun(`docker ps --filter "name=${container}" --format '{{.Names}}'`, { timeout: 10000 });
     const name = stdout.trim().split("\n")[0];
     if (!name) return "";
@@ -301,6 +316,12 @@ async function bootstrap(opts = {}) {
 async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-docker", volume = "cicy-team", env = {} } = {}) {
   const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
 
+  // 0) Fast path: already healthy → instant no-op (idempotent one-shot).
+  if (await probeHealth(port)) {
+    emit({ phase: "done", status: "done", message: "Docker cicy-code 已就绪 🎉" });
+    return { ok: true, container };
+  }
+
   // 1) WSL2 platform
   if (docker.wslMissing()) {
     const w = await docker.ensureWsl({ emit });
@@ -323,8 +344,8 @@ async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-dock
   // 4) dockerd up (phase "container" = 启动服务)
   if (!(await dockerEngineUp())) {
     emit({ phase: "container", status: "running", message: "启动 Docker 引擎（首次较慢，请耐心）…" });
-    await startEngine();
-    const up = await docker.waitUntil(dockerEngineUp, { totalMs: 120000, everyMs: 3000 });
+    const started = await startEngine(); // 3 clean attempts internally
+    const up = started || await docker.waitUntil(dockerEngineUp, { totalMs: 120000, everyMs: 3000 });
     if (!up) {
       const log = await dockerdLogTail();
       emit({ phase: "container", status: "error", message: "Docker 引擎没起来——点「重试」" + (log ? `\n\ndockerd 日志（最后几行）:\n${log}` : "") });
