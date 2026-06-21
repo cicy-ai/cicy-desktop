@@ -2258,6 +2258,11 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
                 >
                   {team.base_url || "—"}
                 </button>
+                {(runningVer || team.version) && (
+                  <div data-id="LocalTeamCard-version" className="bcard__menu-item" style={{ cursor: "default", color: "#8b949e", fontSize: 12 }}>
+                    {tr("localTeams.version", "版本")} v{runningVer || team.version}
+                  </div>
+                )}
               </div>,
               document.body
             )}
@@ -2265,6 +2270,8 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
         )}
       </div>
       <div className="bcard__body">
+        {/* 固定高度容器:h3 与 input 同高,切换不引起卡片位移 */}
+        <div style={{ height: 28, display: "flex", alignItems: "center" }}>
         {editing ? (
           <input
             data-id="LocalTeamCard-rename-input"
@@ -2275,10 +2282,10 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
             onBlur={commit}
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => { if (e.nativeEvent.isComposing || e.keyCode === 229) return; if (e.key === "Enter") commit(); else if (e.key === "Escape") setEditing(false); }}
-            style={{ width: "100%", font: "inherit", fontWeight: 600, padding: "2px 6px", border: "1px solid #3b82f6", borderRadius: 6, background: "#0d1117", color: "#e6edf3", boxSizing: "border-box" }}
+            style={{ flex: 1, width: "100%", font: "inherit", fontWeight: 600, padding: "2px 6px", border: "1px solid #3b82f6", borderRadius: 6, background: "#0d1117", color: "#e6edf3", boxSizing: "border-box" }}
           />
         ) : (
-          <h3 className="bcard__name" title={tr("localTeams.renameHint", "点名字或 ✎ 改名")} style={{ display: "flex", alignItems: "center", gap: 6 }} onDoubleClick={startEdit}>
+          <h3 className="bcard__name" title={tr("localTeams.renameHint", "点名字或 ✎ 改名")} style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0, margin: 0 }} onDoubleClick={startEdit}>
             <span
               data-id="LocalTeamCard-name-text"
               onClick={startEdit}
@@ -2302,6 +2309,7 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
             )}
           </h3>
         )}
+        </div>
         <div className="bcard__meta">
           <span className="bcard__chip" data-id="LocalTeamCard-kind">{local ? tr("localTeams.kindLocal", "本地") : tr("localTeams.kindCustom", "自定义")}</span>
         </div>
@@ -2471,6 +2479,8 @@ function TeamCard({ team, onOpen, onRename }) {
         </div>
       </div>
       <div className="bcard__body">
+        {/* 固定高度容器:h3 与 input 同高,切换不引起位移 */}
+        <div style={{ height: 28, display: "flex", alignItems: "center" }}>
         {editing ? (
           <input
             data-id="TeamCard-rename-input"
@@ -2481,11 +2491,17 @@ function TeamCard({ team, onOpen, onRename }) {
             onBlur={commitName}
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => { if (e.nativeEvent.isComposing || e.keyCode === 229) return; if (e.key === "Enter") commitName(); else if (e.key === "Escape") setEditing(false); }}
-            style={{ width: "100%", font: "inherit", fontWeight: 600, padding: "2px 6px", border: "1px solid #3b82f6", borderRadius: 6, background: "#0d1117", color: "#e6edf3", boxSizing: "border-box" }}
+            style={{ flex: 1, width: "100%", font: "inherit", fontWeight: 600, padding: "2px 6px", border: "1px solid #3b82f6", borderRadius: 6, background: "#0d1117", color: "#e6edf3", boxSizing: "border-box" }}
           />
         ) : (
-          <h3 className="bcard__name" title={onRename ? tr("localTeams.renameHint", "双击改名") : name} onDoubleClick={onRename ? startEdit : undefined} style={onRename ? { cursor: "text" } : undefined}>{name}</h3>
+          <h3 className="bcard__name" title={onRename ? tr("localTeams.renameHint", "点名字或 ✎ 改名") : name} style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0, margin: 0 }} onDoubleClick={onRename ? startEdit : undefined}>
+            <span onClick={onRename ? startEdit : undefined} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: onRename ? "text" : "default" }}>{name}</span>
+            {onRename && (
+              <button type="button" data-id="TeamCard-rename-btn" title={tr("localTeams.rename", "重命名")} onClick={startEdit} style={{ flex: "none", cursor: "pointer", border: "none", background: "transparent", color: "#8b949e", fontSize: 13, padding: 0, lineHeight: 1 }}>✎</button>
+            )}
+          </h3>
         )}
+        </div>
         <div className="bcard__meta">
           <span className="bcard__chip">{kindLabel}</span>
           {!isPrivate && team.membership_status && team.membership_status !== "active" && (
