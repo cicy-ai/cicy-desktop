@@ -660,6 +660,12 @@ export default function App() {
   // render as a 自定义 card (the bootstrap registers it as a team for the
   // token-injected 打开/刷新 flow).
   const dockerTeam = (localTeams || []).find((t) => isDockerApp(t.base_url)) || null;
+  // Docker 现在是个普通云端 team(POST /api/teams,kind=cloud),title/改名与其它团队
+  // 完全同一套:按 cloud_team_id 在 teams(refreshCloudTeams 周期刷新)里找到它的云端
+  // team → 读 title(云端→本地自动同步,同节奏)、改名走 renameCloudTeam(PATCH)。
+  const dockerCloudTeam = (dockerTeam && dockerTeam.cloud_team_id)
+    ? (teams || []).find((t) => String(t.teamId || t.id) === String(dockerTeam.cloud_team_id))
+    : null;
   // Split the cicyDesktopNodes list into 本地 (the localhost:8008 sidecar the
   // desktop owns — full lifecycle) vs 自定义 (deeplink-added nodes, usually
   // remote — probe-only, no restart/stop/update, just 打开).
@@ -770,12 +776,8 @@ export default function App() {
                   if (!r?.ok) window.alert("拿不到容器 token,无法打开 :8009。请确认服务已就绪(或用卡片菜单「重启」)后再试。");
                 } catch (e) { console.warn("[DockerCard] open", e); }
               }}
-              onRename={async (id, title) => {
-                // 双写:本地节点名(立即显示)+ 云端 PATCH(独立 docker team,账单/dash 一致)。
-                const r = await renameLocalTeam(id, title);
-                if (dockerTeam?.cloud_team_id) { try { await renameCloudTeam(dockerTeam.cloud_team_id, title); } catch {} }
-                return r;
-              }}
+              cloudTitle={dockerCloudTeam?.title}
+              onRename={dockerTeam?.cloud_team_id ? ((title) => renameCloudTeam(dockerTeam.cloud_team_id, title)) : undefined}
               onRefresh={fetchLocalTeams}
             />
           )}
@@ -1675,7 +1677,7 @@ function DockerInstallDrawerHost() {
 // in Docker on :8009, alongside the native local daemon (:8008). If Docker
 // Desktop is missing, the install flow downloads its installer to the user's
 // Desktop and runs it (主人指令), streaming progress through the drawer above.
-function DockerCard({ dockerTeam, onOpen, onRename, onRefresh }) {
+function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
   const [status, setStatus] = useState(null);
   const [busy, setBusy] = useState("");   // "" | bootstrap | restart | stop | upgrade
   const [menuOpen, setMenuOpen] = useState(false);
@@ -1683,13 +1685,15 @@ function DockerCard({ dockerTeam, onOpen, onRename, onRefresh }) {
   // Inline rename (mirrors LocalTeamCard): double-click the title to edit.
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
-  const displayName = dockerTeam?.name || "Docker 团队"; // 字面量(i18n docker.title="Docker cicy-code")
+  // 标题 = 云端 team 的 title(和其它团队同一套;refreshCloudTeams 周期刷新 → 自动跟随
+   // 云端改名)。还没建好云端 team 时回退 "Docker 团队"。
+  const displayName = cloudTitle || "Docker 团队";
   const startEdit = (e) => { e?.stopPropagation?.(); setDraft(displayName); setEditing(true); };
   const commitName = async () => {
     setEditing(false);
     const next = String(draft || "").trim();
-    if (!next || next === displayName || !dockerTeam?.id || !onRename) return;
-    try { await onRename(dockerTeam.id, next); onRefresh?.(); } catch {}
+    if (!next || next === displayName || !onRename) return;
+    try { await onRename(next); onRefresh?.(); } catch {}  // onRename 走 renameCloudTeam(PATCH)
   };
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
   const kebabRef = useRef(null);
