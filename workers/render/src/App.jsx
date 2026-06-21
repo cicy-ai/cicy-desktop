@@ -1866,13 +1866,7 @@ function DockerCard({ dockerTeam, onOpen, onRename, onRefresh }) {
                   {tr("docker.update", "更新")}
                 </button>
                 <button type="button" data-id="DockerCard-reload" className="bcard__menu-item"
-                  onClick={() => runOp("reload", async () => {
-                    // 像本地卡:开着才刷,没开就提示——绝不偷偷开新标签。Page.reload 保留
-                    // localStorage 里的 token,所以刷新后仍是登录态。
-                    const r = await window.cicy.localTeams.reload(dockerTeam?.id);
-                    if (!r?.ok && r?.error === "no_open_window") return { ok: false, error: tr("localTeams.windowNotOpen", "窗口未打开,请先点「打开」") };
-                    return r;
-                  }, tr("localTeams.reloaded", "已刷新窗口"))}>
+                  onClick={(e) => { e.stopPropagation(); setMenuOpen(false); window.cicy?.tabs?.reloadIfOpen?.("http://127.0.0.1:8009", "Docker 团队"); }}>
                   {tr("docker.reloadWindow", "刷新窗口")}
                 </button>
                 <button type="button" data-id="DockerCard-restart" className="bcard__menu-item"
@@ -2201,13 +2195,7 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
                     type="button"
                     data-id="LocalTeamCard-reload"
                     className="bcard__menu-item"
-                    onClick={() => runOp("reload", async () => {
-                      const r = await window.cicy.localTeams.reload(team.id);
-                      // 没开就不刷、也不偷偷开新标签(主人令):明确提示"窗口未打开",
-                      // 而不是替用户开一个 tab。开着才真刷(reloadTeam 走标签管理器)。
-                      if (!r?.ok && r?.error === "no_open_window") return { ok: false, error: tr("localTeams.windowNotOpen", "窗口未打开,请先点「打开」") };
-                      return r;
-                    }, tr("localTeams.reloaded", "已刷新窗口"))}
+                    onClick={(e) => { e.stopPropagation(); setMenuOpen(false); window.cicy?.tabs?.reloadIfOpen?.(team.base_url, team.name); }}
                   >
                     {tr("localTeams.reloadWindow", "刷新窗口")}
                   </button>
@@ -2399,16 +2387,9 @@ function TeamCard({ team, onOpen }) {
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, [menuOpen]);
-  const doReload = async () => {
-    if (!hasUrl || busy) return;
-    setBusy(true); setMenuOpen(false);
-    // 不开窗(主人令):没开 tab 就提示,不替用户开。
-    try {
-      const r = await window.cicy?.tabs?.reloadIfOpen?.(openUrl, name);
-      if (!r?.ok && r?.error === "no_open_window") window.alert(tr("localTeams.windowNotOpen", "窗口未打开,请先点「打开」"));
-    } catch {}
-    finally { setBusy(false); }
-  };
+  // 刷新窗口:三卡完全同一逻辑——tabs.reloadIfOpen 按 URL 找开着的 tab 就 reload,
+  // 没开就不操作(不偷偷开新窗)。
+  const doReload = (e) => { e?.stopPropagation?.(); if (!hasUrl) return; setMenuOpen(false); window.cicy?.tabs?.reloadIfOpen?.(openUrl, name); };
   // 主人令:私有云卡片不展示 api key(安全)。key 只在云端 dash / 注入 global.json 用。
   return (
     <div data-id="TeamCard" className={`bcard bcard--cloud${statusOk ? " bcard--online" : ""}`}>
