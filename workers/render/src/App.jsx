@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import "./App.css";
-import { TERMS_VERSION, TERMS_FULL } from "./termsText";
+import { TERMS_VERSION, termsForDisplay } from "./termsText";
+import { mdToHtml } from "./mdLite";
 
 // i18n bridge exposed by homepage-preload (window.cicyI18n.t, locale from
 // app.getLocale()). Returns the localized string, or `fallback` when the key
@@ -1181,12 +1182,11 @@ const DOCKER_STEPS = [
 // 与 MitmConsentCard(HTTPS 审计第二道同意)完全独立 —— 同意条款 ≠ 开启审计。
 function FirstRunTermsGate({ onAgree, onClose }) {
   const [scrolledEnd, setScrolledEnd] = useState(false);
-  const [showFull, setShowFull] = useState(false);
   const [busy, setBusy] = useState(false);
   const locale = (window.cicyI18n?.locale || "en").startsWith("zh") ? "zh-CN" : "en";
   const t = (k, fb) => tr(`firstRunTerms.${k}`, fb);
   const review = !!onClose; // opened from the avatar menu to re-read — not the blocking first-run gate
-  const summaries = [1, 2, 3, 4, 5, 6].map((i) => t(`summary${i}`, ""));
+  const html = useMemo(() => mdToHtml(termsForDisplay(locale)), [locale]);
 
   const onScroll = (e) => {
     const el = e.currentTarget;
@@ -1197,7 +1197,7 @@ function FirstRunTermsGate({ onAgree, onClose }) {
   useEffect(() => {
     const el = bodyRef.current;
     if (el && el.scrollHeight <= el.clientHeight + 24) setScrolledEnd(true);
-  }, [showFull]);
+  }, []);
 
   const agree = async () => {
     if (busy || !scrolledEnd) return;
@@ -1220,16 +1220,7 @@ function FirstRunTermsGate({ onAgree, onClose }) {
         <p className="terms-gate__subtitle">{t("subtitle", "使用 CiCy Desktop 前,请阅读并同意以下条款")}</p>
 
         <div className="terms-gate__body" ref={bodyRef} onScroll={onScroll} data-id="FirstRunTermsGate-body">
-          <h2 className="terms-gate__h2">{t("summaryTitle", "一眼看懂")}</h2>
-          <ol className="terms-gate__summary">
-            {summaries.filter(Boolean).map((s, i) => <li key={i}>{s}</li>)}
-          </ol>
-          {!showFull ? (
-            <button className="terms-gate__viewfull" data-id="FirstRunTermsGate-viewfull"
-              onClick={() => setShowFull(true)}>{t("viewFull", "查看完整条款")}</button>
-          ) : (
-            <pre className="terms-gate__fulltext" data-id="FirstRunTermsGate-fulltext">{TERMS_FULL[locale] || TERMS_FULL.en}</pre>
-          )}
+          <div className="terms-md" data-id="FirstRunTermsGate-md" dangerouslySetInnerHTML={{ __html: html }} />
         </div>
 
         {review ? (
@@ -1688,6 +1679,7 @@ function DockerCard({ dockerTeam, onOpen, onRename, onRefresh }) {
   const [status, setStatus] = useState(null);
   const [busy, setBusy] = useState("");   // "" | bootstrap | restart | stop | upgrade
   const [menuOpen, setMenuOpen] = useState(false);
+  const [confirmRecreate, setConfirmRecreate] = useState(false); // 重建容器 in-app 确认弹窗(不用 native confirm)
   // Inline rename (mirrors LocalTeamCard): double-click the title to edit.
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -1903,10 +1895,7 @@ function DockerCard({ dockerTeam, onOpen, onRename, onRefresh }) {
                   {tr("docker.dockerRestart", "重启 Docker")}
                 </button>
                 <button type="button" data-id="DockerCard-recreate" className="bcard__menu-item is-danger"
-                  onClick={() => {
-                    if (!window.confirm(tr("docker.recreateConfirm", "重建 Docker 容器?会删除当前容器并重新创建(数据保留),用于切换网关 key。确定?"))) return;
-                    runOp("restart", () => window.cicy.docker.appRecreate(), tr("docker.recreated", "已重建 Docker 容器"));
-                  }}>
+                  onClick={(e) => { e.stopPropagation(); setMenuOpen(false); setConfirmRecreate(true); }}>
                   {tr("docker.recreate", "重建 Docker")}
                 </button>
                 <button type="button" data-id="DockerCard-stop" className="bcard__menu-item is-danger"
@@ -1967,6 +1956,32 @@ function DockerCard({ dockerTeam, onOpen, onRename, onRefresh }) {
         {isBusy ? <Spinner /> : <ArrowIcon />}
         <span>{ctaLabel}</span>
       </button>
+      {confirmRecreate && createPortal(
+        <div data-id="DockerCard-recreate-modal"
+          style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center" }}
+          onClick={() => setConfirmRecreate(false)}>
+          <div onClick={(e) => e.stopPropagation()}
+            style={{ width: 360, maxWidth: "90vw", background: "#161b22", border: "1px solid #30363d", borderRadius: 12, padding: "20px 22px", boxShadow: "0 12px 40px rgba(0,0,0,0.5)" }}>
+            <h3 style={{ margin: "0 0 8px", fontSize: 16, color: "#e6edf3" }}>{tr("docker.recreate", "重建 Docker")}</h3>
+            <p style={{ margin: "0 0 18px", fontSize: 13, lineHeight: 1.6, color: "#9aa4b2" }}>
+              {tr("docker.recreateConfirm", "会删除当前容器并重新创建(volume 数据保留),用于切换为独立 team 的网关 key。确定重建?")}
+            </p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <button type="button" data-id="DockerCard-recreate-cancel"
+                onClick={() => setConfirmRecreate(false)}
+                style={{ padding: "7px 16px", borderRadius: 8, border: "1px solid #30363d", background: "transparent", color: "#c9d1d9", cursor: "pointer", fontSize: 13 }}>
+                {tr("common.cancel", "取消")}
+              </button>
+              <button type="button" data-id="DockerCard-recreate-confirm"
+                onClick={() => { setConfirmRecreate(false); runOp("restart", () => window.cicy.docker.appRecreate(), tr("docker.recreated", "已重建 Docker 容器")); }}
+                style={{ padding: "7px 16px", borderRadius: 8, border: "none", background: "#da3633", color: "white", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+                {tr("docker.recreateOk", "确定重建")}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

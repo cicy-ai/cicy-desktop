@@ -1167,18 +1167,26 @@ body {
   animation: terms-pop .16s ease;
 }
 @keyframes terms-pop { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
-.terms-gate__h2 { font-size: 14px; font-weight: 600; margin: 0 0 10px; color: var(--text, #e6edf3); }
-.terms-gate__summary { margin: 0 0 14px; padding-left: 20px; }
-.terms-gate__summary li { font-size: 13px; line-height: 1.6; color: var(--text-dim, #c2cbd6); margin-bottom: 8px; }
-.terms-gate__viewfull {
-  background: none; border: none; color: var(--accent, #3b82f6); cursor: pointer;
-  font-size: 13px; padding: 4px 0; text-decoration: underline;
+/* rendered markdown terms (mdLite) — 不再显示原始 # / ** / | 语法 */
+.terms-md { font-size: 13px; line-height: 1.65; color: var(--text-dim, #c2cbd6); word-break: break-word; }
+.terms-md > :first-child { margin-top: 0; }
+.terms-md h1 { font-size: 17px; font-weight: 700; color: var(--text, #e6edf3); margin: 0 0 6px; }
+.terms-md h2 { font-size: 15px; font-weight: 700; color: var(--text, #e6edf3); margin: 22px 0 8px; padding-top: 14px; border-top: 1px solid rgba(125,135,150,0.12); }
+.terms-md h3 { font-size: 13.5px; font-weight: 600; color: var(--text, #e6edf3); margin: 16px 0 6px; }
+.terms-md p { margin: 8px 0; }
+.terms-md strong { color: var(--text, #e6edf3); font-weight: 600; }
+.terms-md code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+  background: rgba(125,135,150,0.16); padding: 1px 5px; border-radius: 4px; color: #d7dee8; }
+.terms-md ul, .terms-md ol { margin: 8px 0; padding-left: 22px; }
+.terms-md li { margin: 4px 0; }
+.terms-md hr { border: none; border-top: 1px solid rgba(125,135,150,0.14); margin: 18px 0; }
+.terms-md blockquote {
+  margin: 10px 0; padding: 8px 14px; border-left: 3px solid rgba(91,141,247,0.55);
+  background: rgba(91,141,247,0.07); border-radius: 0 8px 8px 0; color: var(--text-dim, #b9c2cf);
 }
-.terms-gate__fulltext {
-  white-space: pre-wrap; word-break: break-word; font-size: 12px; line-height: 1.6;
-  color: var(--text-dim, #b3bcc8); background: rgba(0,0,0,0.2); border-radius: 8px;
-  padding: 14px; margin: 10px 0 0; font-family: inherit;
-}
+.terms-md table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 12px; display: block; overflow-x: auto; }
+.terms-md th, .terms-md td { border: 1px solid rgba(125,135,150,0.18); padding: 7px 10px; text-align: left; vertical-align: top; }
+.terms-md th { background: rgba(125,135,150,0.10); color: var(--text, #e6edf3); font-weight: 600; white-space: nowrap; }
 .terms-gate__scrollhint { font-size: 12px; color: #fbbf24; text-align: center; margin: 12px 0 0; }
 .terms-gate__actions { display: flex; gap: 12px; justify-content: flex-end; margin-top: 18px; }
 .terms-gate__btn {
