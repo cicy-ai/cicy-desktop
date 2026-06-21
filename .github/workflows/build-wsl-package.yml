@@ -67,6 +67,9 @@ jobs:
               docker images
               pkill dockerd || true
               sleep 4
+              # Drop stale daemon runtime files so the FIRST dockerd in WSL2 does
+              # not refuse with "pid file found" (引擎没起来 root cause).
+              rm -f /var/run/docker.pid /run/docker.pid /var/run/docker.sock /run/docker.sock
             ')
           docker logs -f "$cid" || true
           rc=$(docker wait "$cid"); echo "inner exit=$rc"

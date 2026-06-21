@@ -180,10 +180,27 @@ async function startEngine() {
     await wslRun(
       "update-alternatives --set iptables /usr/sbin/iptables-legacy >/dev/null 2>&1; " +
       "update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy >/dev/null 2>&1; " +
+      // A pre-baked rootfs (docker export after an inner dind dockerd) can ship a
+      // STALE /var/run/docker.{pid,sock}: a fresh dockerd then refuses to start
+      // ("pid file found, ensure docker is not running"). Clear them when dockerd
+      // is NOT already running — that was the 烤制包「引擎没起来」failure.
+      "if ! pgrep dockerd >/dev/null 2>&1; then rm -f /var/run/docker.pid /run/docker.pid /var/run/docker.sock /run/docker.sock; fi; " +
       "pgrep dockerd >/dev/null 2>&1 || (nohup dockerd >/var/log/cicy-dockerd.log 2>&1 &); " +
-      "for i in $(seq 1 20); do [ -S /var/run/docker.sock ] && docker version >/dev/null 2>&1 && break; sleep 1; done",
-      { timeout: 40000 });
+      // First boot of a freshly-imported distro: cold WSL2 VM + large pre-baked
+      // /var/lib/docker → give it longer than 20s.
+      "for i in $(seq 1 40); do [ -S /var/run/docker.sock ] && docker version >/dev/null 2>&1 && break; sleep 1; done",
+      { timeout: 60000 });
   } catch {}
+}
+
+// Tail dockerd's log so a "引擎没起来" failure is diagnosable instead of blind.
+async function dockerdLogTail() {
+  try {
+    const { stdout } = await wslRun(
+      "tail -n 25 /var/log/cicy-dockerd.log 2>/dev/null || tail -n 25 /var/log/dockerd.log 2>/dev/null",
+      { timeout: 8000 });
+    return String(stdout || "").trim();
+  } catch { return ""; }
 }
 
 // The cicy-code base image present inside the distro's Docker?
@@ -305,10 +322,14 @@ async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-dock
 
   // 4) dockerd up (phase "container" = 启动服务)
   if (!(await dockerEngineUp())) {
-    emit({ phase: "container", status: "running", message: "启动 Docker 引擎…" });
+    emit({ phase: "container", status: "running", message: "启动 Docker 引擎（首次较慢，请耐心）…" });
     await startEngine();
-    const up = await docker.waitUntil(dockerEngineUp, { totalMs: 60000, everyMs: 3000 });
-    if (!up) { emit({ phase: "container", status: "error", message: "Docker 引擎没起来——点「重试」" }); return { ok: false, reason: "dockerd_not_up" }; }
+    const up = await docker.waitUntil(dockerEngineUp, { totalMs: 120000, everyMs: 3000 });
+    if (!up) {
+      const log = await dockerdLogTail();
+      emit({ phase: "container", status: "error", message: "Docker 引擎没起来——点「重试」" + (log ? `\n\ndockerd 日志（最后几行）:\n${log}` : "") });
+      return { ok: false, reason: "dockerd_not_up" };
+    }
   }
 
   // 5) Base image — pre-baked into the package, so this normally just confirms.

@@ -1493,9 +1493,14 @@ const dockerDrawer = {
     if (!dockerDrawerState) return;
     // status can be forced (e.g. "reboot" — not a failure, just needs a restart).
     const st = status || (ok ? "done" : "error");
-    const line = { id: ++dockerDrawerLogSeq, t: clockHHMMSS(), phase: "done", status: st, message: message || (ok ? "完成" : "失败") };
+    // On FAILURE keep the phase where it actually broke, so the "!" lands on the
+    // failing step (e.g. 启动服务) and earlier steps stay ✓. Only success/reboot
+    // advance to the 完成 step — a step literally named "完成" showing 安装失败 is
+    // nonsense (主人 bug: "为什么安装失败了,还完成").
+    const phase = st === "error" ? dockerDrawerState.phase : "done";
+    const line = { id: ++dockerDrawerLogSeq, t: clockHHMMSS(), phase, status: st, message: message || (ok ? "完成" : "失败") };
     // Pop back open on finish so the user sees the result even if minimized.
-    dockerDrawerState = { ...dockerDrawerState, status: st, phase: "done", minimized: false, logs: [...dockerDrawerState.logs, line], lastAt: Date.now() };
+    dockerDrawerState = { ...dockerDrawerState, status: st, phase, minimized: false, logs: [...dockerDrawerState.logs, line], lastAt: Date.now() };
     emitDockerDrawer();
   },
   close() { dockerDrawerState = null; emitDockerDrawer(); },
