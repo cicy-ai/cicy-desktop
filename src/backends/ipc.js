@@ -260,6 +260,15 @@ function register(opts = {}) {
     } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
   });
 
+  // Just bring an already-open tab to front (no reload, no token, no new tab).
+  // 给「打开很慢」用:卡片先探这个,命中就秒切;没命中(没开过)再走慢的拿 token 开 tab。
+  ipcMain.handle("tabs:activateIfOpen", async (_e, input) => {
+    try {
+      const tb = require("../tools/tab-browser-tools");
+      return tb.activateTabIfOpen(0, String((input && input.url) || ""));
+    } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+  });
+
   // ── RPC audit log (read-only viewer) ────────────────────────────────────────
   // JSONL at ~/cicy-ai/db/rpc-audit.log (utils/rpc-audit.js): every electronRPC
   // call + every authorization decision (incl. temporary ones) + allowlist edits.

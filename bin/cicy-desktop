@@ -13,13 +13,13 @@ const GLOBAL_CONFIG_FILE = path.join(HOME, "global.json");
 const STATE_FILE = path.join(HOME, ".cicy-cluster.json");
 const LOGS_DIR = path.join(HOME, "logs");
 const PACKAGE_ROOT = path.join(__dirname, "..");
-// CN/global defaults: a fresh machine has no cached electron binary, so the
-// electron postinstall (and our own self-provisioning below) would otherwise
-// hit GitHub releases, which is slow/blocked on many networks. Default to our
-// own Aliyun OSS mirror — the three platform zips we ship are mirrored at
-// <ELECTRON_MIRROR>v<version>/electron-v<version>-<platform>.zip (+ SHASUMS256.txt),
-// the exact layout @electron/get expects. Overridable via the env var.
-const ELECTRON_MIRROR = process.env.ELECTRON_MIRROR || "https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/electron/";
+// Electron 二进制来源:**不用用户设任何变量**,自动判断网络。
+//   CN(或探测不通,兜底)→ 我们的 Aliyun OSS 镜像(CN-fast,三平台 zip 镜像在
+//     <OSS>electron/v<version>/electron-v<version>-<platform>.zip,正是 @electron/get 的布局)。
+//   海外 → electron 官方 GitHub release(不压我们 OSS,海外更快)。
+// 仍可用 ELECTRON_MIRROR 显式覆盖(power user / CI)。下载只在首次(无缓存)发生。
+const OSS_ELECTRON_MIRROR = "https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/electron/";
+const GH_ELECTRON_BASE = "https://github.com/electron/electron/releases/download/";
 const NPM_REGISTRY = process.env.CICY_NPM_REGISTRY || process.env.npm_config_registry || "https://registry.npmmirror.com";
 const MASTER_ENTRY = path.join(PACKAGE_ROOT, "src", "master", "master-main.js");
 
@@ -89,30 +89,80 @@ function electronArtifact() {
   };
 }
 
+// 同步探测是否 CN 网络:curl HEAD google(2s 超时)。通 → 海外;不通(CN/被墙/离线)
+// → 当 CN,用 OSS 兜底。裸 node 可跑(不依赖 electron-log/net-detect.js)。只在真正要下
+// electron 时调一次(已有二进制就 return,不探不下),所以不拖慢日常启动。
+function isCNNetwork() {
+  if (process.env.CICY_FORCE_CN === "1") return true;
+  if (process.env.CICY_FORCE_GLOBAL === "1") return false;
+  const curl = isWindows ? "curl.exe" : "curl";
+  const nul = isWindows ? "NUL" : "/dev/null";
+  try {
+    execFileSync(curl, ["-sI", "--max-time", "2", "-o", nul, "https://www.google.com/generate_204"], { stdio: "ignore" });
+    return false; // google 可达 → 海外,走官方
+  } catch { return true; } // google 不可达 → CN/兜底,走 OSS
+}
+
+// 决定 electron zip 的下载地址(不用用户设变量):ELECTRON_MIRROR 显式覆盖 > CN→OSS > 海外→官方 GitHub。
+function electronZipUrl() {
+  const { zip } = electronArtifact();
+  if (process.env.ELECTRON_MIRROR) return { url: `${process.env.ELECTRON_MIRROR}v${ELECTRON_VERSION}/${zip}`, src: "ELECTRON_MIRROR" };
+  if (isCNNetwork()) return { url: `${OSS_ELECTRON_MIRROR}v${ELECTRON_VERSION}/${zip}`, src: "OSS(CN)" };
+  return { url: `${GH_ELECTRON_BASE}v${ELECTRON_VERSION}/${zip}`, src: "GitHub(海外)" };
+}
+
 // Provision the Electron binary INTO the bundled npx copy ourselves: download the
-// platform zip from the mirror (R2) with curl, extract with the OS's own unzip,
-// then write path.txt. We deliberately do NOT use electron's install.js /
-// @electron/get: on Windows its bundled extract-zip only PARTIALLY unpacks
-// electron 41 (leaves no path.txt → "Electron failed to install correctly") even
-// though the downloaded zip is valid. curl + Expand-Archive/unzip is reliable,
-// mirror-only (no GitHub), and writes a complete dist/.
+// platform zip with curl (实时进度条 -#), extract with the OS's own unzip, then
+// write path.txt. We deliberately do NOT use electron's install.js / @electron/get:
+// on Windows its bundled extract-zip only PARTIALLY unpacks electron 41 (leaves no
+// path.txt → "Electron failed to install correctly") even though the downloaded zip
+// is valid. curl + Expand-Archive/unzip is reliable and writes a complete dist/.
+// 远端文件大小(取最终响应的 content-length,跟随重定向)。失败返回 0。
+function remoteContentLength(curl, url) {
+  try {
+    const out = execFileSync(curl, ["-sIL", "--max-time", "15", url], { encoding: "utf8" });
+    const all = [...out.matchAll(/content-length:\s*(\d+)/ig)].map((m) => Number(m[1]));
+    return all.length ? all[all.length - 1] : 0;
+  } catch { return 0; }
+}
+
 function provisionElectronFromMirror(bundledDir) {
   const { zip, exe } = electronArtifact();
-  const url = `${ELECTRON_MIRROR}v${ELECTRON_VERSION}/${zip}`;
-  const tmpZip = path.join(os.tmpdir(), `cicy-${zip}`);
+  const { url, src } = electronZipUrl();
   const curl = isWindows ? "curl.exe" : "curl";
-  execFileSync(curl, ["-fL", "--retry", "5", "--retry-delay", "2", "--connect-timeout", "20", "-o", tmpZip, url], { stdio: "inherit" });
+  // 缓存到 ~/Downloads(主人:下到 Downloads,下过就别再下,最好断点续传):
+  //   • 已完整(大小==远端)→ 直接复用,不再下;
+  //   • 没下全(部分)→ curl -C - 断点续传;
+  //   • 没有 → 全新下载。下完保留 zip,不删,下次免下。
+  const dlDir = path.join(os.homedir(), "Downloads");
+  try { fs.mkdirSync(dlDir, { recursive: true }); } catch {}
+  const dest = path.join(dlDir, zip);
+  const expected = remoteContentLength(curl, url);
+  let localSz = 0; try { localSz = fs.statSync(dest).size; } catch {}
+  const complete = localSz >= 50 * 1024 * 1024 && (!expected || localSz === expected);
+  if (complete) {
+    console.log(`✓ 复用已下载的 Electron:${dest}`);
+  } else {
+    const resuming = localSz > 0;
+    console.log(`⬇️  下载 Electron ${ELECTRON_VERSION}(来源:${src}${resuming ? ",断点续传" : ""})→ ${dest}`);
+    // -C - 断点续传(部分则 206 续,缺则 200 全下);-# 进度条;inherit 让进度条画到终端。
+    execFileSync(curl, ["-fL", "-#", "-C", "-", "--retry", "5", "--retry-delay", "2", "--connect-timeout", "20", "-o", dest, url], { stdio: "inherit" });
+    try { localSz = fs.statSync(dest).size; } catch {}
+    if (localSz < 50 * 1024 * 1024 || (expected && localSz !== expected)) {
+      throw new Error(`Electron zip 下载不完整(${localSz}/${expected || "?"} 字节,${dest})—— 重跑会从断点续传`);
+    }
+  }
   const distDir = path.join(bundledDir, "dist");
   fs.rmSync(distDir, { recursive: true, force: true });
   fs.mkdirSync(distDir, { recursive: true });
   if (isWindows) {
-    execFileSync("powershell", ["-NoProfile", "-Command", `Expand-Archive -LiteralPath "${tmpZip}" -DestinationPath "${distDir}" -Force`], { stdio: "inherit" });
+    execFileSync("powershell", ["-NoProfile", "-Command", `Expand-Archive -LiteralPath "${dest}" -DestinationPath "${distDir}" -Force`], { stdio: "inherit" });
   } else {
-    execFileSync("unzip", ["-o", "-q", tmpZip, "-d", distDir], { stdio: "inherit" });
+    execFileSync("unzip", ["-o", "-q", dest, "-d", distDir], { stdio: "inherit" });
     try { fs.chmodSync(path.join(distDir, exe), 0o755); } catch {}
   }
   fs.writeFileSync(path.join(bundledDir, "path.txt"), exe);
-  try { fs.rmSync(tmpZip, { force: true }); } catch {}
+  // 不删 dest:留在 ~/Downloads 缓存,下次免下(主人:下过就别再下)。
 }
 
 // Make sure a USABLE electron exists before spawning the worker. A pre-existing
@@ -528,11 +578,11 @@ function ensureMacDesktopApp() {
     : "cicy-desktop";
   // do shell script needs node + the global bin on PATH (GUI launch has a
   // minimal PATH); trailing & + nohup + </dev/null lets the shell return so the
-  // applet quits. ELECTRON_MIRROR + npmmirror only matter if electron ever
-  // (re)downloads — harmless otherwise.
+  // applet quits. 不再 export ELECTRON_MIRROR —— bin 自己按网络自动选(CN→OSS / 海外→GitHub)。
+  // npm_config_registry(npmmirror)留着给 cicy-code 子包下载用。
   const ascript =
     `do shell script "export PATH=\\"${nodeDir}:${gbin}:/usr/local/bin:/opt/homebrew/bin:$PATH\\" ; ` +
-    `export ELECTRON_MIRROR=\\"${ELECTRON_MIRROR}\\" ; export npm_config_registry=\\"${NPM_REGISTRY}\\" ; ` +
+    `export npm_config_registry=\\"${NPM_REGISTRY}\\" ; ` +
     `nohup '${cicyBin}' > /tmp/cicy-desktop.log 2>&1 < /dev/null &"`;
   const tmp = path.join(os.tmpdir(), `cicy-launch-${process.pid}.applescript`);
   fs.writeFileSync(tmp, ascript);
@@ -559,7 +609,7 @@ function ensureLinuxDesktopEntry() {
 `[Desktop Entry]
 Type=Application
 Name=CiCy Desktop
-Exec=sh -c 'export PATH="${nodeBinDir()}:$PATH"; export ELECTRON_MIRROR="${ELECTRON_MIRROR}"; export npm_config_registry="${NPM_REGISTRY}"; exec npx -y cicy-desktop'
+Exec=sh -c 'export PATH="${nodeBinDir()}:$PATH"; export npm_config_registry="${NPM_REGISTRY}"; exec npx -y cicy-desktop'
 Icon=${icon}
 Terminal=false
 Categories=Development;

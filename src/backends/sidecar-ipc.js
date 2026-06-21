@@ -18,7 +18,14 @@ const os = require("os");
 const path = require("path");
 const sidecar = require("../sidecar/cicy-code");
 const docker = require("../sidecar/docker");
-const wslDocker = require("../sidecar/wsl-docker"); // Docker-版 via WSL2+Ubuntu (方案 A)
+const wslDocker = require("../sidecar/wsl-docker"); // Docker-版 via WSL2+Ubuntu (方案 A, win32)
+const colimaDocker = require("../sidecar/colima-docker"); // Docker-版 via Colima (Lima VM, darwin)
+// 按平台分发 Docker-版 cicy-code 的运行层:darwin → Colima,win32 → WSL2。两者同接口
+// (bootstrap/status/restart/stop/dockerRestart/recreate/update/upgrade/runContainer/
+// readContainerToken),所以下面的 handler 共用一份逻辑,只换底层模块。
+const appDocker = process.platform === "darwin" ? colimaDocker : wslDocker;
+// Docker-版 cicy-code 支持的平台(win32 = WSL2,darwin = Colima)。其他平台不放行。
+const APP_DOCKER_SUPPORTED = process.platform === "win32" || process.platform === "darwin";
 
 const PORT = Number(process.env.CICY_CODE_PORT || 8008);
 
@@ -76,10 +83,20 @@ async function ensureDockerTeam() {
     if (!rec || !rec.teamId) {
       const created = await cc.createTeam({ title: "Docker 团队", kind: "cloud" });
       if (!created || !created.ok) return null;
-      store[APP_VOLUME] = { teamId: created.teamId, title: created.title || "Docker 团队" };
+      // 强制把云端标题设成 "Docker 团队":POST /api/teams 常忽略我们传的 title、
+      // 回退成 owner/device 名(= 8008 的标题),卡片就显示成 8008 的了。PATCH 一下盖掉。
+      try { await cc.renameTeam(created.teamId, "Docker 团队"); } catch {}
+      store[APP_VOLUME] = { teamId: created.teamId, title: "Docker 团队", titleForced: true };
       writeDockerTeams(store);
-      dockerTeamReg = { teamId: created.teamId, title: store[APP_VOLUME].title, apiKey: created.apiKey };
+      dockerTeamReg = { teamId: created.teamId, title: "Docker 团队", apiKey: created.apiKey };
       return dockerTeamReg;
+    }
+    // 既有 team:若还没强制过标题(老数据/上面那个 bug 建的),补一次 PATCH 成 "Docker
+    // 团队",然后打上 titleForced 标记 —— 只补这一次,之后用户自己改名不会被覆盖。
+    if (!rec.titleForced) {
+      try { await cc.renameTeam(rec.teamId, "Docker 团队"); } catch {}
+      rec.title = "Docker 团队"; rec.titleForced = true;
+      store[APP_VOLUME] = rec; writeDockerTeams(store);
     }
     const apiKey = await cc.getTeamApiKey(rec.teamId);
     dockerTeamReg = { teamId: rec.teamId, title: rec.title, apiKey };
@@ -155,7 +172,7 @@ function register({ sidecarLogPath } = {}) {
   // (engine up)→启动 / installed(Ubuntu present)→启动 Docker / else→下载安装.
   ipcMain.handle("docker:app-status", async () => {
     try {
-      const s = await wslDocker.status(APP_PORT); // { wsl, distro, engineUp, running }
+      const s = await appDocker.status(APP_PORT); // { wsl, distro, engineUp, running }
       return { installed: !!s.distro, dockerRunning: !!s.engineUp, running: !!s.running, port: APP_PORT, platform: process.platform };
     } catch (e) {
       return { installed: false, dockerRunning: false, running: false, port: APP_PORT, platform: process.platform, error: e.message };
@@ -200,9 +217,9 @@ function register({ sidecarLogPath } = {}) {
   // docker 里实时拿 token 再 open tab). Refuse to open if it can't be read —
   // opening tokenless / with the host token just strands the user at login.
   ipcMain.handle("docker:app-open", async () => {
-    if (process.platform !== "win32") return { ok: false, error: "windows_only" };
+    if (!APP_DOCKER_SUPPORTED) return { ok: false, error: "unsupported_platform" };
     try {
-      const tok = await wslDocker.readContainerToken(APP_PORT, APP_CONTAINER, APP_VOLUME);
+      const tok = await appDocker.readContainerToken(APP_PORT, APP_CONTAINER, APP_VOLUME);
       if (!tok) return { ok: false, error: "no_token" };
       const reg = await registerAppTeam();
       if (!reg.id) return { ok: false, error: "register_failed" };
@@ -216,10 +233,10 @@ function register({ sidecarLogPath } = {}) {
   // image → start :8009 container → health. Streams phase/progress on
   // 'docker:app-progress'. Idempotent + resumable → the modal's 重试 just re-runs.
   ipcMain.handle("docker:app-bootstrap", async (e) => {
-    if (process.platform !== "win32") return { ok: false, error: "Docker cicy-code is Windows-only" };
+    if (!APP_DOCKER_SUPPORTED) return { ok: false, error: "Docker cicy-code 仅支持 Windows / macOS" };
     try {
       await ensureDockerTeam(); // 启动前先确保独立云端 team + 拿到它的网关 key(appOpts 用)
-      const result = await wslDocker.bootstrap({
+      const result = await appDocker.bootstrap({
         ...appOpts(),
         onProgress: (ev) => { try { e.sender.send("docker:app-progress", ev); } catch {} },
       });
@@ -232,13 +249,13 @@ function register({ sidecarLogPath } = {}) {
 
   // ⋯ menu → 重启 cicy-code (supervisorctl restart cicy-code; daemons stay up).
   ipcMain.handle("docker:app-restart", async () => {
-    try { const ok = await wslDocker.restart({ container: APP_CONTAINER, port: APP_PORT, volume: APP_VOLUME }); return { ok: !!ok }; }
+    try { const ok = await appDocker.restart({ container: APP_CONTAINER, port: APP_PORT, volume: APP_VOLUME }); return { ok: !!ok }; }
     catch (e) { return { ok: false, error: e.message }; }
   });
 
   // ⋯ menu → 重启 Docker:`docker restart` 整个容器(区别于上面 supervisorctl 重启 cicy-code)。
   ipcMain.handle("docker:app-docker-restart", async () => {
-    try { await wslDocker.dockerRestart({ container: APP_CONTAINER }); return { ok: true }; }
+    try { await appDocker.dockerRestart({ container: APP_CONTAINER }); return { ok: true }; }
     catch (e) { return { ok: false, error: e.message }; }
   });
 
@@ -247,7 +264,7 @@ function register({ sidecarLogPath } = {}) {
   ipcMain.handle("docker:app-recreate", async () => {
     try {
       await ensureDockerTeam();
-      await wslDocker.recreate({ ...appOpts() });
+      await appDocker.recreate({ ...appOpts() });
       await registerAppTeam();
       return { ok: true };
     } catch (e) { return { ok: false, error: e.message }; }
@@ -256,9 +273,9 @@ function register({ sidecarLogPath } = {}) {
   // ⋯ menu → 更新 cicy-code: pull the latest cicy-code into the container +
   // restart it (no container recreate). Streams progress to the drawer.
   ipcMain.handle("docker:app-update", async (e) => {
-    if (process.platform !== "win32") return { ok: false, error: "Docker cicy-code is Windows-only" };
+    if (!APP_DOCKER_SUPPORTED) return { ok: false, error: "Docker cicy-code 仅支持 Windows / macOS" };
     try {
-      return await wslDocker.update({
+      return await appDocker.update({
         container: APP_CONTAINER, port: APP_PORT,
         onProgress: (ev) => { try { e.sender.send("docker:app-progress", ev); } catch {} },
       });
@@ -267,16 +284,16 @@ function register({ sidecarLogPath } = {}) {
 
   // ⋯ menu → 停止 cicy-code.
   ipcMain.handle("docker:app-stop", async () => {
-    try { await wslDocker.stop({ container: APP_CONTAINER }); return { ok: true }; }
+    try { await appDocker.stop({ container: APP_CONTAINER }); return { ok: true }; }
     catch (e) { return { ok: false, error: e.message }; }
   });
 
   // ⋯ menu → 升级: re-pull the latest R2 image, re-create the :8009 container.
   ipcMain.handle("docker:app-upgrade", async (e) => {
-    if (process.platform !== "win32") return { ok: false, error: "Docker cicy-code is Windows-only" };
+    if (!APP_DOCKER_SUPPORTED) return { ok: false, error: "Docker cicy-code 仅支持 Windows / macOS" };
     try {
       await ensureDockerTeam();
-      const result = await wslDocker.upgrade({
+      const result = await appDocker.upgrade({
         ...appOpts(),
         onProgress: (ev) => { try { e.sender.send("docker:app-progress", ev); } catch {} },
       });

@@ -1813,10 +1813,11 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
     } finally { setBusy(""); checkStatus(); }
   }, [checkStatus]);
 
-  // Render only on Windows. window.cicy.platform is sync, so we can decide
+  // Render on Windows (WSL2) and macOS (Colima) — the two platforms the
+  // Docker-版 backend supports. window.cicy.platform is sync, so we can decide
   // immediately without waiting on the async appStatus probe.
   const platform = window.cicy?.platform || status?.platform;
-  if (platform !== "win32") return null;
+  if (platform !== "win32" && platform !== "darwin") return null;
 
   // Distinct states (主人: 状态分清楚):
   //   running       — :8009 container healthy → 打开
@@ -1836,7 +1837,9 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
         ? tr("docker.engineDown", "Docker 未运行 · 点启动")
         : tr("docker.notInstalled", "Docker Desktop 未安装");
 
-  const ctaLabel = isBusy
+  const ctaLabel = busy === "open"
+    ? tr("docker.opening", "打开中…")
+    : isBusy
     ? tr("docker.working", "处理中…")
     : running
       ? tr("localTeams.open", "打开")
@@ -1846,9 +1849,20 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
           ? tr("docker.startDocker", "启动 Docker")
           : tr("docker.install", "下载安装");
 
-  const onCta = () => {
+  const onCta = async () => {
     if (isBusy) return;
-    if (running) { onOpen?.(dockerTeam?.id); return; }
+    if (running) {
+      // 主人令:打开很慢 → 先探这个 :8009 tab 开过没。开过(openedWc 里有它的
+      // webContentsId)就**直接 active 秒切**,不再拿 token / 注册 team(那是慢的根)。
+      try {
+        const r = await window.cicy?.tabs?.activateIfOpen?.("http://127.0.0.1:8009");
+        if (r?.active) return;
+      } catch {}
+      // 没开过 → 显示 loading(打开中…),走慢路径:拿容器 token 再开 tab。
+      setBusy("open");
+      try { await onOpen?.(dockerTeam?.id); } finally { setBusy(""); }
+      return;
+    }
     runBootstrap();
   };
 

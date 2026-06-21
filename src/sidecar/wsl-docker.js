@@ -249,8 +249,9 @@ const probeHealth = docker.probeHealth;
 //     network-exposed; the api_token gates access. WSL2's localhost relay then
 //     forwards the distro's 127.0.0.1:<port> to Windows 127.0.0.1:<port>.
 // Only :<port> is published — sshd/cron stay inside the container's own netns.
-async function runContainer({ port = 8009, container = "cicy-code-docker", volume = "cicy-team", env = {} } = {}) {
-  if (await probeHealth(port)) return { adopted: true };
+async function runContainer({ port = 8009, container = "cicy-code-docker", volume = "cicy-team-8009", env = {} } = {}) {
+  // 每次容器"启动"(含已在跑被 adopt)都确保桌面快捷方式存在 —— 不存在就建,坏了就修。
+  if (await probeHealth(port)) { ensureDesktopShortcut(volume, port).catch(() => {}); return { adopted: true }; }
   // Replace any stale same-named container.
   try { await wslRun(`docker rm -f ${container}`, { timeout: 20000 }); } catch {}
   const envArgs = Object.entries(env || {})
@@ -259,6 +260,7 @@ async function runContainer({ port = 8009, container = "cicy-code-docker", volum
     .join(" ");
   const cmd = `docker run -d --name ${container} --restart unless-stopped -p 127.0.0.1:${port}:8008 -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${envArgs} ${IMAGE}`;
   await wslRun(cmd, { timeout: 60000 });
+  ensureDesktopShortcut(volume, port).catch(() => {});
   return { started: true };
 }
 
@@ -267,7 +269,7 @@ async function runContainer({ port = 8009, container = "cicy-code-docker", volum
 // 8009 rejects it. Retries because right after start the entrypoint may not have
 // written global.json yet; returns "" only if it truly can't be read (callers
 // must then NOT open with a wrong/host token — that strands the user at login).
-async function readContainerToken(port = 8009, container = "cicy-code-docker", volume = "cicy-team") {
+async function readContainerToken(port = 8009, container = "cicy-code-docker", volume = "cicy-team-8009") {
   for (let attempt = 1; attempt <= 5; attempt++) {
     // 1) Fast + reliable: read the volume-backed global.json straight from the
     //    distro fs. `docker exec` into a just-loaded/busy container is slow and
@@ -307,19 +309,31 @@ function ensureAutostart() {
 // cicy-team volume on the distro — so the user can browse :8009's files from
 // Windows Explorer. \\wsl$\<distro>\… is the UNC view of the WSL filesystem.
 // Idempotent: CreateShortcut overwrites. Best-effort (errors swallowed).
+// PowerShell single-quoted literal. PowerShell does NOT treat backslash as an
+// escape (it uses backtick), so backslashes are literal — only ' needs doubling.
+// The previous code used JSON.stringify here, whose \\ escaping was stored
+// VERBATIM by PowerShell → the shortcut target became \\\\wsl$\\…\\_data (doubled
+// backslashes) which Explorer can't open. That was the broken "WSL 快捷方式".
+function psSingle(s) { return "'" + String(s).replace(/'/g, "''") + "'"; }
+
 function ensureDesktopShortcut(volume = "cicy-team-8009", port = 8009) {
   if (process.platform !== "win32") return Promise.resolve();
   return new Promise((res) => {
     // 快捷方式名带 port —— 多个 docker(不同端口)各自一个桌面文件夹快捷方式。
-    const lnk = path.join(os.homedir(), "Desktop", `cicy-${port} 文件.lnk`);
+    // 纯 ASCII 文件名:中文文件名在不同编码下会变乱码,直接避开。
+    const lnk = path.join(os.homedir(), "Desktop", `cicy-${port}.lnk`);
+    // JS string: \\\\ → \\ and \\ → \, so target = \\wsl$\<distro>\…\_data (a
+    // correct UNC path with exactly two leading backslashes).
     const target = `\\\\wsl$\\${DISTRO}\\var\\lib\\docker\\volumes\\${volume}\\_data`;
+    // 每次都重建(覆盖)= 自愈:不存在→创建,存在但坏了/指向旧 volume→修正。
     const ps =
+      `$ErrorActionPreference='SilentlyContinue';` +
       `$w=New-Object -ComObject WScript.Shell;` +
-      `$s=$w.CreateShortcut(${JSON.stringify(lnk)});` +
+      `$s=$w.CreateShortcut(${psSingle(lnk)});` +
       `$s.TargetPath='explorer.exe';` +
-      `$s.Arguments=${JSON.stringify(target)};` +
+      `$s.Arguments=${psSingle(target)};` +
       `$s.IconLocation='imageres.dll,3';` +         // yellow Windows folder icon
-      `$s.Description=${JSON.stringify(`cicy-code :${port} /home/cicy`)};` +
+      `$s.Description=${psSingle(`cicy-code :${port} /home/cicy`)};` +
       `$s.Save()`;
     execFile("powershell", ["-NoProfile", "-Command", ps], { windowsHide: true, timeout: 15000 }, () => res());
   });
@@ -418,7 +432,7 @@ async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-dock
 // Restart ONLY cicy-code via supervisor — cron / sshd / user daemons keep
 // running (that's the whole point of the supervisor layout). Falls back to a
 // full container restart on the pre-supervisor image.
-async function restart({ container = "cicy-code-docker", port = 8009, volume = "cicy-team" } = {}) {
+async function restart({ container = "cicy-code-docker", port = 8009, volume = "cicy-team-8009" } = {}) {
   await startEngine();
   try {
     await wslRun(`docker exec ${container} supervisorctl -c /etc/supervisor/supervisord.conf restart cicy-code`, { timeout: 30000 });

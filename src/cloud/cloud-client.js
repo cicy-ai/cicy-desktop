@@ -358,6 +358,15 @@ async function createTeam({ title = "", kind = "cloud" } = {}) {
   return { ok: false, status: res.status, reason: res.reason };
 }
 
+// 改某 team 的标题(PATCH /api/teams/:id {title})——和 DockerCard 改名同一个端点。
+// 用途:建完 docker 独立 team 后**强制**把云端标题设成 "Docker 团队"(POST /api/teams
+// 不保证用我们传的 title,常回退成 owner/device 名 = 8008 的标题,卡片就显示错了)。
+async function renameTeam(teamId, title) {
+  if (teamId == null) return { ok: false, reason: "no_team_id" };
+  const res = await cloudFetch(`/api/teams/${encodeURIComponent(teamId)}`, { method: "PATCH", body: { title } });
+  return res.ok ? { ok: true } : { ok: false, status: res.status, reason: res.reason };
+}
+
 // 按 teamId 取回某 team 的 token(网关 key)——建过之后重启只存 teamId,token 现取。
 async function getTeamApiKey(teamId) {
   if (teamId == null) return null;
@@ -457,6 +466,7 @@ module.exports = {
   registerTeam,
   listTeams,
   createTeam,
+  renameTeam,
   getTeamApiKey,
   injectGatewayKey,
   registerTeamAndInjectKey,

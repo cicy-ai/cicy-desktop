@@ -57,6 +57,12 @@ function getBinaryCandidates() {
     const programFiles = process.env.PROGRAMFILES;
     const programFilesX86 = process.env["PROGRAMFILES(X86)"];
     return [
+      // ONLY standard / official Chrome install layouts. Repackaged "green"
+      // Chrome (common in CN, installs under …\Google\Chrome\Bin\, doesn't
+      // register App Paths) is deliberately NOT probed: those builds launch and
+      // immediately exit without opening --remote-debugging-port, so a profile
+      // can never attach. Better to report "not installed" and prompt the user to
+      // install official Chrome than to pick a Chrome we can't drive.
       localAppData && path.join(localAppData, "Google", "Chrome", "Application", "chrome.exe"),
       programFiles && path.join(programFiles, "Google", "Chrome", "Application", "chrome.exe"),
       programFilesX86 && path.join(programFilesX86, "Google", "Chrome", "Application", "chrome.exe"),

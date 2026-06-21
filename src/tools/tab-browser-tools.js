@@ -575,9 +575,31 @@ function reloadTabIfOpen(accountIdx, url, opts = {}) {
     : { ok: false, error: "no_open_window" };
 }
 
+// 只「激活(置前)」已打开的 tab,不 reload、不拿 token、不开新 tab —— 专给「打开很慢」
+// 用:tab 已经开过就秒切过去(主人:打开了直接 active 那个 tab 就行)。返回是否命中。
+function activateTabIfOpen(accountIdx, url) {
+  const key = stripVol(url);
+  const wcId = openedWc.get(key);
+  if (wcId != null) {
+    const wc = webContents.fromId(wcId);
+    if (wc && !wc.isDestroyed()) {
+      const mm = managers.get(accountIdx);
+      if (mm && !mm.win.isDestroyed()) {
+        try {
+          const tab = mm.tabs.find((t) => { try { return t.view.webContents.id === wcId; } catch (e) { return false; } });
+          if (tab) { mm.activate(tab.id); mm.win.show(); mm.win.focus(); return { ok: true, active: true }; }
+        } catch (e) {}
+      }
+    }
+    openedWc.delete(key); // 已销毁 → 清状态
+  }
+  return { ok: false, active: false };
+}
+
 registerTabBrowserTools.openTab = openTab;
 registerTabBrowserTools.reloadTabByUrl = reloadTabByUrl;
 registerTabBrowserTools.reloadTabIfOpen = reloadTabIfOpen;
+registerTabBrowserTools.activateTabIfOpen = activateTabIfOpen;
 registerTabBrowserTools.openHomeWindow = openHomeWindow;
 registerTabBrowserTools.ensureManager = ensureManager;
 module.exports = registerTabBrowserTools;
