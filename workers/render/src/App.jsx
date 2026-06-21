@@ -2177,8 +2177,13 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
                   style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
                   onClick={(e) => { e.stopPropagation(); setMenuOpen(false); try { navigator.clipboard.writeText(team.base_url || ""); } catch {} }}
                 >
-                  {team.base_url || "—"}{(runningVer || team.version) ? ` · v${runningVer || team.version}` : ""}
+                  {team.base_url || "—"}
                 </button>
+                {(runningVer || team.version) && (
+                  <div data-id="LocalTeamCard-version" className="bcard__menu-item" style={{ cursor: "default", color: "#8b949e", fontSize: 12 }}>
+                    {tr("localTeams.version", "版本")} v{runningVer || team.version}
+                  </div>
+                )}
                 {local && (
                   <button
                     type="button"
