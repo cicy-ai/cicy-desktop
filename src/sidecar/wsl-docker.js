@@ -387,18 +387,27 @@ async function restart({ container = "cicy-code-docker", port = 8009 } = {}) {
 async function stop({ container = "cicy-code-docker" } = {}) {
   try { await wslRun(`docker stop ${container}`, { timeout: 30000 }); } catch {}
 }
+// Unregister the dedicated distro (idempotent; no-op if absent). Used by upgrade
+// to wipe a stale install before re-importing the latest pre-baked package.
+function unregisterDistro() {
+  return new Promise((resolve) => {
+    execFile("wsl", ["--unregister", DISTRO], { timeout: 120000, windowsHide: true }, () => resolve());
+  });
+}
+
+// Upgrade = re-import the latest pre-baked 烤制包 (it carries the latest cicy-code
+// image). DockerHub `docker pull` is unreliable in CN, and the standalone image
+// `docker save` tarball was retired — so re-import (via the app's own resilient
+// downloader, which copes with the flaky CN DNS that bare curl can't) is the
+// only reliable CN update path. This RESETS the distro: the cicy-team volume is
+// re-created and the instance re-seeds (new token) on next boot.
 async function upgrade({ onProgress, port = 8009, container = "cicy-code-docker", volume = "cicy-team", env = {} } = {}) {
   const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
-  if (!(await dockerEngineUp())) { await startEngine(); if (!(await dockerEngineUp())) { emit({ phase: "done", status: "error", message: "Docker 引擎未运行" }); return { ok: false, reason: "dockerd_not_up" }; } }
-  let tarball;
-  try { tarball = await docker.downloadImageTarball({ emit }); await loadImage(tarball, { emit }); emit({ phase: "image", status: "done", message: "镜像已更新" }); }
-  catch (e) { emit({ phase: "done", status: "error", message: `升级失败：${e.message}` }); return { ok: false, reason: "image_failed" }; }
-  emit({ phase: "container", status: "running", message: "用新镜像重建容器…" });
-  try { await stop({ container }); await runContainer({ port, container, volume, env }); }
-  catch (e) { emit({ phase: "done", status: "error", message: `容器启动失败：${e.message}` }); return { ok: false, reason: "container_start_failed" }; }
-  const healthy = await docker.waitUntil(() => probeHealth(port), { totalMs: 120000, everyMs: 3000 });
-  emit({ phase: "done", status: healthy ? "done" : "error", message: healthy ? "升级完成 🎉" : `启动了但 :${port} 还没响应` });
-  return { ok: healthy };
+  emit({ phase: "install-docker", status: "running", message: "升级 = 拉取最新运行环境并重装（会重置容器数据）…" });
+  try { await stop({ container }); } catch {}
+  try { await unregisterDistro(); } catch {}
+  // Reuse the robust one-shot install flow (download → import → dockerd → run).
+  return await _bootstrap({ onProgress, port, container, volume, env });
 }
 
 module.exports = {
