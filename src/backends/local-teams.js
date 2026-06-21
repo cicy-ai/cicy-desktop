@@ -434,6 +434,10 @@ async function syncNameToCloud(id) {
     if (!cc.loginToken || !cc.loginToken()) return; // not logged in
     const node = readNodes()[id];
     if (!node || !isLocalOrigin(node.base_url || "")) return;
+    // Docker 节点有自己独立的云端 team(POST /api/teams,sidecar ensureDockerTeam 管),
+    // 绝不走这里的 device-register —— 否则会按本机 deviceId 复用回 8008 那个 team(40),
+    // cloud_team_id 被覆盖、又和 8008 串名。跳过。
+    if (node.is_docker) return;
     let reg = await cc.registerTeam({ teamId: node.cloud_team_id || null, title: node.name || "", titleVersion: node.titleVersion || 0 });
     // Self-heal a STALE cached cloud_team_id: if we presented a cached id but the
     // cloud returned ok WITHOUT an apiKey (team deleted / rotated / no longer owned
@@ -597,6 +601,7 @@ const UPDATABLE_FIELDS = new Set([
   "name", "base_url", "api_token",
   "install_source", "install_os", "install_arch",
   "install_path", "container_name", "image",
+  "cloud_team_id", "is_docker", // Docker 独立 team:cloud_team_id 给账单/改名,is_docker 让 syncNameToCloud 跳过
 ]);
 
 async function updateTeam(id, patch) {

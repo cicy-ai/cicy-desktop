@@ -51,6 +51,39 @@ function readLocalGatewayKey() {
   } catch { return ""; }
 }
 
+// ── Docker 独立云端 team ──────────────────────────────────────────────────────
+// 主人令(2026-06-21):每个 Docker 容器要有自己独立的云端 team(8008 那个本机
+// local team 不动)。云端是「一 deviceId 一 local team」,装不下一机多 docker,所以
+// docker 走 POST /api/teams 建**独立 team**(不按 device)。首次建一次、把 teamId 存
+// 本机(~/cicy-ai/db/docker-teams.json,按 volume 区分多个 docker);之后用 teamId 现
+// 取 token。容器用这个 team 的 token 当网关 key(appOpts env);teamId 给 DockerCard
+// 账单 + 改名(PATCH /api/teams/:id,和私有云卡同一套)。
+const cc = (() => { try { return require("../cloud/cloud-client"); } catch { return null; } })();
+const DOCKER_TEAMS_FILE = path.join(os.homedir(), "cicy-ai", "db", "docker-teams.json");
+function readDockerTeams() { try { return JSON.parse(fs.readFileSync(DOCKER_TEAMS_FILE, "utf8")) || {}; } catch { return {}; } }
+function writeDockerTeams(obj) { try { fs.mkdirSync(path.dirname(DOCKER_TEAMS_FILE), { recursive: true }); fs.writeFileSync(DOCKER_TEAMS_FILE, JSON.stringify(obj, null, 2)); } catch {} }
+let dockerTeamReg = null; // { teamId, title, apiKey } — 缓存,appOpts 读它
+
+// 确保这个 docker(按 volume)有独立云端 team;返回 { teamId, title, apiKey } 或 null。
+async function ensureDockerTeam() {
+  if (!cc || !cc.loginToken || !cc.loginToken()) return null; // 未登录 → appOpts 回退 8008 key
+  try {
+    const store = readDockerTeams();
+    let rec = store[APP_VOLUME];
+    if (!rec || !rec.teamId) {
+      const created = await cc.createTeam({ title: "Docker 团队", kind: "cloud" });
+      if (!created || !created.ok) return null;
+      store[APP_VOLUME] = { teamId: created.teamId, title: created.title || "Docker 团队" };
+      writeDockerTeams(store);
+      dockerTeamReg = { teamId: created.teamId, title: store[APP_VOLUME].title, apiKey: created.apiKey };
+      return dockerTeamReg;
+    }
+    const apiKey = await cc.getTeamApiKey(rec.teamId);
+    dockerTeamReg = { teamId: rec.teamId, title: rec.title, apiKey };
+    return dockerTeamReg;
+  } catch (e) { return null; }
+}
+
 let registered = false;
 
 function register({ sidecarLogPath } = {}) {
@@ -130,7 +163,9 @@ function register({ sidecarLogPath } = {}) {
   // LLM gateway env keyed by the 8008 team's token. (WSL: whole-home mount via
   // -v <volume>:/home/cicy inside wsl-docker.)
   const appOpts = () => {
-    const gwKey = readLocalGatewayKey(); // 8008's team gateway key (sk-cicy-…)
+    // Docker 独立 team 的网关 key 优先(ensureDockerTeam 已缓存);未登录/未建成功
+    // 时回退 8008 的 key,保证容器仍有 LLM key 可用。
+    const gwKey = (dockerTeamReg && dockerTeamReg.apiKey) || readLocalGatewayKey();
     const env = { CICY_AI_GATEWAY_LLM_ENDPOINT: GATEWAY_ENDPOINT };
     if (gwKey) env.CICY_AI_GATEWAY_LLM_API_KEY = gwKey;
     return { port: APP_PORT, container: APP_CONTAINER, volume: APP_VOLUME, env };
@@ -146,7 +181,14 @@ function register({ sidecarLogPath } = {}) {
   // the HOST 8008 token (the bug that made 8009 verify with 8008's token → login).
   const registerAppTeam = async () => {
     const lt = require("./local-teams");
-    const r = await lt.addTeam({ base_url: `http://127.0.0.1:${APP_PORT}`, name: "Docker 团队", skipTokenAutofill: true });
+    await ensureDockerTeam(); // 确保独立云端 team 存在 + 拿到 teamId/title
+    const title = (dockerTeamReg && dockerTeamReg.title) || "Docker 团队";
+    const r = await lt.addTeam({ base_url: `http://127.0.0.1:${APP_PORT}`, name: title, skipTokenAutofill: true });
+    // 把 docker 独立 team 的 cloud_team_id 写到这个本地节点(DockerCard 据此账单 + 改名),
+    // 并标记 is_docker(syncNameToCloud 跳过它,不被本机 deviceId 复用回 8008)。
+    if (r && r.id) {
+      try { await lt.updateTeam(r.id, { is_docker: true, ...(dockerTeamReg && dockerTeamReg.teamId ? { cloud_team_id: dockerTeamReg.teamId } : {}) }); } catch {}
+    }
     return { ok: true, id: r && r.id };
   };
 
@@ -173,6 +215,7 @@ function register({ sidecarLogPath } = {}) {
   ipcMain.handle("docker:app-bootstrap", async (e) => {
     if (process.platform !== "win32") return { ok: false, error: "Docker cicy-code is Windows-only" };
     try {
+      await ensureDockerTeam(); // 启动前先确保独立云端 team + 拿到它的网关 key(appOpts 用)
       const result = await wslDocker.bootstrap({
         ...appOpts(),
         onProgress: (ev) => { try { e.sender.send("docker:app-progress", ev); } catch {} },
@@ -212,6 +255,7 @@ function register({ sidecarLogPath } = {}) {
   ipcMain.handle("docker:app-upgrade", async (e) => {
     if (process.platform !== "win32") return { ok: false, error: "Docker cicy-code is Windows-only" };
     try {
+      await ensureDockerTeam();
       const result = await wslDocker.upgrade({
         ...appOpts(),
         onProgress: (ev) => { try { e.sender.send("docker:app-progress", ev); } catch {} },

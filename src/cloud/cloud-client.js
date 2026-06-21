@@ -262,10 +262,12 @@ async function cloudFetch(endpoint, { method = "GET", body = null } = {}) {
 
 // ── ① device/register ───────────────────────────────────────────────────────
 
-async function registerDevice() {
+async function registerDevice({ deviceId: deviceIdOverride = null } = {}) {
   const token = loginToken();
   if (!token) return { ok: false, reason: "not_logged_in" };
-  const deviceId = getDeviceId();
+  // deviceId override:Docker 容器当作独立设备注册(host deviceId + "-docker"),
+  // 这样它能拿到自己独立的 local team(云端按 device_id 复用一个 local team)。
+  const deviceId = deviceIdOverride || getDeviceId();
   // Prefer the persisted deviceInfo (written by the startup task, which also has
   // the OS locale). If nothing detected yet, detect now (no syslang available here).
   let di = readDeviceInfo();
@@ -296,10 +298,10 @@ async function registerDevice() {
 //   teamId omitted → cloud creates a new team + key.
 //   teamId given   → cloud returns that team's existing key (no rotation).
 // Returns { ok, teamId, apiKey, gatewayUrl } on success.
-async function registerTeam({ teamId = null, title = "", titleVersion = 0 } = {}) {
+async function registerTeam({ teamId = null, title = "", titleVersion = 0, deviceId: deviceIdOverride = null } = {}) {
   const token = loginToken();
   if (!token) return { ok: false, reason: "not_logged_in" };
-  const deviceId = getDeviceId();
+  const deviceId = deviceIdOverride || getDeviceId(); // Docker:传容器自己的 deviceId → 独立 team
   const body = { deviceId };
   if (teamId != null) body.teamId = teamId;
   if (title) body.title = title;
@@ -339,6 +341,30 @@ async function listTeams({ deviceId = null, kind = null } = {}) {
   }
   log.warn(`[cloud] teams list failed status=${res.status} reason=${res.reason || ""}`);
   return { ok: false, status: res.status, reason: res.reason, teams: [] };
+}
+
+// 建一个全新的独立 team(POST /api/teams)——不按 device 复用,每次建一个新的。
+// Docker 用它:一机可以有多个 docker 容器,各自一个独立 team(8008 那个 local team
+// 不动)。返回 { teamId, apiKey(=team token,既网关 key 也凭证), title, kind }。
+async function createTeam({ title = "", kind = "cloud" } = {}) {
+  const token = loginToken();
+  if (!token) return { ok: false, reason: "not_logged_in" };
+  const res = await cloudFetch("/api/teams", { method: "POST", body: { title, kind } });
+  if (res.ok && res.json && res.json.team) {
+    const t = res.json.team;
+    return { ok: true, teamId: t.teamId || t.id, apiKey: t.apiKey || t.api_token, title: t.title, kind: t.kind, gatewayUrl: GATEWAY_URL };
+  }
+  log.warn(`[cloud] create team failed status=${res.status} reason=${res.reason || ""}`);
+  return { ok: false, status: res.status, reason: res.reason };
+}
+
+// 按 teamId 取回某 team 的 token(网关 key)——建过之后重启只存 teamId,token 现取。
+async function getTeamApiKey(teamId) {
+  if (teamId == null) return null;
+  const r = await listTeams();
+  if (!r.ok) return null;
+  const t = (r.teams || []).find((x) => String(x.teamId || x.id) === String(teamId));
+  return t ? (t.apiKey || t.api_token || null) : null;
 }
 
 // ── gateway-key injection ─────────────────────────────────────────────────────
@@ -430,6 +456,8 @@ module.exports = {
   registerDevice,
   registerTeam,
   listTeams,
+  createTeam,
+  getTeamApiKey,
   injectGatewayKey,
   registerTeamAndInjectKey,
 };

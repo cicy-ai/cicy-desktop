@@ -1143,10 +1143,30 @@ body {
 .terms-gate__title { font-size: 20px; font-weight: 700; margin: 0 0 4px; color: var(--text, #e6edf3); }
 .terms-gate__subtitle { font-size: 13px; color: var(--text-dim, #9da7b3); margin: 0 0 16px; }
 .terms-gate__body {
-  overflow-y: auto; flex: 1 1 auto; min-height: 0; padding-right: 8px;
+  overflow-y: auto; flex: 1 1 auto; min-height: 0; padding-right: 10px;
   border-top: 1px solid rgba(125,135,150,0.15); border-bottom: 1px solid rgba(125,135,150,0.15);
   padding-top: 14px; padding-bottom: 14px;
+  overscroll-behavior: contain;
 }
+/* slim, modern scrollbar (默认滚动条太丑) */
+.terms-gate__body { scrollbar-width: thin; scrollbar-color: rgba(125,135,150,0.35) transparent; }
+.terms-gate__body::-webkit-scrollbar { width: 8px; }
+.terms-gate__body::-webkit-scrollbar-track { background: transparent; }
+.terms-gate__body::-webkit-scrollbar-thumb {
+  background: rgba(125,135,150,0.30); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box;
+}
+.terms-gate__body::-webkit-scrollbar-thumb:hover { background: rgba(125,135,150,0.55); background-clip: padding-box; border: 2px solid transparent; }
+
+/* review mode (从头像菜单点「用户协议」重新阅读) — 居中浮层 + 收紧面板 */
+.terms-gate--review { padding: 24px; }
+.terms-gate--review .glow { display: none; }            /* 装饰光晕只属于首启全屏页,modal 里多余 */
+.terms-gate--review .terms-gate__panel {
+  width: min(640px, 92vw); max-height: min(82vh, 760px);
+  background: rgba(18, 22, 30, 0.98);
+  box-shadow: 0 28px 80px rgba(0,0,0,0.6);
+  animation: terms-pop .16s ease;
+}
+@keyframes terms-pop { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
 .terms-gate__h2 { font-size: 14px; font-weight: 600; margin: 0 0 10px; color: var(--text, #e6edf3); }
 .terms-gate__summary { margin: 0 0 14px; padding-left: 20px; }
 .terms-gate__summary li { font-size: 13px; line-height: 1.6; color: var(--text-dim, #c2cbd6); margin-bottom: 8px; }

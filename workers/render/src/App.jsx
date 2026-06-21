@@ -769,7 +769,12 @@ export default function App() {
                   if (!r?.ok) window.alert("拿不到容器 token,无法打开 :8009。请确认服务已就绪(或用卡片菜单「重启」)后再试。");
                 } catch (e) { console.warn("[DockerCard] open", e); }
               }}
-              onRename={renameLocalTeam}
+              onRename={async (id, title) => {
+                // 双写:本地节点名(立即显示)+ 云端 PATCH(独立 docker team,账单/dash 一致)。
+                const r = await renameLocalTeam(id, title);
+                if (dockerTeam?.cloud_team_id) { try { await renameCloudTeam(dockerTeam.cloud_team_id, title); } catch {} }
+                return r;
+              }}
               onRefresh={fetchLocalTeams}
             />
           )}
@@ -1087,6 +1092,7 @@ function Header({ me, welcome, onLogout, mitmTeam }) {
   // (no long-term token in the URL — see openCloudPage).
   const goDash = (query) => { openCloudPage(query); setOpen(false); };
   return (
+    <>
     <header className="topbar">
       <div className="brand-mini">
         <div className="brand-mark sm"><BrandGlyph /></div>
@@ -1121,7 +1127,8 @@ function Header({ me, welcome, onLogout, mitmTeam }) {
             <button type="button" data-id="UserChip-terms" className="user-chip__menu-item" onClick={() => { setOpen(false); setTermsOpen(true); }}>
               {tr("firstRunTerms.menu", "用户协议")}
             </button>
-            {mitmTeam && (
+            {/* HTTPS 审计入口暂时隐藏 */}
+            {false && mitmTeam && (
               <div className="user-chip__menu-mitm" data-id="UserChip-mitm" onClick={(e) => e.stopPropagation()}>
                 <MitmConsentCard team={mitmTeam} variant="menu" />
               </div>
@@ -1136,10 +1143,13 @@ function Header({ me, welcome, onLogout, mitmTeam }) {
           </div>
         )}
       </div>
-      {trustOpen && <TrustedSitesModal onClose={() => setTrustOpen(false)} />}
-      {auditOpen && <AuditLogModal onClose={() => setAuditOpen(false)} />}
-      {termsOpen && <FirstRunTermsGate onClose={() => setTermsOpen(false)} />}
     </header>
+    {/* 这些 modal 必须渲染在 .topbar 之外:.topbar 有 backdrop-filter,会成为
+        position:fixed 的包含块,放在里面会让 modal 被限制在顶栏区域(位置不对)。 */}
+    {trustOpen && <TrustedSitesModal onClose={() => setTrustOpen(false)} />}
+    {auditOpen && <AuditLogModal onClose={() => setAuditOpen(false)} />}
+    {termsOpen && <FirstRunTermsGate onClose={() => setTermsOpen(false)} />}
+    </>
   );
 }
 
@@ -1681,7 +1691,7 @@ function DockerCard({ dockerTeam, onOpen, onRename, onRefresh }) {
   // Inline rename (mirrors LocalTeamCard): double-click the title to edit.
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
-  const displayName = dockerTeam?.name || tr("docker.title", "Docker 团队");
+  const displayName = dockerTeam?.name || "Docker 团队"; // 字面量(i18n docker.title="Docker cicy-code")
   const startEdit = (e) => { e?.stopPropagation?.(); setDraft(displayName); setEditing(true); };
   const commitName = async () => {
     setEditing(false);
@@ -1909,10 +1919,29 @@ function DockerCard({ dockerTeam, onOpen, onRename, onRefresh }) {
         )}
       </div>
       <div className="bcard__body">
-        {/* Docker 卡身份固定为 "Docker 团队",不读会和 8008 串名的同步 team name。
-            (8008/8009 共用 cloud_team_id → 名字同步;独立改名要 8009 自己的云端 team。) */}
-        <div style={{ minHeight: 26, display: "flex", alignItems: "center" }}>
-          <h3 className="bcard__name">Docker 团队</h3>
+        {/* 8009 现在有独立云端 team(cloud_team_id 是它自己的,不再和 8008 串),所以
+            标题可改名:本地节点名 + 云端 PATCH 双写(onRename 在父组件处理)。 */}
+        <div style={{ height: 28, display: "flex", alignItems: "center" }}>
+          {editing ? (
+            <input
+              data-id="DockerCard-rename-input"
+              autoFocus
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onFocus={(e) => e.target.select()}
+              onBlur={commitName}
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => { if (e.nativeEvent.isComposing || e.keyCode === 229) return; if (e.key === "Enter") commitName(); else if (e.key === "Escape") setEditing(false); }}
+              style={{ flex: 1, width: "100%", font: "inherit", fontWeight: 600, padding: "2px 6px", border: "1px solid #3b82f6", borderRadius: 6, background: "#0d1117", color: "#e6edf3", boxSizing: "border-box" }}
+            />
+          ) : (
+            <h3 className="bcard__name" title={onRename ? tr("localTeams.renameHint", "点名字或 ✎ 改名") : displayName} style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0, margin: 0 }} onDoubleClick={onRename ? startEdit : undefined}>
+              <span onClick={onRename ? startEdit : undefined} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: onRename ? "text" : "default" }}>{displayName}</span>
+              {onRename && (
+                <button type="button" data-id="DockerCard-rename-btn" title={tr("localTeams.rename", "重命名")} onClick={startEdit} style={{ flex: "none", cursor: "pointer", border: "none", background: "transparent", color: "#8b949e", fontSize: 13, padding: 0, lineHeight: 1 }}>✎</button>
+              )}
+            </h3>
+          )}
         </div>
         <div className="bcard__meta"><span className="bcard__chip">Docker</span></div>
       </div>
