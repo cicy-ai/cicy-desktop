@@ -236,6 +236,23 @@ function register({ sidecarLogPath } = {}) {
     catch (e) { return { ok: false, error: e.message }; }
   });
 
+  // ⋯ menu → 重启 Docker:`docker restart` 整个容器(区别于上面 supervisorctl 重启 cicy-code)。
+  ipcMain.handle("docker:app-docker-restart", async () => {
+    try { await wslDocker.dockerRestart({ container: APP_CONTAINER }); return { ok: true }; }
+    catch (e) { return { ok: false, error: e.message }; }
+  });
+
+  // ⋯ menu → 重建 Docker:删容器 + 用新 env(docker team 网关 key)重新 docker run(保留
+  // volume 数据)。换 key 的唯一途径。渲染端已 confirm。
+  ipcMain.handle("docker:app-recreate", async () => {
+    try {
+      await ensureDockerTeam();
+      await wslDocker.recreate({ ...appOpts() });
+      await registerAppTeam();
+      return { ok: true };
+    } catch (e) { return { ok: false, error: e.message }; }
+  });
+
   // ⋯ menu → 更新 cicy-code: pull the latest cicy-code into the container +
   // restart it (no container recreate). Streams progress to the drawer.
   ipcMain.handle("docker:app-update", async (e) => {

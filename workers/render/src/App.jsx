@@ -1896,7 +1896,18 @@ function DockerCard({ dockerTeam, onOpen, onRename, onRefresh }) {
                 </button>
                 <button type="button" data-id="DockerCard-restart" className="bcard__menu-item"
                   onClick={() => runOp("restart", () => window.cicy.docker.appRestart(), tr("docker.restarted", "已重启 cicy-code"))}>
-                  {tr("docker.restart", "重启")}
+                  {tr("docker.restart", "重启 cicy-code")}
+                </button>
+                <button type="button" data-id="DockerCard-docker-restart" className="bcard__menu-item"
+                  onClick={() => runOp("restart", () => window.cicy.docker.appDockerRestart(), tr("docker.dockerRestarted", "已重启 Docker 容器"))}>
+                  {tr("docker.dockerRestart", "重启 Docker")}
+                </button>
+                <button type="button" data-id="DockerCard-recreate" className="bcard__menu-item is-danger"
+                  onClick={() => {
+                    if (!window.confirm(tr("docker.recreateConfirm", "重建 Docker 容器?会删除当前容器并重新创建(数据保留),用于切换网关 key。确定?"))) return;
+                    runOp("restart", () => window.cicy.docker.appRecreate(), tr("docker.recreated", "已重建 Docker 容器"));
+                  }}>
+                  {tr("docker.recreate", "重建 Docker")}
                 </button>
                 <button type="button" data-id="DockerCard-stop" className="bcard__menu-item is-danger"
                   onClick={() => runOp("stop", () => window.cicy.docker.appStop(), tr("docker.stopped", "已停止 cicy-code"))}>

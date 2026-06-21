@@ -452,6 +452,25 @@ async function update({ onProgress, container = "cicy-code-docker", port = 8009 
 async function stop({ container = "cicy-code-docker" } = {}) {
   try { await wslRun(`docker stop ${container}`, { timeout: 30000 }); } catch {}
 }
+
+// docker restart 整个容器(stop+start 同一个容器)—— 区别于 restart()(supervisorctl
+// 重启容器内的 cicy-code 进程)和重建(rm+run)。容器重启后 entrypoint 重跑,会重读
+// volume global.json,所以若先把新 key 写进 volume,这个就能让 cicy-code 用上新 key。
+async function dockerRestart({ container = "cicy-code-docker-8009" } = {}) {
+  await wslRun(`docker restart ${container}`, { timeout: 45000 });
+  return true;
+}
+
+// 重建容器:docker rm -f 旧容器 + docker run 新容器(用新 env,如新的 docker team 网关
+// key)。**保留 volume**(数据/api_token/deviceId 不丢),只是换掉容器本身 + env。
+// 破坏性(短暂中断 + 换 key)→ 调用方要 confirm。
+async function recreate({ port = 8009, container = "cicy-code-docker-8009", volume = "cicy-team-8009", env = {} } = {}) {
+  try { await wslRun(`docker rm -f ${container}`, { timeout: 30000 }); } catch {}
+  // runContainer 内部还会 rm 一次并 run;它开头的 probeHealth 此时已无容器 → 直接重建。
+  const r = await runContainer({ port, container, volume, env });
+  try { await ensureDesktopShortcut(volume, port); } catch {}
+  return r;
+}
 // Unregister the dedicated distro (idempotent; no-op if absent). Used by upgrade
 // to wipe a stale install before re-importing the latest pre-baked package.
 function unregisterDistro() {
@@ -476,6 +495,6 @@ async function upgrade({ onProgress, port = 8009, container = "cicy-code-docker"
 }
 
 module.exports = {
-  bootstrap, status, restart, stop, update, upgrade, runContainer, readContainerToken,
+  bootstrap, status, restart, stop, dockerRestart, recreate, update, upgrade, runContainer, readContainerToken,
   distroInstalled, dockerInstalled, dockerEngineUp, imagePresent, probeHealth, wslRun,
 };

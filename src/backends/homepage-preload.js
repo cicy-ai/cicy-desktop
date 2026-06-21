@@ -161,7 +161,9 @@ contextBridge.exposeInMainWorld("cicy", {
     // streaming phase/progress on 'docker:app-progress'.
     appStatus:    ()  => logInvoke("docker:app-status"),
     appBootstrap: ()  => logInvoke("docker:app-bootstrap"),
-    appRestart:   ()  => logInvoke("docker:app-restart"),
+    appRestart:   ()  => logInvoke("docker:app-restart"),          // supervisorctl 重启 cicy-code
+    appDockerRestart: () => logInvoke("docker:app-docker-restart"), // docker restart 整个容器
+    appRecreate:  ()  => logInvoke("docker:app-recreate"),         // 删容器+重建(换 key,需 confirm)
     appUpdate:    ()  => logInvoke("docker:app-update"),
     appStop:      ()  => logInvoke("docker:app-stop"),
     appUpgrade:   ()  => logInvoke("docker:app-upgrade"),
