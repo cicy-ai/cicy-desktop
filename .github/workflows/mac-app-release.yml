@@ -203,4 +203,16 @@ jobs:
             tar -czf "$OUT" -C "$B" .
             gh release upload "${{ steps.meta.outputs.tag }}" "$OUT" --repo "$GITHUB_REPOSITORY" --clobber
             echo "uploaded $OUT ($(du -h "$OUT" | cut -f1))"
+
+            # Native .pkg installer (right-click Open once; the postinstall ad-hoc-signs
+            # + de-quarantines the installed app so it opens with no Apple cert).
+            ROOT="pkgroot-$ARCH"; rm -rf "$ROOT"; mkdir -p "$ROOT/Applications"
+            cp -R "$APP" "$ROOT/Applications/CiCy Desktop.app"
+            SCR="pkgscripts-$ARCH"; rm -rf "$SCR"; mkdir -p "$SCR"
+            cp scripts/mac-allinone/postinstall "$SCR/postinstall"; chmod +x "$SCR/postinstall"
+            PKG="cicy-desktop-$VER-$ARCH.pkg"
+            pkgbuild --root "$ROOT" --scripts "$SCR" --identifier com.cicy.desktop \
+              --version "$VER" --install-location / "$PKG"
+            gh release upload "${{ steps.meta.outputs.tag }}" "$PKG" --repo "$GITHUB_REPOSITORY" --clobber
+            echo "uploaded $PKG ($(du -h "$PKG" | cut -f1))"
           done

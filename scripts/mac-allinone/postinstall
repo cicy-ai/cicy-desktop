@@ -1,0 +1,11 @@
+#!/bin/bash
+# Runs as root right after the .pkg lays down /Applications/CiCy Desktop.app.
+# The app is unsigned-but-ad-hoc (no Apple cert). pkg-installed files normally
+# aren't quarantined, but strip any quarantine + re-ad-hoc-sign to be safe so the
+# app opens without "已损坏 / unidentified developer". Best-effort — never fail install.
+APP="/Applications/CiCy Desktop.app"
+[ -d "$APP" ] || exit 0
+/usr/bin/xattr -dr com.apple.quarantine "$APP" 2>/dev/null || true
+/usr/bin/xattr -cr "$APP" 2>/dev/null || true
+/usr/bin/codesign --force --deep --sign - "$APP" 2>/dev/null || true
+exit 0
