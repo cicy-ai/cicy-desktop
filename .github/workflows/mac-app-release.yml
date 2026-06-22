@@ -211,8 +211,17 @@ jobs:
             SCR="pkgscripts-$ARCH"; rm -rf "$SCR"; mkdir -p "$SCR"
             cp scripts/mac-allinone/postinstall "$SCR/postinstall"; chmod +x "$SCR/postinstall"
             PKG="cicy-desktop-$VER-$ARCH.pkg"
-            if pkgbuild --root "$ROOT" --scripts "$SCR" --identifier com.cicy.desktop \
-                 --version "$VER" --install-location / "$PKG"; then
+            # Disable bundle relocation. Without this the macOS Installer "relocates" the
+            # install to wherever an existing com.cicy.desktop bundle already lives (e.g. a
+            # leftover copy in ~/Downloads from a tarball test) instead of /Applications —
+            # so the app vanishes from /Applications. BundleIsRelocatable=false pins it to
+            # the payload path (/Applications) no matter what's already on disk.
+            PLIST="component-$ARCH.plist"
+            pkgbuild --analyze --root "$ROOT" "$PLIST"
+            /usr/libexec/PlistBuddy -c "Set :0:BundleIsRelocatable false" "$PLIST" 2>/dev/null \
+              || plutil -replace 0.BundleIsRelocatable -bool NO "$PLIST" || true
+            if pkgbuild --root "$ROOT" --component-plist "$PLIST" --scripts "$SCR" \
+                 --identifier com.cicy.desktop --version "$VER" --install-location / "$PKG"; then
               gh release upload "${{ steps.meta.outputs.tag }}" "$PKG" --repo "$GITHUB_REPOSITORY" --clobber
               echo "uploaded $PKG ($(du -h "$PKG" | cut -f1))"
             else
