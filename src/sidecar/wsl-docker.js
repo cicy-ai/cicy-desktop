@@ -370,7 +370,12 @@ async function runContainer({ port = 8009, container = "cicy-code-docker", volum
     .filter(([, v]) => v != null && v !== "")
     .map(([k, v]) => `-e ${k}='${String(v).replace(/'/g, "'\\''")}'`)
     .join(" ");
-  const cmd = `docker run -d --name ${container} --restart unless-stopped -p 127.0.0.1:${port}:8008 -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${shareMountArg()} ${envArgs} ${IMAGE}`;
+  // --dns: WSL2's auto resolv.conf points the distro at the host NAT gateway
+  // (172.x.x.1), which docker's default DNS forwarding does NOT reach from inside a
+  // bridge container → every lookup is EAI_AGAIN and cicy-code's startup `npm i`
+  // crash-loops the container (:8009 never comes up). Pin public resolvers: Aliyun
+  // 223.5.5.5 (CN-fast) first, Google 8.8.8.8 as the overseas fallback.
+  const cmd = `docker run -d --name ${container} --restart unless-stopped --dns 223.5.5.5 --dns 8.8.8.8 -p 127.0.0.1:${port}:8008 -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${shareMountArg()} ${envArgs} ${IMAGE}`;
   await wslRun(cmd, { timeout: 60000 });
   ensureDesktopShortcut(volume, port).catch(() => {});
   return { started: true };
