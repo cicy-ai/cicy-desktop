@@ -138,6 +138,11 @@ jobs:
             Set-Content -NoNewline -Path "current-latest.txt" -Value $version
             & $oss cp "current-latest.txt" "$base/latest-version.txt" -f --acl public-read
             if ($LASTEXITCODE -ne 0) { Write-Error "latest-version.txt upload failed"; exit 1 }
+            # Unified per-platform naming: cicy-desktop-<platform>-latest.<ext> so every OS
+            # shares one URL shape (win + mac-x64 + mac-arm64). The bare cicy-desktop-latest.exe
+            # / latest-version.txt above are kept as backward-compat aliases for old links.
+            & $oss cp "$($exe.FullName)" "$base/cicy-desktop-win-latest.exe" -f --acl public-read
+            & $oss cp "current-latest.txt" "$base/win-latest-version.txt" -f --acl public-read
           } else {
             Write-Host "Skip latest: building $version < published $cur (older build — not clobbering newer latest)"
           }
