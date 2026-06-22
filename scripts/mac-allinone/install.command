@@ -45,15 +45,23 @@ xattr -cr "$DEST_APP" 2>/dev/null || true
 codesign --force --deep --sign - "$DEST_APP" 2>/dev/null || \
   echo "    (codesign 警告可忽略,quarantine 已清即可打开)"
 
-# ── 3) 预暂存 docker 包(让 app 的 bootstrap reuse、零下载)──────────────────
-echo "==> 预暂存 docker 运行环境(基础盘 + 镜像)…"
-mkdir -p "$HOME/cicy-ai/colima" "$HOME/Downloads"
+# ── 3) (可选)预暂存 docker 包 —— 仅当 bundle 里带了 docker/ 时(全离线包)。
+#      app-only 包没有这个目录:跳过,docker 由 app 运行时联网装(一次,之后复用)。
 DISK_SRC="$HERE/docker/ubuntu-2404-$DTAG-docker.raw.gz"
 IMG_SRC="$HERE/docker/cicy-code-latest.tar.gz"
-[ -f "$DISK_SRC" ] && ditto "$DISK_SRC" "$HOME/cicy-ai/colima/ubuntu-2404-$DTAG-docker.raw.gz" && echo "    基础盘已就位($DTAG)"
-[ -f "$IMG_SRC" ]  && ditto "$IMG_SRC"  "$HOME/Downloads/cicy-code-latest.tar.gz" && echo "    cicy-code 镜像已就位"
+STAGED=0
+if [ -f "$DISK_SRC" ] || [ -f "$IMG_SRC" ]; then
+  echo "==> 检测到离线 docker 包,预暂存以便零下载 …"
+  mkdir -p "$HOME/cicy-ai/colima" "$HOME/Downloads"
+  [ -f "$DISK_SRC" ] && ditto "$DISK_SRC" "$HOME/cicy-ai/colima/ubuntu-2404-$DTAG-docker.raw.gz" && echo "    基础盘已就位($DTAG)" && STAGED=1
+  [ -f "$IMG_SRC" ]  && ditto "$IMG_SRC"  "$HOME/Downloads/cicy-code-latest.tar.gz" && echo "    cicy-code 镜像已就位" && STAGED=1
+fi
 
 echo ""
 echo "✅ 安装完成 —— 打开「启动台」或 /Applications 里的「$APP_NAME」。"
-echo "   docker 运行环境已预置,首次点安装直接复用、不下载。"
+if [ "$STAGED" = 1 ]; then
+  echo "   docker 运行环境已预置,首次点安装直接复用、不下载。"
+else
+  echo "   docker 首次点安装会联网下载运行环境(之后复用,不再重下)。"
+fi
 open "$DEST_APP" || true

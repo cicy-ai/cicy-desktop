@@ -172,37 +172,31 @@ jobs:
               --repo "$GITHUB_REPOSITORY" --clobber
           fi
 
-      # Offline all-in-one: prebuilt .app (ad-hoc signed) + docker base disk + cicy-code
-      # image + install.command. No Apple cert needed (the installer strips quarantine +
-      # re-ad-hoc-signs locally), no network at docker-install time (images pre-staged).
-      - name: Build offline all-in-one bundles (.app + docker + installer)
+      # Lightweight app installer (~150MB): prebuilt ad-hoc-signed .app + install.command.
+      # No Apple cert (installer strips quarantine + re-ad-hoc-signs locally). Docker is
+      # NOT bundled — the app downloads + reuses it at runtime (keeps this small). For a
+      # fully-offline install, drop the docker base disk + cicy-code image next to
+      # install.command in a docker/ subdir and it'll stage them instead.
+      - name: Build app installer bundles (.app + installer, no docker)
         continue-on-error: true   # extra artifact — never fail the dmg/zip release
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          OSS="https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com"
           VER="${{ steps.meta.outputs.version }}"
-          mkdir -p payload
-          # cicy-code image is amd64 for both arches (runs via rosetta on arm64) → fetch once.
-          curl -fSL "$OSS/images/cicy-code-latest.tar.gz" -o payload/cicy-code-latest.tar.gz
           for ARCH in x64 arm64; do
-            [ "$ARCH" = x64 ] && DTAG=amd64 || DTAG=arm64
-            # locate the .app for this arch (electron-builder leaves it under dist/mac*/)
+            WANT="$([ "$ARCH" = x64 ] && echo x86_64 || echo arm64)"
             APP=""
             for d in $(find dist -maxdepth 2 -type d -name "*.app"); do
-              if lipo -archs "$d/Contents/MacOS/"* 2>/dev/null | grep -qw "$([ "$ARCH" = x64 ] && echo x86_64 || echo arm64)"; then APP="$d"; break; fi
+              if lipo -archs "$d/Contents/MacOS/"* 2>/dev/null | grep -qw "$WANT"; then APP="$d"; break; fi
             done
-            [ -n "$APP" ] || { echo "::warning::no $ARCH .app found, skipping all-in-one"; continue; }
-            echo "all-in-one $ARCH ← $APP"
-            curl -fSL "$OSS/colima-base/ubuntu-2404-$DTAG-docker.raw.gz" -o "payload/ubuntu-2404-$DTAG-docker.raw.gz"
-            B="allinone-$ARCH"; rm -rf "$B"; mkdir -p "$B/docker"
+            [ -n "$APP" ] || { echo "::warning::no $ARCH .app found, skipping"; continue; }
+            echo "app installer $ARCH ← $APP"
+            B="appbundle-$ARCH"; rm -rf "$B"; mkdir -p "$B"
             cp -R "$APP" "$B/CiCy Desktop.app"
-            cp payload/cicy-code-latest.tar.gz "$B/docker/"
-            cp "payload/ubuntu-2404-$DTAG-docker.raw.gz" "$B/docker/"
             cp scripts/mac-allinone/install.command "$B/"; chmod +x "$B/install.command"
-            OUT="cicy-desktop-allinone-$VER-$ARCH.tar.gz"
+            OUT="cicy-desktop-app-$VER-$ARCH.tar.gz"
             tar -czf "$OUT" -C "$B" .
             gh release upload "${{ steps.meta.outputs.tag }}" "$OUT" --repo "$GITHUB_REPOSITORY" --clobber
             echo "uploaded $OUT ($(du -h "$OUT" | cut -f1))"
