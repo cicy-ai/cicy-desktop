@@ -170,19 +170,42 @@ function provisionElectronFromMirror(bundledDir) {
 // into the bundled npx copy straight from the R2 mirror — NO `npm i -g`, NO
 // GitHub, NO @electron/get. This is what lets a single `npx cicy-desktop`
 // self-provision electron and start first-try. Runs once per process.
+// The electron dir we provision into: the real electron npm package if it's
+// installed, otherwise a self-managed dir under our own node_modules. `npx
+// cicy-desktop` does NOT pull electron (it's not a runtime dep), so on a fresh
+// machine require.resolve('electron') fails — we must NOT give up there.
+function bundledElectronDir() {
+  try { return path.dirname(require.resolve("electron/package.json", { paths: [PACKAGE_ROOT] })); } catch {}
+  return path.join(PACKAGE_ROOT, "node_modules", "electron");
+}
+// Make `dir` a resolvable electron package (package.json + index.js that reads
+// path.txt) so provisionElectronFromMirror's layout + a spawned require('electron')
+// both work — WITHOUT ever running electron's own installer. Only fills in missing
+// files, so a real electron package is left untouched.
+function ensureMinimalElectronPkg(dir) {
+  fs.mkdirSync(dir, { recursive: true });
+  const pj = path.join(dir, "package.json");
+  if (!fs.existsSync(pj)) fs.writeFileSync(pj, JSON.stringify({ name: "electron", version: ELECTRON_VERSION, main: "index.js" }));
+  const ij = path.join(dir, "index.js");
+  if (!fs.existsSync(ij)) fs.writeFileSync(ij,
+    "const fs=require('fs'),path=require('path');const p=path.join(__dirname,'path.txt');" +
+    "module.exports=fs.existsSync(p)?path.join(__dirname,'dist',fs.readFileSync(p,'utf8').trim()):null;\n");
+}
+
 let _electronEnsured = false;
 function ensureElectron() {
   if (_electronEnsured) return;
   _electronEnsured = true;
-  // Already usable (a shared global, or the resolvable bundled/npx copy)? done.
+  // Already usable (a shared global, or an already-provisioned bundled copy)? done.
   if (electronBinaryHealthy(globalElectronDir())) return;
-  let bundledDir = null;
-  try { bundledDir = path.dirname(require.resolve("electron/package.json", { paths: [PACKAGE_ROOT] })); } catch {}
+  const bundledDir = bundledElectronDir();
   if (electronBinaryHealthy(bundledDir)) return;
-  if (!bundledDir) {
-    console.warn(`⚠️  electron package not resolvable under ${PACKAGE_ROOT}; cannot self-provision.`);
-    return;
-  }
+  // Set up the dir (create minimal pkg if electron isn't installed) then download
+  // the binary straight from the mirror — bypassing electron's own installer,
+  // which is broken on win32 + node 24 (@electron-internal extract-zip native
+  // binding "intentionally not published" → "Cannot find native binding").
+  try { ensureMinimalElectronPkg(bundledDir); }
+  catch (e) { console.warn(`⚠️  could not set up electron dir ${bundledDir}: ${e.message}`); return; }
   console.log(`⚙️  Fetching Electron ${ELECTRON_VERSION} from mirror (one-time)…`);
   try {
     provisionElectronFromMirror(bundledDir);
@@ -200,9 +223,17 @@ function resolveElectronSpawn() {
   ensureElectron();
   const g = globalElectronBin();
   if (g) return { cmd: g, prefixArgs: [] };
-  if (isWindows) return { cmd: "npx.cmd", prefixArgs: ["electron"] };
+  // Spawn the self-provisioned binary DIRECTLY (mirror download → <dir>/dist/<exe>).
+  // Critically: prefer this over `npx electron` — electron's own installer is
+  // broken on win32 + node 24, so the npx fallback below just crashes there.
+  try {
+    const { exe } = electronArtifact();
+    const bin = path.join(bundledElectronDir(), "dist", exe);
+    if (fs.existsSync(bin)) return { cmd: bin, prefixArgs: [] };
+  } catch {}
   const local = path.join(PACKAGE_ROOT, "node_modules", ".bin", "electron");
   if (fs.existsSync(local)) return { cmd: local, prefixArgs: [] };
+  if (isWindows) return { cmd: "npx.cmd", prefixArgs: ["electron"] };
   return { cmd: "npx", prefixArgs: ["electron"] };
 }
 const PROJECT_COMMAND_FILE = path.join(PACKAGE_ROOT, "cicy-dektop.command");
