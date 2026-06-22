@@ -188,9 +188,12 @@ jobs:
           for ARCH in x64 arm64; do
             WANT="$([ "$ARCH" = x64 ] && echo x86_64 || echo arm64)"
             APP=""
-            for d in $(find dist -maxdepth 2 -type d -name "*.app"); do
-              if lipo -archs "$d/Contents/MacOS/"* 2>/dev/null | grep -qw "$WANT"; then APP="$d"; break; fi
-            done
+            # NUL-delimited: the .app dir name has a space ("CiCy Desktop.app"), so a
+            # `for d in $(find …)` word-splits the path and breaks. read -d '' is safe.
+            while IFS= read -r -d '' d; do
+              bin="$(find "$d/Contents/MacOS" -maxdepth 1 -type f | head -1)"
+              if lipo -archs "$bin" 2>/dev/null | grep -qw "$WANT"; then APP="$d"; break; fi
+            done < <(find dist -maxdepth 2 -type d -name "*.app" -print0)
             [ -n "$APP" ] || { echo "::warning::no $ARCH .app found, skipping"; continue; }
             echo "app installer $ARCH ← $APP"
             B="appbundle-$ARCH"; rm -rf "$B"; mkdir -p "$B"
