@@ -1,6 +1,6 @@
 {
   "name": "cicy-desktop",
-  "version": "2.1.120",
+  "version": "2.1.121",
   "description": "CiCy - AI-powered operating system browser",
   "main": "src/main.js",
   "bin": {
@@ -98,7 +98,9 @@
       "allowToChangeInstallationDirectory": false,
       "oneClick": true,
       "perMachine": false,
-      "allowElevation": true
+      "allowElevation": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true
     },
     "electronVersion": "41.0.3"
   },
