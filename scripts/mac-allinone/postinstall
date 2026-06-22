@@ -8,4 +8,16 @@ APP="/Applications/CiCy Desktop.app"
 /usr/bin/xattr -dr com.apple.quarantine "$APP" 2>/dev/null || true
 /usr/bin/xattr -cr "$APP" 2>/dev/null || true
 /usr/bin/codesign --force --deep --sign - "$APP" 2>/dev/null || true
+
+# Desktop shortcut for the logged-in user (postinstall runs as root, so resolve the
+# console user + their home and chown the symlink to them). Launchpad/Spotlight pick
+# the app up automatically from /Applications.
+CUSER="$(/usr/bin/stat -f%Su /dev/console 2>/dev/null)"
+if [ -n "$CUSER" ] && [ "$CUSER" != "root" ]; then
+  UHOME="$(/usr/bin/dscl . -read "/Users/$CUSER" NFSHomeDirectory 2>/dev/null | awk '{print $2}')"
+  if [ -d "$UHOME/Desktop" ]; then
+    /bin/ln -sfn "$APP" "$UHOME/Desktop/CiCy Desktop.app" 2>/dev/null || true
+    /usr/sbin/chown -h "$CUSER:staff" "$UHOME/Desktop/CiCy Desktop.app" 2>/dev/null || true
+  fi
+fi
 exit 0
