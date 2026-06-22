@@ -121,6 +121,18 @@ function importTarball(dest, installDir) {
   });
 }
 
+// `wsl --terminate <distro>`: stop the distro so the NEXT `wsl -d` cold-boots it
+// clean. This is the fix for the「引擎没起来」-on-fresh-install failure: a distro
+// straight out of `wsl --import` is frequently half-initialized / unresponsive,
+// so startEngine's first `wsl -d` command times out, dockerd never launches, and
+// its log is never even created (exactly what we saw on a new Windows user). A
+// terminate + cold boot makes that first real command hit a clean distro.
+function wslTerminate() {
+  return new Promise((resolve) => {
+    execFile("wsl", ["--terminate", DISTRO], { timeout: 30000, windowsHide: true }, () => resolve());
+  });
+}
+
 async function installDistro({ emit } = {}) {
   // 1) Download the PRE-BAKED rootfs (Ubuntu+Docker+image baked in, ~444MB) with
   //    a real progress bar. curl is ~10× faster than node's downloader on OSS.
@@ -147,7 +159,13 @@ async function installDistro({ emit } = {}) {
     await ensureWslKernel({ emit });
     await importTarball(dest, installDir);
   }
-  // 3) Free the ~444MB package now that the distro has everything.
+  // 3) Force a clean cold boot. A freshly-imported distro is often wedged, so the
+  //    next `wsl -d` (startEngine) would time out → dockerd never starts. Terminate
+  //    now so that first real command boots a clean distro instead.
+  emit && emit({ phase: "container", status: "running", message: "重置运行环境(冷启动)…" });
+  try { await wslTerminate(); } catch {}
+
+  // 4) Free the ~444MB package now that the distro has everything.
   try { fs.unlinkSync(dest); } catch {}
 }
 
@@ -195,6 +213,7 @@ async function startEngine() {
   // attempts we hard-kill any half-dead daemon so the next launch is clean.
   for (let attempt = 1; attempt <= 3; attempt++) {
     const at0 = Date.now();
+    let launchErr = null;
     log.info(`[startEngine] attempt ${attempt}/3 — (re)launch dockerd + wait for socket`);
     try {
       await wslRun(
@@ -213,17 +232,24 @@ async function startEngine() {
         // cold again (a restart loop → 「引擎没起来」even though dockerd was fine).
         "for i in $(seq 1 120); do [ -S /var/run/docker.sock ] && docker version >/dev/null 2>&1 && break; sleep 1; done",
         { timeout: 150000 });
-    } catch (e) { log.warn(`[startEngine] attempt ${attempt} launch/wait errored: ${e.message}`); }
+    } catch (e) { launchErr = e; log.warn(`[startEngine] attempt ${attempt} launch/wait errored: ${e.message}`); }
     if (await dockerEngineUp()) { log.info(`[startEngine] ✓ dockerd up on attempt ${attempt} (${((Date.now() - at0) / 1000).toFixed(1)}s)`); return true; }
     log.warn(`[startEngine] attempt ${attempt} dockerd still not up after ${((Date.now() - at0) / 1000).toFixed(1)}s`);
-    // Not up after the wait. Only hard-reset when dockerd actually DIED (crash) —
-    // if it's still alive it's just slow/mid-init, so leave it and let the next
-    // attempt's wait loop keep polling instead of killing a healthy daemon.
-    try {
-      await wslRun(
-        "if ! pgrep dockerd >/dev/null 2>&1; then rm -f /var/run/docker.pid /run/docker.pid /var/run/docker.sock /run/docker.sock; fi; sleep 1",
-        { timeout: 15000 });
-    } catch {}
+    // Reset between attempts. If the launch itself ERRORED (timeout = WSL wedged /
+    // unresponsive — the post-import failure where the command can't even get into
+    // the distro), `wsl --terminate` so the next attempt cold-boots a CLEAN distro;
+    // clearing pid files inside a wedged WSL does nothing. Otherwise dockerd just
+    // died/is slow — clear stale runtime files only when it's actually gone.
+    if (launchErr) {
+      log.info(`[startEngine] launch errored → wsl --terminate for a clean cold boot`);
+      try { await wslTerminate(); } catch {}
+    } else {
+      try {
+        await wslRun(
+          "if ! pgrep dockerd >/dev/null 2>&1; then rm -f /var/run/docker.pid /run/docker.pid /var/run/docker.sock /run/docker.sock; fi; sleep 1",
+          { timeout: 15000 });
+      } catch {}
+    }
   }
   log.error("[startEngine] ✗ dockerd NOT up after 3 attempts");
   return false;
