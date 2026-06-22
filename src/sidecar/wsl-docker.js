@@ -193,13 +193,22 @@ async function startEngine() {
         "if ! pgrep dockerd >/dev/null 2>&1; then rm -f /var/run/docker.pid /run/docker.pid /var/run/docker.sock /run/docker.sock; fi; " +
         "pgrep dockerd >/dev/null 2>&1 || (nohup dockerd >/var/log/cicy-dockerd.log 2>&1 &); " +
         // First boot of a freshly-imported distro: cold WSL2 VM + large pre-baked
-        // /var/lib/docker → give it longer than 20s.
-        "for i in $(seq 1 40); do [ -S /var/run/docker.sock ] && docker version >/dev/null 2>&1 && break; sleep 1; done",
-        { timeout: 60000 });
+        // /var/lib/docker (restoring containers + overlay) can take well over 40s.
+        // Wait up to 120s — the 40s window was too short on cold boot, which made
+        // the next attempt pkill the STILL-INITIALIZING daemon and relaunch it
+        // cold again (a restart loop → 「引擎没起来」even though dockerd was fine).
+        "for i in $(seq 1 120); do [ -S /var/run/docker.sock ] && docker version >/dev/null 2>&1 && break; sleep 1; done",
+        { timeout: 150000 });
     } catch {}
     if (await dockerEngineUp()) return true;
-    // Failed: kill the half-dead daemon + clear runtime files for a clean retry.
-    try { await wslRun("pkill -9 dockerd 2>/dev/null; rm -f /var/run/docker.pid /run/docker.pid /var/run/docker.sock /run/docker.sock; sleep 1", { timeout: 15000 }); } catch {}
+    // Not up after the wait. Only hard-reset when dockerd actually DIED (crash) —
+    // if it's still alive it's just slow/mid-init, so leave it and let the next
+    // attempt's wait loop keep polling instead of killing a healthy daemon.
+    try {
+      await wslRun(
+        "if ! pgrep dockerd >/dev/null 2>&1; then rm -f /var/run/docker.pid /run/docker.pid /var/run/docker.sock /run/docker.sock; fi; sleep 1",
+        { timeout: 15000 });
+    } catch {}
   }
   return false;
 }
