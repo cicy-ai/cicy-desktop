@@ -137,7 +137,7 @@ async function startLogin({ onResult } = {}) {
       // browser, locked-down shell) openExternal silently fails and the user is
       // left stuck "等回调" with no recourse — so we ALSO return the url to the
       // renderer (below) to show a manual "open / copy this link" fallback.
-      shell.openExternal(url).catch((e) => log.warn(`[auth-loopback] openExternal failed: ${e.message}`));
+      require("./open-external").openExternalRobust(url).catch((e) => log.warn(`[auth-loopback] open failed: ${e.message}`));
 
       _timeoutHandle = setTimeout(() => {
         try { onResult && onResult({ error: "timeout" }); } catch {}

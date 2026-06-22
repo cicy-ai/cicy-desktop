@@ -199,10 +199,12 @@ function register(opts = {}) {
   });
 
   // --- shell / app / tos / logs (last rebuild!) ---
-  ipcMain.handle("shell:open-external", (_e, url) => {
+  ipcMain.handle("shell:open-external", async (_e, url) => {
     if (!url) return false;
-    shell.openExternal(String(url));
-    return true;
+    // Robust open: shell.openExternal silently fails on some Windows profiles;
+    // fall back to rundll32/explorer/start (the "手动打开" button uses this too).
+    const { openExternalRobust } = require("./open-external");
+    return await openExternalRobust(url);
   });
   ipcMain.handle("app:quit", () => {
     setTimeout(() => app.quit(), 100);
