@@ -1,6 +1,6 @@
 {
   "name": "cicy-desktop",
-  "version": "2.1.132",
+  "version": "2.1.133",
   "description": "CiCy - AI-powered operating system browser",
   "main": "src/main.js",
   "bin": {
@@ -17,6 +17,11 @@
     "test:ls": "node tests/test-ls.js",
     "build": "electron-builder --publish never",
     "build:ui": "cd packages/ui-react && npm install && npm run build",
+    "build:homepage": "node scripts/build-homepage.cjs",
+    "prebuild:win": "node scripts/build-homepage.cjs",
+    "prebuild:mac": "node scripts/build-homepage.cjs",
+    "prebuild:linux": "node scripts/build-homepage.cjs",
+    "prepublishOnly": "node scripts/build-homepage.cjs",
     "build:win": "electron-builder --win",
     "build:mac": "electron-builder --mac",
     "build:linux": "electron-builder --linux"

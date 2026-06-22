@@ -32,19 +32,9 @@ jobs:
       - name: Install Electron build dependencies in project directory
         run: npm install --save-dev --no-audit electron@41.0.2 electron-builder@26.7.0
 
-      # Installer builds bundle the prebuilt SPA at src/backends/homepage-react.
-      # vite outputs to workers/render/dist, so rebuild + copy here — otherwise the
-      # exe ships a STALE homepage (e.g. missing the version badge). Mirrors npm-publish.yml.
-      - name: Build homepage SPA → src/backends/homepage-react
-        shell: bash
-        run: |
-          cd workers/render
-          npm install --no-audit --no-fund
-          npm run build
-          cd ../..
-          rm -rf src/backends/homepage-react/assets src/backends/homepage-react/index.html
-          cp -r workers/render/dist/. src/backends/homepage-react/
-          echo "homepage bundle: $(grep -o 'assets/index-[A-Za-z0-9_-]*\.js' src/backends/homepage-react/index.html)"
+      # NOTE: the homepage SPA is rebuilt automatically by the prebuild:win npm
+      # hook (scripts/build-homepage.cjs) right before `npm run build:win` below,
+      # so the exe can never ship a stale homepage. No explicit step needed.
 
       - name: Prepare Windows icon
         shell: powershell
