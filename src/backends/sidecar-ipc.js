@@ -172,8 +172,8 @@ function register({ sidecarLogPath } = {}) {
   // (engine up)→启动 / installed(Ubuntu present)→启动 Docker / else→下载安装.
   ipcMain.handle("docker:app-status", async () => {
     try {
-      const s = await appDocker.status(APP_PORT); // { wsl, distro, engineUp, running }
-      return { installed: !!s.distro, dockerRunning: !!s.engineUp, running: !!s.running, port: APP_PORT, platform: process.platform };
+      const s = await appDocker.status(APP_PORT); // { wsl, distro, engineUp, running, unknown }
+      return { installed: !!s.distro, dockerRunning: !!s.engineUp, running: !!s.running, unknown: !!s.unknown, port: APP_PORT, platform: process.platform };
     } catch (e) {
       return { installed: false, dockerRunning: false, running: false, port: APP_PORT, platform: process.platform, error: e.message };
     }

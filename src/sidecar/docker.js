@@ -563,10 +563,15 @@ async function wslMissing() {
   // A sync call there blocked the whole Electron main process → the window went
   // "未响应". Capture stdout+stderr even on a non-zero exit (a fresh Windows
   // without WSL prints the "not installed / --install" hint and exits non-zero).
+  // TRI-STATE: true = WSL missing, false = WSL present, null = couldn't tell
+  // (wsl didn't answer / timed out). null lets status() report `unknown` instead
+  // of falsely concluding "not installed" when WSL is merely stuck.
   return await new Promise((resolve) => {
     execFile("wsl", ["--status"], { timeout: 8000, windowsHide: true, encoding: "utf16le" }, (err, stdout, stderr) => {
       const s = String((stdout || "") + (stderr || "") + (err && err.message ? err.message : ""));
-      resolve(/未安装|not installed|--install/i.test(s));
+      if (/未安装|not installed|--install/i.test(s)) return resolve(true);   // definitely missing
+      if (err && (err.killed || err.signal || err.code === "ETIMEDOUT")) return resolve(null); // timed out → unknown
+      resolve(false); // wsl present (errored for another reason → assume OK)
     });
   });
 }

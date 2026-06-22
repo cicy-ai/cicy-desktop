@@ -1827,7 +1827,11 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
   const running = !!status?.running || dockerTeam?.status === "running";
   const dockerRunning = !!status?.dockerRunning;
   const installed = !!status?.installed;
-  const tone = running ? "ok" : (dockerRunning || installed) ? "warn" : "off";
+  // unknown = the status probe couldn't reach WSL (stuck / still booting after a
+  // reboot). Do NOT fall through to 「下载安装」— that lies (it IS installed, WSL
+  // just didn't answer). Show a retry state so the user re-probes, not reinstalls.
+  const unknown = !!status?.unknown && !running && !dockerRunning && !installed;
+  const tone = running ? "ok" : (dockerRunning || installed || unknown) ? "warn" : "off";
   const isBusy = !!busy;
   const stateText = running
     ? tr("docker.running", "运行中")
@@ -1835,7 +1839,9 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
       ? tr("docker.notRunning", "未启动 · 点「启动」")
       : installed
         ? tr("docker.engineDown", "Docker 未运行 · 点启动")
-        : tr("docker.notInstalled", "Docker Desktop 未安装");
+        : unknown
+          ? tr("docker.wslUnresponsive", "WSL 未响应 · 点「重试检测」")
+          : tr("docker.notInstalled", "Docker Desktop 未安装");
 
   const ctaLabel = busy === "open"
     ? tr("docker.opening", "打开中…")
@@ -1847,7 +1853,9 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
         ? tr("docker.start", "启动")
         : installed
           ? tr("docker.startDocker", "启动 Docker")
-          : tr("docker.install", "下载安装");
+          : unknown
+            ? tr("docker.retryProbe", "重试检测")
+            : tr("docker.install", "下载安装");
 
   const onCta = async () => {
     if (isBusy) return;
@@ -1863,6 +1871,9 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
       try { await onOpen?.(dockerTeam?.id); } finally { setBusy(""); }
       return;
     }
+    // WSL didn't answer the probe → re-check instead of (re)installing. If WSL
+    // has since come up (e.g. autostart finished), this flips the card to 打开/启动.
+    if (unknown) { await checkStatus(); return; }
     runBootstrap();
   };
 

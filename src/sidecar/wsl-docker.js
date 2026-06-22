@@ -89,13 +89,19 @@ function wslRunStream(cmd, { emit, phase = "install-docker", timeout = 900000, d
 }
 
 // Is `DISTRO` registered? `wsl -l -q` lists installed distros (UTF-16LE).
+// TRI-STATE: true = distro present, false = wsl answered + distro absent,
+// null = wsl DIDN'T answer (timeout/hung). The null case matters: a stuck WSL
+// must NOT be reported as "not installed" (that's what made the homepage show
+// 「下载安装」even though it was installed). Callers that only need a boolean
+// treat null as falsy (unchanged); status() surfaces null as `unknown`.
 async function distroInstalled(distro = DISTRO) {
   if (process.platform !== "win32") return false;
-  // ASYNC execFile, NOT execFileSync: this runs on the homepage's status poll,
-  // and a sync `wsl -l -q` on a cold post-reboot WSL blocked the Electron main
-  // process for seconds → window "未响应". (waitUntil awaits the promise fine.)
+  // ASYNC execFile (sync froze the main process on a cold/stuck WSL → "未响应").
   return await new Promise((resolve) => {
     execFile("wsl", ["-l", "-q"], { timeout: 8000, windowsHide: true, encoding: "utf16le" }, (err, stdout) => {
+      // Our timeout killed it / it was signalled → WSL didn't answer → UNKNOWN.
+      if (err && (err.killed || err.signal || err.code === "ETIMEDOUT")) return resolve(null);
+      // Other errors (wsl missing / non-zero exit) → definitively not our distro.
       if (err) return resolve(false);
       resolve(String(stdout || "").split(/\r?\n/).map((s) => s.replace(/\0/g, "").trim()).filter(Boolean)
         .some((d) => d.toLowerCase() === distro.toLowerCase()));
@@ -364,11 +370,19 @@ function ensureDesktopShortcut(volume = "cicy-team-8009", port = 8009) {
 
 // Composite status for the card.
 async function status(port = 8009) {
-  const wsl = !(await docker.wslMissing());
-  const distro = wsl && (await distroInstalled());
-  const engineUp = distro && (await dockerEngineUp());
-  const running = engineUp && (await probeHealth(port));
-  return { wsl, distro, engineUp, running };
+  // `unknown` = WSL didn't answer a probe (stuck/booting). The homepage uses it
+  // to show 「检测中/WSL 无响应·重试」instead of falsely showing 「下载安装」.
+  const miss = await docker.wslMissing();           // true | false | null(unknown)
+  if (miss === null) return { wsl: false, distro: false, engineUp: false, running: false, unknown: true };
+  const wsl = !miss;
+  let distro = false, unknown = false;
+  if (wsl) {
+    const di = await distroInstalled();             // true | false | null(unknown)
+    if (di === null) unknown = true; else distro = !!di;
+  }
+  const engineUp = !!(distro && (await dockerEngineUp()));
+  const running = !!(engineUp && (await probeHealth(port)));
+  return { wsl, distro, engineUp, running, unknown };
 }
 
 // Guard against overlapping bootstrap runs (double-click 重试 / re-entrancy):

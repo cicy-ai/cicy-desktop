@@ -7,11 +7,14 @@ const https = require("https");
 const { URL } = require("url");
 const { resolveBackendUrl } = require("./window-manager");
 
-function probeBackend(backend, { timeoutMs = 4000 } = {}) {
+async function probeBackend(backend, { timeoutMs = 4000 } = {}) {
+  // resolveBackendUrl is async now (it reads the token via async docker/wsl probes
+  // — the old sync version blocked the main process here on every poll when
+  // docker/WSL was hung). Resolve it BEFORE the http-probe Promise below.
+  if (!backend) return { ok: false, error: "no backend" };
+  const baseUrl = await resolveBackendUrl(backend).catch(() => null);
+  if (!baseUrl) return { ok: false, error: "no url" };
   return new Promise(resolve => {
-    if (!backend) return resolve({ ok: false, error: "no backend" });
-    const baseUrl = resolveBackendUrl(backend);
-    if (!baseUrl) return resolve({ ok: false, error: "no url" });
     let u;
     try {
       // Strip any token query for /api/health; the endpoint is unauthenticated.

@@ -7,6 +7,9 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const { execFile } = require("child_process");
+const { promisify } = require("util");
+const execFileAsync = promisify(execFile); // ASYNC docker/wsl probes — sync ones froze the main process
 const sidecar = require("../sidecar/cicy-code");
 const { createWindow } = require("../utils/window-utils");
 const registry = require("./registry");
@@ -37,7 +40,7 @@ function findCicyCodeDaemonHome() {
   return os.homedir();
 }
 
-function readCicyAiApiToken() {
+async function readCicyAiApiToken() {
   // STEP 1 — Docker mode (preferred on every platform): cicy-code runs
   // inside a container named "cicy", so its global.json (the SOURCE OF
   // TRUTH for the cicy-code web UI token) lives in the container, NOT
@@ -65,8 +68,9 @@ function readCicyAiApiToken() {
     let raw = "";
     for (const bin of dockerBins) {
       try {
-        raw = execFileSync(bin, ["exec", "cicy", "cat", "/home/cicy/cicy-ai/global.json"],
-          { encoding: "utf8", timeout: 4000, stdio: ["ignore", "pipe", "ignore"] }).trim();
+        const { stdout } = await execFileAsync(bin, ["exec", "cicy", "cat", "/home/cicy/cicy-ai/global.json"],
+          { encoding: "utf8", timeout: 4000, windowsHide: true });
+        raw = String(stdout || "").trim();
         if (raw) break;
       } catch {}
     }
@@ -82,15 +86,14 @@ function readCicyAiApiToken() {
   // \\wsl$\<distro>\home\<user>\cicy-ai\global.json.
   if (process.platform === "win32") {
     try {
-      const { execFileSync } = require("child_process");
-      const wslPath = execFileSync(
+      const { stdout: outA } = await execFileAsync(
         "wsl.exe", ["-e", "bash", "-c", "echo $HOME/cicy-ai/global.json"],
-        { encoding: "utf8", timeout: 3000 }
-      ).trim();
-      const winPath = execFileSync(
+        { encoding: "utf8", timeout: 3000, windowsHide: true });
+      const wslPath = String(outA || "").trim();
+      const { stdout: outB } = await execFileAsync(
         "wsl.exe", ["-e", "wslpath", "-w", wslPath],
-        { encoding: "utf8", timeout: 3000 }
-      ).trim();
+        { encoding: "utf8", timeout: 3000, windowsHide: true });
+      const winPath = String(outB || "").trim();
       if (winPath) {
         const raw = fs.readFileSync(winPath, "utf8");
         const data = JSON.parse(raw);
@@ -116,8 +119,8 @@ function readCicyAiApiToken() {
   return "";
 }
 
-function buildLocalUrl() {
-  const token = readCicyAiApiToken();
+async function buildLocalUrl() {
+  const token = await readCicyAiApiToken();
   const tokenQs = token ? `?token=${encodeURIComponent(token)}` : "";
   return `http://${LOCAL_HOST}:${LOCAL_PORT}/${tokenQs}`;
 }
@@ -131,9 +134,9 @@ function buildRemoteUrl(backend) {
   return url;
 }
 
-function resolveBackendUrl(backend) {
+async function resolveBackendUrl(backend) {
   if (!backend) return null;
-  if (backend.kind === "local") return buildLocalUrl();
+  if (backend.kind === "local") return await buildLocalUrl();
   return buildRemoteUrl(backend);
 }
 
@@ -158,7 +161,7 @@ async function openWindowForBackend(backend, opts = {}) {
     // load its UI. start() is idempotent: returns null fast if a daemon is
     // already on :8008 (e.g. an externally-managed cicy-code).
     await sidecar.start({ logPath: opts.sidecarLogPath });
-    url = buildLocalUrl();
+    url = await buildLocalUrl();
   } else {
     url = buildRemoteUrl(backend);
   }

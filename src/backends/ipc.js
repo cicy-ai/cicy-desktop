@@ -77,17 +77,17 @@ function register(opts = {}) {
   registered = true;
 
   // --- backends ---
-  ipcMain.handle("backends:list", () => {
+  ipcMain.handle("backends:list", async () => {
     const { resolveBackendUrl } = require("./window-manager");
-    return registry.list().map(b => ({ ...b, resolvedUrl: resolveBackendUrl(b) }));
+    return Promise.all(registry.list().map(async b => ({ ...b, resolvedUrl: await resolveBackendUrl(b) })));
   });
   // Resolve a single backend URL on demand (e.g. just before open_window so
   // the token is always fresh rather than stale from the last loadBackends).
-  ipcMain.handle("backends:resolve-url", (_e, id) => {
+  ipcMain.handle("backends:resolve-url", async (_e, id) => {
     const { resolveBackendUrl } = require("./window-manager");
     const b = registry.get(id);
     if (!b) return null;
-    return resolveBackendUrl(b);
+    return await resolveBackendUrl(b);
   });
   ipcMain.handle("backends:add", (_e, input) => registry.add(input || {}));
   ipcMain.handle("backends:remove", (_e, id) => registry.remove(id));
