@@ -360,6 +360,18 @@ function curlDownload(url, dest, { emit, phase = "image", label = "下载镜像"
 // (much faster here); falls back to the node downloader if curl is unavailable.
 async function downloadImageTarball({ emit } = {}) {
   const dest = imageTarballPath();
+  // REUSE a complete tarball already on disk (staged into ~/Downloads, or a prior
+  // run) BEFORE curlDownload touches it — curlDownload doesn't skip a complete file
+  // (and a failed curl truncates it). headSize uses node http so it works even when
+  // curl can't resolve the host. Skips the ~500MB re-download per new user.
+  try {
+    const expected = await headSize(R2_TARBALL);
+    const have = fs.statSync(dest).size;
+    if (expected > 0 && have === expected) {
+      emit && emit({ phase: "image", status: "skip", message: "镜像:已有完整包,跳过下载", progress: 100, received: have, total: expected });
+      return dest;
+    }
+  } catch {}
   try { await curlDownload(R2_TARBALL, dest, { emit, phase: "image", label: "下载镜像" }); }
   catch (e) {
     emit && emit({ phase: "image", status: "running", message: `curl 下载失败(${e.message}),改用内置下载…` });
