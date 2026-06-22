@@ -638,18 +638,13 @@ const MAC_LAUNCHER_TARGET = path.join(DESKTOP_DIR, "cicy-dektop.command");
 const WINDOWS_LAUNCHER_TARGET = path.join(DESKTOP_DIR, "cicy-desktop.cmd");
 
 function ensureDesktopLauncher() {
-  try {
-    if (process.platform === "darwin") {
-      ensureMacDesktopLauncher();
-      return;
-    }
-
-    if (process.platform === "win32") {
-      ensureWindowsDesktopLauncher();
-    }
-  } catch (error) {
-    log.warn(`[Launcher] Failed to ensure desktop launcher: ${error.message}`);
-  }
+  // Disabled (主人: bug — 桌面别再放快捷方式): this used to drop a dev "npm start"
+  // launcher on the Desktop EVERY launch — cicy-desktop.cmd on Windows,
+  // cicy-dektop.command on macOS. That's unwanted clutter: the app is opened via
+  // its installer / Start-menu / Dock shortcut, not this .cmd. No desktop
+  // launcher is created anymore (both platforms). The ensure*DesktopLauncher
+  // helpers below are kept dead-but-harmless for reference.
+  return;
 }
 
 function ensureMacDesktopLauncher() {
