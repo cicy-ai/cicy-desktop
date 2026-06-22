@@ -155,10 +155,24 @@ async function installDistro({ emit } = {}) {
   // 1) Download the PRE-BAKED rootfs (Ubuntu+Docker+image baked in, ~444MB) with
   //    a real progress bar. curl is ~10× faster than node's downloader on OSS.
   const dest = rootfsPath();
-  try { await docker.curlDownload(ROOTFS_URL, dest, { emit, phase: "image", label: "下载运行环境" }); }
-  catch (e) {
-    emit && emit({ phase: "image", status: "running", message: `下载器异常(${e.message}),改用备用下载…` });
-    await docker.ensureDownloaded(ROOTFS_URL, dest, null, { emit, phase: "image", label: "下载运行环境" });
+  // REUSE a complete rootfs already on disk (pre-staged into ~/Downloads, or left by
+  // a prior run) BEFORE curlDownload touches it. The bug: curlDownload doesn't skip a
+  // complete file (and on a failed curl it truncated the staged 447MB), so a staged
+  // rootfs got re-downloaded. headSize uses node http (works even when curl can't
+  // resolve the host — the `curl exit 6` we saw), so this skip is reliable.
+  let haveComplete = false;
+  try {
+    const expected = await docker.headSize(ROOTFS_URL);
+    const have = fs.statSync(dest).size;
+    haveComplete = expected > 0 && have === expected;
+    if (haveComplete) emit && emit({ phase: "image", status: "skip", message: "下载运行环境:已有完整包,跳过下载", progress: 100, received: have, total: expected });
+  } catch {}
+  if (!haveComplete) {
+    try { await docker.curlDownload(ROOTFS_URL, dest, { emit, phase: "image", label: "下载运行环境" }); }
+    catch (e) {
+      emit && emit({ phase: "image", status: "running", message: `下载器异常(${e.message}),改用备用下载…` });
+      await docker.ensureDownloaded(ROOTFS_URL, dest, null, { emit, phase: "image", label: "下载运行环境" });
+    }
   }
   // 2) Import as an ISOLATED WSL2 distro: its OWN VHDX under a dedicated dir, so
   //    it never touches the user's existing distros. `--version 2` sets just THIS
@@ -252,6 +266,25 @@ const BOOT_SCRIPT_B64 = Buffer.from(
   "pgrep dockerd >/dev/null 2>&1 || setsid sh -c 'exec dockerd >/var/log/dockerd.log 2>&1 </dev/null' &\n"
 ).toString("base64");
 
+// Hold the distro OPEN. The flip side of detaching dockerd: once the launching
+// wsl.exe exits, WSL tears the distro down if no session holds it — killing the
+// just-launched dockerd (the "启动引擎 转圈但 dockerd=none" we saw). A detached,
+// long-lived `wsl … sleep infinity` keeps the distro alive so dockerd (and the
+// container) survive. unref'd so it never blocks the app; survives app exit too.
+let _keepalive = null;
+function ensureKeepalive() {
+  if (process.platform !== "win32") return;
+  if (_keepalive && _keepalive.exitCode == null && !_keepalive.killed) return;
+  try {
+    _keepalive = spawn("wsl", ["-d", DISTRO, "-u", "root", "--", "sh", "-c", "exec sleep infinity"],
+      { detached: true, stdio: "ignore", windowsHide: true });
+    _keepalive.on("error", (e) => { log.warn(`[keepalive] ${e.message}`); _keepalive = null; });
+    _keepalive.on("exit", () => { _keepalive = null; });
+    _keepalive.unref();
+    log.info("[keepalive] holding distro open (sleep infinity)");
+  } catch (e) { log.warn(`[keepalive] spawn failed: ${e.message}`); }
+}
+
 async function launchDockerd() {
   await wslRun(
     `echo ${BOOT_SCRIPT_B64} | base64 -d > /usr/local/sbin/start-dockerd.sh 2>/dev/null; chmod +x /usr/local/sbin/start-dockerd.sh 2>/dev/null; ` +
@@ -260,8 +293,10 @@ async function launchDockerd() {
     // Stale /var/run/docker.{pid,sock} from the pre-baked rootfs make a fresh dockerd
     // refuse to start; clear them when dockerd isn't already running.
     "if ! pgrep dockerd >/dev/null 2>&1; then rm -f /var/run/docker.pid /run/docker.pid /var/run/docker.sock /run/docker.sock; fi; " +
-    "pgrep dockerd >/dev/null 2>&1 || setsid bash -c 'exec dockerd >/var/log/cicy-dockerd.log 2>&1 </dev/null' & " +
-    "true",
+    // setsid --fork: fork dockerd into a NEW session and have setsid EXIT immediately,
+    // so this wsl call returns at once and dockerd is fully orphaned (no `& true`
+    // backgrounding race). It only survives because ensureKeepalive() holds the distro.
+    "pgrep dockerd >/dev/null 2>&1 || setsid --fork bash -c 'exec dockerd >/var/log/cicy-dockerd.log 2>&1 </dev/null'",
     { timeout: 20000 });
 }
 
@@ -273,7 +308,8 @@ async function startEngine() {
   for (let attempt = 1; attempt <= 3; attempt++) {
     const at0 = Date.now();
     let stuck = false;
-    log.info(`[startEngine] attempt ${attempt}/3 — launch dockerd (detached) + poll socket`);
+    log.info(`[startEngine] attempt ${attempt}/3 — keepalive + launch dockerd (detached) + poll socket`);
+    ensureKeepalive(); // hold the distro open BEFORE launching, or the teardown kills dockerd
     try { await launchDockerd(); }
     catch (e) { stuck = true; log.warn(`[startEngine] attempt ${attempt} launch errored — WSL stuck? ${e.message}`); }
     if (!stuck) {

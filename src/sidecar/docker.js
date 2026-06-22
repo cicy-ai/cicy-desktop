@@ -722,5 +722,5 @@ module.exports = {
   bootstrap, probeHealth, readContainerToken, dockerDesktopExe, desktopDir, downloadsDir, imageTarballPath,
   launchElevated, wslMissing, ensureWsl,
   // platform-agnostic download/retry primitives, reused by native.js
-  ensureDownloaded, curlDownload, withRetry, waitUntil, run,
+  ensureDownloaded, curlDownload, withRetry, waitUntil, run, headSize,
 };
