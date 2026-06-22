@@ -562,6 +562,19 @@ async function addTeam(spec) {
     : slugifyId(spec.id || baseUrlKey || (port ? `local-${port}` : "local"));
   if (!id) return { ok: false, error: "could not derive id" };
 
+  // The Docker app node MUST self-identify as is_docker AT CREATION — atomically,
+  // in the SAME writeNodes as the node itself — not in a later updateTeam. Reason:
+  // addTeam fires syncNameToCloud(id) below (fire-and-forget). If is_docker isn't
+  // already on the node, that first sync sees a plain local team, device-registers
+  // it, and the cloud hands back THIS DEVICE's shared team (= the 8008 team) — so
+  // :8009 and :8008 end up on one cloud_team_id and renaming one renames both
+  // ("串名"). Marking is_docker here (explicit spec OR by the docker app port, which
+  // doesn't depend on the caller setting a flag) closes that window for ALL creation
+  // paths (sidecar registerAppTeam, a cloud deeplink, a manual add). cloud_team_id
+  // (the node's OWN independent team) is written the same atomic way when known.
+  const DOCKER_PORT = String(process.env.CICY_DOCKER_APP_PORT || 8009);
+  const isDockerNode = !!spec.is_docker || (port != null && String(port) === DOCKER_PORT);
+
   const now = new Date().toISOString();
   const patch = {
     name:           spec.name           !== undefined ? String(spec.name || unnamedName()) : undefined,
@@ -574,6 +587,11 @@ async function addTeam(spec) {
     install_path:   spec.install_path   ?? undefined,
     container_name: spec.container_name ?? undefined,
     image:          spec.image          ?? undefined,
+    // is_docker: only ever set TRUE (never flip an existing node to false).
+    is_docker:      isDockerNode ? true : undefined,
+    // cloud_team_id: set only when the caller passes a real id — a falsy value is
+    // dropped so we never clobber an already-correct independent team with null.
+    cloud_team_id:  spec.cloud_team_id ? spec.cloud_team_id : undefined,
   };
   // Drop undefined keys so we never overwrite existing fields with null.
   Object.keys(patch).forEach(k => patch[k] === undefined && delete patch[k]);

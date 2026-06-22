@@ -203,9 +203,20 @@ function register({ sidecarLogPath } = {}) {
     const lt = require("./local-teams");
     await ensureDockerTeam(); // 确保独立云端 team 存在 + 拿到 teamId/title
     const title = (dockerTeamReg && dockerTeamReg.title) || "Docker 团队";
-    const r = await lt.addTeam({ base_url: `http://127.0.0.1:${APP_PORT}`, name: title, skipTokenAutofill: true });
-    // 把 docker 独立 team 的 cloud_team_id 写到这个本地节点(DockerCard 据此账单 + 改名),
-    // 并标记 is_docker(syncNameToCloud 跳过它,不被本机 deviceId 复用回 8008)。
+    // is_docker + cloud_team_id are passed INTO addTeam so they land in the SAME
+    // writeNodes as the node — before addTeam's fire-and-forget syncNameToCloud
+    // runs. That's what stops the freshly-created :8009 node from device-registering
+    // into THIS device's shared (8008) team and 串名. (addTeam also self-detects
+    // is_docker by the :8009 port, so this is belt-and-suspenders.)
+    const r = await lt.addTeam({
+      base_url: `http://127.0.0.1:${APP_PORT}`,
+      name: title,
+      skipTokenAutofill: true,
+      is_docker: true,
+      cloud_team_id: (dockerTeamReg && dockerTeamReg.teamId) || undefined,
+    });
+    // Belt: re-affirm on the persisted node (no-op when addTeam already set them;
+    // also late-binds cloud_team_id if ensureDockerTeam minted the team just now).
     if (r && r.id) {
       try { await lt.updateTeam(r.id, { is_docker: true, ...(dockerTeamReg && dockerTeamReg.teamId ? { cloud_team_id: dockerTeamReg.teamId } : {}) }); } catch {}
     }
