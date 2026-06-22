@@ -98,7 +98,11 @@ async function distroInstalled(distro = DISTRO) {
   if (process.platform !== "win32") return false;
   // ASYNC execFile (sync froze the main process on a cold/stuck WSL → "未响应").
   return await new Promise((resolve) => {
-    execFile("wsl", ["-l", "-q"], { timeout: 8000, windowsHide: true, encoding: "utf16le" }, (err, stdout) => {
+    // 25s, NOT 8s: a COLD WSL2 VM takes 10-20s just to boot before it answers the
+    // first `wsl -l -q`, so an 8s timeout falsely returns null(unknown) → the
+    // homepage gets stuck on 「重试检测」 instead of offering 「安装」. A warm WSL
+    // answers in <1s, so the longer ceiling never bites in the normal case.
+    execFile("wsl", ["-l", "-q"], { timeout: 25000, windowsHide: true, encoding: "utf16le" }, (err, stdout) => {
       // Our timeout killed it / it was signalled → WSL didn't answer → UNKNOWN.
       if (err && (err.killed || err.signal || err.code === "ETIMEDOUT")) return resolve(null);
       // Other errors (wsl missing / non-zero exit) → definitively not our distro.

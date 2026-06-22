@@ -567,7 +567,7 @@ async function wslMissing() {
   // (wsl didn't answer / timed out). null lets status() report `unknown` instead
   // of falsely concluding "not installed" when WSL is merely stuck.
   return await new Promise((resolve) => {
-    execFile("wsl", ["--status"], { timeout: 8000, windowsHide: true, encoding: "utf16le" }, (err, stdout, stderr) => {
+    execFile("wsl", ["--status"], { timeout: 25000, windowsHide: true, encoding: "utf16le" }, (err, stdout, stderr) => {
       const s = String((stdout || "") + (stderr || "") + (err && err.message ? err.message : ""));
       if (/未安装|not installed|--install/i.test(s)) return resolve(true);   // definitely missing
       if (err && (err.killed || err.signal || err.code === "ETIMEDOUT")) return resolve(null); // timed out → unknown

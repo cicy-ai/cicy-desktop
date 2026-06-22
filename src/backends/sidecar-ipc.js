@@ -16,6 +16,10 @@ const { ipcMain } = require("electron");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const log = require("electron-log");
+// Background-computed docker status lives here; the homepage READS this (never
+// probes WSL live → never blocks the UI / strands it on 「重试检测」).
+const DOCKER_STATUS_FILE = path.join(os.homedir(), "cicy-ai", "db", "docker-status.json");
 const sidecar = require("../sidecar/cicy-code");
 const docker = require("../sidecar/docker");
 const wslDocker = require("../sidecar/wsl-docker"); // Docker-版 via WSL2+Ubuntu (方案 A, win32)
@@ -110,6 +114,46 @@ function register({ sidecarLogPath } = {}) {
   if (registered) return;
   registered = true;
 
+  // ---- Docker status: computed by a dedicated NON-BLOCKING background daemon ----
+  // The homepage's 「重试检测」 / 「未响应」 came from probing WSL live on the UI's
+  // status call: a cold/busy WSL2 VM takes 10-20s to answer, timed out, and got
+  // mis-read as unknown. Instead the daemon below detects status off the UI thread,
+  // caches it (memory + file), AND auto-starts whatever is installed-but-down. The
+  // docker:app-status handler just returns the cache — instant, never blocks.
+  let _dockerStatusCache = null;
+  let _dockerDaemonBusy = false;
+  async function refreshDockerStatus() {
+    try {
+      const s = await appDocker.status(APP_PORT); // { wsl, distro, engineUp, running, unknown }
+      _dockerStatusCache = { installed: !!s.distro, dockerRunning: !!s.engineUp, running: !!s.running, unknown: !!s.unknown, port: APP_PORT, platform: process.platform, ts: Date.now() };
+    } catch (e) {
+      _dockerStatusCache = { installed: false, dockerRunning: false, running: false, unknown: true, port: APP_PORT, platform: process.platform, error: e.message, ts: Date.now() };
+    }
+    try { fs.mkdirSync(path.dirname(DOCKER_STATUS_FILE), { recursive: true }); fs.writeFileSync(DOCKER_STATUS_FILE, JSON.stringify(_dockerStatusCache)); } catch {}
+    return _dockerStatusCache;
+  }
+  async function reconcileDocker() {
+    if (_dockerDaemonBusy) return _dockerStatusCache;
+    _dockerDaemonBusy = true;
+    try {
+      const s = await refreshDockerStatus();
+      // 没启动的给我启动: distro installed but :8009 not healthy (and WSL not unknown)
+      // → bring it up. bootstrap is idempotent: it skips done steps and just runs
+      // startEngine + the container. Skip when not installed (would silently pull
+      // the 444MB rootfs) or unknown (WSL not answering — let the next tick retry).
+      if (s.installed && !s.running && !s.unknown) {
+        log.info("[docker-daemon] installed but :8009 down → auto-starting (bootstrap idempotent)");
+        try { await appDocker.bootstrap(appOpts()); } catch (e) { log.warn(`[docker-daemon] auto-start failed: ${e.message}`); }
+        await refreshDockerStatus();
+      }
+    } finally { _dockerDaemonBusy = false; }
+    return _dockerStatusCache;
+  }
+  function startDockerStatusDaemon() {
+    setTimeout(() => { reconcileDocker().catch(() => {}); }, 2000);     // shortly after startup
+    setInterval(() => { reconcileDocker().catch(() => {}); }, 60000);   // keep fresh + self-heal
+  }
+
   ipcMain.handle("sidecar:status", async () => {
     const running = await sidecar.probeExisting(PORT);
     return { running };
@@ -170,13 +214,14 @@ function register({ sidecarLogPath } = {}) {
   // ---- Docker-版 cicy-code on :8009 — WSL2 + Ubuntu + Docker Engine (方案 A) ----
   // Card states (主人: 状态分清楚): running(:8009 healthy)→打开 / dockerRunning
   // (engine up)→启动 / installed(Ubuntu present)→启动 Docker / else→下载安装.
-  ipcMain.handle("docker:app-status", async () => {
-    try {
-      const s = await appDocker.status(APP_PORT); // { wsl, distro, engineUp, running, unknown }
-      return { installed: !!s.distro, dockerRunning: !!s.engineUp, running: !!s.running, unknown: !!s.unknown, port: APP_PORT, platform: process.platform };
-    } catch (e) {
-      return { installed: false, dockerRunning: false, running: false, port: APP_PORT, platform: process.platform, error: e.message };
-    }
+  ipcMain.handle("docker:app-status", () => {
+    // NON-BLOCKING: return what the background daemon already computed (memory →
+    // file). NEVER probe WSL live here — that's what froze the UI / stranded the
+    // card on 「重试检测」. Kick a refresh if we have nothing cached yet.
+    if (_dockerStatusCache) return _dockerStatusCache;
+    try { return JSON.parse(fs.readFileSync(DOCKER_STATUS_FILE, "utf8")); } catch {}
+    reconcileDocker().catch(() => {});
+    return { installed: false, dockerRunning: false, running: false, unknown: true, port: APP_PORT, platform: process.platform };
   });
 
   // Common run options for the :8009 instance: its own container/volume + the
@@ -422,6 +467,10 @@ function register({ sidecarLogPath } = {}) {
       });
     });
   });
+
+  // Kick the non-blocking docker status daemon: detect on startup + every 60s,
+  // cache to file, and auto-start what's installed-but-down. The UI just reads it.
+  startDockerStatusDaemon();
 }
 
 module.exports = { register };
