@@ -319,11 +319,14 @@ export default function App() {
         }
         return;
       }
-      // /api/teams drives the team grid — it is the ONLY critical call here.
-      if (!teamsRes?.ok) throw new Error(`/api/teams ${teamsRes?.status || "?"} ${teamsRes?.error || ""}`);
-      // /api/teams is bare: { teams: [...] }
-      const teamsBody = JSON.parse(teamsRes.body || "{}");
-      setTeams(Array.isArray(teamsBody?.teams) ? teamsBody.teams : []);
+      // /api/teams drives the cloud team grid. On a transient failure (network /
+      // 5xx) degrade SILENTLY: keep whatever teams we already have and let the
+      // background sync retry — do NOT throw. 主人: 不把报错显示给用户,后台重试。
+      // (Throwing here painted the homepage with a red "/api/teams …" error.)
+      if (teamsRes?.ok) {
+        const teamsBody = JSON.parse(teamsRes.body || "{}"); // bare: { teams: [...] }
+        setTeams(Array.isArray(teamsBody?.teams) ? teamsBody.teams : []);
+      }
       // /api/user/self is best-effort: it only fills the profile display name.
       // A 404 / failure here must NOT block login or the team list (the cloud
       // endpoint can lag) — degrade to a null profile instead of throwing.
@@ -337,7 +340,9 @@ export default function App() {
         setMe(null);
       }
     } catch (e) {
-      setProfileError(e.message || String(e));
+      // 不把报错显示给用户 —— 一个瞬时的云端/网络失败不该让首页飘红;后台
+      // refreshCloudTeams 会按周期静默重试。清掉任何残留的错误态。
+      setProfileError("");
     } finally {
       setProfileLoading(false);
     }
