@@ -89,13 +89,18 @@ function wslRunStream(cmd, { emit, phase = "install-docker", timeout = 900000, d
 }
 
 // Is `DISTRO` registered? `wsl -l -q` lists installed distros (UTF-16LE).
-function distroInstalled(distro = DISTRO) {
+async function distroInstalled(distro = DISTRO) {
   if (process.platform !== "win32") return false;
-  try {
-    const out = execFileSync("wsl", ["-l", "-q"], { timeout: 8000, windowsHide: true, encoding: "utf16le" });
-    return String(out).split(/\r?\n/).map((s) => s.replace(/\0/g, "").trim()).filter(Boolean)
-      .some((d) => d.toLowerCase() === distro.toLowerCase());
-  } catch { return false; }
+  // ASYNC execFile, NOT execFileSync: this runs on the homepage's status poll,
+  // and a sync `wsl -l -q` on a cold post-reboot WSL blocked the Electron main
+  // process for seconds → window "未响应". (waitUntil awaits the promise fine.)
+  return await new Promise((resolve) => {
+    execFile("wsl", ["-l", "-q"], { timeout: 8000, windowsHide: true, encoding: "utf16le" }, (err, stdout) => {
+      if (err) return resolve(false);
+      resolve(String(stdout || "").split(/\r?\n/).map((s) => s.replace(/\0/g, "").trim()).filter(Boolean)
+        .some((d) => d.toLowerCase() === distro.toLowerCase()));
+    });
+  });
 }
 
 // Install the Ubuntu distro WITHOUT launching its interactive first-run setup
@@ -359,8 +364,8 @@ function ensureDesktopShortcut(volume = "cicy-team-8009", port = 8009) {
 
 // Composite status for the card.
 async function status(port = 8009) {
-  const wsl = !docker.wslMissing();
-  const distro = wsl && distroInstalled();
+  const wsl = !(await docker.wslMissing());
+  const distro = wsl && (await distroInstalled());
   const engineUp = distro && (await dockerEngineUp());
   const running = engineUp && (await probeHealth(port));
   return { wsl, distro, engineUp, running };
@@ -414,7 +419,7 @@ async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-dock
 
   // 1) WSL2 platform
   begin("ensure-wsl");
-  if (docker.wslMissing()) {
+  if (await docker.wslMissing()) {
     const w = await docker.ensureWsl({ emit });
     if (w.needsReboot) { fail("wsl_reboot_required"); emit({ phase: "done", status: "reboot", message: "WSL2 正在安装——请【重启 Windows】后回来点「重试」继续。" }); finish(false, "wsl_reboot_required"); return { ok: false, reason: "wsl_reboot_required" }; }
     done();
@@ -422,7 +427,7 @@ async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-dock
 
   // 2) Ubuntu distro
   begin("ensure-distro");
-  if (!distroInstalled()) {
+  if (!(await distroInstalled())) {
     try { await installDistro({ emit }); } catch (e) { fail("distro_install_failed", e.message); emit({ phase: "install-docker", status: "error", message: `Ubuntu 安装失败：${e.message}（点重试）` }); finish(false, "distro_install_failed"); return { ok: false, reason: "distro_install_failed" }; }
     const t0 = Date.now();
     const ok = await docker.waitUntil(() => distroInstalled(), { totalMs: 600000, everyMs: 5000, onTick: () => emit({ phase: "install-docker", status: "running", message: `正在下载/注册 Ubuntu…（已 ${Math.round((Date.now() - t0) / 1000)}s,首次较慢请耐心）` }) });

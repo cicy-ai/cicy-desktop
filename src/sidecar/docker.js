@@ -556,16 +556,19 @@ function launchElevated(exe, args, { emit } = {}) {
 // hangs on "正在启动 Docker Desktop". Detect a missing WSL. `wsl` prints UTF-16
 // and a fresh Windows without the feature says "未安装 / not installed / can be
 // installed by running wsl.exe --install".
-function wslMissing() {
+async function wslMissing() {
   if (process.platform !== "win32") return false;
-  try {
-    const out = execFileSync("wsl", ["--status"], { timeout: 8000, windowsHide: true, encoding: "utf16le", stdio: ["ignore", "pipe", "pipe"] });
-    return /未安装|not installed|--install/i.test(String(out));
-  } catch (e) {
-    const s = String((e.stdout || "") + (e.stderr || ""));
-    if (/未安装|not installed|--install/i.test(s)) return true;
-    return false; // wsl present but errored for another reason — assume OK
-  }
+  // ASYNC execFile, NOT execFileSync: this runs on the homepage's status poll,
+  // and a cold post-reboot WSL can take many seconds to answer `wsl --status`.
+  // A sync call there blocked the whole Electron main process → the window went
+  // "未响应". Capture stdout+stderr even on a non-zero exit (a fresh Windows
+  // without WSL prints the "not installed / --install" hint and exits non-zero).
+  return await new Promise((resolve) => {
+    execFile("wsl", ["--status"], { timeout: 8000, windowsHide: true, encoding: "utf16le" }, (err, stdout, stderr) => {
+      const s = String((stdout || "") + (stderr || "") + (err && err.message ? err.message : ""));
+      resolve(/未安装|not installed|--install/i.test(s));
+    });
+  });
 }
 
 // Read-only, works without elevation. True iff a Windows optional feature
@@ -601,7 +604,7 @@ async function dismEnableFeature(feature, label, { emit } = {}) {
 // features are verified-enabled (a Windows reboot is then needed before Docker
 // can use WSL2), or { failed } if a feature couldn't be enabled.
 async function ensureWsl({ emit } = {}) {
-  if (!wslMissing()) return { ok: true };
+  if (!(await wslMissing())) return { ok: true };
   emit && emit({ phase: "install-docker", status: "running", message: "Docker 需要 WSL2 后端，开始启用所需的 Windows 功能…" });
   const a = await dismEnableFeature("Microsoft-Windows-Subsystem-Linux", "启用 WSL 功能 1/2 · Linux 子系统", { emit });
   const b = await dismEnableFeature("VirtualMachinePlatform", "启用 WSL 功能 2/2 · 虚拟机平台", { emit });
