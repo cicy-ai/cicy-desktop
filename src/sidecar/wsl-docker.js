@@ -274,6 +274,42 @@ const probeHealth = docker.probeHealth;
 //     network-exposed; the api_token gates access. WSL2's localhost relay then
 //     forwards the distro's 127.0.0.1:<port> to Windows 127.0.0.1:<port>.
 // Only :<port> is published — sshd/cron stay inside the container's own netns.
+// Shared folder bind: the CURRENT Windows user's ~/Desktop/Share ↔
+// /home/cicy/cicy-ai/Share in the container — a drop-zone both the user and the
+// agent can read/write. Auto-created (with a readme) on every container start if
+// missing; os.homedir() makes it per-user (never hard-coded to one account).
+// Returns the docker `-v` arg, or "" if setup fails (mount is best-effort).
+const SHARE_README = `# CiCy 共享目录 / Shared Folder
+
+这个文件夹与 CiCy 容器之间双向共享 —— 你和容器里的 agent 都能读写同一份文件。
+
+- 你的电脑上: ~/Desktop/Share （就是这个文件夹）
+- 容器里: /home/cicy/cicy-ai/Share
+
+把文件丢进来,CiCy 里的 agent 就能访问;agent 写到容器 Share 里的东西,也会出现在这里。
+
+---
+
+This folder is shared both ways between your computer and the CiCy container.
+
+- On your computer: ~/Desktop/Share (this folder)
+- Inside the container: /home/cicy/cicy-ai/Share
+
+Drop files here for CiCy agents to read; files agents write to Share show up here too.
+`;
+
+function shareMountArg() {
+  try {
+    const winShare = path.join(os.homedir(), "Desktop", "Share");
+    fs.mkdirSync(winShare, { recursive: true });
+    const readme = path.join(winShare, "readme.md");
+    if (!fs.existsSync(readme)) { try { fs.writeFileSync(readme, SHARE_README); } catch {} }
+    // C:\Users\<user>\Desktop\Share → /mnt/c/Users/<user>/Desktop/Share (WSL view)
+    const wslShare = winShare.replace(/^([A-Za-z]):/, (_, d) => `/mnt/${d.toLowerCase()}`).replace(/\\/g, "/");
+    return `-v '${wslShare}':/home/cicy/cicy-ai/Share`;
+  } catch (e) { log.warn(`[wsl-docker] Share mount setup failed: ${e.message}`); return ""; }
+}
+
 async function runContainer({ port = 8009, container = "cicy-code-docker", volume = "cicy-team-8009", env = {} } = {}) {
   // 每次容器"启动"(含已在跑被 adopt)都确保桌面快捷方式存在 —— 不存在就建,坏了就修。
   if (await probeHealth(port)) { ensureDesktopShortcut(volume, port).catch(() => {}); return { adopted: true }; }
@@ -283,7 +319,7 @@ async function runContainer({ port = 8009, container = "cicy-code-docker", volum
     .filter(([, v]) => v != null && v !== "")
     .map(([k, v]) => `-e ${k}='${String(v).replace(/'/g, "'\\''")}'`)
     .join(" ");
-  const cmd = `docker run -d --name ${container} --restart unless-stopped -p 127.0.0.1:${port}:8008 -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${envArgs} ${IMAGE}`;
+  const cmd = `docker run -d --name ${container} --restart unless-stopped -p 127.0.0.1:${port}:8008 -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${shareMountArg()} ${envArgs} ${IMAGE}`;
   await wslRun(cmd, { timeout: 60000 });
   ensureDesktopShortcut(volume, port).catch(() => {});
   return { started: true };

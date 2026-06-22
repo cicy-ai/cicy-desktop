@@ -222,6 +222,39 @@ const probeHealth = docker.probeHealth;
 //     bind-mount 会用空的宿主目录**遮住镜像里预装的 /home/cicy**(cicy-code 装在那),
 //     entrypoint 找不到就试图全局 npm 重装 → EACCES 崩溃,:8009 起不来。named volume
 //     首次挂载会**从镜像内容预填充**,容器才看得到预装的 cicy-code(和 WSL 一致)。
+// Shared folder bind: the CURRENT macOS user's ~/Desktop/Share ↔
+// /home/cicy/cicy-ai/Share in the container. Auto-created (with a readme) on every
+// container start if missing; os.homedir() makes it per-user. Colima mounts the
+// host $HOME into the VM, so the direct path works (no /mnt translation like WSL).
+const SHARE_README = `# CiCy 共享目录 / Shared Folder
+
+这个文件夹与 CiCy 容器之间双向共享 —— 你和容器里的 agent 都能读写同一份文件。
+
+- 你的电脑上: ~/Desktop/Share （就是这个文件夹）
+- 容器里: /home/cicy/cicy-ai/Share
+
+把文件丢进来,CiCy 里的 agent 就能访问;agent 写到容器 Share 里的东西,也会出现在这里。
+
+---
+
+This folder is shared both ways between your computer and the CiCy container.
+
+- On your computer: ~/Desktop/Share (this folder)
+- Inside the container: /home/cicy/cicy-ai/Share
+
+Drop files here for CiCy agents to read; files agents write to Share show up here too.
+`;
+
+function shareMountArg() {
+  try {
+    const share = path.join(os.homedir(), "Desktop", "Share");
+    fs.mkdirSync(share, { recursive: true });
+    const readme = path.join(share, "readme.md");
+    if (!fs.existsSync(readme)) { try { fs.writeFileSync(readme, SHARE_README); } catch {} }
+    return `-v '${share}':/home/cicy/cicy-ai/Share`;
+  } catch { return ""; }
+}
+
 async function runContainer({ port = 8009, container = "cicy-code-docker-8009", volume = "cicy-team-8009", env = {} } = {}) {
   if (await probeHealth(port)) return { adopted: true };
   try { await dk(`rm -f ${container}`, { timeout: 20000 }); } catch {} // 替换同名残留容器
@@ -230,7 +263,7 @@ async function runContainer({ port = 8009, container = "cicy-code-docker-8009", 
     .map(([k, v]) => `-e ${k}='${String(v).replace(/'/g, "'\\''")}'`)
     .join(" ");
   const cmd = `run -d --name ${container} --restart unless-stopped ${PLATFORM_FLAG} ` +
-    `-p 127.0.0.1:${port}:8008 -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${envArgs} ${IMAGE}`;
+    `-p 127.0.0.1:${port}:8008 -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${shareMountArg()} ${envArgs} ${IMAGE}`;
   await dk(cmd, { timeout: 90000 });
   return { started: true };
 }
