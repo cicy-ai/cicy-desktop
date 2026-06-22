@@ -95,15 +95,18 @@ jobs:
           path: dist/*.exe
           if-no-files-found: error
 
-      # 把最新的安装 exe 推到 OSS 的**单一固定 key**(主人:latest 只发一个)。
-      # 每次发版覆盖同一个文件,永远只有一个 latest，URL 不变:
-      #   https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/releases/cicy-desktop-latest.exe
-      - name: Upload latest EXE to OSS (single 'latest' file, overwritten)
+      # 推 exe 到 OSS。三件事(不再是"永远一个版本"):
+      #   1) 带版本号的永久副本 releases/cicy-desktop-<version>.exe — 历史 / 指定版本 / 回滚
+      #   2) latest 指针 releases/cicy-desktop-latest.exe — 只前进:本次版本 < 已发布版本(更旧的
+      #      构建后完成)则不覆盖,避免并发构建竞态把 latest 退回旧版
+      #   3) releases/latest-version.txt — 记录 latest 当前是哪个版本,curl 一下即可核对,无需猜 exe
+      - name: Upload EXE to OSS (versioned + forward-only latest pointer)
         shell: pwsh
         env:
           OSS_AK: ${{ secrets.OSS_ACCESS_KEY_ID }}
           OSS_SK: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
         run: |
+          $version = "${{ steps.meta.outputs.version }}"
           Invoke-WebRequest -Uri "https://gosspublic.alicdn.com/ossutil/1.7.18/ossutil-v1.7.18-windows-amd64.zip" -OutFile ossutil.zip
           Expand-Archive -LiteralPath ossutil.zip -DestinationPath ossutil-dir -Force
           $oss = "ossutil-dir\ossutil-v1.7.18-windows-amd64\ossutil.exe"
@@ -111,10 +114,50 @@ jobs:
           $exe = Get-ChildItem dist\*.exe | Where-Object { $_.Name -match 'Setup' } | Select-Object -First 1
           if (-not $exe) { $exe = Get-ChildItem dist\*.exe | Select-Object -First 1 }
           if (-not $exe) { Write-Error "no exe found in dist"; exit 1 }
-          Write-Host "Uploading $($exe.Name) -> oss://cicy-1372193042-cn/releases/cicy-desktop-latest.exe"
-          & $oss cp "$($exe.FullName)" "oss://cicy-1372193042-cn/releases/cicy-desktop-latest.exe" -f --acl public-read
-          if ($LASTEXITCODE -ne 0) { Write-Error "ossutil upload failed"; exit 1 }
-          Write-Host "Latest EXE: https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/releases/cicy-desktop-latest.exe"
+          $base = "oss://cicy-1372193042-cn/releases"
+
+          # 1) 永久版本化副本(unique key — 不会被后续发版覆盖)
+          $verKey = "$base/cicy-desktop-$version.exe"
+          Write-Host "Uploading versioned -> $verKey"
+          & $oss cp "$($exe.FullName)" "$verKey" -f --acl public-read
+          if ($LASTEXITCODE -ne 0) { Write-Error "versioned upload failed"; exit 1 }
+
+          # 2) latest 指针 — 只在本次版本 >= 已发布版本时前进
+          & $oss cp "$base/latest-version.txt" "current-latest.txt" -f 2>$null
+          $cur = if (Test-Path "current-latest.txt") { (Get-Content "current-latest.txt" -Raw).Trim() } else { "0.0.0" }
+          $advance = $true
+          try { $advance = ([version]$version -ge [version]$cur) } catch { $advance = $true }
+          if ($advance) {
+            Write-Host "Advancing latest: $cur -> $version"
+            & $oss cp "$($exe.FullName)" "$base/cicy-desktop-latest.exe" -f --acl public-read
+            if ($LASTEXITCODE -ne 0) { Write-Error "latest upload failed"; exit 1 }
+            Set-Content -NoNewline -Path "current-latest.txt" -Value $version
+            & $oss cp "current-latest.txt" "$base/latest-version.txt" -f --acl public-read
+            if ($LASTEXITCODE -ne 0) { Write-Error "latest-version.txt upload failed"; exit 1 }
+          } else {
+            Write-Host "Skip latest: building $version < published $cur (older build — not clobbering newer latest)"
+          }
+
+          # 3) 保留策略 — 只留最近 $KEEP 个版本化 exe(~130MB/个),旧的删掉,避免 OSS 无限膨胀。
+          #    latest.exe / latest-version.txt 不在此列(名字不匹配 X.Y.Z),永远保留。
+          $KEEP = 2
+          $versions = @()
+          foreach ($l in (& $oss ls "$base/" 2>$null)) {
+            if ($l -match 'releases/cicy-desktop-(\d+\.\d+\.\d+)\.exe\s*$') { $versions += $matches[1] }
+          }
+          $sorted = @($versions | Sort-Object { [version]$_ } -Descending)
+          if ($sorted.Count -gt $KEEP) {
+            foreach ($v in ($sorted | Select-Object -Skip $KEEP)) {
+              Write-Host "Pruning old versioned exe: cicy-desktop-$v.exe"
+              & $oss rm "$base/cicy-desktop-$v.exe" -f 2>$null
+            }
+          } else {
+            Write-Host "Retention: $($sorted.Count) versioned exe(s) <= keep $KEEP, nothing to prune"
+          }
+
+          Write-Host "Versioned : https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/releases/cicy-desktop-$version.exe"
+          Write-Host "Latest    : https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/releases/cicy-desktop-latest.exe"
+          Write-Host "Version-of: https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/releases/latest-version.txt"
 
       - name: Publish release (drop draft, mark latest)
         # Only promote AFTER all assets uploaded successfully. autoUpdater on
