@@ -1081,13 +1081,18 @@ electronApp.whenReady().then(async () => {
   }
 
   // Periodic WHOLE-desktop snapshot → ~/cicy-files/desktop-snapshot/desktop.b64
-  // (≤600px wide JPEG). ALL PLATFORMS: the cloud (cicy-code) fetches it via the
-  // dedicated non-dangerous `desktop_snapshot` RPC tool, which reads this fresh
-  // file — so there's no per-call screen capture, hence no macOS Screen-Recording
-  // prompt and no consent dialog. On Windows the capture runs in a --disable-gpu
-  // child electron (GDI path, works over RDP; main app GPU intact); on mac/linux
-  // it's an in-process native-capture loop (screencapture / scrot).
-  if (!global.__cicyDesktopSnapStarted) {
+  // so the cloud (cicy-code) can read the screen via the `desktop_snapshot` tool.
+  // Windows uses a --disable-gpu child (GDI, no prompt); linux uses scrot.
+  //
+  // macOS: this spawns `screencapture`, which DOES trigger the Screen-Recording TCC
+  // prompt — and on an ad-hoc-signed build (no Apple cert) the grant never sticks, so
+  // the prompt fires over and over. So it's OFF by default on macOS (most users —
+  // docker/team management — don't need the agent to watch their screen). Opt in with
+  // CICY_DESKTOP_SNAPSHOT=1. Other platforms stay on (opt out with =0).
+  const __snapOn = process.platform === "darwin"
+    ? process.env.CICY_DESKTOP_SNAPSHOT === "1"
+    : process.env.CICY_DESKTOP_SNAPSHOT !== "0";
+  if (!global.__cicyDesktopSnapStarted && __snapOn) {
     global.__cicyDesktopSnapStarted = true;
     try {
       const info = require("./utils/desktop-snapshot").startDesktopSnapshots();
