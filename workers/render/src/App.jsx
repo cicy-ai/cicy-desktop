@@ -1708,7 +1708,8 @@ function DockerInstallDrawerHost() {
 // Desktop and runs it (主人指令), streaming progress through the drawer above.
 function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
   const [status, setStatus] = useState(null);
-  const [busy, setBusy] = useState("");   // "" | bootstrap | restart | stop | upgrade
+  const [busy, setBusy] = useState("");   // "" | bootstrap | restart | stop | upgrade | probe
+  const [probeNote, setProbeNote] = useState(""); // 「重试检测」后给用户的明确反馈(WSL 仍卡 → 提示重启)
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmRecreate, setConfirmRecreate] = useState(false); // 重建容器 in-app 确认弹窗(不用 native confirm)
   // Inline rename (mirrors LocalTeamCard): double-click the title to edit.
@@ -1731,8 +1732,11 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
   const DOCKER_BLUE = "#2496ed";
 
   const checkStatus = useCallback(async () => {
-    try { setStatus(await window.cicy?.docker?.appStatus?.()); }
-    catch (e) { console.warn("[DockerCard]", e); }
+    try {
+      const s = await window.cicy?.docker?.appStatus?.();
+      setStatus(s);
+      if (s && !s.unknown) setProbeNote(""); // WSL came back → clear the stuck note
+    } catch (e) { console.warn("[DockerCard]", e); }
   }, []);
 
   // Poll so the card reflects reality even when Docker changes outside the app
@@ -1874,6 +1878,8 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
 
   const ctaLabel = busy === "open"
     ? tr("docker.opening", "打开中…")
+    : busy === "probe"
+    ? tr("docker.probing", "检测中…")
     : isBusy
     ? tr("docker.working", "处理中…")
     : running
@@ -1900,9 +1906,20 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
       try { await onOpen?.(dockerTeam?.id); } finally { setBusy(""); }
       return;
     }
-    // WSL didn't answer the probe → re-check instead of (re)installing. If WSL
-    // has since come up (e.g. autostart finished), this flips the card to 打开/启动.
-    if (unknown) { await checkStatus(); return; }
+    // 「重试检测」: FORCE a fresh WSL probe (checkStatus only re-read the cache, so
+    // clicking did nothing — the「点了没反应」bug). Show a spinner so the click always
+    // gives feedback; if WSL is STILL stuck after a real probe, say so clearly.
+    if (unknown) {
+      setBusy("probe");
+      try {
+        const s = await (window.cicy?.docker?.appRedetect?.() ?? window.cicy?.docker?.appStatus?.());
+        if (s) setStatus(s);
+        if (s?.unknown) setProbeNote(tr("docker.wslStillStuck", "WSL 仍无响应 —— 多半要重启 Windows 后再试"));
+        else setProbeNote("");
+      } catch (e) { setProbeNote(tr("docker.probeFailed", "检测失败,请重试")); }
+      finally { setBusy(""); }
+      return;
+    }
     runBootstrap();
   };
 
@@ -2002,6 +2019,11 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
           )}
         </div>
         <div className="bcard__meta"><span className="bcard__chip">Docker</span></div>
+        {(probeNote || (!running && stateText)) && (
+          <div data-id="DockerCard-statusline" style={{ marginTop: 4, fontSize: 11, lineHeight: 1.4, color: probeNote ? "#f0a020" : "rgba(255,255,255,0.55)" }}>
+            {probeNote || stateText}
+          </div>
+        )}
       </div>
       <button
         type="button"

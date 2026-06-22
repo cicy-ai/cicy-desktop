@@ -224,6 +224,16 @@ function register({ sidecarLogPath } = {}) {
     return { installed: false, dockerRunning: false, running: false, unknown: true, port: APP_PORT, platform: process.platform };
   });
 
+  // 「重试检测」: FORCE a fresh probe right now (appStatus only reads the cache, so
+  // clicking it changed nothing — the "点了没反应" bug). Returns the freshly-probed
+  // status and kicks the auto-start reconcile in the background. If WSL is wedged
+  // this resolves to unknown after the probe timeout, which the UI then surfaces.
+  ipcMain.handle("docker:app-redetect", async () => {
+    const s = await refreshDockerStatus();
+    reconcileDocker().catch(() => {});
+    return s;
+  });
+
   // Common run options for the :8009 instance: its own container/volume + the
   // LLM gateway env keyed by the 8008 team's token. (WSL: whole-home mount via
   // -v <volume>:/home/cicy inside wsl-docker.)

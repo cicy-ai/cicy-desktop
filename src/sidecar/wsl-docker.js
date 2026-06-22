@@ -232,51 +232,63 @@ async function dockerEngineUp() {
 //   • iptables must use the LEGACY backend (Ubuntu defaults to nft, which
 //     dockerd can't drive in WSL2 → daemon fails to set up networking).
 //   • run dockerd detached and wait for /var/run/docker.sock.
+// Launch dockerd FULLY DETACHED. This is the core fix for the all-day「WSL 卡死 /
+// app 未响应」: the old launch `(nohup dockerd >log 2>&1 &)` left dockerd in the wsl
+// session with stdin still on the wsl pipe, so `wsl.exe` would NOT exit — the
+// launching call hung (up to its 150s timeout), and a hung wsl session wedges the
+// whole WSL subsystem so every later `wsl` call blocks and the app freezes.
+//   setsid → new session (detached from the wsl console)
+//   </dev/null + >log 2>&1 → no shared stdio with the wsl pipe
+// ⇒ the launch returns INSTANTLY and dockerd is fully orphaned. Short timeout: if
+// THIS times out, WSL itself is already wedged (not dockerd's fault).
+// The boot/autostart script the rootfs ships (run by wsl.conf [boot] + our logon
+// task) used a NON-detached `nohup dockerd &`, which hangs the logon wsl.exe and
+// wedges WSL on every reboot. Rewrite it to launch detached too. base64 so the
+// multi-line script survives `bash -lc "…"` without any quote escaping.
+const BOOT_SCRIPT_B64 = Buffer.from(
+  "#!/bin/sh\n" +
+  "update-alternatives --set iptables /usr/sbin/iptables-legacy 2>/dev/null || true\n" +
+  "update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy 2>/dev/null || true\n" +
+  "pgrep dockerd >/dev/null 2>&1 || setsid sh -c 'exec dockerd >/var/log/dockerd.log 2>&1 </dev/null' &\n"
+).toString("base64");
+
+async function launchDockerd() {
+  await wslRun(
+    `echo ${BOOT_SCRIPT_B64} | base64 -d > /usr/local/sbin/start-dockerd.sh 2>/dev/null; chmod +x /usr/local/sbin/start-dockerd.sh 2>/dev/null; ` +
+    "update-alternatives --set iptables /usr/sbin/iptables-legacy >/dev/null 2>&1; " +
+    "update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy >/dev/null 2>&1; " +
+    // Stale /var/run/docker.{pid,sock} from the pre-baked rootfs make a fresh dockerd
+    // refuse to start; clear them when dockerd isn't already running.
+    "if ! pgrep dockerd >/dev/null 2>&1; then rm -f /var/run/docker.pid /run/docker.pid /var/run/docker.sock /run/docker.sock; fi; " +
+    "pgrep dockerd >/dev/null 2>&1 || setsid bash -c 'exec dockerd >/var/log/cicy-dockerd.log 2>&1 </dev/null' & " +
+    "true",
+    { timeout: 20000 });
+}
+
 async function startEngine() {
-  // Up to 3 clean attempts: on a cold first boot dockerd can die mid-init (e.g.
-  // networking not ready yet) and only succeed on a fresh relaunch — that race
-  // was the main "一次装不上、要点几次重试" culprit. Each attempt clears stale
-  // runtime files, (re)launches dockerd, and waits for the socket; between
-  // attempts we hard-kill any half-dead daemon so the next launch is clean.
+  // Up to 3 attempts. Each: launch dockerd (detached, returns instantly) then POLL
+  // the socket in SHORT, SEPARATE wsl calls — never hold the distro in one 120s call
+  // (that both masked wedges and blocked everything else). Cold first boot of a
+  // freshly-imported distro can take well over 40s, so poll up to 90s.
   for (let attempt = 1; attempt <= 3; attempt++) {
     const at0 = Date.now();
-    let launchErr = null;
-    log.info(`[startEngine] attempt ${attempt}/3 — (re)launch dockerd + wait for socket`);
-    try {
-      await wslRun(
-        "update-alternatives --set iptables /usr/sbin/iptables-legacy >/dev/null 2>&1; " +
-        "update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy >/dev/null 2>&1; " +
-        // A pre-baked rootfs (docker export after an inner dind dockerd) can ship a
-        // STALE /var/run/docker.{pid,sock}: a fresh dockerd then refuses to start
-        // ("pid file found, ensure docker is not running"). Clear them when dockerd
-        // is NOT already running — that was the 烤制包「引擎没起来」failure.
-        "if ! pgrep dockerd >/dev/null 2>&1; then rm -f /var/run/docker.pid /run/docker.pid /var/run/docker.sock /run/docker.sock; fi; " +
-        "pgrep dockerd >/dev/null 2>&1 || (nohup dockerd >/var/log/cicy-dockerd.log 2>&1 &); " +
-        // First boot of a freshly-imported distro: cold WSL2 VM + large pre-baked
-        // /var/lib/docker (restoring containers + overlay) can take well over 40s.
-        // Wait up to 120s — the 40s window was too short on cold boot, which made
-        // the next attempt pkill the STILL-INITIALIZING daemon and relaunch it
-        // cold again (a restart loop → 「引擎没起来」even though dockerd was fine).
-        "for i in $(seq 1 120); do [ -S /var/run/docker.sock ] && docker version >/dev/null 2>&1 && break; sleep 1; done",
-        { timeout: 150000 });
-    } catch (e) { launchErr = e; log.warn(`[startEngine] attempt ${attempt} launch/wait errored: ${e.message}`); }
-    if (await dockerEngineUp()) { log.info(`[startEngine] ✓ dockerd up on attempt ${attempt} (${((Date.now() - at0) / 1000).toFixed(1)}s)`); return true; }
-    log.warn(`[startEngine] attempt ${attempt} dockerd still not up after ${((Date.now() - at0) / 1000).toFixed(1)}s`);
-    // Reset between attempts. If the launch itself ERRORED (timeout = WSL wedged /
-    // unresponsive — the post-import failure where the command can't even get into
-    // the distro), `wsl --terminate` so the next attempt cold-boots a CLEAN distro;
-    // clearing pid files inside a wedged WSL does nothing. Otherwise dockerd just
-    // died/is slow — clear stale runtime files only when it's actually gone.
-    if (launchErr) {
-      log.info(`[startEngine] launch errored → wsl --terminate for a clean cold boot`);
-      try { await wslTerminate(); } catch {}
-    } else {
-      try {
-        await wslRun(
-          "if ! pgrep dockerd >/dev/null 2>&1; then rm -f /var/run/docker.pid /run/docker.pid /var/run/docker.sock /run/docker.sock; fi; sleep 1",
-          { timeout: 15000 });
-      } catch {}
+    let stuck = false;
+    log.info(`[startEngine] attempt ${attempt}/3 — launch dockerd (detached) + poll socket`);
+    try { await launchDockerd(); }
+    catch (e) { stuck = true; log.warn(`[startEngine] attempt ${attempt} launch errored — WSL stuck? ${e.message}`); }
+    if (!stuck) {
+      const deadline = Date.now() + 90000;
+      while (Date.now() < deadline) {
+        if (await dockerEngineUp()) { log.info(`[startEngine] ✓ dockerd up on attempt ${attempt} (${((Date.now() - at0) / 1000).toFixed(1)}s)`); return true; }
+        await new Promise((r) => setTimeout(r, 2000));
+      }
     }
+    log.warn(`[startEngine] attempt ${attempt} dockerd not up after ${((Date.now() - at0) / 1000).toFixed(1)}s`);
+    // Recover. A stuck launch = WSL wedged → `wsl --shutdown` (full VM reset — the
+    // ONLY thing that clears a real wedge; --terminate isn't enough). Otherwise
+    // dockerd just died/is slow → clear stale runtime files for a clean relaunch.
+    if (stuck) { log.info(`[startEngine] WSL stuck → wsl --shutdown`); try { await wslShutdown(); } catch {} }
+    else { try { await wslRun("if ! pgrep dockerd >/dev/null 2>&1; then rm -f /var/run/docker.pid /run/docker.pid /var/run/docker.sock /run/docker.sock; fi", { timeout: 15000 }); } catch {} }
   }
   log.error("[startEngine] ✗ dockerd NOT up after 3 attempts");
   return false;

@@ -160,6 +160,7 @@ contextBridge.exposeInMainWorld("cicy", {
     // Docker (if missing, installer → Desktop) + starts the :8009 container,
     // streaming phase/progress on 'docker:app-progress'.
     appStatus:    ()  => logInvoke("docker:app-status"),
+    appRedetect:  ()  => logInvoke("docker:app-redetect"),   // 「重试检测」: FORCE a fresh probe (appStatus only reads cache)
     appBootstrap: ()  => logInvoke("docker:app-bootstrap"),
     appRestart:   ()  => logInvoke("docker:app-restart"),          // supervisorctl 重启 cicy-code
     appDockerRestart: () => logInvoke("docker:app-docker-restart"), // docker restart 整个容器
