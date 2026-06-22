@@ -47,6 +47,45 @@ const LOGIN_TIMEOUT_MS = 120_000;
 let _server = null;
 let _state = null;
 let _timeoutHandle = null;
+let _loginWindow = null;
+let _onResult = null;     // the caller's callback, for the user-closes-window case
+let _resultFired = false; // guard: onResult is delivered exactly once
+
+function closeLoginWindow() {
+  const w = _loginWindow;
+  _loginWindow = null;
+  if (w && !w.isDestroyed()) { try { w.removeAllListeners("closed"); w.close(); } catch {} }
+}
+
+// Open the login page in an IN-APP Electron window. This is the fix for "登录弹不出
+//网页": shell.openExternal needs a working default browser, which a fresh Windows
+// profile may not have. An in-app window has no such dependency, and the cloud's
+// 302 to http://127.0.0.1:<port>/cb lands right back in THIS window — the loopback
+// server answers it, firing onResult. Returns false if the window can't be made
+// (then the caller falls back to the system browser).
+function openLoginWindow(url) {
+  const { BrowserWindow } = require("electron");
+  try {
+    closeLoginWindow();
+    _loginWindow = new BrowserWindow({
+      width: 480, height: 760, title: "登录 CiCy", autoHideMenuBar: true, show: true,
+      webPreferences: { nodeIntegration: false, contextIsolation: true, partition: "persist:cicy-login" },
+    });
+    _loginWindow.loadURL(url);
+    // User closed the window before login completed → treat as cancel so the
+    // renderer's "登录中…" state is released instead of hanging until timeout.
+    _loginWindow.on("closed", () => {
+      _loginWindow = null;
+      if (_resultFired) return; // success already delivered; it shuts us down
+      try { _onResult && _onResult({ error: "login window closed" }); } catch {}
+      shutdown("login window closed by user");
+    });
+    return true;
+  } catch (e) {
+    log.warn(`[auth-loopback] in-app login window failed: ${e.message}`);
+    return false;
+  }
+}
 
 function shutdown(reason) {
   if (_timeoutHandle) { clearTimeout(_timeoutHandle); _timeoutHandle = null; }
@@ -54,6 +93,7 @@ function shutdown(reason) {
     try { _server.close(); } catch {}
     _server = null;
   }
+  closeLoginWindow();
   _state = null;
   if (reason) log.info(`[auth-loopback] shutdown: ${reason}`);
 }
@@ -64,6 +104,14 @@ async function startLogin({ onResult } = {}) {
 
   _state = crypto.randomBytes(16).toString("hex");
   const expectedState = _state;
+  _resultFired = false;
+  // Deliver the result to the caller exactly once — the server callback, the
+  // user-closes-window handler, and the timeout all race to be first.
+  _onResult = (payload) => {
+    if (_resultFired) return;
+    _resultFired = true;
+    try { onResult && onResult(payload); } catch {}
+  };
 
   _server = http.createServer((req, res) => {
     let url;
@@ -98,7 +146,7 @@ async function startLogin({ onResult } = {}) {
   <h1 style="color:#c00">登录失败</h1>
   <p>state 校验未通过，请回到 CiCy Desktop 重新点击 Login。</p>
 </body>`);
-      try { onResult && onResult({ error: "state mismatch" }); } catch {}
+      _onResult({ error: "state mismatch" });
       setTimeout(() => shutdown("state mismatch"), 500);
       return;
     }
@@ -110,14 +158,14 @@ async function startLogin({ onResult } = {}) {
   <h1 style="color:#c00">登录失败</h1>
   <p>未收到 token，请回到 CiCy Desktop 重试。</p>
 </body>`);
-      try { onResult && onResult({ error: "no token" }); } catch {}
+      _onResult({ error: "no token" });
       setTimeout(() => shutdown("no token"), 500);
       return;
     }
 
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     res.end(SUCCESS_HTML);
-    try { onResult && onResult({ token, state, reused, accessToken, userId }); } catch {}
+    _onResult({ token, state, reused, accessToken, userId });
     setTimeout(() => shutdown("login complete"), 500);
   });
 
@@ -133,14 +181,18 @@ async function startLogin({ onResult } = {}) {
       });
       const url = `${LOGIN_BASE}?${params.toString()}`;
       log.info(`[auth-loopback] listening :${port}, opening ${url}`);
-      // Best-effort auto-open. On some setups (fresh Windows user with no default
-      // browser, locked-down shell) openExternal silently fails and the user is
-      // left stuck "等回调" with no recourse — so we ALSO return the url to the
-      // renderer (below) to show a manual "open / copy this link" fallback.
-      require("./open-external").openExternalRobust(url).catch((e) => log.warn(`[auth-loopback] open failed: ${e.message}`));
+      // Open the login page IN-APP (an Electron window) — works even when the
+      // machine has no/locked default browser, which is the "登录弹不出网页" bug.
+      // The cloud's 302 to http://127.0.0.1:<port>/cb lands back in this same
+      // window and the loopback server answers it. Only if the window can't be
+      // created do we fall back to the system browser. We still return the url so
+      // the renderer can offer a manual "open / copy link" last resort.
+      if (!openLoginWindow(url)) {
+        require("./open-external").openExternalRobust(url).catch((e) => log.warn(`[auth-loopback] open failed: ${e.message}`));
+      }
 
       _timeoutHandle = setTimeout(() => {
-        try { onResult && onResult({ error: "timeout" }); } catch {}
+        _onResult({ error: "timeout" });
         shutdown("timeout");
       }, LOGIN_TIMEOUT_MS);
 
