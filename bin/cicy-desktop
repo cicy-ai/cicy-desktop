@@ -7,6 +7,14 @@ const isWindows = process.platform === "win32";
 const { MasterTokenManager } = require("../src/master/master-main");
 const { version: CLI_VERSION } = require("../package.json");
 
+// Windows consoles default to a legacy OEM codepage (936/GBK on zh-CN), which
+// renders our UTF-8 output (emoji + 中文) as 乱码. Flip the active console to
+// UTF-8 (65001) before anything prints. Best-effort: harmless if redirected,
+// unsupported, or already UTF-8.
+if (isWindows) {
+  try { execSync("chcp 65001", { stdio: "ignore" }); } catch {}
+}
+
 const HOME = os.homedir();
 const DESKTOP_DIR = path.join(HOME, "Desktop");
 const GLOBAL_CONFIG_FILE = path.join(HOME, "global.json");
