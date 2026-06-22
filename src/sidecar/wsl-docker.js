@@ -16,6 +16,7 @@ const path = require("path");
 const os = require("os");
 const fs = require("fs");
 const docker = require("./docker"); // shared: downloads, waitUntil, probeHealth, launchElevated, ensureWsl…
+const log = require("electron-log"); // persisted main.log — bootstrap timing/failures land here
 
 // Dedicated distro name — NEVER reuse/clobber a user's own "Ubuntu" distro.
 const DISTRO   = process.env.CICY_WSL_DISTRO || "cicy-code-wsl";
@@ -182,6 +183,8 @@ async function startEngine() {
   // runtime files, (re)launches dockerd, and waits for the socket; between
   // attempts we hard-kill any half-dead daemon so the next launch is clean.
   for (let attempt = 1; attempt <= 3; attempt++) {
+    const at0 = Date.now();
+    log.info(`[startEngine] attempt ${attempt}/3 — (re)launch dockerd + wait for socket`);
     try {
       await wslRun(
         "update-alternatives --set iptables /usr/sbin/iptables-legacy >/dev/null 2>&1; " +
@@ -199,8 +202,9 @@ async function startEngine() {
         // cold again (a restart loop → 「引擎没起来」even though dockerd was fine).
         "for i in $(seq 1 120); do [ -S /var/run/docker.sock ] && docker version >/dev/null 2>&1 && break; sleep 1; done",
         { timeout: 150000 });
-    } catch {}
-    if (await dockerEngineUp()) return true;
+    } catch (e) { log.warn(`[startEngine] attempt ${attempt} launch/wait errored: ${e.message}`); }
+    if (await dockerEngineUp()) { log.info(`[startEngine] ✓ dockerd up on attempt ${attempt} (${((Date.now() - at0) / 1000).toFixed(1)}s)`); return true; }
+    log.warn(`[startEngine] attempt ${attempt} dockerd still not up after ${((Date.now() - at0) / 1000).toFixed(1)}s`);
     // Not up after the wait. Only hard-reset when dockerd actually DIED (crash) —
     // if it's still alive it's just slow/mid-init, so leave it and let the next
     // attempt's wait loop keep polling instead of killing a healthy daemon.
@@ -210,6 +214,7 @@ async function startEngine() {
         { timeout: 15000 });
     } catch {}
   }
+  log.error("[startEngine] ✗ dockerd NOT up after 3 attempts");
   return false;
 }
 
@@ -310,7 +315,11 @@ function ensureAutostart() {
   return new Promise((res) => {
     const tr = `wsl.exe -d ${DISTRO} -u root -e /usr/local/sbin/start-dockerd.sh`;
     execFile("schtasks", ["/create", "/tn", "cicy-docker-autostart", "/tr", tr, "/sc", "onlogon", "/rl", "HIGHEST", "/f"],
-      { windowsHide: true }, () => res());
+      { windowsHide: true }, (err, _stdout, stderr) => {
+        if (err) log.warn(`[ensureAutostart] schtasks create FAILED (dockerd won't auto-start after reboot): ${err.message}${stderr ? ` / ${String(stderr).trim()}` : ""}`);
+        else log.info("[ensureAutostart] logon task 'cicy-docker-autostart' registered → dockerd starts on next logon");
+        res();
+      });
   });
 }
 
@@ -375,65 +384,104 @@ async function bootstrap(opts = {}) {
 async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-docker", volume = "cicy-team", env = {} } = {}) {
   const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
 
+  // Structured, PERSISTED trace of the whole run (electron-log → main.log) so a
+  // failed "重启后起不来" is diagnosable AFTER the fact instead of staring at the
+  // ephemeral progress modal. Each step logs ▶start / ✓done(+duration, or "skip"
+  // when already satisfied) / ✗fail(+reason+duration); the final line gives the
+  // total time and the SLOWEST step, plus a [name,ms] breakdown of every step.
+  const BT0 = Date.now();
+  const secs = (t) => `${((Date.now() - t) / 1000).toFixed(1)}s`;
+  const steps = [];
+  let _pt = BT0, _pname = "";
+  const begin = (name) => { _pname = name; _pt = Date.now(); log.info(`[bootstrap] ▶ ${name}`); };
+  const done  = (skip) => { steps.push([_pname, Date.now() - _pt]); log.info(`[bootstrap] ✓ ${_pname}${skip ? " (skip)" : ""} ${secs(_pt)}`); };
+  const fail  = (reason, extra) => { steps.push([`${_pname}:FAIL`, Date.now() - _pt]); log.error(`[bootstrap] ✗ ${_pname} reason=${reason} ${secs(_pt)}${extra ? `\n${extra}` : ""}`); };
+  const finish = (ok, reason) => {
+    const slow = steps.slice().sort((a, b) => b[1] - a[1])[0];
+    log.info(`[bootstrap] ${ok ? "DONE ✓" : `ABORT ✗ reason=${reason}`} total=${secs(BT0)} slowest=${slow ? `${slow[0]} ${(slow[1] / 1000).toFixed(1)}s` : "n/a"} steps=${JSON.stringify(steps.map(([n, d]) => [n, Math.round(d)]))}`);
+  };
+  log.info(`[bootstrap] START port=${port} container=${container} volume=${volume}`);
+
   // 0) Fast path: already healthy → instant no-op (idempotent one-shot).
+  begin("probe-healthy");
   if (await probeHealth(port)) {
+    done();
     emit({ phase: "done", status: "done", message: "Docker cicy-code 已就绪 🎉" });
+    finish(true);
     return { ok: true, container };
   }
+  done();
 
   // 1) WSL2 platform
+  begin("ensure-wsl");
   if (docker.wslMissing()) {
     const w = await docker.ensureWsl({ emit });
-    if (w.needsReboot) { emit({ phase: "done", status: "reboot", message: "WSL2 正在安装——请【重启 Windows】后回来点「重试」继续。" }); return { ok: false, reason: "wsl_reboot_required" }; }
-  }
+    if (w.needsReboot) { fail("wsl_reboot_required"); emit({ phase: "done", status: "reboot", message: "WSL2 正在安装——请【重启 Windows】后回来点「重试」继续。" }); finish(false, "wsl_reboot_required"); return { ok: false, reason: "wsl_reboot_required" }; }
+    done();
+  } else done(true);
 
   // 2) Ubuntu distro
+  begin("ensure-distro");
   if (!distroInstalled()) {
-    try { await installDistro({ emit }); } catch (e) { emit({ phase: "install-docker", status: "error", message: `Ubuntu 安装失败：${e.message}（点重试）` }); return { ok: false, reason: "distro_install_failed" }; }
+    try { await installDistro({ emit }); } catch (e) { fail("distro_install_failed", e.message); emit({ phase: "install-docker", status: "error", message: `Ubuntu 安装失败：${e.message}（点重试）` }); finish(false, "distro_install_failed"); return { ok: false, reason: "distro_install_failed" }; }
     const t0 = Date.now();
     const ok = await docker.waitUntil(() => distroInstalled(), { totalMs: 600000, everyMs: 5000, onTick: () => emit({ phase: "install-docker", status: "running", message: `正在下载/注册 Ubuntu…（已 ${Math.round((Date.now() - t0) / 1000)}s,首次较慢请耐心）` }) });
-    if (!ok) { emit({ phase: "install-docker", status: "error", message: "Ubuntu 还没装好——稍等或点「重试」" }); return { ok: false, reason: "distro_not_ready" }; }
-  }
+    if (!ok) { fail("distro_not_ready"); emit({ phase: "install-docker", status: "error", message: "Ubuntu 还没装好——稍等或点「重试」" }); finish(false, "distro_not_ready"); return { ok: false, reason: "distro_not_ready" }; }
+    done();
+  } else done(true);
 
   // 3) Docker Engine inside Ubuntu
+  begin("install-docker-engine");
   if (!(await dockerInstalled())) {
-    try { await installDockerEngine({ emit }); } catch (e) { emit({ phase: "install-docker", status: "error", message: `Docker 安装失败：${e.message}（点重试）` }); return { ok: false, reason: "docker_install_failed" }; }
-  }
+    try { await installDockerEngine({ emit }); } catch (e) { fail("docker_install_failed", e.message); emit({ phase: "install-docker", status: "error", message: `Docker 安装失败：${e.message}（点重试）` }); finish(false, "docker_install_failed"); return { ok: false, reason: "docker_install_failed" }; }
+    done();
+  } else done(true);
 
   // 4) dockerd up (phase "container" = 启动服务)
+  begin("start-dockerd");
   if (!(await dockerEngineUp())) {
     emit({ phase: "container", status: "running", message: "启动 Docker 引擎（首次较慢，请耐心）…" });
     const started = await startEngine(); // 3 clean attempts internally
     const up = started || await docker.waitUntil(dockerEngineUp, { totalMs: 120000, everyMs: 3000 });
     if (!up) {
-      const log = await dockerdLogTail();
-      emit({ phase: "container", status: "error", message: "Docker 引擎没起来——点「重试」" + (log ? `\n\ndockerd 日志（最后几行）:\n${log}` : "") });
+      const dlog = await dockerdLogTail();
+      fail("dockerd_not_up", dlog ? `dockerd log:\n${dlog}` : "");
+      emit({ phase: "container", status: "error", message: "Docker 引擎没起来——点「重试」" + (dlog ? `\n\ndockerd 日志（最后几行）:\n${dlog}` : "") });
+      finish(false, "dockerd_not_up");
       return { ok: false, reason: "dockerd_not_up" };
     }
-  }
+    done();
+  } else done(true);
 
   // 5) Base image — pre-baked into the package, so this normally just confirms.
   //    The download-tarball path is a fallback for a non-pre-baked rootfs.
+  begin("ensure-image");
   if (!(await imagePresent())) {
     let tarball;
     try { tarball = await docker.downloadImageTarball({ emit }); }
-    catch (e) { emit({ phase: "image", status: "error", message: `镜像下载失败：${e.message}（点重试续传）` }); return { ok: false, reason: "image_download_failed" }; }
+    catch (e) { fail("image_download_failed", e.message); emit({ phase: "image", status: "error", message: `镜像下载失败：${e.message}（点重试续传）` }); finish(false, "image_download_failed"); return { ok: false, reason: "image_download_failed" }; }
     try { await loadImage(tarball, { emit }); }
-    catch (e) { emit({ phase: "image", status: "error", message: `镜像导入失败：${e.message}（点重试）` }); return { ok: false, reason: "image_load_failed" }; }
-  }
+    catch (e) { fail("image_load_failed", e.message); emit({ phase: "image", status: "error", message: `镜像导入失败：${e.message}（点重试）` }); finish(false, "image_load_failed"); return { ok: false, reason: "image_load_failed" }; }
+    done();
+  } else done(true);
 
   // 6) Container (phase "container" = 启动服务)
+  begin("run-container");
   if (!(await probeHealth(port))) {
     emit({ phase: "container", status: "running", message: "启动 cicy-code 服务…" });
     try { await runContainer({ port, container, volume, env }); }
-    catch (e) { emit({ phase: "container", status: "error", message: `服务启动失败：${e.message}（点重试）` }); return { ok: false, reason: "container_start_failed" }; }
-  }
+    catch (e) { fail("container_start_failed", e.message); emit({ phase: "container", status: "error", message: `服务启动失败：${e.message}（点重试）` }); finish(false, "container_start_failed"); return { ok: false, reason: "container_start_failed" }; }
+    done();
+  } else done(true);
 
   // 7) Health — the ONLY path to ok:true.
+  begin("wait-health");
   emit({ phase: "container", status: "running", message: "等待 cicy-code 就绪…" });
   const healthy = await docker.waitUntil(() => probeHealth(port), { totalMs: 120000, everyMs: 3000 });
-  if (healthy) { await ensureAutostart(); await ensureDesktopShortcut(volume, port); } // survive reboot + desktop shortcut
+  if (healthy) { done(); await ensureAutostart(); await ensureDesktopShortcut(volume, port); } // survive reboot + desktop shortcut
+  else fail("health_timeout");
   emit({ phase: healthy ? "done" : "container", status: healthy ? "done" : "error", message: healthy ? "Docker cicy-code 已就绪 🎉" : `服务起来了但 :${port} 还没响应——稍等或点「重试」` });
+  finish(healthy, healthy ? null : "health_timeout");
   return { ok: healthy, container };
 }
 
