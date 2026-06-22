@@ -158,5 +158,18 @@
     "retry": "Réessayer",
     "done": "Terminé",
     "minimize": "Réduire"
+  },
+  "auth": {
+    "restoring": "Restauration de la connexion…",
+    "tagline": "Connectez-vous pour synchroniser vos équipes, réglages et assistant IA",
+    "browserLogin": "Se connecter via le navigateur",
+    "autoOpenHint": "Votre navigateur s'ouvrira automatiquement",
+    "waitingTagline": "Page de connexion ouverte dans le navigateur — terminez là…",
+    "waitingCallback": "En attente du rappel",
+    "cancel": "Annuler",
+    "browserNotOpened": "Le navigateur ne s'est pas ouvert ?",
+    "openManually": "Ouvrir la page de connexion manuellement",
+    "copyLink": "Copier le lien",
+    "linkCopied": "Lien copié — collez-le dans le navigateur"
   }
 }

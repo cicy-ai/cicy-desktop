@@ -133,6 +133,10 @@ async function startLogin({ onResult } = {}) {
       });
       const url = `${LOGIN_BASE}?${params.toString()}`;
       log.info(`[auth-loopback] listening :${port}, opening ${url}`);
+      // Best-effort auto-open. On some setups (fresh Windows user with no default
+      // browser, locked-down shell) openExternal silently fails and the user is
+      // left stuck "等回调" with no recourse — so we ALSO return the url to the
+      // renderer (below) to show a manual "open / copy this link" fallback.
       shell.openExternal(url).catch((e) => log.warn(`[auth-loopback] openExternal failed: ${e.message}`));
 
       _timeoutHandle = setTimeout(() => {
@@ -140,7 +144,7 @@ async function startLogin({ onResult } = {}) {
         shutdown("timeout");
       }, LOGIN_TIMEOUT_MS);
 
-      resolve({ port, state: expectedState });
+      resolve({ port, state: expectedState, url });
     });
   });
 }

@@ -158,5 +158,18 @@
     "retry": "再試行",
     "done": "完了",
     "minimize": "最小化"
+  },
+  "auth": {
+    "restoring": "ログインを復元中…",
+    "tagline": "サインインしてチーム・設定・AIアシスタントを同期",
+    "browserLogin": "ブラウザでサインイン",
+    "autoOpenHint": "クリックするとブラウザが自動的に開きます",
+    "waitingTagline": "ブラウザでログインページを開きました。そちらで完了してください…",
+    "waitingCallback": "コールバックを待機中",
+    "cancel": "キャンセル",
+    "browserNotOpened": "ブラウザが開かない?",
+    "openManually": "ログインページを手動で開く",
+    "copyLink": "リンクをコピー",
+    "linkCopied": "リンクをコピーしました。ブラウザに貼り付けてください"
   }
 }

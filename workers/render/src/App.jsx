@@ -259,6 +259,7 @@ export default function App() {
   // Prevents the login card from flashing on every launch before restore.
   const [authRestoring, setAuthRestoring] = useState(() => !safeGet(TOKEN_KEY));
   const [loggingIn, setLoggingIn] = useState(false);
+  const [loginUrl, setLoginUrl] = useState(""); // shown as a manual fallback when the browser doesn't auto-open
   const [error, setError] = useState("");
   const [welcome, setWelcome] = useState("");
   // Fetched after login: { id, display_name, username, email, ... }
@@ -568,7 +569,9 @@ export default function App() {
     if (!r?.ok) {
       setLoggingIn(false);
       setError(humanError(r?.error || "login start failed"));
+      return;
     }
+    setLoginUrl(r.url || "");
   }
 
   function handleLogout() {
@@ -611,7 +614,7 @@ export default function App() {
         <div className="glow" aria-hidden />
         <div className="card">
           <Brand />
-          <div className="spinner-row"><Spinner /><span>正在恢复登录…</span></div>
+          <div className="spinner-row"><Spinner /><span>{tr("auth.restoring", "正在恢复登录…")}</span></div>
         </div>
       </div>
     );
@@ -626,25 +629,36 @@ export default function App() {
           <Brand />
           {!loggingIn && (
             <>
-              <p className="tagline">登录以同步你的团队、配置与 AI 助手</p>
+              <p className="tagline">{tr("auth.tagline", "登录以同步你的团队、配置与 AI 助手")}</p>
               <button className="btn-primary" onClick={handleLogin}>
-                <span>使用浏览器登录</span>
+                <span>{tr("auth.browserLogin", "使用浏览器登录")}</span>
                 <ArrowIcon />
               </button>
-              <p className="hint">点击后会自动打开浏览器</p>
+              <p className="hint">{tr("auth.autoOpenHint", "点击后会自动打开浏览器")}</p>
             </>
           )}
           {loggingIn && (
             <>
-              <p className="tagline">已在浏览器打开登录页，等待你完成…</p>
+              <p className="tagline">{tr("auth.waitingTagline", "已在浏览器打开登录页，等待你完成…")}</p>
               <div className="spinner-row">
                 <Spinner />
-                <span>等待回调</span>
+                <span>{tr("auth.waitingCallback", "等待回调")}</span>
               </div>
+              {loginUrl && (
+                <div className="login-fallback" data-id="LoginUrlFallback" style={{ marginTop: 10, textAlign: "center" }}>
+                  <p className="hint" style={{ marginBottom: 6 }}>{tr("auth.browserNotOpened", "浏览器没自动打开?")}</p>
+                  <button className="btn-ghost" data-id="LoginUrlFallback-open"
+                    onClick={() => { try { window.cicy?.shell?.openExternal?.(loginUrl); } catch {} }}>{tr("auth.openManually", "手动打开登录页")}</button>
+                  <button className="btn-ghost" data-id="LoginUrlFallback-copy"
+                    onClick={() => { try { navigator.clipboard?.writeText(loginUrl); setWelcome(tr("auth.linkCopied", "链接已复制,粘到浏览器打开")); setTimeout(() => setWelcome(""), 2500); } catch {} }}>{tr("auth.copyLink", "复制链接")}</button>
+                  <p className="hint" data-id="LoginUrlFallback-url" style={{ wordBreak: "break-all", marginTop: 6, fontSize: 11, opacity: 0.7, userSelect: "text" }}>{loginUrl}</p>
+                </div>
+              )}
               <button className="btn-ghost" onClick={() => {
                 window.cicy?.auth?.loginCancel?.();
                 setLoggingIn(false);
-              }}>取消</button>
+                setLoginUrl("");
+              }}>{tr("auth.cancel", "取消")}</button>
             </>
           )}
           {error && <div className="error">{error}</div>}

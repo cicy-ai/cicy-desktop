@@ -159,5 +159,18 @@
     "retry": "Retry",
     "done": "Done",
     "minimize": "Minimize"
+  },
+  "auth": {
+    "restoring": "Restoring login…",
+    "tagline": "Sign in to sync your teams, settings & AI assistant",
+    "browserLogin": "Sign in with browser",
+    "autoOpenHint": "Your browser will open automatically",
+    "waitingTagline": "Login page opened in your browser — finish there…",
+    "waitingCallback": "Waiting for callback",
+    "cancel": "Cancel",
+    "browserNotOpened": "Browser didn't open?",
+    "openManually": "Open login page manually",
+    "copyLink": "Copy link",
+    "linkCopied": "Link copied — paste it into your browser"
   }
 }

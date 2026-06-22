@@ -159,5 +159,18 @@
     "retry": "重试",
     "done": "完成",
     "minimize": "最小化"
+  },
+  "auth": {
+    "restoring": "正在恢复登录…",
+    "tagline": "登录以同步你的团队、配置与 AI 助手",
+    "browserLogin": "使用浏览器登录",
+    "autoOpenHint": "点击后会自动打开浏览器",
+    "waitingTagline": "已在浏览器打开登录页，等待你完成…",
+    "waitingCallback": "等待回调",
+    "cancel": "取消",
+    "browserNotOpened": "浏览器没自动打开?",
+    "openManually": "手动打开登录页",
+    "copyLink": "复制链接",
+    "linkCopied": "链接已复制,粘到浏览器打开"
   }
 }

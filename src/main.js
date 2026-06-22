@@ -949,7 +949,7 @@ electronApp.whenReady().then(async () => {
 
     __ipcMainAuth.handle("auth:login-start", async () => {
       try {
-        await auth.startLogin({
+        const _info = await auth.startLogin({
           onResult: (payload) => {
             if (payload && payload.token) {
               saveDesktopAuth(payload);
@@ -975,7 +975,9 @@ electronApp.whenReady().then(async () => {
             }
           },
         });
-        return { ok: true };
+        // Return the login URL so the renderer can offer a manual "open / copy
+        // link" fallback when the browser didn't auto-open (openExternal failed).
+        return { ok: true, url: _info && _info.url };
       } catch (e) {
         log.warn(`[auth] login-start failed: ${e.message}`);
         return { ok: false, error: e.message };
