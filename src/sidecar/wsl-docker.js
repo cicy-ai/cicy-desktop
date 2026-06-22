@@ -119,9 +119,23 @@ async function distroInstalled(distro = DISTRO) {
 // Raw `wsl --import` of the rootfs as an ISOLATED v2 distro.
 function importTarball(dest, installDir) {
   return new Promise((resolve, reject) => {
+    // 240s, NOT 600s: a 444MB import finishes in well under 4min on a healthy WSL.
+    // If it runs longer it has WEDGED (the whole WSL subsystem hangs — every later
+    // `wsl` call then blocks and the app goes 未响应). Bound it short so we FAIL FAST
+    // and the caller can `wsl --shutdown` + retry instead of hanging 10 minutes.
     execFile("wsl", ["--import", DISTRO, installDir, dest, "--version", "2"],
-      { timeout: 600000, windowsHide: true },
+      { timeout: 240000, windowsHide: true },
       (err, _so, se) => { if (err) { err.stderr = String(se || ""); return reject(err); } resolve(); });
+  });
+}
+
+// `wsl --shutdown`: hard-reset the ENTIRE WSL VM. This is the only reliable cure
+// when WSL wedges (a hung `wsl --import` leaves every subsequent `wsl` call
+// blocking → the app freezes). Unlike `wsl --list/-d` it doesn't query the wedged
+// VM, so it returns even when WSL is stuck. Use it as recovery between retries.
+function wslShutdown() {
+  return new Promise((resolve) => {
+    execFile("wsl", ["--shutdown"], { timeout: 30000, windowsHide: true }, () => resolve());
   });
 }
 
@@ -157,10 +171,17 @@ async function installDistro({ emit } = {}) {
   try {
     await importTarball(dest, installDir);
   } catch (e) {
-    // Most likely the shared WSL2 kernel component is missing — install it
-    // (idempotent) and retry once.
-    emit && emit({ phase: "container", status: "running", message: "需要 WSL2 内核,正在安装后重试…" });
-    await ensureWslKernel({ emit });
+    // Import failed or WEDGED (our 4-min timeout fired). Recover hard, then retry once:
+    //   1) `wsl --shutdown` — clears a wedged WSL VM (the real cause of the 8-min hang
+    //      + app freeze). Without this the retry hits the same stuck VM and hangs again.
+    //   2) ensure the WSL2 kernel (import also fails when it's missing).
+    //   3) unregister any half-registered distro a wedged import left behind, so the
+    //      retry imports clean.
+    log.warn(`[installDistro] import failed/wedged (${e.message}) → wsl --shutdown + retry`);
+    emit && emit({ phase: "container", status: "running", message: "导入卡住,重置 WSL(--shutdown)后重试…" });
+    try { await wslShutdown(); } catch {}
+    try { await ensureWslKernel({ emit }); } catch {}
+    try { await new Promise((r) => execFile("wsl", ["--unregister", DISTRO], { timeout: 30000, windowsHide: true }, () => r())); } catch {}
     await importTarball(dest, installDir);
   }
   // 3) Force a clean cold boot. A freshly-imported distro is often wedged, so the
