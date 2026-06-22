@@ -190,8 +190,10 @@ async function installDistro({ emit } = {}) {
   emit && emit({ phase: "container", status: "running", message: "重置运行环境(冷启动)…" });
   try { await wslTerminate(); } catch {}
 
-  // 4) Free the ~444MB package now that the distro has everything.
-  try { fs.unlinkSync(dest); } catch {}
+  // 4) KEEP the rootfs (deletion removed per 主人). Deleting it forced a fresh
+  //    447MB re-download on every reinstall / new user / clean retry — the main
+  //    「怎么这么慢」 pain. We keep it so reinstall reuses it (curlDownload skips a
+  //    complete file). Users who want the disk back can delete the tarball manually.
 }
 
 // docker CLI present inside the distro?
