@@ -228,3 +228,35 @@ jobs:
               echo "::warning::pkgbuild failed for $ARCH (other arch unaffected)"
             fi
           done
+
+      # Publish the .pkg installers to OSS (CN-fast). GitHub release downloads stall from
+      # mainland China, so users in CN pull from OSS instead. Each arch gets a versioned key
+      # plus a stable cicy-desktop-mac-<arch>-latest.pkg alias a download page can hard-link.
+      # Same bucket/creds as the Windows latest.exe step.
+      - name: Upload .pkg to OSS (versioned + per-arch latest alias)
+        continue-on-error: true   # OSS is a convenience mirror — never fail the release
+        shell: bash
+        env:
+          OSS_AK: ${{ secrets.OSS_ACCESS_KEY_ID }}
+          OSS_SK: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+        run: |
+          set -uo pipefail
+          VER="${{ steps.meta.outputs.version }}"
+          if [ -z "${OSS_AK:-}" ] || [ -z "${OSS_SK:-}" ]; then
+            echo "::warning::OSS creds missing — skipping OSS mirror"; exit 0
+          fi
+          curl -fsSL -o ossutil.zip "https://gosspublic.alicdn.com/ossutil/1.7.18/ossutil-v1.7.18-mac-arm64.zip"
+          unzip -oq ossutil.zip
+          OSS="./ossutil-v1.7.18-mac-arm64/ossutil"; chmod +x "$OSS"
+          "$OSS" config -e oss-cn-shanghai.aliyuncs.com -i "$OSS_AK" -k "$OSS_SK"
+          BASE="oss://cicy-1372193042-cn/releases"
+          HOST="https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/releases"
+          for ARCH in x64 arm64; do
+            PKG="cicy-desktop-$VER-$ARCH.pkg"
+            [ -f "$PKG" ] || { echo "::warning::$PKG not built — skipping OSS for $ARCH"; continue; }
+            "$OSS" cp "$PKG" "$BASE/$PKG" -f --acl public-read || { echo "::warning::OSS versioned upload failed $ARCH"; continue; }
+            "$OSS" cp "$PKG" "$BASE/cicy-desktop-mac-$ARCH-latest.pkg" -f --acl public-read || echo "::warning::OSS latest upload failed $ARCH"
+            echo "OSS $ARCH: $HOST/cicy-desktop-mac-$ARCH-latest.pkg"
+          done
+          printf '%s' "$VER" > mac-latest-version.txt
+          "$OSS" cp mac-latest-version.txt "$BASE/mac-latest-version.txt" -f --acl public-read || true
