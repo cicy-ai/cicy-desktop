@@ -1709,7 +1709,6 @@ function DockerInstallDrawerHost() {
 function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
   const [status, setStatus] = useState(null);
   const [busy, setBusy] = useState("");   // "" | bootstrap | restart | stop | upgrade | probe
-  const [probeNote, setProbeNote] = useState(""); // 「重试检测」后给用户的明确反馈(WSL 仍卡 → 提示重启)
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmRecreate, setConfirmRecreate] = useState(false); // 重建容器 in-app 确认弹窗(不用 native confirm)
   // Inline rename (mirrors LocalTeamCard): double-click the title to edit.
@@ -1733,9 +1732,7 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
 
   const checkStatus = useCallback(async () => {
     try {
-      const s = await window.cicy?.docker?.appStatus?.();
-      setStatus(s);
-      if (s && !s.unknown) setProbeNote(""); // WSL came back → clear the stuck note
+      setStatus(await window.cicy?.docker?.appStatus?.());
     } catch (e) { console.warn("[DockerCard]", e); }
   }, []);
 
@@ -1914,9 +1911,8 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
       try {
         const s = await (window.cicy?.docker?.appRedetect?.() ?? window.cicy?.docker?.appStatus?.());
         if (s) setStatus(s);
-        if (s?.unknown) setProbeNote(tr("docker.wslStillStuck", "WSL 仍无响应 —— 多半要重启 Windows 后再试"));
-        else setProbeNote("");
-      } catch (e) { setProbeNote(tr("docker.probeFailed", "检测失败,请重试")); }
+        if (s?.unknown) toast.show({ id: "docker-probe", status: "error", message: tr("docker.wslStillStuck", "WSL 仍无响应 —— 多半要重启 Windows 后再试"), ttl: 6000 });
+      } catch (e) { toast.show({ id: "docker-probe", status: "error", message: tr("docker.probeFailed", "检测失败,请重试"), ttl: 5000 }); }
       finally { setBusy(""); }
       return;
     }
@@ -2019,11 +2015,6 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
           )}
         </div>
         <div className="bcard__meta"><span className="bcard__chip">Docker</span></div>
-        {(probeNote || (!running && stateText)) && (
-          <div data-id="DockerCard-statusline" style={{ marginTop: 4, fontSize: 11, lineHeight: 1.4, color: probeNote ? "#f0a020" : "rgba(255,255,255,0.55)" }}>
-            {probeNote || stateText}
-          </div>
-        )}
       </div>
       <button
         type="button"
