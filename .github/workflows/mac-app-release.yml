@@ -115,11 +115,16 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf dist
+          # Build BOTH arches: --arm64 (Apple Silicon) AND --x64 (Intel). The runner
+          # is arm64 and electron-builder cross-builds x64, so Intel Macs get a NATIVE
+          # dmg instead of being forced onto the slow `npx` electron path (the repo had
+          # only arm64 dmgs, so x86_64 Macs had no installer). cicy-code sidecar is
+          # already built for darwin amd64 + arm64 above.
           if [ -f build/logo.icns ]; then
-            npm run build:mac -- --config.mac.icon=build/logo.icns --publish always
+            npm run build:mac -- --arm64 --x64 --config.mac.icon=build/logo.icns --publish always
           else
             echo "::warning::build/logo.icns missing — using default Electron icon"
-            npm run build:mac -- --publish always
+            npm run build:mac -- --arm64 --x64 --publish always
           fi
 
       - name: Upload macOS artifacts
