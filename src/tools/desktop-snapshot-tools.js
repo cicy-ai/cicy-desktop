@@ -51,7 +51,10 @@ module.exports = (registerTool) => {
 
         // Stale/missing. mac/linux can capture live in-process; win32 cannot (needs
         // the --disable-gpu daemon), so there we fall back to whatever file exists.
-        if (process.platform !== "win32") {
+        // BUT honor snapshotEnabled(): on macOS capture is off by default, and a live
+        // `screencapture` here is exactly what pops the Screen-Recording prompt (just
+        // less often than the daemon did) — so when disabled we must NOT live-capture.
+        if (process.platform !== "win32" && snap.snapshotEnabled()) {
           try {
             const r = await snap.captureB64(maxWidth);
             return { content: [{ type: "text", text: r.b64 }] };
@@ -61,7 +64,10 @@ module.exports = (registerTool) => {
           }
         }
 
-        if (fresh) return { content: [{ type: "text", text: fresh.b64 }] }; // win32: stale is better than nothing
+        if (fresh) return { content: [{ type: "text", text: fresh.b64 }] }; // stale is better than nothing
+        if (process.platform === "darwin" && !snap.snapshotEnabled()) {
+          throw new Error("桌面截图在 macOS 默认关闭(避免反复弹屏幕录制授权)。需要 agent 看屏幕时,启动 app 前设 CICY_DESKTOP_SNAPSHOT=1。");
+        }
         throw new Error("no desktop snapshot yet (daemon warming up?)");
       } catch (error) {
         return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };

@@ -33,6 +33,16 @@ function snapDir() {
   return fromEnv || path.join(os.homedir(), "cicy-files", "desktop-snapshot");
 }
 
+// Is desktop screen capture allowed here? Single source of truth shared by the
+// periodic daemon (main.js) AND the on-demand `desktop_snapshot` tool's live fallback.
+// ON by default on every platform (主人令: 不能关周期截图 — the agent needs to watch the
+// screen). The macOS repeated Screen-Recording prompt is NOT fixed by disabling capture
+// but by giving the app a STABLE signing identity (see scripts/mac-allinone codesign), so
+// the TCC grant sticks. Opt out entirely with CICY_DESKTOP_SNAPSHOT=0.
+function snapshotEnabled() {
+  return process.env.CICY_DESKTOP_SNAPSHOT !== "0";
+}
+
 function intervalMs(opt) {
   const fromEnv = parseInt(process.env.CICY_DESKTOP_SNAP_INTERVAL_MS || "", 10);
   return (opt && opt.intervalMs) || (fromEnv > 0 ? fromEnv : DEFAULT_INTERVAL_MS);
@@ -187,4 +197,4 @@ if (process.env.CICY_SNAP_DAEMON === "1") {
   app.on("render-process-gone", () => app.quit());
 }
 
-module.exports = { startDesktopSnapshots, stopDesktopSnapshots, snapDir, captureOnce, captureB64, MAX_W };
+module.exports = { startDesktopSnapshots, stopDesktopSnapshots, snapDir, captureOnce, captureB64, snapshotEnabled, MAX_W };

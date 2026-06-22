@@ -1089,13 +1089,11 @@ electronApp.whenReady().then(async () => {
   // the prompt fires over and over. So it's OFF by default on macOS (most users —
   // docker/team management — don't need the agent to watch their screen). Opt in with
   // CICY_DESKTOP_SNAPSHOT=1. Other platforms stay on (opt out with =0).
-  const __snapOn = process.platform === "darwin"
-    ? process.env.CICY_DESKTOP_SNAPSHOT === "1"
-    : process.env.CICY_DESKTOP_SNAPSHOT !== "0";
-  if (!global.__cicyDesktopSnapStarted && __snapOn) {
+  const __snap = require("./utils/desktop-snapshot");
+  if (!global.__cicyDesktopSnapStarted && __snap.snapshotEnabled()) {
     global.__cicyDesktopSnapStarted = true;
     try {
-      const info = require("./utils/desktop-snapshot").startDesktopSnapshots();
+      const info = __snap.startDesktopSnapshots();
       log.info(`[desktop-snap] desktop snapshots → ${info.dir} (every ${info.intervalMs}ms, maxW ${info.maxWidth}, mode ${info.mode})`);
     } catch (e) { log.warn(`[desktop-snap] start failed: ${e.message}`); }
   }
