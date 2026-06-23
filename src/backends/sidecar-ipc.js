@@ -46,24 +46,9 @@ const APP_PORT = Number(process.env.CICY_DOCKER_APP_PORT || 8009);
 const APP_CONTAINER = process.env.CICY_DOCKER_APP_CONTAINER || `cicy-code-docker-${APP_PORT}`;
 const APP_VOLUME = process.env.CICY_DOCKER_APP_VOLUME || `cicy-team-${APP_PORT}`;
 const APP_MOUNT = process.env.CICY_DOCKER_APP_MOUNT || "/home/cicy";
-// 8008 and 8009 are ONE team (主人), so :8009 reaches the LLM through the cicy
-// gateway using 8008's TEAM key — the `sk-cicy-…` apiKey already minted in 8008's
-// global.json providers (NOT the api_token, which is only the local access
-// credential). 8008 is up by the time the Docker card is used, so the key is
-// ready — we just read it and pass it to the container. Same key ⇒ same billing.
+// :8009 docker 的网关 endpoint。key 不再从 :8008 借(native 已退役)—— 容器只用它
+// 自己独立云端 team 的 key(见 ensureDockerTeam / appOpts)。
 const GATEWAY_ENDPOINT = process.env.CICY_AI_GATEWAY_LLM_ENDPOINT || "https://gateway.cicy-ai.com";
-function readLocalGatewayKey() {
-  try {
-    const p = path.join(os.homedir(), "cicy-ai", "global.json");
-    const g = JSON.parse(fs.readFileSync(p, "utf8"));
-    const items = (g.providers && g.providers.items) || [];
-    const pick =
-      items.find((it) => it && it.apiKey && String(it.url || "").includes("gateway.cicy-ai.com")) ||
-      items.find((it) => it && it.key === "defaultAnthropic" && it.apiKey) ||
-      items.find((it) => it && it.apiKey);
-    return pick ? String(pick.apiKey || "") : "";
-  } catch { return ""; }
-}
 
 // ── Docker 独立云端 team ──────────────────────────────────────────────────────
 // 主人令(2026-06-21):每个 Docker 容器要有自己独立的云端 team(8008 那个本机
@@ -80,7 +65,7 @@ let dockerTeamReg = null; // { teamId, title, apiKey } — 缓存,appOpts 读它
 
 // 确保这个 docker(按 volume)有独立云端 team;返回 { teamId, title, apiKey } 或 null。
 async function ensureDockerTeam() {
-  if (!cc || !cc.loginToken || !cc.loginToken()) return null; // 未登录 → appOpts 回退 8008 key
+  if (!cc || !cc.loginToken || !cc.loginToken()) return null; // 未登录 → 先不带 key,登录后重建容器再补(绝不借 8008)
   try {
     const store = readDockerTeams();
     let rec = store[APP_VOLUME];
@@ -143,7 +128,7 @@ function register({ sidecarLogPath } = {}) {
       // the 444MB rootfs) or unknown (WSL not answering — let the next tick retry).
       if (s.installed && !s.running && !s.unknown) {
         log.info("[docker-daemon] installed but :8009 down → auto-starting (bootstrap idempotent)");
-        try { await appDocker.bootstrap(appOpts()); } catch (e) { log.warn(`[docker-daemon] auto-start failed: ${e.message}`); }
+        try { await appDocker.bootstrap(await appOpts()); } catch (e) { log.warn(`[docker-daemon] auto-start failed: ${e.message}`); }
         await refreshDockerStatus();
       }
     } finally { _dockerDaemonBusy = false; }
@@ -234,15 +219,15 @@ function register({ sidecarLogPath } = {}) {
     return s;
   });
 
-  // Common run options for the :8009 instance: its own container/volume + the
-  // LLM gateway env keyed by the 8008 team's token. (WSL: whole-home mount via
-  // -v <volume>:/home/cicy inside wsl-docker.)
-  const appOpts = () => {
-    // Docker 独立 team 的网关 key 优先(ensureDockerTeam 已缓存);未登录/未建成功
-    // 时回退 8008 的 key,保证容器仍有 LLM key 可用。
-    const gwKey = (dockerTeamReg && dockerTeamReg.apiKey) || readLocalGatewayKey();
+  // Common run options for the :8009 instance: its own container/volume + the LLM
+  // gateway env. 主人: :8009 必须用「它自己独立云端 team」的 key —— ensureDockerTeam
+  // 没建就建(createTeam),用那个 teamId 的 key。绝不借别人的(native :8008 已退役,
+  // 没得借,也不许借)。所以 appOpts 是 async:先 await ensureDockerTeam,确保容器启动
+  // 前自己的 key 已就位;拿不到(未登录)就先不带 key,登录后「重建 Docker」再带上。
+  const appOpts = async () => {
+    await ensureDockerTeam().catch(() => {});
     const env = { CICY_AI_GATEWAY_LLM_ENDPOINT: GATEWAY_ENDPOINT };
-    if (gwKey) env.CICY_AI_GATEWAY_LLM_API_KEY = gwKey;
+    if (dockerTeamReg && dockerTeamReg.apiKey) env.CICY_AI_GATEWAY_LLM_API_KEY = dockerTeamReg.apiKey;
     return { port: APP_PORT, container: APP_CONTAINER, volume: APP_VOLUME, env };
   };
   // Register the running :8009 instance as a (custom) team so the card's "打开"
@@ -303,7 +288,7 @@ function register({ sidecarLogPath } = {}) {
     try {
       await ensureDockerTeam(); // 启动前先确保独立云端 team + 拿到它的网关 key(appOpts 用)
       const result = await appDocker.bootstrap({
-        ...appOpts(),
+        ...(await appOpts()),
         onProgress: (ev) => { try { e.sender.send("docker:app-progress", ev); } catch {} },
       });
       if (result && result.ok) await registerAppTeam();
@@ -330,7 +315,7 @@ function register({ sidecarLogPath } = {}) {
   ipcMain.handle("docker:app-recreate", async () => {
     try {
       await ensureDockerTeam();
-      await appDocker.recreate({ ...appOpts() });
+      await appDocker.recreate({ ...(await appOpts()) });
       await registerAppTeam();
       return { ok: true };
     } catch (e) { return { ok: false, error: e.message }; }
@@ -360,7 +345,7 @@ function register({ sidecarLogPath } = {}) {
     try {
       await ensureDockerTeam();
       const result = await appDocker.upgrade({
-        ...appOpts(),
+        ...(await appOpts()),
         onProgress: (ev) => { try { e.sender.send("docker:app-progress", ev); } catch {} },
       });
       if (result && result.ok) await registerAppTeam();

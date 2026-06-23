@@ -880,6 +880,21 @@ electronApp.whenReady().then(async () => {
   // 主人: native :8008 退役 —— 不再起本机 cicy-code、不再 watchdog 保活、不再把它
   // 自动注册成「本地团队」。cicy-code 只在 docker 容器里跑(Docker 卡,:8009 那套不变,
   // 由 sidecar-ipc 自己管理)。cicyCodeSidecar 仍保留供 :8008 探活/版本查询用。
+  //
+  // 升级清理:历史遗留的「本地团队」(http://127.0.0.1:8008)节点现在是死的(native 没了),
+  // 它那张连不上的卡得删掉。只删这个 native :8008 节点;docker :8009 + 自定义团队不动。
+  (async () => {
+    try {
+      const lt = require("./backends/local-teams");
+      const teams = await lt.list().catch(() => []);
+      for (const t of (teams || [])) {
+        if (/\/\/127\.0\.0\.1:8008(\/|$|\b)/.test(String(t.base_url || ""))) {
+          await lt.removeTeam(t.id).catch(() => {});
+          log.info(`[migrate] removed retired native :8008 team ${t.id}`);
+        }
+      }
+    } catch {}
+  })();
 
   // Backend launcher: app menu + IPC handlers. Menu adds a Backends top-level
   // entry; IPC powers the launcher window (src/backends/launcher.html).
