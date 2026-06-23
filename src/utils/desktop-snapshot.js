@@ -35,12 +35,15 @@ function snapDir() {
 
 // Is desktop screen capture allowed here? Single source of truth shared by the
 // periodic daemon (main.js) AND the on-demand `desktop_snapshot` tool's live fallback.
-// ON by default on every platform (主人令: 不能关周期截图 — the agent needs to watch the
-// screen). The macOS repeated Screen-Recording prompt is NOT fixed by disabling capture
-// but by giving the app a STABLE signing identity (see scripts/mac-allinone codesign), so
-// the TCC grant sticks. Opt out entirely with CICY_DESKTOP_SNAPSHOT=0.
+// OFF by default on macOS: any capture trips the Screen-Recording prompt, and macOS 15
+// won't persist the grant for a non-Apple-Team-ID signature (ad-hoc AND a self-signed
+// cert both re-prompt — verified). So unless you ship an Apple Developer-ID + notarized
+// build, the only way to "no prompts" is to not capture. Opt in with CICY_DESKTOP_SNAPSHOT=1.
+// win/linux are ON by default (no such prompt); opt out with =0.
 function snapshotEnabled() {
-  return process.env.CICY_DESKTOP_SNAPSHOT !== "0";
+  return process.platform === "darwin"
+    ? process.env.CICY_DESKTOP_SNAPSHOT === "1"
+    : process.env.CICY_DESKTOP_SNAPSHOT !== "0";
 }
 
 function intervalMs(opt) {

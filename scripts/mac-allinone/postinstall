@@ -7,47 +7,10 @@ APP="/Applications/CiCy Desktop.app"
 [ -d "$APP" ] || exit 0
 /usr/bin/xattr -dr com.apple.quarantine "$APP" 2>/dev/null || true
 /usr/bin/xattr -cr "$APP" 2>/dev/null || true
-
-# ── Stable LOCAL code-signing identity (主人令: 用自签证书) ────────────────────
-# ad-hoc has no stable identity, so macOS never persists the Screen-Recording TCC
-# grant → it re-prompts forever. A self-signed cert gives the app a STABLE designated
-# requirement, so the grant sticks after the user allows it once. We run as root here,
-# so we can write the System keychain + trust the cert with NO password prompt.
-SIGN_CN="CiCy Desktop Local Signing"
-SYS_KC="/Library/Keychains/System.keychain"
-if ! /usr/bin/security find-identity -p codesigning "$SYS_KC" 2>/dev/null | grep -qF "$SIGN_CN"; then
-  TMPD="$(/usr/bin/mktemp -d)"
-  # Config file (portable across the LibreSSL that ships in /usr/bin/openssl, which
-  # lacks `-addext`). codeSigning EKU is what makes it a valid signing identity.
-  cat > "$TMPD/c.cnf" <<CNF
-[req]
-distinguished_name = dn
-x509_extensions = v3
-prompt = no
-[dn]
-CN = $SIGN_CN
-[v3]
-basicConstraints = critical,CA:false
-keyUsage = critical,digitalSignature
-extendedKeyUsage = critical,codeSigning
-CNF
-  /usr/bin/openssl req -x509 -newkey rsa:2048 -keyout "$TMPD/k.pem" -out "$TMPD/c.pem" \
-    -days 3650 -nodes -config "$TMPD/c.cnf" >/dev/null 2>&1
-  /usr/bin/openssl pkcs12 -export -inkey "$TMPD/k.pem" -in "$TMPD/c.pem" \
-    -out "$TMPD/id.p12" -passout pass:cicy -name "$SIGN_CN" >/dev/null 2>&1
-  # -A = no ACL on the key → codesign can use it without a partition-list/password dance.
-  /usr/bin/security import "$TMPD/id.p12" -k "$SYS_KC" -P cicy -A >/dev/null 2>&1 || true
-  /usr/bin/security add-trusted-cert -d -r trustRoot -p codeSign -k "$SYS_KC" "$TMPD/c.pem" >/dev/null 2>&1 || true
-  /bin/rm -rf "$TMPD"
-fi
-if /usr/bin/security find-identity -p codesigning "$SYS_KC" 2>/dev/null | grep -qF "$SIGN_CN"; then
-  /usr/bin/codesign --force --deep --sign "$SIGN_CN" --keychain "$SYS_KC" "$APP" 2>/dev/null \
-    && echo "signed with local identity: $SIGN_CN" \
-    || /usr/bin/codesign --force --deep --sign - "$APP" 2>/dev/null || true
-else
-  echo "local identity unavailable — falling back to ad-hoc"
-  /usr/bin/codesign --force --deep --sign - "$APP" 2>/dev/null || true
-fi
+# Re-ad-hoc-sign so the app opens with no Apple cert. (A self-signed cert was tried to
+# make the Screen-Recording grant persist — it did sign, but macOS 15 still re-prompts
+# without an Apple Team ID, so it was dropped; desktop capture is OFF by default on mac.)
+/usr/bin/codesign --force --deep --sign - "$APP" 2>/dev/null || true
 
 # Desktop shortcut for the logged-in user (postinstall runs as root, so resolve the
 # console user + their home and chown the symlink to them). Launchpad/Spotlight pick
