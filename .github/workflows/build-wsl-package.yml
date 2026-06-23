@@ -86,6 +86,17 @@ jobs:
           ./ossutil cp cicy-wsl.tar.gz "oss://cicy-1372193042-cn/${{ inputs.oss_key }}" -f --acl public-read
           echo "Uploaded: https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/${{ inputs.oss_key }}"
 
+      # macOS (colima) loads the cicy-code image tarball directly, NOT a WSL rootfs. So the
+      # SAME run also republishes images/cicy-code-latest.tar.gz from the image already saved
+      # at /tmp/cicy-image.tar — one workflow keeps BOTH platforms' docker images current
+      # (this OSS key had no producer, which is why macOS was stuck on a stale image).
+      - name: Publish cicy-code image tarball to OSS (macOS / colima)
+        run: |
+          gzip -c /tmp/cicy-image.tar > cicy-code-latest.tar.gz
+          ls -lh cicy-code-latest.tar.gz
+          ./ossutil cp cicy-code-latest.tar.gz "oss://cicy-1372193042-cn/images/cicy-code-latest.tar.gz" -f --acl public-read
+          echo "Uploaded mac image: https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/images/cicy-code-latest.tar.gz"
+
       - name: Upload artifact (backup)
         uses: actions/upload-artifact@v4
         with:
