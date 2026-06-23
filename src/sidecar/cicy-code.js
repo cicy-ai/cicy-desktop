@@ -82,12 +82,6 @@ async function startFromRuntime({ logPath, port }) {
     CICY_CODE_PORT: String(port),
     PORT: String(port),
   };
-  if (process.platform === "win32") {
-    try {
-      const msys = runtime.binPath("msys2") || runtime.ensureFromBundle("msys2");
-      if (msys) env.CICY_MSYS_ROOT = msys; // w-10084 exe 探测约定
-    } catch {}
-  }
   const c = spawn(exe, ["--desktop"], { stdio, detached: false, windowsHide: true, env });
   console.log(`[cicy-code-sidecar] spawned runtime ${exe} --desktop (v${runtime.currentVersion("cicy-code")}) pid=${c.pid} port=${port}`);
   c.on("exit", (code, signal) => {
@@ -141,8 +135,8 @@ async function start({ logPath, port = DEFAULT_PORT, force = false, version = nu
     PORT: String(port),
   };
   // --helper removed (主人指令): Windows now runs cicy-code in normal mode (full
-  // tmux-based multi-agent via the bundled MSYS2 runtime), same as mac/linux —
-  // no longer the single headless 团队助手.
+  // tmux-based multi-agent), same as mac/linux — no longer the single headless
+  // 团队助手.
   const args = ["--desktop"];
   child = spawn(exe, args, { stdio, detached: false, windowsHide: true, env });
   console.log(`[cicy-code-sidecar] spawned ${exe} ${args.join(" ")} pid=${child.pid} port=${port} log=${logPath || "(none)"}`);

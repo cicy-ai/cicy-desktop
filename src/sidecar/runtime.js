@@ -1,12 +1,11 @@
 // Runtime Bundle v1 — versioned component store for everything cicy-desktop
-// runs locally (cicy-code, mihomo, and on Windows the slim MSYS2 tree).
+// runs locally (cicy-code, mihomo).
 //
 // Layout:
 //   ~/cicy-ai/runtime/
 //     versions.json                  { "<comp>": { "current": "<ver>" }, ... }
 //     cicy-code/<ver>/cicy-code(.exe)
 //     mihomo/<ver>/mihomo(.exe)
-//     msys2/<ver>/usr/bin/bash.exe   (win32 only, directory component)
 //
 // Sourcing order:
 //   1. first run: copy out of cicy-desktop's own node_modules — the platform
@@ -32,8 +31,8 @@ const IS_WIN = process.platform === "win32";
 
 // npm subpackage platform suffix. NOTE: Windows is "windows" not "win32" —
 // npm's spam filter 403s NEW package names containing 'win32', so EVERY cicy
-// subpackage (code/mihomo/msys2) is published as *-windows-*. This must match
-// the published names exactly or both the bundled-dir lookup AND the npm-pull
+// subpackage (code/mihomo) is published as *-windows-*. This must match the
+// published names exactly or both the bundled-dir lookup AND the npm-pull
 // fallback fail (a 404 that stranded first start on Windows).
 function plat() {
   const osStr = IS_WIN ? "windows" : process.platform === "darwin" ? "darwin" : "linux";
@@ -42,7 +41,6 @@ function plat() {
 }
 
 // kind "bin": single executable at the package root.
-// kind "dir": a directory tree (msys2) — `check` is the file proving it's intact.
 const COMPONENTS = {
   "cicy-code": {
     kind: "bin",
@@ -53,12 +51,6 @@ const COMPONENTS = {
     kind: "bin",
     pkg: () => `cicy-mihomo-${plat()}`,
     bin: () => (IS_WIN ? "mihomo.exe" : "mihomo"),
-  },
-  "msys2": {
-    kind: "dir",
-    winOnly: true,
-    pkg: () => "cicy-msys2-windows-x64",
-    check: path.join("usr", "bin", "bash.exe"),
   },
 };
 
@@ -83,19 +75,13 @@ function versionDir(comp, ver) {
   return path.join(RUNTIME_DIR, comp, ver);
 }
 
-// Absolute path of the component's current payload — the executable for "bin"
-// components, the root dir for "dir" components. null when not installed.
+// Absolute path of the component's current executable. null when not installed.
 function binPath(comp) {
   const c = COMPONENTS[comp];
   const ver = currentVersion(comp);
   if (!c || !ver) return null;
-  const p = c.kind === "dir" ? versionDir(comp, ver) : path.join(versionDir(comp, ver), c.bin());
-  const probe = c.kind === "dir" ? path.join(p, c.check) : p;
-  return fs.existsSync(probe) ? p : null;
-}
-
-function cpDirSync(src, dst) {
-  fs.cpSync(src, dst, { recursive: true });
+  const p = path.join(versionDir(comp, ver), c.bin());
+  return fs.existsSync(p) ? p : null;
 }
 
 // Install a payload directory as <comp>@<ver> and return the version dir.
@@ -108,31 +94,10 @@ function installPayload(comp, ver, payloadDir) {
   const staging = dst + ".staging";
   fs.rmSync(staging, { recursive: true, force: true });
   fs.mkdirSync(staging, { recursive: true });
-  if (c.kind === "dir") {
-    // The 118MB+ MSYS2 tree ships as a single .tar.gz inside the npm package
-    // (npm handles one big file far better than 10k tiny ones). Extract it;
-    // otherwise the payload is already an unpacked tree → copy.
-    const tgz = (() => { try { return fs.readdirSync(payloadDir).find((f) => /\.tar\.gz$/i.test(f)); } catch { return null; } })();
-    if (tgz) {
-      require("child_process").execFileSync("tar", ["-xzf", path.join(payloadDir, tgz), "-C", staging], { windowsHide: true });
-    } else {
-      cpDirSync(payloadDir, staging);
-    }
-    if (!fs.existsSync(path.join(staging, c.check))) {
-      // the tree may be nested one level (package/msys64/usr/... or root/usr/...)
-      const sub = fs.readdirSync(staging).find((d) =>
-        fs.existsSync(path.join(staging, d, c.check)));
-      if (!sub) { fs.rmSync(staging, { recursive: true, force: true }); throw new Error(`${comp}: ${c.check} missing in package`); }
-      fs.renameSync(path.join(staging, sub), staging + ".inner");
-      fs.rmSync(staging, { recursive: true, force: true });
-      fs.renameSync(staging + ".inner", staging);
-    }
-  } else {
-    const src = path.join(payloadDir, c.bin());
-    if (!fs.existsSync(src)) { fs.rmSync(staging, { recursive: true, force: true }); throw new Error(`${comp}: ${c.bin()} missing in package`); }
-    fs.copyFileSync(src, path.join(staging, c.bin()));
-    if (!IS_WIN) fs.chmodSync(path.join(staging, c.bin()), 0o755);
-  }
+  const src = path.join(payloadDir, c.bin());
+  if (!fs.existsSync(src)) { fs.rmSync(staging, { recursive: true, force: true }); throw new Error(`${comp}: ${c.bin()} missing in package`); }
+  fs.copyFileSync(src, path.join(staging, c.bin()));
+  if (!IS_WIN) fs.chmodSync(path.join(staging, c.bin()), 0o755);
   fs.renameSync(staging, dst);
   return dst;
 }
@@ -175,7 +140,7 @@ function bundledPkgDir(comp) {
 // sourcing from the bundled subpackage. Never touches the network.
 function ensureFromBundle(comp) {
   const c = COMPONENTS[comp];
-  if (!c || (c.winOnly && !IS_WIN)) return null;
+  if (!c) return null;
   const existing = binPath(comp);
   if (existing) return existing;
   const pkgDir = bundledPkgDir(comp);

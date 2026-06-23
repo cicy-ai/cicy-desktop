@@ -2,10 +2,8 @@
 // WSL. (2026-06 方向变更: the Docker route in docker.js is transitional and
 // being retired; this module replaces it once stable.)
 //
-// The exe is a native Go build (w-10084's line). It shells out to a slim
-// bundled MSYS2 (bash/tmux/coreutils…) which it locates itself via
-// CICY_MSYS_ROOT probing — nothing to do here beyond optionally passing the
-// env through. Known exe-side behaviors we rely on:
+// The exe is a native Go build (w-10084's line). Known exe-side behaviors we
+// rely on:
 //   - reads PORT / CICY_CODE_PORT for the listen port
 //   - missing optional deps degrade to warnings (never os.Exit)
 //   - cold tmux-server start may need ConPTY (w-10084's ensureTmuxServer, WIP)
