@@ -45,7 +45,7 @@ const PORT = Number(process.env.CICY_CODE_PORT || 8008);
 // existing daemon/reconcile/ensureDockerTeam/appOpts machinery below just retargets to 8008
 // — independent cloud team key, named-volume isolation, auto-start all come for free.
 // win32 keeps the Docker-版 as an optional 2nd instance on :8009 alongside native :8008 (next).
-const APP_PORT = Number(process.env.CICY_DOCKER_APP_PORT || (process.platform === "darwin" ? 8008 : 8009));
+const APP_PORT = Number(process.env.CICY_DOCKER_APP_PORT || 8008); // native 退役:原 :8009 Docker-版就是唯一的 :8008 cicy-code
 // container / volume 名都带上 port —— 一台机可以跑多个 docker(不同端口),各自
 // 独立容器 + 独立 volume(数据隔离)+ 独立云端 team。docker-teams.json 也按 volume
 // (含 port)区分。
@@ -83,9 +83,7 @@ const DOCKER_TEAMS_FILE = path.join(os.homedir(), "cicy-ai", "db", "docker-teams
 function readDockerTeams() { try { return JSON.parse(fs.readFileSync(DOCKER_TEAMS_FILE, "utf8")) || {}; } catch { return {}; } }
 function writeDockerTeams(obj) { try { fs.mkdirSync(path.dirname(DOCKER_TEAMS_FILE), { recursive: true }); fs.writeFileSync(DOCKER_TEAMS_FILE, JSON.stringify(obj, null, 2)); } catch {} }
 let dockerTeamReg = null; // { teamId, title, apiKey } — 缓存,appOpts 读它
-// 主实例(APP_PORT===PORT,即 darwin docker-only 的 :8008)就是「本地团队」,不该叫
-// 「Docker 团队」(那是第二实例 :8009 用的)。docker-only 下它是唯一/主团队。
-const APP_TEAM_TITLE = (APP_PORT === PORT) ? "本地团队" : "Docker 团队";
+const APP_TEAM_TITLE = "本地团队"; // 只有一个 cicy-code(:8008)= 本地团队
 
 // 确保这个 docker(按 volume)有独立云端 team;返回 { teamId, title, apiKey } 或 null。
 async function ensureDockerTeam() {
