@@ -262,8 +262,12 @@ async function runContainer({ port = 8009, container = "cicy-code-docker-8009", 
     .filter(([, v]) => v != null && v !== "")
     .map(([k, v]) => `-e ${k}='${String(v).replace(/'/g, "'\\''")}'`)
     .join(" ");
+  // 主人(A 方案): 映射 mihomo 的 per-Chrome-profile 监听口段(约定 20000+N)回主机回环。
+  // docker-only 后 mihomo 只在容器里,这些口不暴露则主机系统 Chrome 的代理 127.0.0.1:(20000+N)
+  // 连不上。默认 20001-20032(32 个 profile),CICY_CHROME_PROXY_PORTS 可调。
+  const CHROME_PROXY_PORTS = process.env.CICY_CHROME_PROXY_PORTS || "20001-20032";
   const cmd = `run -d --name ${container} --restart unless-stopped ${PLATFORM_FLAG} ` +
-    `-p 127.0.0.1:${port}:8008 -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${shareMountArg()} ${envArgs} ${IMAGE}`;
+    `-p 127.0.0.1:${port}:8008 -p 127.0.0.1:${CHROME_PROXY_PORTS}:${CHROME_PROXY_PORTS} -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${shareMountArg()} ${envArgs} ${IMAGE}`;
   await dk(cmd, { timeout: 90000 });
   return { started: true };
 }

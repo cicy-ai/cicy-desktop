@@ -425,7 +425,10 @@ async function runContainer({ port = 8009, container = "cicy-code-docker", volum
   // bridge container → every lookup is EAI_AGAIN and cicy-code's startup `npm i`
   // crash-loops the container (:8009 never comes up). Pin public resolvers: Aliyun
   // 223.5.5.5 (CN-fast) first, Google 8.8.8.8 as the overseas fallback.
-  const cmd = `docker run -d --name ${container} --restart unless-stopped --dns 223.5.5.5 --dns 8.8.8.8 -p 127.0.0.1:${port}:8008 -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${shareMountArg()} ${envArgs} ${IMAGE}`;
+  // 主人(A 方案): 映射 mihomo 的 per-Chrome-profile 监听口段(约定 20000+N)回主机回环 —— docker-only
+  // 后这些口只在容器里,不暴露则主机系统 Chrome 的代理 127.0.0.1:(20000+N) 连不上. 默认 20001-20032.
+  const CHROME_PROXY_PORTS = process.env.CICY_CHROME_PROXY_PORTS || "20001-20032";
+  const cmd = `docker run -d --name ${container} --restart unless-stopped --dns 223.5.5.5 --dns 8.8.8.8 -p 127.0.0.1:${port}:8008 -p 127.0.0.1:${CHROME_PROXY_PORTS}:${CHROME_PROXY_PORTS} -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${shareMountArg()} ${envArgs} ${IMAGE}`;
   await wslRun(cmd, { timeout: 60000 });
   ensureDesktopShortcut(volume, port).catch(() => {});
   return { started: true };
