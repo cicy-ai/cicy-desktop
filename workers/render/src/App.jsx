@@ -2057,7 +2057,10 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
             </h3>
           )}
         </div>
-        <div className="bcard__meta"><span className="bcard__chip">Docker</span></div>
+        <div className="bcard__meta">
+          <span className="bcard__chip">Docker</span>
+          {status?.version && <span className="bcard__ver" data-id="DockerCard-ver" style={{ marginLeft: 8, fontSize: 11, opacity: 0.6 }}>v{status.version}</span>}
+        </div>
       </div>
       <button
         type="button"

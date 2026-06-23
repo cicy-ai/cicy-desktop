@@ -123,7 +123,10 @@ function register({ sidecarLogPath } = {}) {
   async function refreshDockerStatus() {
     try {
       const s = await appDocker.status(APP_PORT); // { wsl, distro, engineUp, running, unknown }
-      _dockerStatusCache = { installed: !!s.distro, dockerRunning: !!s.engineUp, running: !!s.running, unknown: !!s.unknown, port: APP_PORT, platform: process.platform, ts: Date.now() };
+      // 容器里 cicy-code 的版本(DockerCard 底部显示):running 时读 :APP_PORT/api/health。
+      let ver = null;
+      if (s.running) { try { ver = await require("../sidecar/version").running(APP_PORT); } catch {} }
+      _dockerStatusCache = { installed: !!s.distro, dockerRunning: !!s.engineUp, running: !!s.running, unknown: !!s.unknown, version: ver, port: APP_PORT, platform: process.platform, ts: Date.now() };
     } catch (e) {
       _dockerStatusCache = { installed: false, dockerRunning: false, running: false, unknown: true, port: APP_PORT, platform: process.platform, error: e.message, ts: Date.now() };
     }
