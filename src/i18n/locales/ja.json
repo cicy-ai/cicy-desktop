@@ -151,7 +151,15 @@
     "rebootShort": "Windows 再起動",
     "installerLaunched": "Docker インストーラーを開きました。完了後（WSL2/再起動あり）「再試行」を押してください",
     "engineDown": "Docker エンジン停止 · 起動",
-    "startDocker": "Docker を起動"
+    "startDocker": "Docker を起動",
+    "update": "cicy-code を更新",
+    "reloadWindow": "ウィンドウを再読み込み",
+    "dockerRestart": "Docker を再起動",
+    "dockerRestarted": "Docker コンテナを再起動しました",
+    "recreate": "Docker を再構築",
+    "billing": "請求",
+    "opsGroup": "Docker コンテナ",
+    "openNoToken": "サービスがまだ準備できていません。数秒待ってから「開く」を再度クリック(またはメニュー→再起動)。"
   },
   "common": {
     "close": "閉じる",

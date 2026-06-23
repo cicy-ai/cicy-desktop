@@ -2021,13 +2021,28 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
                 ref={menuRef}
                 style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: MENU_W }}
                 onClick={(e) => e.stopPropagation()}>
+                {/* 常用:更新 / 刷新窗口 / 帐单 / 地址 */}
                 <button type="button" data-id="DockerCard-update" className="bcard__menu-item is-accent" onClick={runUpdate}>
-                  {tr("docker.update", "更新")}
+                  {tr("docker.update", "更新 cicy-code")}
                 </button>
                 <button type="button" data-id="DockerCard-reload" className="bcard__menu-item"
                   onClick={(e) => { e.stopPropagation(); setMenuOpen(false); window.cicy?.tabs?.reloadIfOpen?.("http://127.0.0.1:8008", displayName); }}>
                   {tr("docker.reloadWindow", "刷新窗口")}
                 </button>
+                <button type="button" data-id="DockerCard-billing" className="bcard__menu-item"
+                  onClick={() => { setMenuOpen(false); openCloudPage(dockerTeam?.cloud_team_id ? `?team=${encodeURIComponent(dockerTeam.cloud_team_id)}` : "?view=usage"); }}>
+                  {tr("docker.billing", "帐单")}
+                </button>
+                <button type="button" data-id="DockerCard-addr" className="bcard__menu-item"
+                  title={tr("localTeams.copyAddr", "点击复制地址")}
+                  style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                  onClick={(e) => { e.stopPropagation(); setMenuOpen(false); try { navigator.clipboard.writeText("http://127.0.0.1:8008"); } catch {} }}>
+                  http://127.0.0.1:8008
+                </button>
+                {/* ── Docker 容器操作(归到一起,divider 分隔)── */}
+                <div className="bcard__menu-sep" data-id="DockerCard-menu-sep" role="separator">
+                  <span>{tr("docker.opsGroup", "Docker 容器")}</span>
+                </div>
                 <button type="button" data-id="DockerCard-restart" className="bcard__menu-item"
                   onClick={() => runOp("restart", () => window.cicy.docker.appRestart(), tr("docker.restarted", "已重启 cicy-code"))}>
                   {tr("docker.restart", "重启 cicy-code")}
@@ -2041,18 +2056,8 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
                   {tr("docker.recreate", "重建 Docker")}
                 </button>
                 <button type="button" data-id="DockerCard-stop" className="bcard__menu-item is-danger"
-                  onClick={() => runOp("stop", () => window.cicy.docker.appStop(), tr("docker.stopped", "已停止 cicy-code"))}>
+                  onClick={() => runOp("stop", () => window.cicy.docker.appStop(), tr("docker.stop", "停止 cicy-code"))}>
                   {tr("docker.stop", "停止")}
-                </button>
-                <button type="button" data-id="DockerCard-billing" className="bcard__menu-item"
-                  onClick={() => { setMenuOpen(false); openCloudPage(dockerTeam?.cloud_team_id ? `?team=${encodeURIComponent(dockerTeam.cloud_team_id)}` : "?view=usage"); }}>
-                  {tr("docker.billing", "帐单")}
-                </button>
-                <button type="button" data-id="DockerCard-addr" className="bcard__menu-item"
-                  title={tr("localTeams.copyAddr", "点击复制地址")}
-                  style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-                  onClick={(e) => { e.stopPropagation(); setMenuOpen(false); try { navigator.clipboard.writeText("http://127.0.0.1:8008"); } catch {} }}>
-                  http://127.0.0.1:8008
                 </button>
               </div>,
               document.body
