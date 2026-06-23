@@ -877,36 +877,9 @@ electronApp.whenReady().then(async () => {
   setupAppIcons();
   ensureDesktopLauncher();
   ensureAutoLaunch();
-  // Start bundled cicy-code daemon as a sidecar. Reuses an existing
-  // instance on :8008 if one is already running; no-op on Windows.
-  cicyCodeSidecar
-    .start({ logPath: path.join(os.homedir(), "logs", "cicy-code-sidecar.log") })
-    .then((c) => { if (c) log.info(`[Sidecar] cicy-code spawned pid=${c.pid}`); })
-    .catch((e) => log.warn(`[Sidecar] cicy-code start failed: ${e.message}`));
-  startSidecarWatchdog();
-
-  // Auto-register the local sidecar as 本地团队 once :8008 answers (主人:
-  // "本地团队没有占位" — a fresh install must show its local team without any
-  // manual step). addTeam upserts by host:port + auto-fills api_token from
-  // global.json, so re-runs are no-ops; addTeam itself then triggers the
-  // cloud team register + gateway-key injection when logged in. A fresh boot
-  // may npm-seed the runtime first, so probe for up to ~90s before giving up.
-  (async () => {
-    const sidecarPort = Number(process.env.CICY_CODE_PORT || 8008);
-    const lt = require("./backends/local-teams");
-    for (let i = 0; i < 30; i++) {
-      try {
-        if (await cicyCodeSidecar.probeExisting(sidecarPort)) {
-          const r = await lt.addTeam({ base_url: `http://127.0.0.1:${sidecarPort}`, name: "本地团队" });
-          if (r && r.ok) log.info(`[Sidecar] local team ${r.upserted ? "refreshed" : "registered"} (${r.id})`);
-          else log.warn(`[Sidecar] local team auto-register failed: ${r && r.error}`);
-          return;
-        }
-      } catch (e) { log.warn(`[Sidecar] local team auto-register error: ${e.message}`); }
-      await new Promise((res) => setTimeout(res, 3000));
-    }
-    log.warn(`[Sidecar] local team auto-register gave up — :${sidecarPort} never came up`);
-  })();
+  // 主人: native :8008 退役 —— 不再起本机 cicy-code、不再 watchdog 保活、不再把它
+  // 自动注册成「本地团队」。cicy-code 只在 docker 容器里跑(Docker 卡,:8009 那套不变,
+  // 由 sidecar-ipc 自己管理)。cicyCodeSidecar 仍保留供 :8008 探活/版本查询用。
 
   // Backend launcher: app menu + IPC handlers. Menu adds a Backends top-level
   // entry; IPC powers the launcher window (src/backends/launcher.html).

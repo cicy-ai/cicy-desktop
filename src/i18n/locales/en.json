@@ -152,7 +152,13 @@
     "rebootShort": "Restart Windows",
     "installerLaunched": "Docker installer opened — finish it (installs WSL2, may reboot), then click Retry",
     "engineDown": "Docker engine down · Start",
-    "startDocker": "Start Docker"
+    "startDocker": "Start Docker",
+    "update": "Update cicy-code",
+    "reloadWindow": "Reload window",
+    "dockerRestart": "Restart Docker",
+    "dockerRestarted": "Docker container restarted",
+    "recreate": "Rebuild Docker",
+    "billing": "Billing"
   },
   "common": {
     "close": "Close",
