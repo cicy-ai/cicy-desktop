@@ -63,47 +63,26 @@ function readDockerTeams() { try { return JSON.parse(fs.readFileSync(DOCKER_TEAM
 function writeDockerTeams(obj) { try { fs.mkdirSync(path.dirname(DOCKER_TEAMS_FILE), { recursive: true }); fs.writeFileSync(DOCKER_TEAMS_FILE, JSON.stringify(obj, null, 2)); } catch {} }
 let dockerTeamReg = null; // { teamId, title, apiKey } — 缓存,appOpts 读它
 
-// 确保这个 docker(按 volume)有独立云端 team;返回 { teamId, title, apiKey } 或 null。
+// docker 团队的权威来源 = cloud(w-10122 #197):POST /api/team/docker/register 按
+// (deviceId, port) get-or-create。幂等;失效/换设备/丢本机缓存都不会建重复 team;kind='docker';
+// 软删后同 (device,port) 可重建;title 云端缺省 'Docker :<port>'(不回退 owner 名)。
+// 本机 docker-teams.json 只当 cloud 不可达时的 offline fallback(缓存 teamId+key)。
+// mac(colima)/ windows(WSL)同一套(这里平台无关,只有 appDocker 分平台)。
 async function ensureDockerTeam() {
-  if (!cc || !cc.loginToken || !cc.loginToken()) return null; // 未登录 → 先不带 key,登录后重建容器再补(绝不借 8008)
+  if (!cc || !cc.loginToken || !cc.loginToken()) return null; // 未登录 → 先不带 key,登录后重建容器再补
+  const cachedFallback = () => {
+    try { const c = readDockerTeams()[APP_VOLUME]; if (c && c.apiKey) { dockerTeamReg = { teamId: c.teamId, title: c.title, apiKey: c.apiKey }; return dockerTeamReg; } } catch {}
+    return null;
+  };
   try {
-    const store = readDockerTeams();
-    let rec = store[APP_VOLUME];
-    if (!rec || !rec.teamId) {
-      const created = await cc.createTeam({ title: "Docker 团队", kind: "cloud" });
-      if (!created || !created.ok) return null;
-      // 强制把云端标题设成 "Docker 团队":POST /api/teams 常忽略我们传的 title、
-      // 回退成 owner/device 名(= 8008 的标题),卡片就显示成 8008 的了。PATCH 一下盖掉。
-      try { await cc.renameTeam(created.teamId, "Docker 团队"); } catch {}
-      store[APP_VOLUME] = { teamId: created.teamId, title: "Docker 团队", titleForced: true };
-      writeDockerTeams(store);
-      dockerTeamReg = { teamId: created.teamId, title: "Docker 团队", apiKey: created.apiKey };
+    const r = await cc.registerDockerTeam({ port: APP_PORT });
+    if (r && r.ok && r.apiKey) {
+      dockerTeamReg = { teamId: r.teamId, title: r.title || `Docker :${APP_PORT}`, apiKey: r.apiKey };
+      try { const store = readDockerTeams(); store[APP_VOLUME] = { teamId: r.teamId, title: dockerTeamReg.title, apiKey: r.apiKey }; writeDockerTeams(store); } catch {}
       return dockerTeamReg;
     }
-    // 既有 team:若还没强制过标题(老数据/上面那个 bug 建的),补一次 PATCH 成 "Docker
-    // 团队",然后打上 titleForced 标记 —— 只补这一次,之后用户自己改名不会被覆盖。
-    if (!rec.titleForced) {
-      try { await cc.renameTeam(rec.teamId, "Docker 团队"); } catch {}
-      rec.title = "Docker 团队"; rec.titleForced = true;
-      store[APP_VOLUME] = rec; writeDockerTeams(store);
-    }
-    // 「如果没有就 create,有就直接用」(主人)。本机记了 teamId,但云端拿不到它的 key
-    // (team 被删 / 换了账号 / 设备重置 —— 等于实际上没有了)→ 视同没有,重新 create 一个
-    // 存回本机。这就是手动「清 docker-teams.json + 重建」做的事,自动化掉。
-    const apiKey = await cc.getTeamApiKey(rec.teamId);
-    if (!apiKey) {
-      const created = await cc.createTeam({ title: "Docker 团队", kind: "cloud" });
-      if (created && created.ok) {
-        try { await cc.renameTeam(created.teamId, "Docker 团队"); } catch {}
-        store[APP_VOLUME] = { teamId: created.teamId, title: "Docker 团队", titleForced: true };
-        writeDockerTeams(store);
-        dockerTeamReg = { teamId: created.teamId, title: "Docker 团队", apiKey: created.apiKey };
-        return dockerTeamReg;
-      }
-    }
-    dockerTeamReg = { teamId: rec.teamId, title: rec.title, apiKey };
-    return dockerTeamReg;
-  } catch (e) { return null; }
+    return cachedFallback(); // cloud 返回异常 → offline 兜底
+  } catch (e) { return cachedFallback(); } // cloud 不可达 → offline 兜底
 }
 
 let registered = false;

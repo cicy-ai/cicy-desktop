@@ -358,6 +358,34 @@ async function createTeam({ title = "", kind = "cloud" } = {}) {
   return { ok: false, status: res.status, reason: res.reason };
 }
 
+// Docker 团队的权威来源(w-10122 #197):POST /api/team/docker/register —— cloud 按
+// (deviceId, port) get-or-create。一机一 port 一 team(8009/8010…),幂等:同 (device,port)
+// 返同一 key;不同 port 不同 team;kind='docker';软删后同 (device,port) 可重建。title 传了
+// 就用桌面的,没传云端缺省 'Docker :<port>'(不回退 owner 名)。替代 createTeam + 本机缓存。
+async function registerDockerTeam({ port, title = "" } = {}) {
+  const token = loginToken();
+  if (!token) return { ok: false, reason: "not_logged_in" };
+  if (!port) return { ok: false, reason: "port_required" };
+  const body = { deviceId: getDeviceId(), port: Number(port) };
+  if (title) body.title = title;
+  const res = await cloudFetch("/api/team/docker/register", { method: "POST", body });
+  if (res.ok && res.json && (res.json.success || res.json.teamId)) {
+    return {
+      ok: true,
+      teamId: res.json.teamId,
+      apiKey: res.json.apiKey,
+      title: res.json.title,
+      titleVersion: Number(res.json.titleVersion) || 0,
+      kind: res.json.kind || "docker",
+      port: res.json.port,
+      gatewayUrl: res.json.gatewayUrl || GATEWAY_URL,
+      protocols: res.json.protocols || ["anthropic", "openai"],
+    };
+  }
+  log.warn(`[cloud] docker team register failed status=${res.status} reason=${res.reason || ""}`);
+  return { ok: false, status: res.status, reason: res.reason, json: res.json };
+}
+
 // 改某 team 的标题(PATCH /api/teams/:id {title})——和 DockerCard 改名同一个端点。
 // 用途:建完 docker 独立 team 后**强制**把云端标题设成 "Docker 团队"(POST /api/teams
 // 不保证用我们传的 title,常回退成 owner/device 名 = 8008 的标题,卡片就显示错了)。
@@ -466,6 +494,7 @@ module.exports = {
   registerTeam,
   listTeams,
   createTeam,
+  registerDockerTeam,
   renameTeam,
   getTeamApiKey,
   injectGatewayKey,
