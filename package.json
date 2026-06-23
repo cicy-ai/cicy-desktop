@@ -1,6 +1,6 @@
 {
   "name": "cicy-desktop",
-  "version": "2.1.171",
+  "version": "2.1.172",
   "description": "CiCy - AI-powered operating system browser",
   "main": "src/main.js",
   "bin": {

@@ -1777,7 +1777,15 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
 
   const checkStatus = useCallback(async () => {
     try {
-      setStatus(await window.cicy?.docker?.appStatus?.());
+      const s = await window.cicy?.docker?.appStatus?.();
+      setStatus(s);
+      // 自愈卡死的设置抽屉:容器已健康(running)说明 setup 实际已完成,但抽屉可能还停在
+      // 「进行中」—— 网络失败重试后,follower 跟随的 bootstrap promise 迟迟不 resolve、又收
+      // 不到 docker:app-progress 完成事件,抽屉就一直转(用户看到的「正在跟随同一进度」假死)。
+      // 这里检测到容器起来了就直接把抽屉收成「完成」,不再死等 promise。
+      if (s?.running && dockerDrawerState && dockerDrawerState.status === "running") {
+        dockerDrawer.finish({ ok: true, message: "Docker cicy-code 已就绪" });
+      }
     } catch (e) { console.warn("[DockerCard]", e); }
   }, []);
 
