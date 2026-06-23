@@ -847,7 +847,7 @@ export default function App() {
                 // (主人: 必须拿到 token 才能打开,否则被卡在登录页).
                 try {
                   const r = await window.cicy?.docker?.appOpen?.();
-                  if (!r?.ok) window.alert("拿不到容器 token,无法打开 :8009。请确认服务已就绪(或用卡片菜单「重启」)后再试。");
+                  if (!r?.ok) toast.show({ id: "docker-open", status: "error", ttl: 6000, message: tr("docker.openNoToken", "服务还没就绪,稍等几秒再点「打开」(或用卡片菜单「重启」)。") });
                 } catch (e) { console.warn("[DockerCard] open", e); }
               }}
               cloudTitle={dockerCloudTeam?.title}

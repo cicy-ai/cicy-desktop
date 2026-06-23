@@ -87,7 +87,20 @@ async function ensureDockerTeam() {
       rec.title = "Docker 团队"; rec.titleForced = true;
       store[APP_VOLUME] = rec; writeDockerTeams(store);
     }
+    // 「如果没有就 create,有就直接用」(主人)。本机记了 teamId,但云端拿不到它的 key
+    // (team 被删 / 换了账号 / 设备重置 —— 等于实际上没有了)→ 视同没有,重新 create 一个
+    // 存回本机。这就是手动「清 docker-teams.json + 重建」做的事,自动化掉。
     const apiKey = await cc.getTeamApiKey(rec.teamId);
+    if (!apiKey) {
+      const created = await cc.createTeam({ title: "Docker 团队", kind: "cloud" });
+      if (created && created.ok) {
+        try { await cc.renameTeam(created.teamId, "Docker 团队"); } catch {}
+        store[APP_VOLUME] = { teamId: created.teamId, title: "Docker 团队", titleForced: true };
+        writeDockerTeams(store);
+        dockerTeamReg = { teamId: created.teamId, title: "Docker 团队", apiKey: created.apiKey };
+        return dockerTeamReg;
+      }
+    }
     dockerTeamReg = { teamId: rec.teamId, title: rec.title, apiKey };
     return dockerTeamReg;
   } catch (e) { return null; }

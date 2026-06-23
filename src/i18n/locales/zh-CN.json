@@ -158,7 +158,8 @@
     "dockerRestart": "重启 Docker",
     "dockerRestarted": "已重启 Docker 容器",
     "recreate": "重建 Docker",
-    "billing": "帐单"
+    "billing": "帐单",
+    "openNoToken": "服务还没就绪,稍等几秒再点「打开」(或用卡片菜单「重启」)。"
   },
   "common": {
     "close": "关闭",

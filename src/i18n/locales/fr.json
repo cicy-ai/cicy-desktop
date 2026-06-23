@@ -157,7 +157,8 @@
     "dockerRestart": "Redémarrer Docker",
     "dockerRestarted": "Conteneur Docker redémarré",
     "recreate": "Reconstruire Docker",
-    "billing": "Facturation"
+    "billing": "Facturation",
+    "openNoToken": "Service pas encore prêt — patientez quelques secondes puis recliquez sur Ouvrir (ou 「Redémarrer」 dans le menu)."
   },
   "common": {
     "close": "Fermer",

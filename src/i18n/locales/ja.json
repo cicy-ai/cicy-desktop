@@ -157,7 +157,8 @@
     "dockerRestart": "Docker を再起動",
     "dockerRestarted": "Docker コンテナを再起動しました",
     "recreate": "Docker を再構築",
-    "billing": "請求"
+    "billing": "請求",
+    "openNoToken": "サービスがまだ準備できていません。数秒待ってから「開く」を再度クリック(またはカードメニューの「再起動」)。"
   },
   "common": {
     "close": "閉じる",

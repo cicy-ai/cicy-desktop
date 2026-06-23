@@ -158,7 +158,8 @@
     "dockerRestart": "Restart Docker",
     "dockerRestarted": "Docker container restarted",
     "recreate": "Rebuild Docker",
-    "billing": "Billing"
+    "billing": "Billing",
+    "openNoToken": "Service not ready yet — wait a few seconds and click Open again (or 「Restart」 from the card menu)."
   },
   "common": {
     "close": "Close",
