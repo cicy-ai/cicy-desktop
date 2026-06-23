@@ -53,18 +53,20 @@ jobs:
           EOF
           docker build -t cicy-wsl-base ctx
 
-      - name: Pre-load cicy-code image into the rootfs
+      - name: Build WSL rootfs (Ubuntu + Docker, image NOT baked)
         run: |
+          # 主人: image NO LONGER baked into the rootfs. wsl-docker.bootstrap downloads +
+          # docker-loads cicy-code-latest.tar.gz at setup (像 mac/colima 那样) → WSL 也拿最新
+          # 烤制镜像,且镜像更新不必重下整个 rootfs(rootfs=Ubuntu+Docker 很少变,瘦了 ~169MB)。
           docker pull "${{ inputs.image }}"
+          # Still save the image so the SAME run republishes the macOS tarball (next step).
           docker save "${{ inputs.image }}" -o /tmp/cicy-image.tar
-          # Run the base privileged, start an inner dockerd, load the image into
-          # its /var/lib/docker (kept in the container fs, NOT a volume), then stop.
-          cid=$(docker run -d --privileged -v /tmp/cicy-image.tar:/img.tar:ro cicy-wsl-base \
+          # Run the base privileged, start an inner dockerd ONCE then stop — purely to clear
+          # stale daemon runtime files so the FIRST dockerd in WSL2 starts clean. No image load.
+          cid=$(docker run -d --privileged cicy-wsl-base \
             bash -c '
               nohup dockerd >/var/log/dind.log 2>&1 &
               for i in $(seq 1 60); do docker info >/dev/null 2>&1 && break; sleep 1; done
-              docker load -i /img.tar
-              docker images
               pkill dockerd || true
               sleep 4
               # Drop stale daemon runtime files so the FIRST dockerd in WSL2 does
@@ -73,7 +75,7 @@ jobs:
             ')
           docker logs -f "$cid" || true
           rc=$(docker wait "$cid"); echo "inner exit=$rc"
-          # Export the whole container filesystem (incl. /var/lib/docker) = the WSL rootfs.
+          # Export the container filesystem = the WSL rootfs (Ubuntu + Docker, no image).
           docker export "$cid" | gzip > cicy-wsl.tar.gz
           ls -lh cicy-wsl.tar.gz
 
