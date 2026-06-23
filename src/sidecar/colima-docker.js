@@ -247,10 +247,18 @@ Drop files here for CiCy agents to read; files agents write to Share show up her
 
 function shareMountArg() {
   try {
-    const share = path.join(os.homedir(), "Desktop", "Share");
+    // 主人: Share 真实目录放 ~/cicy-ai/Share —— 不能用 ~/Desktop:macOS TCC 挡着 colima(VM)
+    // 访问 Desktop/Documents/Downloads,docker 建挂载源时报 'mkdir …/Desktop: operation not
+    // permitted' → 容器起不来。~/cicy-ai 非 TCC、colima 能挂。再在 Desktop 放个软链(桌面可见;
+    // 失败无所谓,真实目录已可用)。
+    const share = path.join(os.homedir(), "cicy-ai", "Share");
     fs.mkdirSync(share, { recursive: true });
     const readme = path.join(share, "readme.md");
     if (!fs.existsSync(readme)) { try { fs.writeFileSync(readme, SHARE_README); } catch {} }
+    try {
+      const link = path.join(os.homedir(), "Desktop", "Share");
+      if (!fs.existsSync(link)) fs.symlinkSync(share, link);
+    } catch {}
     return `-v '${share}':/home/cicy/cicy-ai/Share`;
   } catch { return ""; }
 }
@@ -266,9 +274,19 @@ async function runContainer({ port = 8009, container = "cicy-code-docker-8009", 
   // docker-only 后 mihomo 只在容器里,这些口不暴露则主机系统 Chrome 的代理 127.0.0.1:(20000+N)
   // 连不上。默认 20001-20032(32 个 profile),CICY_CHROME_PROXY_PORTS 可调。
   const CHROME_PROXY_PORTS = process.env.CICY_CHROME_PROXY_PORTS || "20001-20032";
-  const cmd = `run -d --name ${container} --restart unless-stopped ${PLATFORM_FLAG} ` +
-    `-p 127.0.0.1:${port}:8008 -p 127.0.0.1:${CHROME_PROXY_PORTS}:${CHROME_PROXY_PORTS} -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${shareMountArg()} ${envArgs} ${IMAGE}`;
-  await dk(cmd, { timeout: 90000 });
+  const mk = (s) => `run -d --name ${container} --restart unless-stopped ${PLATFORM_FLAG} ` +
+    `-p 127.0.0.1:${port}:8008 -p 127.0.0.1:${CHROME_PROXY_PORTS}:${CHROME_PROXY_PORTS} -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${s} ${envArgs} ${IMAGE}`;
+  const share = shareMountArg();
+  try {
+    await dk(mk(share), { timeout: 90000 });
+  } catch (e) {
+    if (!share) throw e;
+    // 兜底: 带 Share 启动失败(如 macOS TCC 挡 colima 访问挂载源)→ 去掉 Share 重试,保证容器
+    // 一定能起(Share 只是附加共享目录,不该挡住整个服务). 主人: '容器起不来' 的修复.
+    console.warn(`[colima] 带 Share 启动失败,去掉 Share 重试: ${e.message}`);
+    try { await dk(`rm -f ${container}`, { timeout: 20000 }); } catch {}
+    await dk(mk(""), { timeout: 90000 });
+  }
   return { started: true };
 }
 
