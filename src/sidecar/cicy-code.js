@@ -100,6 +100,14 @@ async function startFromRuntime({ logPath, port }) {
 async function start({ logPath, port = DEFAULT_PORT, force = false, version = null } = {}) {
   if (child && !force) return child;
 
+  // macOS: DOCKER-ONLY (主人指令: native 退役). The native daemon runs cicy-code directly
+  // on the host with full access to the user's real files — no isolation. On darwin we no
+  // longer spawn it; the docker cicy-code (Colima container, named-volume isolated) IS the
+  // primary on :8008, brought up + kept alive by the docker daemon in src/backends/
+  // sidecar-ipc.js (APP_PORT=8008 on darwin). probeExisting()/watchdog still work — they
+  // just observe the container's :8008. Returning null here = "no native child".
+  if (process.platform === "darwin") return null;
+
   if (!force && await probeExisting(port)) {
     console.log(`[cicy-code-sidecar] existing instance on :${port}, reusing`);
     return null;

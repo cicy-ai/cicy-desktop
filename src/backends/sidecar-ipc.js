@@ -39,7 +39,13 @@ const PORT = Number(process.env.CICY_CODE_PORT || 8008);
 // Desktop is missing the card installs it first (installer downloads to the
 // user's Desktop). The whole cicy home is persisted to a named volume so the
 // entire container state survives recreation (主人: "把整个 docker 挂出来").
-const APP_PORT = Number(process.env.CICY_DOCKER_APP_PORT || 8009);
+// macOS is DOCKER-ONLY (主人指令: native 退役 — native 跑在宿主机无隔离会动用户数据).
+// So on darwin the docker cicy-code IS the PRIMARY on :8008 (the slot the rest of the app
+// already talks to; native no longer spawns there — see src/sidecar/cicy-code.js). The
+// existing daemon/reconcile/ensureDockerTeam/appOpts machinery below just retargets to 8008
+// — independent cloud team key, named-volume isolation, auto-start all come for free.
+// win32 keeps the Docker-版 as an optional 2nd instance on :8009 alongside native :8008 (next).
+const APP_PORT = Number(process.env.CICY_DOCKER_APP_PORT || (process.platform === "darwin" ? 8008 : 8009));
 // container / volume 名都带上 port —— 一台机可以跑多个 docker(不同端口),各自
 // 独立容器 + 独立 volume(数据隔离)+ 独立云端 team。docker-teams.json 也按 volume
 // (含 port)区分。
