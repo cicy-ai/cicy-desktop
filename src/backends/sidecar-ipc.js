@@ -126,8 +126,23 @@ function register({ sidecarLogPath } = {}) {
       // the 444MB rootfs) or unknown (WSL not answering — let the next tick retry).
       if (s.installed && !s.running && !s.unknown) {
         log.info("[docker-daemon] installed but :8008 down → auto-starting (bootstrap idempotent)");
-        try { await appDocker.bootstrap(appOpts()); } catch (e) { log.warn(`[docker-daemon] auto-start failed: ${e.message}`); }
+        try { await appDocker.bootstrap(await appOpts()); } catch (e) { log.warn(`[docker-daemon] auto-start failed: ${e.message}`); }
         await refreshDockerStatus();
+      } else if (s.running && cc && cc.loginToken && cc.loginToken()) {
+        // Running but maybe KEYLESS: the container first came up at the 2s tick BEFORE login
+        // restored, so it started without CICY_AI_GATEWAY_LLM_API_KEY; --restart unless-stopped
+        // then revived it keyless forever (reconcile skips bootstrap while healthy → key never
+        // re-injected → cicy-code can't reach the LLM). Once a key is resolvable, if the live
+        // container lacks it, recreate WITH the key.
+        try {
+          const opts = await appOpts();
+          if (opts.env.CICY_AI_GATEWAY_LLM_API_KEY && appDocker.hasGatewayKey &&
+              !(await appDocker.hasGatewayKey(APP_CONTAINER))) {
+            log.info("[docker-daemon] running container has no gateway key → recreating with key");
+            await appDocker.recreate(opts);
+            await refreshDockerStatus();
+          }
+        } catch (e) { log.warn(`[docker-daemon] key recheck failed: ${e.message}`); }
       }
     } finally { _dockerDaemonBusy = false; }
     return _dockerStatusCache;
@@ -220,9 +235,11 @@ function register({ sidecarLogPath } = {}) {
   // Common run options for the :8008 instance: its own container/volume + the
   // LLM gateway env keyed by the 8008 team's token. (WSL: whole-home mount via
   // -v <volume>:/home/cicy inside wsl-docker.)
-  const appOpts = () => {
-    // Docker 独立 team 的网关 key 优先(ensureDockerTeam 已缓存);未登录/未建成功
-    // 时回退 8008 的 key,保证容器仍有 LLM key 可用。
+  const appOpts = async () => {
+    // 先确保 docker team 的网关 key 拿到(ensureDockerTeam 填 dockerTeamReg)—— 必须在
+    // 建容器前 await,否则容器在 2s 自启时 dockerTeamReg 还空 → 无 key 启动(就是那个
+    // "里面 llm api key 没有")。未登录/未建成功时回退本地 key,保证容器仍有 LLM key。
+    await ensureDockerTeam().catch(() => {});
     const gwKey = (dockerTeamReg && dockerTeamReg.apiKey) || readLocalGatewayKey();
     const env = { CICY_AI_GATEWAY_LLM_ENDPOINT: GATEWAY_ENDPOINT };
     if (gwKey) env.CICY_AI_GATEWAY_LLM_API_KEY = gwKey;
@@ -284,9 +301,8 @@ function register({ sidecarLogPath } = {}) {
   ipcMain.handle("docker:app-bootstrap", async (e) => {
     if (!APP_DOCKER_SUPPORTED) return { ok: false, error: "Docker cicy-code 仅支持 Windows / macOS" };
     try {
-      await ensureDockerTeam(); // 启动前先确保独立云端 team + 拿到它的网关 key(appOpts 用)
       const result = await appDocker.bootstrap({
-        ...appOpts(),
+        ...(await appOpts()), // appOpts 内部已 await ensureDockerTeam 拿网关 key
         onProgress: (ev) => { try { e.sender.send("docker:app-progress", ev); } catch {} },
       });
       if (result && result.ok) await registerAppTeam();
@@ -312,8 +328,7 @@ function register({ sidecarLogPath } = {}) {
   // volume 数据)。换 key 的唯一途径。渲染端已 confirm。
   ipcMain.handle("docker:app-recreate", async () => {
     try {
-      await ensureDockerTeam();
-      await appDocker.recreate({ ...appOpts() });
+      await appDocker.recreate({ ...(await appOpts()) }); // appOpts 内部 await ensureDockerTeam
       await registerAppTeam();
       return { ok: true };
     } catch (e) { return { ok: false, error: e.message }; }
@@ -341,9 +356,8 @@ function register({ sidecarLogPath } = {}) {
   ipcMain.handle("docker:app-upgrade", async (e) => {
     if (!APP_DOCKER_SUPPORTED) return { ok: false, error: "Docker cicy-code 仅支持 Windows / macOS" };
     try {
-      await ensureDockerTeam();
       const result = await appDocker.upgrade({
-        ...appOpts(),
+        ...(await appOpts()), // appOpts 内部 await ensureDockerTeam 拿网关 key
         onProgress: (ev) => { try { e.sender.send("docker:app-progress", ev); } catch {} },
       });
       if (result && result.ok) await registerAppTeam();

@@ -446,7 +446,14 @@ async function upgrade({ onProgress, port = 8008, container = "cicy-code-docker-
   return await _bootstrap({ onProgress, port, container, volume, env });
 }
 
+// 容器 env 里有没有网关 LLM key —— daemon 用它判断运行中的容器是否需要"带 key 重建"
+// (容器可能在登录前就先无 key 起来了)。key 未设时 printenv 非零退出 → catch → false。
+async function hasGatewayKey(container = "cicy-code-docker-8008") {
+  try { const { stdout } = await dk(`exec ${container} printenv CICY_AI_GATEWAY_LLM_API_KEY`, { timeout: 8000 }); return /sk-/.test(String(stdout || "")); }
+  catch { return false; }
+}
+
 module.exports = {
   bootstrap, status, restart, stop, dockerRestart, recreate, update, upgrade, runContainer, readContainerToken,
-  vmExists, colimaInstalled, dockerCliInstalled, engineUp, imagePresent, probeHealth,
+  vmExists, colimaInstalled, dockerCliInstalled, engineUp, imagePresent, probeHealth, hasGatewayKey,
 };
