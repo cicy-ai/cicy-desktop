@@ -1,6 +1,6 @@
 {
   "name": "cicy-desktop",
-  "version": "2.1.173",
+  "version": "2.1.174",
   "description": "CiCy - AI-powered operating system browser",
   "main": "src/main.js",
   "bin": {
@@ -137,20 +137,9 @@
     "zod": "3.25",
     "electron-updater": "6.6.2"
   },
-  "//optionalDependencies": "Runtime Bundle v1 (主人指令): platform binaries delivered by `npm i -g cicy-desktop` itself — npm installs only the current-platform subpackage (os/cpu pinned in each), so first start seeds the runtime store with ZERO network, ZERO npx. Windows packages are named *-windows-* (npm spam filter 403s new names containing win32). cicy-msys2 added once published.",
+  "//optionalDependencies": "docker-only(主人): host cicy-code/mihomo 二进制不再内置 —— cicy-code + mihomo 都只在 docker 容器里跑(npm 装/镜像预装),host 永远不起,所以去掉了 cicy-code-<plat> / cicy-mihomo-<plat> 子包。只留 electron。",
   "optionalDependencies": {
-    "electron": "41.0.3",
-    "cicy-code-darwin-x64": "2.3.1",
-    "cicy-code-darwin-arm64": "2.3.1",
-    "cicy-code-linux-x64": "2.3.1",
-    "cicy-code-linux-arm64": "2.3.1",
-    "cicy-code-windows-x64": "2.3.1",
-    "cicy-mihomo-darwin-x64": "1.10.4",
-    "cicy-mihomo-darwin-arm64": "1.10.4",
-    "cicy-mihomo-linux-x64": "1.10.4",
-    "cicy-mihomo-linux-arm64": "1.10.4",
-    "cicy-mihomo-windows-x64": "1.10.4",
-    "cicy-mihomo-windows-arm64": "1.10.4"
+    "electron": "41.0.3"
   },
   "devDependencies": {
     "@babel/core": "^7.29.0",

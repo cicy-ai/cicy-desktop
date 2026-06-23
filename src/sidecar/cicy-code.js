@@ -126,14 +126,8 @@ async function start({ logPath, port = DEFAULT_PORT, force = false, version = nu
   }
   if (!exe) { console.warn("[cicy-code-sidecar] no cicy-code binary available"); return null; }
 
-  // cicy-desktop ALSO owns the mihomo binary (same npm/localbin model). Seed it
-  // into ~/.local/bin/mihomo from the bundle (zero network) BEFORE the cicy-code
-  // daemon boots, so cicy-code's own startup finds it already present and skips
-  // its GitHub/COS download. Best-effort — never block cicy-code on it.
-  try {
-    const r = await localbin.ensure({ name: "mihomo" });
-    if (r?.exe) console.log(`[cicy-code-sidecar] mihomo ready at ${r.exe} (v${r.version || "?"})`);
-  } catch (e) { console.warn(`[cicy-code-sidecar] mihomo seed skipped: ${e.message}`); }
+  // 主人: 不再 seed host mihomo —— docker-only 后 mihomo 只在容器里跑(host 不用)。
+  // 内置的 cicy-mihomo-<plat> 依赖已从 package.json 移除。
 
   let stdio = ["ignore", "ignore", "ignore"];
   if (logPath) {

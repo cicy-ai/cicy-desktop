@@ -44,7 +44,6 @@ const MANIFEST = path.join(LOCAL_BIN, ".cicy-localbin.json");
 // cicy-code, so the legacy single-component callers keep working unchanged.
 const COMPONENTS = {
   "cicy-code": { pkgPrefix: "cicy-code", base: "cicy-code" },
-  "mihomo": { pkgPrefix: "cicy-mihomo", base: "mihomo" },
 };
 const DEFAULT = "cicy-code";
 function comp(name) {
