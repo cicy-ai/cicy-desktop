@@ -665,38 +665,47 @@ export default function App() {
           {!loggingIn && !emailSent && (
             <>
               <p className="tagline">{tr("auth.tagline", "登录以同步你的团队、配置与 AI 助手")}</p>
-              <button className="btn-primary" onClick={handleLogin}>
-                <span>{tr("auth.browserLogin", "使用浏览器登录")}</span>
-                <ArrowIcon />
-              </button>
-              <p className="hint">{tr("auth.autoOpenHint", "点击后会自动打开浏览器")}</p>
-              <div className="login-divider" data-id="LoginDivider"><span>{tr("auth.or", "或")}</span></div>
+              {/* Email magic-link is the PRIMARY login: it's cross-device safe (the
+                  link works when clicked on a phone). The browser/loopback login is
+                  demoted to a secondary option below — its link 302s to 127.0.0.1 and
+                  only completes on the SAME machine, so a phone click breaks it. */}
+              <label className="login-label" data-id="EmailLoginLabel" htmlFor="cicy-email-login">
+                {tr("auth.emailLabel", "输入邮箱,用邮件链接登录")}
+              </label>
               <input
+                id="cicy-email-login"
                 type="email"
                 className="login-email-input"
                 data-id="EmailLoginInput"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") handleEmailLogin(); }}
-                placeholder={tr("auth.emailPlaceholder", "你的邮箱")}
+                placeholder={tr("auth.emailPlaceholder", "you@example.com")}
                 autoComplete="email"
                 spellCheck={false}
+                autoFocus
               />
-              <button className="btn-ghost" data-id="EmailLoginSubmit" onClick={handleEmailLogin}>
-                {tr("auth.emailLogin", "用邮件登录（手机也能点链接）")}
+              <button className="btn-primary" data-id="EmailLoginSubmit" onClick={handleEmailLogin}>
+                <span>{tr("auth.emailLogin", "发送登录链接")}</span>
+                <ArrowIcon />
+              </button>
+              <p className="hint">{tr("auth.emailHint", "手机上点邮件里的链接,也能登录这台电脑")}</p>
+              <div className="login-divider" data-id="LoginDivider"><span>{tr("auth.or", "或")}</span></div>
+              <button className="btn-ghost" data-id="BrowserLoginBtn" onClick={handleLogin}>
+                {tr("auth.browserLogin", "用浏览器登录(Google / SSO,仅同一台电脑)")}
               </button>
             </>
           )}
           {emailSent && (
             <>
-              <p className="tagline" data-id="EmailSentTagline">{tr("auth.emailSentTagline", "登录链接已发送")}</p>
+              <p className="tagline" data-id="EmailSentTagline">{tr("auth.emailSentTagline", "登录邮件已发送")}</p>
               <p className="hint" data-id="EmailSentHint" style={{ textAlign: "center" }}>
                 {tr("auth.emailSentHint", "到邮箱打开链接即可（手机、电脑都行），这里会自动登录。")}
                 <br />{email}
               </p>
               <div className="spinner-row">
                 <Spinner />
-                <span>{tr("auth.emailWaiting", "等待你点击链接…")}</span>
+                <span>{tr("auth.emailWaiting", "等待确认…")}</span>
               </div>
               <button className="btn-ghost" data-id="EmailSentCancel" onClick={() => {
                 window.cicy?.auth?.emailLoginCancel?.();
