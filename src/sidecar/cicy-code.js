@@ -100,23 +100,6 @@ async function startFromRuntime({ logPath, port }) {
 async function start({ logPath, port = DEFAULT_PORT, force = false, version = null } = {}) {
   if (child && !force) return child;
 
-  // macOS: DOCKER-ONLY (主人指令: native 退役). The native sidecar runs cicy-code
-  // directly on the host → it can touch the user's real files with no isolation.
-  // The container persists everything in a named docker volume instead, so user
-  // data is isolated. Delegate to the docker sidecar: it adopts a healthy :8008,
-  // else runs the cicy-code image with -p ${port}:8008 (Docker Desktop / colima
-  // auto-forward -p to the Mac's localhost, so no --network host needed). Returns
-  // null when docker isn't up yet → the homepage docker card guides the user.
-  if (process.platform === "darwin") {
-    try {
-      const docker = require("./docker");
-      const r = await docker.start({ port });
-      if (r) console.log(`[cicy-code-sidecar] docker cicy-code on :${port} (${r.adopted ? "adopted" : r.id || "started"})`);
-      else console.warn("[cicy-code-sidecar] docker not ready — homepage docker card will guide install");
-    } catch (e) { console.warn(`[cicy-code-sidecar] docker start failed: ${e.message}`); }
-    return null; // no native child on mac
-  }
-
   if (!force && await probeExisting(port)) {
     console.log(`[cicy-code-sidecar] existing instance on :${port}, reusing`);
     return null;
