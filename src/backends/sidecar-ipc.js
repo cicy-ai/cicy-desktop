@@ -125,6 +125,21 @@ function register({ sidecarLogPath } = {}) {
         log.info("[docker-daemon] installed but :8009 down → auto-starting (bootstrap idempotent)");
         try { await appDocker.bootstrap(await appOpts()); } catch (e) { log.warn(`[docker-daemon] auto-start failed: ${e.message}`); }
         await refreshDockerStatus();
+      } else if (s.running) {
+        // 自愈:容器在跑,但很可能是「首次启动时还没登录 / key 还没就位就建好了」的没 key 容器
+        // —— runContainer 见到 :8009 健康就直接 adopt 不重建,key 永远进不去(Windows 实测的
+        // 'llm key 没拿到')。这里:已能拿到 key + 容器里确实没 key → 带 key 重建一次(volume
+        // 数据保留)。mac/win 同一套(hasGatewayKey 两个 docker 模块都实现了)。
+        try {
+          const opts = await appOpts();
+          if (opts.env && opts.env.CICY_AI_GATEWAY_LLM_API_KEY && appDocker.hasGatewayKey
+              && !(await appDocker.hasGatewayKey(APP_CONTAINER))) {
+            log.info("[docker-daemon] 容器在跑但没网关 key → 带 key 重建(数据保留)");
+            await appDocker.recreate(opts);
+            try { await registerAppTeam(); } catch {}
+            await refreshDockerStatus();
+          }
+        } catch (e) { log.warn(`[docker-daemon] key self-heal failed: ${e.message}`); }
       }
     } finally { _dockerDaemonBusy = false; }
     return _dockerStatusCache;

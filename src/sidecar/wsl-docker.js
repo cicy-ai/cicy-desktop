@@ -727,7 +727,13 @@ async function upgrade({ onProgress, port = 8009, container = "cicy-code-docker"
   return await _bootstrap({ onProgress, port, container, volume, env });
 }
 
+// 容器里有没有注入网关 key(reconcile 自愈用):printenv 看 CICY_AI_GATEWAY_LLM_API_KEY。
+async function hasGatewayKey(container = "cicy-code-docker") {
+  try { const { stdout } = await wslRun(`docker exec ${container} printenv CICY_AI_GATEWAY_LLM_API_KEY`, { timeout: 8000 }); return /sk-/.test(String(stdout || "")); }
+  catch { return false; }
+}
+
 module.exports = {
   bootstrap, status, restart, stop, dockerRestart, recreate, update, upgrade, runContainer, readContainerToken,
-  distroInstalled, dockerInstalled, dockerEngineUp, imagePresent, probeHealth, wslRun,
+  distroInstalled, dockerInstalled, dockerEngineUp, imagePresent, probeHealth, wslRun, hasGatewayKey,
 };
