@@ -833,7 +833,11 @@ export default function App() {
         )}
 
         <div className="app__grid">
-          {showLocal && localList.map((t) => (
+          {/* The docker team (:8008) is rendered ONCE — as the dedicated <DockerCard>
+              below, NOT also as a LocalTeamCard here. Since :8008 is now BOTH the local
+              sidecar port AND the docker app port, it matched localList + dockerTeam and
+              rendered twice (the duplicate card). Exclude it from this map. */}
+          {showLocal && localList.filter((t) => !isDockerApp(t.base_url)).map((t) => (
             <LocalTeamCard key={"local:" + t.id} team={t} onOpen={() => openLocalTeam(t.id)} onRename={renameLocalTeam} onRefresh={fetchLocalTeams} />
           ))}
           {/* 占位卡 (主人: "本地团队没有占位"): a fresh install starts the sidecar
