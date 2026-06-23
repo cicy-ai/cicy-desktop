@@ -839,6 +839,8 @@ body {
 .bcard__menu-item.is-accent:hover { background: var(--accent-soft); color: #c7dbff; }
 .bcard__menu-item.is-danger { color: #f7a3a3; }
 .bcard__menu-item.is-danger:hover { background: rgba(239,68,68,.16); color: #fff; }
+/* Plain divider line in the DockerCard ⋯ menu (cicy-code ops 上 / Docker 容器 ops 下). */
+.bcard__menu-sep { height: 1px; margin: 5px 10px; background: rgba(255,255,255,.08); }
 /* Portaled to document.body to escape .bcard's overflow:hidden (which clipped the
    dropdown). Inline top/left position it under the kebab; here just a high
    stacking order (below toast/drawer) + word-wrapping items so nothing overflows. */

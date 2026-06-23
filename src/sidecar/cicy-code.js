@@ -100,6 +100,10 @@ async function startFromRuntime({ logPath, port }) {
 async function start({ logPath, port = DEFAULT_PORT, force = false, version = null } = {}) {
   if (child && !force) return child;
 
+  // 主人: native :8008 退役 —— 不再在本机起 cicy-code。docker team(:8009 容器)不变,
+  // 用户用那张 Docker 卡。这里直接返回,native 一律不起。
+  return null;
+
   if (!force && await probeExisting(port)) {
     console.log(`[cicy-code-sidecar] existing instance on :${port}, reusing`);
     return null;

@@ -152,7 +152,14 @@
     "rebootShort": "需重启 Windows",
     "installerLaunched": "已打开 Docker 安装程序——请完成安装（会装 WSL2、可能需重启），装好后点「重试」",
     "engineDown": "Docker 未运行 · 点启动",
-    "startDocker": "启动 Docker"
+    "startDocker": "启动 Docker",
+    "update": "更新 cicy-code",
+    "reloadWindow": "刷新窗口",
+    "dockerRestart": "重启 Docker",
+    "dockerRestarted": "已重启 Docker 容器",
+    "recreate": "重建 Docker",
+    "billing": "帐单",
+    "openNoToken": "服务还没就绪,稍等几秒再点「打开」(或用卡片菜单「重启」)。"
   },
   "common": {
     "close": "关闭",
