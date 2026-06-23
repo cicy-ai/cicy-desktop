@@ -125,7 +125,7 @@
     "title": "Docker cicy-code",
     "install": "インストール",
     "start": "起動",
-    "running": "実行中 · :8009",
+    "running": "実行中 · :8008",
     "notRunning": "停止中 · 「起動」をクリック",
     "notInstalled": "未インストール · クリックでインストール",
     "working": "処理中…",

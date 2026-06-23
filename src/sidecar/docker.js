@@ -441,7 +441,7 @@ function desktopDir() {
 // Start the container. Returns a sidecar child token { docker:true, container,
 // id } or null when Docker isn't ready (homepage guides the user to install
 // Docker Desktop). `container`/`volume` are parameterized so a SECOND instance
-// (the Docker-版 cicy-code on :8009) can run alongside the native local one
+// (the Docker-版 cicy-code on :8008) can run alongside the native local one
 // without a name/volume collision.
 async function start({ port = 8008, container = CONTAINER, volume = VOLUME, mountTarget = "/home/cicy/cicy-ai", env = {} } = {}) {
   // Something already serves a healthy cicy-code on :port (a legacy-named

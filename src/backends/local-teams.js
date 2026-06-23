@@ -224,7 +224,7 @@ async function openTeam(id, opts = {}) {
   if (!node) return { ok: false, error: "team not found" };
   const baseUrl = (node.base_url || "").replace(/\/$/, "");
   if (!baseUrl) return { ok: false, error: "no base_url" };
-  // opts.token (a LIVE-read token, e.g. the :8009 container's own) takes
+  // opts.token (a LIVE-read token, e.g. the :8008 container's own) takes
   // precedence over any stored token — the Docker team stores none.
   const token = (opts && opts.token) || node.api_token || "";
   const url = token ? `${baseUrl}/?token=${encodeURIComponent(token)}` : baseUrl;
@@ -439,7 +439,7 @@ async function syncNameToCloud(id) {
     // cloud_team_id 被覆盖、又和 8008 串名。按 is_docker 标记 OR 端口(docker app port)
     // 跳过(端口判断不依赖标记的写入时机,更稳)。
     {
-      const DOCKER_PORT = String(process.env.CICY_DOCKER_APP_PORT || 8009);
+      const DOCKER_PORT = String(process.env.CICY_DOCKER_APP_PORT || 8008);
       let isDockerNode = !!node.is_docker;
       try { if (new URL(node.base_url).port === DOCKER_PORT) isDockerNode = true; } catch {}
       if (isDockerNode) return;
@@ -524,10 +524,10 @@ async function addTeam(spec) {
   // pass it, leaving the swap URL with no `?token=` and stranding the user
   // at a login screen. Auto-fill from local global.json (top-level api_token)
   // so the common case "Just Works", even when spec.api_token is empty.
-  // skipTokenAutofill: the :8009 Docker team must NEVER store a token — its token
-  // is read LIVE from the container on every open (主人: teams.json 不存 8009 的
+  // skipTokenAutofill: the :8008 Docker team must NEVER store a token — its token
+  // is read LIVE from the container on every open (主人: teams.json 不存 8008 的
   // token / docker 的 token 是实时拿的). Without this guard the auto-fill below
-  // back-fills the HOST 8008 token, which 8009 rejects → endless login screen.
+  // back-fills the HOST 8008 token, which 8008 rejects → endless login screen.
   if (!spec.api_token && !spec.skipTokenAutofill) {
     try {
       const host = new URL(baseUrl).hostname;
@@ -567,19 +567,19 @@ async function addTeam(spec) {
   // addTeam fires syncNameToCloud(id) below (fire-and-forget). If is_docker isn't
   // already on the node, that first sync sees a plain local team, device-registers
   // it, and the cloud hands back THIS DEVICE's shared team (= the 8008 team) — so
-  // :8009 and :8008 end up on one cloud_team_id and renaming one renames both
+  // :8008 and :8008 end up on one cloud_team_id and renaming one renames both
   // ("串名"). Marking is_docker here (explicit spec OR by the docker app port, which
   // doesn't depend on the caller setting a flag) closes that window for ALL creation
   // paths (sidecar registerAppTeam, a cloud deeplink, a manual add). cloud_team_id
   // (the node's OWN independent team) is written the same atomic way when known.
-  const DOCKER_PORT = String(process.env.CICY_DOCKER_APP_PORT || 8009);
+  const DOCKER_PORT = String(process.env.CICY_DOCKER_APP_PORT || 8008);
   const isDockerNode = !!spec.is_docker || (port != null && String(port) === DOCKER_PORT);
 
   const now = new Date().toISOString();
   const patch = {
     name:           spec.name           !== undefined ? String(spec.name || unnamedName()) : undefined,
     base_url:       baseUrl,
-    // skipTokenAutofill → force-clear any stored token (Docker :8009 reads live).
+    // skipTokenAutofill → force-clear any stored token (Docker :8008 reads live).
     api_token:      spec.skipTokenAutofill ? "" : (spec.api_token !== undefined ? String(spec.api_token || "") : undefined),
     install_source: spec.install_source ?? undefined,
     install_os:     spec.install_os     ?? undefined,

@@ -4,11 +4,11 @@
 // (Apache-2.0, no licensing) INSIDE a WSL2 Ubuntu distro and drive it with
 // deterministic Linux commands — no UAC click-through, no whale-icon wait, no
 // leftover-staging / PATH issues. WSL2 forwards localhost, so a container
-// published on :8009 in Ubuntu is reachable at 127.0.0.1:8009 on Windows.
+// published on :8008 in Ubuntu is reachable at 127.0.0.1:8008 on Windows.
 //
 // Flow: ensure WSL2 → ensure Ubuntu distro → apt install docker.io → start
 // dockerd → docker load (image tarball from ~/Downloads via /mnt/c) → docker run
-// → health-probe :8009 from Windows. Every step checks-then-acts and is
+// → health-probe :8008 from Windows. Every step checks-then-acts and is
 // idempotent, so 重试 resumes.
 
 const { execFile, execFileSync, spawn } = require("child_process");
@@ -411,7 +411,7 @@ function shareMountArg() {
   } catch (e) { log.warn(`[wsl-docker] Share mount setup failed: ${e.message}`); return ""; }
 }
 
-async function runContainer({ port = 8009, container = "cicy-code-docker", volume = "cicy-team-8009", env = {} } = {}) {
+async function runContainer({ port = 8008, container = "cicy-code-docker", volume = "cicy-team-8008", env = {} } = {}) {
   // 每次容器"启动"(含已在跑被 adopt)都确保桌面快捷方式存在 —— 不存在就建,坏了就修。
   if (await probeHealth(port)) { ensureDesktopShortcut(volume, port).catch(() => {}); return { adopted: true }; }
   // Replace any stale same-named container.
@@ -423,7 +423,7 @@ async function runContainer({ port = 8009, container = "cicy-code-docker", volum
   // --dns: WSL2's auto resolv.conf points the distro at the host NAT gateway
   // (172.x.x.1), which docker's default DNS forwarding does NOT reach from inside a
   // bridge container → every lookup is EAI_AGAIN and cicy-code's startup `npm i`
-  // crash-loops the container (:8009 never comes up). Pin public resolvers: Aliyun
+  // crash-loops the container (:8008 never comes up). Pin public resolvers: Aliyun
   // 223.5.5.5 (CN-fast) first, Google 8.8.8.8 as the overseas fallback.
   const cmd = `docker run -d --name ${container} --restart unless-stopped --dns 223.5.5.5 --dns 8.8.8.8 -p 127.0.0.1:${port}:8008 -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${shareMountArg()} ${envArgs} ${IMAGE}`;
   await wslRun(cmd, { timeout: 60000 });
@@ -432,11 +432,11 @@ async function runContainer({ port = 8009, container = "cicy-code-docker", volum
 }
 
 // Read the container's OWN api_token (its volume-persisted global.json). This is
-// the ONLY correct credential for :8009 — the host's 8008 token is different and
-// 8009 rejects it. Retries because right after start the entrypoint may not have
+// the ONLY correct credential for :8008 — the host's 8008 token is different and
+// 8008 rejects it. Retries because right after start the entrypoint may not have
 // written global.json yet; returns "" only if it truly can't be read (callers
 // must then NOT open with a wrong/host token — that strands the user at login).
-async function readContainerToken(port = 8009, container = "cicy-code-docker", volume = "cicy-team-8009") {
+async function readContainerToken(port = 8008, container = "cicy-code-docker", volume = "cicy-team-8008") {
   for (let attempt = 1; attempt <= 5; attempt++) {
     // 1) Fast + reliable: read the volume-backed global.json straight from the
     //    distro fs. `docker exec` into a just-loaded/busy container is slow and
@@ -459,7 +459,7 @@ async function readContainerToken(port = 8009, container = "cicy-code-docker", v
 }
 
 // Register a Windows logon task that starts dockerd in our distro on every
-// logon — old inbox WSL ignores wsl.conf [boot], so without this :8009 is dead
+// logon — old inbox WSL ignores wsl.conf [boot], so without this :8008 is dead
 // after a Windows reboot until the user clicks 启动. The container's
 // --restart unless-stopped then brings cicy-code back automatically. Idempotent
 // (start-dockerd.sh is `pgrep dockerd || dockerd`); /f overwrites a stale task.
@@ -477,7 +477,7 @@ function ensureAutostart() {
 }
 
 // Drop a desktop shortcut (folder icon) to the container's /home/cicy — i.e. the
-// cicy-team volume on the distro — so the user can browse :8009's files from
+// cicy-team volume on the distro — so the user can browse :8008's files from
 // Windows Explorer. \\wsl$\<distro>\… is the UNC view of the WSL filesystem.
 // Idempotent: CreateShortcut overwrites. Best-effort (errors swallowed).
 // PowerShell single-quoted literal. PowerShell does NOT treat backslash as an
@@ -487,7 +487,7 @@ function ensureAutostart() {
 // backslashes) which Explorer can't open. That was the broken "WSL 快捷方式".
 function psSingle(s) { return "'" + String(s).replace(/'/g, "''") + "'"; }
 
-function ensureDesktopShortcut(volume = "cicy-team-8009", port = 8009) {
+function ensureDesktopShortcut(volume = "cicy-team-8008", port = 8008) {
   if (process.platform !== "win32") return Promise.resolve();
   return new Promise((res) => {
     // 快捷方式名带 port —— 多个 docker(不同端口)各自一个桌面文件夹快捷方式。
@@ -511,7 +511,7 @@ function ensureDesktopShortcut(volume = "cicy-team-8009", port = 8009) {
 }
 
 // Composite status for the card.
-async function status(port = 8009) {
+async function status(port = 8008) {
   // `unknown` = WSL didn't answer a probe (stuck/booting). The homepage uses it
   // to show 「检测中/WSL 无响应·重试」instead of falsely showing 「下载安装」.
   const miss = await docker.wslMissing();           // true | false | null(unknown)
@@ -542,7 +542,7 @@ async function bootstrap(opts = {}) {
   return _bootstrapInFlight;
 }
 
-async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-docker", volume = "cicy-team", env = {} } = {}) {
+async function _bootstrap({ onProgress, port = 8008, container = "cicy-code-docker", volume = "cicy-team", env = {} } = {}) {
   const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
 
   // Structured, PERSISTED trace of the whole run (electron-log → main.log) so a
@@ -650,7 +650,7 @@ async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-dock
 // Restart ONLY cicy-code via supervisor — cron / sshd / user daemons keep
 // running (that's the whole point of the supervisor layout). Falls back to a
 // full container restart on the pre-supervisor image.
-async function restart({ container = "cicy-code-docker", port = 8009, volume = "cicy-team-8009" } = {}) {
+async function restart({ container = "cicy-code-docker", port = 8008, volume = "cicy-team-8008" } = {}) {
   await startEngine();
   try {
     await wslRun(`docker exec ${container} supervisorctl -c /etc/supervisor/supervisord.conf restart cicy-code`, { timeout: 30000 });
@@ -666,7 +666,7 @@ async function restart({ container = "cicy-code-docker", port = 8009, volume = "
 // which installs the latest version side-by-side, repoints the symlink, and
 // `supervisorctl restart cicy-code` — no container recreate, daemons untouched.
 // Streamed to the drawer so the user sees the npm pull + restart.
-async function update({ onProgress, container = "cicy-code-docker", port = 8009 } = {}) {
+async function update({ onProgress, container = "cicy-code-docker", port = 8008 } = {}) {
   const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
   await startEngine();
   emit({ phase: "image", status: "running", message: "更新 cicy-code（拉取最新版）…" });
@@ -678,7 +678,7 @@ async function update({ onProgress, container = "cicy-code-docker", port = 8009 
     return { ok: false, reason: "update_failed" };
   }
   const healthy = await docker.waitUntil(() => probeHealth(port), { totalMs: 120000, everyMs: 3000 });
-  emit({ phase: "done", status: healthy ? "done" : "error", message: healthy ? "cicy-code 已更新到最新 🎉" : "更新了但 :8009 还没响应——稍等或点重试" });
+  emit({ phase: "done", status: healthy ? "done" : "error", message: healthy ? "cicy-code 已更新到最新 🎉" : "更新了但 :8008 还没响应——稍等或点重试" });
   return { ok: healthy };
 }
 async function stop({ container = "cicy-code-docker" } = {}) {
@@ -688,7 +688,7 @@ async function stop({ container = "cicy-code-docker" } = {}) {
 // docker restart 整个容器(stop+start 同一个容器)—— 区别于 restart()(supervisorctl
 // 重启容器内的 cicy-code 进程)和重建(rm+run)。容器重启后 entrypoint 重跑,会重读
 // volume global.json,所以若先把新 key 写进 volume,这个就能让 cicy-code 用上新 key。
-async function dockerRestart({ container = "cicy-code-docker-8009" } = {}) {
+async function dockerRestart({ container = "cicy-code-docker-8008" } = {}) {
   await wslRun(`docker restart ${container}`, { timeout: 45000 });
   return true;
 }
@@ -696,7 +696,7 @@ async function dockerRestart({ container = "cicy-code-docker-8009" } = {}) {
 // 重建容器:docker rm -f 旧容器 + docker run 新容器(用新 env,如新的 docker team 网关
 // key)。**保留 volume**(数据/api_token/deviceId 不丢),只是换掉容器本身 + env。
 // 破坏性(短暂中断 + 换 key)→ 调用方要 confirm。
-async function recreate({ port = 8009, container = "cicy-code-docker-8009", volume = "cicy-team-8009", env = {} } = {}) {
+async function recreate({ port = 8008, container = "cicy-code-docker-8008", volume = "cicy-team-8008", env = {} } = {}) {
   // 强删占用该端口的**任何**容器(含老名字 cicy-code-docker)+ 目标容器 —— 否则
   // runContainer 开头的 probeHealth 看到旧容器还健康会 adopt 它、不重建,key 就换不了。
   try { await wslRun(`docker ps -aq --filter publish=${port} | xargs -r docker rm -f 2>/dev/null; docker rm -f ${container} 2>/dev/null; true`, { timeout: 30000 }); } catch {}
@@ -718,7 +718,7 @@ function unregisterDistro() {
 // downloader, which copes with the flaky CN DNS that bare curl can't) is the
 // only reliable CN update path. This RESETS the distro: the cicy-team volume is
 // re-created and the instance re-seeds (new token) on next boot.
-async function upgrade({ onProgress, port = 8009, container = "cicy-code-docker", volume = "cicy-team", env = {} } = {}) {
+async function upgrade({ onProgress, port = 8008, container = "cicy-code-docker", volume = "cicy-team", env = {} } = {}) {
   const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
   emit({ phase: "install-docker", status: "running", message: "升级 = 拉取最新运行环境并重装（会重置容器数据）…" });
   try { await stop({ container }); } catch {}

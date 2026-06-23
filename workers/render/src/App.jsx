@@ -745,7 +745,7 @@ export default function App() {
 
   // Logged in: unified tabs + cards grid on the left, full-height webview
   // drawer on the right.
-  // The Docker-版 cicy-code on :8009 has its own dedicated <DockerCard> (right of
+  // The Docker-版 cicy-code on :8008 has its own dedicated <DockerCard> (right of
   // the local card), so pull it out of the generic node list — else it'd ALSO
   // render as a 自定义 card (the bootstrap registers it as a team for the
   // token-injected 打开/刷新 flow).
@@ -869,7 +869,7 @@ export default function App() {
                 // (主人: 必须拿到 token 才能打开,否则被卡在登录页).
                 try {
                   const r = await window.cicy?.docker?.appOpen?.();
-                  if (!r?.ok) window.alert("拿不到容器 token,无法打开 :8009。请确认服务已就绪(或用卡片菜单「重启」)后再试。");
+                  if (!r?.ok) window.alert("拿不到容器 token,无法打开 :8008。请确认服务已就绪(或用卡片菜单「重启」)后再试。");
                 } catch (e) { console.warn("[DockerCard] open", e); }
               }}
               cloudTitle={dockerCloudTeam?.title}
@@ -1691,7 +1691,7 @@ function DockerInstallDrawerHost() {
             </span>
             <div>
               <div className="drawer__h">{tr("docker.setupTitle", "安装 Docker cicy-code")}</div>
-              <div className="drawer__sub">127.0.0.1:8009</div>
+              <div className="drawer__sub">127.0.0.1:8008</div>
             </div>
           </div>
           <div className="drawer__headbtns">
@@ -1770,7 +1770,7 @@ function DockerInstallDrawerHost() {
 }
 
 // Docker-版 cicy-code card (Windows only): a SECOND cicy-code instance running
-// in Docker on :8009, alongside the native local daemon (:8008). If Docker
+// in Docker on :8008, alongside the native local daemon (:8008). If Docker
 // Desktop is missing, the install flow downloads its installer to the user's
 // Desktop and runs it (主人指令), streaming progress through the drawer above.
 function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
@@ -1782,8 +1782,8 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   // 标题 = 云端 team 的 title(和其它团队同一套;refreshCloudTeams 周期刷新 → 自动跟随
-   // 云端改名)。还没建好云端 team 时回退 "Docker 团队"。
-  const displayName = cloudTitle || "Docker 团队";
+   // 云端改名)。还没建好云端 team 时回退 "本地团队"(docker-only:这就是本地团队卡)。
+  const displayName = cloudTitle || "本地团队";
   const startEdit = (e) => { e?.stopPropagation?.(); setDraft(displayName); setEditing(true); };
   const commitName = async () => {
     setEditing(false);
@@ -1917,7 +1917,7 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
   if (platform !== "win32" && platform !== "darwin") return null;
 
   // Distinct states (主人: 状态分清楚):
-  //   running       — :8009 container healthy → 打开
+  //   running       — :8008 container healthy → 打开
   //   dockerRunning — engine up, no container → 启动 (build/start container)
   //   installed     — Docker on disk but engine down → 启动 Docker
   //   else          — not installed → 下载安装
@@ -1959,10 +1959,10 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
   const onCta = async () => {
     if (isBusy) return;
     if (running) {
-      // 主人令:打开很慢 → 先探这个 :8009 tab 开过没。开过(openedWc 里有它的
+      // 主人令:打开很慢 → 先探这个 :8008 tab 开过没。开过(openedWc 里有它的
       // webContentsId)就**直接 active 秒切**,不再拿 token / 注册 team(那是慢的根)。
       try {
-        const r = await window.cicy?.tabs?.activateIfOpen?.("http://127.0.0.1:8009");
+        const r = await window.cicy?.tabs?.activateIfOpen?.("http://127.0.0.1:8008");
         if (r?.active) return;
       } catch {}
       // 没开过 → 显示 loading(打开中…),走慢路径:拿容器 token 再开 tab。
@@ -2021,7 +2021,7 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
                   {tr("docker.update", "更新")}
                 </button>
                 <button type="button" data-id="DockerCard-reload" className="bcard__menu-item"
-                  onClick={(e) => { e.stopPropagation(); setMenuOpen(false); window.cicy?.tabs?.reloadIfOpen?.("http://127.0.0.1:8009", "Docker 团队"); }}>
+                  onClick={(e) => { e.stopPropagation(); setMenuOpen(false); window.cicy?.tabs?.reloadIfOpen?.("http://127.0.0.1:8008", displayName); }}>
                   {tr("docker.reloadWindow", "刷新窗口")}
                 </button>
                 <button type="button" data-id="DockerCard-restart" className="bcard__menu-item"
@@ -2047,8 +2047,8 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
                 <button type="button" data-id="DockerCard-addr" className="bcard__menu-item"
                   title={tr("localTeams.copyAddr", "点击复制地址")}
                   style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-                  onClick={(e) => { e.stopPropagation(); setMenuOpen(false); try { navigator.clipboard.writeText("http://127.0.0.1:8009"); } catch {} }}>
-                  http://127.0.0.1:8009
+                  onClick={(e) => { e.stopPropagation(); setMenuOpen(false); try { navigator.clipboard.writeText("http://127.0.0.1:8008"); } catch {} }}>
+                  http://127.0.0.1:8008
                 </button>
               </div>,
               document.body
@@ -2057,7 +2057,7 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
         )}
       </div>
       <div className="bcard__body">
-        {/* 8009 现在有独立云端 team(cloud_team_id 是它自己的,不再和 8008 串),所以
+        {/* 8008 现在有独立云端 team(cloud_team_id 是它自己的,不再和 8008 串),所以
             标题可改名:本地节点名 + 云端 PATCH 双写(onRename 在父组件处理)。 */}
         <div style={{ height: 28, display: "flex", alignItems: "center" }}>
           {editing ? (
@@ -2532,13 +2532,13 @@ function isLocalSidecar(baseUrl) {
   } catch { return false; }
 }
 
-// The Docker-版 cicy-code instance — localhost:8009. Owned by <DockerCard>, so
+// The Docker-版 cicy-code instance — localhost:8008. Owned by <DockerCard>, so
 // it's filtered out of the generic node lists.
 function isDockerApp(baseUrl) {
   try {
     const p = new URL(baseUrl);
     const local = p.hostname === "127.0.0.1" || p.hostname === "localhost" || p.hostname === "::1";
-    return local && p.port === "8009";
+    return local && p.port === "8008";
   } catch { return false; }
 }
 

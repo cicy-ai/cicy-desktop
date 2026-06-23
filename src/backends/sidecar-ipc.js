@@ -33,30 +33,16 @@ const APP_DOCKER_SUPPORTED = process.platform === "win32" || process.platform ==
 
 const PORT = Number(process.env.CICY_CODE_PORT || 8008);
 
-// Docker-版 cicy-code: a SECOND, optional instance that runs inside Docker on
-// :8009 (its own container + volume), alongside the native local daemon on
-// :8008. The homepage "Docker cicy-code" card owns its lifecycle; if Docker
-// Desktop is missing the card installs it first (installer downloads to the
-// user's Desktop). The whole cicy home is persisted to a named volume so the
-// entire container state survives recreation (主人: "把整个 docker 挂出来").
-// macOS is DOCKER-ONLY (主人指令: native 退役 — native 跑在宿主机无隔离会动用户数据).
-// So on darwin the docker cicy-code IS the PRIMARY on :8008 (the slot the rest of the app
-// already talks to; native no longer spawns there — see src/sidecar/cicy-code.js). The
-// existing daemon/reconcile/ensureDockerTeam/appOpts machinery below just retargets to 8008
-// — independent cloud team key, named-volume isolation, auto-start all come for free.
-// win32 keeps the Docker-版 as an optional 2nd instance on :8009 alongside native :8008 (next).
-const APP_PORT = Number(process.env.CICY_DOCKER_APP_PORT || 8008); // native 退役:原 :8009 Docker-版就是唯一的 :8008 cicy-code
-// container / volume 名都带上 port —— 一台机可以跑多个 docker(不同端口),各自
-// 独立容器 + 独立 volume(数据隔离)+ 独立云端 team。docker-teams.json 也按 volume
-// (含 port)区分。
+// docker-only(主人: native 退役):cicy-code 只在 docker 容器里跑,:8008 就是它 —— 全
+// app 都跟 :8008 说话。darwin=Colima / win32=WSL2,数据在命名卷里隔离(不动用户文件)。
+// homepage 的 docker 卡负责首次安装(缺 colima/wsl 时引导装)+ 状态。一台机可跑多个
+// docker(不同端口),各自独立容器 + 卷 + 云端 team(teams.json 里各自的 node 条目)。
+const APP_PORT = Number(process.env.CICY_DOCKER_APP_PORT || 8008);
 const APP_CONTAINER = process.env.CICY_DOCKER_APP_CONTAINER || `cicy-code-docker-${APP_PORT}`;
 const APP_VOLUME = process.env.CICY_DOCKER_APP_VOLUME || `cicy-team-${APP_PORT}`;
 const APP_MOUNT = process.env.CICY_DOCKER_APP_MOUNT || "/home/cicy";
-// 8008 and 8009 are ONE team (主人), so :8009 reaches the LLM through the cicy
-// gateway using 8008's TEAM key — the `sk-cicy-…` apiKey already minted in 8008's
-// global.json providers (NOT the api_token, which is only the local access
-// credential). 8008 is up by the time the Docker card is used, so the key is
-// ready — we just read it and pass it to the container. Same key ⇒ same billing.
+// 容器的 LLM 网关 key:优先 ensureDockerTeam 缓存的本 docker team 的 apiKey,回退本机
+// global.json 里的 gateway key(readLocalGatewayKey),保证容器始终有 LLM key 可用。
 const GATEWAY_ENDPOINT = process.env.CICY_AI_GATEWAY_LLM_ENDPOINT || "https://gateway.cicy-ai.com";
 function readLocalGatewayKey() {
   try {
@@ -71,46 +57,36 @@ function readLocalGatewayKey() {
   } catch { return ""; }
 }
 
-// ── Docker 独立云端 team ──────────────────────────────────────────────────────
-// 主人令(2026-06-21):每个 Docker 容器要有自己独立的云端 team(8008 那个本机
-// local team 不动)。云端是「一 deviceId 一 local team」,装不下一机多 docker,所以
-// docker 走 POST /api/teams 建**独立 team**(不按 device)。首次建一次、把 teamId 存
-// 本机(~/cicy-ai/db/docker-teams.json,按 volume 区分多个 docker);之后用 teamId 现
-// 取 token。容器用这个 team 的 token 当网关 key(appOpts env);teamId 给 DockerCard
-// 账单 + 改名(PATCH /api/teams/:id,和私有云卡同一套)。
+// ── Docker 云端 team(统一到 teams.json)─────────────────────────────────────
+// docker-only(主人): native 退役,docker cicy-code 就是 :8008 本地团队。一机多 docker
+// = 不同端口 = teams.json 里不同 node 条目(127-0-0-1-<port>),各自 cloud_team_id。
+// 不再单独存 docker-teams.json —— teamId 统一落在 teams.json 的 node.cloud_team_id 上
+// (由 registerAppTeam 的 addTeam 传 cloud_team_id 写盘,和 node 同一次 writeNodes)。
+// 这里只:读已有 teamId / 没有就 POST /api/teams 建一个 + 取网关 key,缓存给 appOpts。
 const cc = (() => { try { return require("../cloud/cloud-client"); } catch { return null; } })();
-const DOCKER_TEAMS_FILE = path.join(os.homedir(), "cicy-ai", "db", "docker-teams.json");
-function readDockerTeams() { try { return JSON.parse(fs.readFileSync(DOCKER_TEAMS_FILE, "utf8")) || {}; } catch { return {}; } }
-function writeDockerTeams(obj) { try { fs.mkdirSync(path.dirname(DOCKER_TEAMS_FILE), { recursive: true }); fs.writeFileSync(DOCKER_TEAMS_FILE, JSON.stringify(obj, null, 2)); } catch {} }
+const TEAMS_JSON = path.join(os.homedir(), "cicy-ai", "db", "teams.json");
+function readTeamsJson() { try { return JSON.parse(fs.readFileSync(TEAMS_JSON, "utf8")) || {}; } catch { return {}; } }
 let dockerTeamReg = null; // { teamId, title, apiKey } — 缓存,appOpts 读它
 const APP_TEAM_TITLE = "本地团队"; // 只有一个 cicy-code(:8008)= 本地团队
 
-// 确保这个 docker(按 volume)有独立云端 team;返回 { teamId, title, apiKey } 或 null。
+// 确保本 docker(按 node = 127-0-0-1-<APP_PORT>,支持一机多 docker)有云端 team;返回
+// { teamId, title, apiKey } 或 null。READ-ONLY teams.json —— teamId 的落盘走
+// registerAppTeam 的 addTeam,避免和 local-teams 的 writeNodes 抢写。
 async function ensureDockerTeam() {
-  if (!cc || !cc.loginToken || !cc.loginToken()) return null; // 未登录 → appOpts 回退 8008 key
+  if (!cc || !cc.loginToken || !cc.loginToken()) return null; // 未登录 → appOpts 回退本地 key
   try {
-    const store = readDockerTeams();
-    let rec = store[APP_VOLUME];
-    if (!rec || !rec.teamId) {
+    const nodeKey = `127-0-0-1-${APP_PORT}`;          // 本 docker 在 teams.json 的 node key
+    const node = readTeamsJson()[nodeKey];
+    const teamId = node && node.cloud_team_id;
+    if (!teamId) {
       const created = await cc.createTeam({ title: APP_TEAM_TITLE, kind: "cloud" });
       if (!created || !created.ok) return null;
-      // 强制把云端标题设成 APP_TEAM_TITLE:POST /api/teams 常忽略我们传的 title、
-      // 回退成 owner/device 名,卡片就显示错了。PATCH 一下盖掉。
-      try { await cc.renameTeam(created.teamId, APP_TEAM_TITLE); } catch {}
-      store[APP_VOLUME] = { teamId: created.teamId, title: APP_TEAM_TITLE, titleForced: true };
-      writeDockerTeams(store);
+      try { await cc.renameTeam(created.teamId, APP_TEAM_TITLE); } catch {} // 盖掉云端 owner/device 回退名
       dockerTeamReg = { teamId: created.teamId, title: APP_TEAM_TITLE, apiKey: created.apiKey };
-      return dockerTeamReg;
+      return dockerTeamReg; // teamId 由 registerAppTeam.addTeam(cloud_team_id) 写进 teams.json
     }
-    // 既有 team:若还没强制过标题(老数据/上面那个 bug 建的),补一次 PATCH 成 "Docker
-    // 团队",然后打上 titleForced 标记 —— 只补这一次,之后用户自己改名不会被覆盖。
-    if (!rec.titleForced) {
-      try { await cc.renameTeam(rec.teamId, APP_TEAM_TITLE); } catch {}
-      rec.title = APP_TEAM_TITLE; rec.titleForced = true;
-      store[APP_VOLUME] = rec; writeDockerTeams(store);
-    }
-    const apiKey = await cc.getTeamApiKey(rec.teamId);
-    dockerTeamReg = { teamId: rec.teamId, title: rec.title, apiKey };
+    const apiKey = await cc.getTeamApiKey(teamId);
+    dockerTeamReg = { teamId, title: (node.name || APP_TEAM_TITLE), apiKey };
     return dockerTeamReg;
   } catch (e) { return null; }
 }
@@ -144,12 +120,12 @@ function register({ sidecarLogPath } = {}) {
     _dockerDaemonBusy = true;
     try {
       const s = await refreshDockerStatus();
-      // 没启动的给我启动: distro installed but :8009 not healthy (and WSL not unknown)
+      // 没启动的给我启动: distro installed but :8008 not healthy (and WSL not unknown)
       // → bring it up. bootstrap is idempotent: it skips done steps and just runs
       // startEngine + the container. Skip when not installed (would silently pull
       // the 444MB rootfs) or unknown (WSL not answering — let the next tick retry).
       if (s.installed && !s.running && !s.unknown) {
-        log.info("[docker-daemon] installed but :8009 down → auto-starting (bootstrap idempotent)");
+        log.info("[docker-daemon] installed but :8008 down → auto-starting (bootstrap idempotent)");
         try { await appDocker.bootstrap(appOpts()); } catch (e) { log.warn(`[docker-daemon] auto-start failed: ${e.message}`); }
         await refreshDockerStatus();
       }
@@ -218,8 +194,8 @@ function register({ sidecarLogPath } = {}) {
     }
   });
 
-  // ---- Docker-版 cicy-code on :8009 — WSL2 + Ubuntu + Docker Engine (方案 A) ----
-  // Card states (主人: 状态分清楚): running(:8009 healthy)→打开 / dockerRunning
+  // ---- Docker-版 cicy-code on :8008 — WSL2 + Ubuntu + Docker Engine (方案 A) ----
+  // Card states (主人: 状态分清楚): running(:8008 healthy)→打开 / dockerRunning
   // (engine up)→启动 / installed(Ubuntu present)→启动 Docker / else→下载安装.
   ipcMain.handle("docker:app-status", () => {
     // NON-BLOCKING: return what the background daemon already computed (memory →
@@ -241,7 +217,7 @@ function register({ sidecarLogPath } = {}) {
     return s;
   });
 
-  // Common run options for the :8009 instance: its own container/volume + the
+  // Common run options for the :8008 instance: its own container/volume + the
   // LLM gateway env keyed by the 8008 team's token. (WSL: whole-home mount via
   // -v <volume>:/home/cicy inside wsl-docker.)
   const appOpts = () => {
@@ -252,24 +228,24 @@ function register({ sidecarLogPath } = {}) {
     if (gwKey) env.CICY_AI_GATEWAY_LLM_API_KEY = gwKey;
     return { port: APP_PORT, container: APP_CONTAINER, volume: APP_VOLUME, env };
   };
-  // Register the running :8009 instance as a (custom) team so the card's "打开"
+  // Register the running :8008 instance as a (custom) team so the card's "打开"
   // reuses the token-injected open/reload flow. addTeam dedups by host:port.
-  // Upsert the :8009 team with the CONTAINER's OWN live token. Critical: never
+  // Upsert the :8008 team with the CONTAINER's OWN live token. Critical: never
   // fall back to the host 8008 token (addTeam auto-fills global.json on an empty
-  // api_token — that's the host credential, which 8009 rejects → login screen).
+  // api_token — that's the host credential, which 8008 rejects → login screen).
   // Returns the team id, or {ok:false} when the container token can't be read.
-  // Register the :8009 team WITHOUT a token. 主人: teams.json 不存 8009 的 token;
+  // Register the :8008 team WITHOUT a token. 主人: teams.json 不存 8008 的 token;
   // docker 的 token 是实时拿的. skipTokenAutofill stops addTeam from back-filling
-  // the HOST 8008 token (the bug that made 8009 verify with 8008's token → login).
+  // the HOST 8008 token (the bug that made 8008 verify with 8008's token → login).
   const registerAppTeam = async () => {
     const lt = require("./local-teams");
     await ensureDockerTeam(); // 确保独立云端 team 存在 + 拿到 teamId/title
-    const title = (dockerTeamReg && dockerTeamReg.title) || "Docker 团队";
+    const title = (dockerTeamReg && dockerTeamReg.title) || APP_TEAM_TITLE;
     // is_docker + cloud_team_id are passed INTO addTeam so they land in the SAME
     // writeNodes as the node — before addTeam's fire-and-forget syncNameToCloud
-    // runs. That's what stops the freshly-created :8009 node from device-registering
+    // runs. That's what stops the freshly-created :8008 node from device-registering
     // into THIS device's shared (8008) team and 串名. (addTeam also self-detects
-    // is_docker by the :8009 port, so this is belt-and-suspenders.)
+    // is_docker by the :8008 port, so this is belt-and-suspenders.)
     const r = await lt.addTeam({
       base_url: `http://127.0.0.1:${APP_PORT}`,
       name: title,
@@ -303,7 +279,7 @@ function register({ sidecarLogPath } = {}) {
   });
 
   // One-click bootstrap (方案 A): ensure WSL2 → Ubuntu → Docker Engine → load
-  // image → start :8009 container → health. Streams phase/progress on
+  // image → start :8008 container → health. Streams phase/progress on
   // 'docker:app-progress'. Idempotent + resumable → the modal's 重试 just re-runs.
   ipcMain.handle("docker:app-bootstrap", async (e) => {
     if (!APP_DOCKER_SUPPORTED) return { ok: false, error: "Docker cicy-code 仅支持 Windows / macOS" };
@@ -361,7 +337,7 @@ function register({ sidecarLogPath } = {}) {
     catch (e) { return { ok: false, error: e.message }; }
   });
 
-  // ⋯ menu → 升级: re-pull the latest R2 image, re-create the :8009 container.
+  // ⋯ menu → 升级: re-pull the latest R2 image, re-create the :8008 container.
   ipcMain.handle("docker:app-upgrade", async (e) => {
     if (!APP_DOCKER_SUPPORTED) return { ok: false, error: "Docker cicy-code 仅支持 Windows / macOS" };
     try {
