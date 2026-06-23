@@ -83,6 +83,9 @@ const DOCKER_TEAMS_FILE = path.join(os.homedir(), "cicy-ai", "db", "docker-teams
 function readDockerTeams() { try { return JSON.parse(fs.readFileSync(DOCKER_TEAMS_FILE, "utf8")) || {}; } catch { return {}; } }
 function writeDockerTeams(obj) { try { fs.mkdirSync(path.dirname(DOCKER_TEAMS_FILE), { recursive: true }); fs.writeFileSync(DOCKER_TEAMS_FILE, JSON.stringify(obj, null, 2)); } catch {} }
 let dockerTeamReg = null; // { teamId, title, apiKey } — 缓存,appOpts 读它
+// 主实例(APP_PORT===PORT,即 darwin docker-only 的 :8008)就是「本地团队」,不该叫
+// 「Docker 团队」(那是第二实例 :8009 用的)。docker-only 下它是唯一/主团队。
+const APP_TEAM_TITLE = (APP_PORT === PORT) ? "本地团队" : "Docker 团队";
 
 // 确保这个 docker(按 volume)有独立云端 team;返回 { teamId, title, apiKey } 或 null。
 async function ensureDockerTeam() {
@@ -91,21 +94,21 @@ async function ensureDockerTeam() {
     const store = readDockerTeams();
     let rec = store[APP_VOLUME];
     if (!rec || !rec.teamId) {
-      const created = await cc.createTeam({ title: "Docker 团队", kind: "cloud" });
+      const created = await cc.createTeam({ title: APP_TEAM_TITLE, kind: "cloud" });
       if (!created || !created.ok) return null;
-      // 强制把云端标题设成 "Docker 团队":POST /api/teams 常忽略我们传的 title、
-      // 回退成 owner/device 名(= 8008 的标题),卡片就显示成 8008 的了。PATCH 一下盖掉。
-      try { await cc.renameTeam(created.teamId, "Docker 团队"); } catch {}
-      store[APP_VOLUME] = { teamId: created.teamId, title: "Docker 团队", titleForced: true };
+      // 强制把云端标题设成 APP_TEAM_TITLE:POST /api/teams 常忽略我们传的 title、
+      // 回退成 owner/device 名,卡片就显示错了。PATCH 一下盖掉。
+      try { await cc.renameTeam(created.teamId, APP_TEAM_TITLE); } catch {}
+      store[APP_VOLUME] = { teamId: created.teamId, title: APP_TEAM_TITLE, titleForced: true };
       writeDockerTeams(store);
-      dockerTeamReg = { teamId: created.teamId, title: "Docker 团队", apiKey: created.apiKey };
+      dockerTeamReg = { teamId: created.teamId, title: APP_TEAM_TITLE, apiKey: created.apiKey };
       return dockerTeamReg;
     }
     // 既有 team:若还没强制过标题(老数据/上面那个 bug 建的),补一次 PATCH 成 "Docker
     // 团队",然后打上 titleForced 标记 —— 只补这一次,之后用户自己改名不会被覆盖。
     if (!rec.titleForced) {
-      try { await cc.renameTeam(rec.teamId, "Docker 团队"); } catch {}
-      rec.title = "Docker 团队"; rec.titleForced = true;
+      try { await cc.renameTeam(rec.teamId, APP_TEAM_TITLE); } catch {}
+      rec.title = APP_TEAM_TITLE; rec.titleForced = true;
       store[APP_VOLUME] = rec; writeDockerTeams(store);
     }
     const apiKey = await cc.getTeamApiKey(rec.teamId);

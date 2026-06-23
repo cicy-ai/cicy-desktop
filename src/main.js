@@ -817,6 +817,11 @@ X-GNOME-Autostart-enabled=true
 let _sidecarWatchdogTimer = null;
 function startSidecarWatchdog({ intervalMs = 30_000 } = {}) {
   if (_sidecarWatchdogTimer) return;
+  // macOS is docker-only: cicy-code lives in the Colima container on :8008, kept alive by
+  // the docker daemon's reconcile (sidecar-ipc) + the container's --restart unless-stopped.
+  // The native restart this watchdog does is a no-op on darwin (start() returns null), so it
+  // would just spam "sidecar unreachable → restart" every tick. Skip it entirely on darwin.
+  if (process.platform === "darwin") return;
   let consecutiveFailures = 0;
   let restartInFlight = false;
 
