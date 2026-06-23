@@ -839,14 +839,8 @@ body {
 .bcard__menu-item.is-accent:hover { background: var(--accent-soft); color: #c7dbff; }
 .bcard__menu-item.is-danger { color: #f7a3a3; }
 .bcard__menu-item.is-danger:hover { background: rgba(239,68,68,.16); color: #fff; }
-/* Labeled divider grouping the Docker container ops below it (主人: docker 操作放一起 + divider). */
-.bcard__menu-sep {
-  display: flex; align-items: center; gap: 8px;
-  margin: 5px 0 2px; padding: 0 12px;
-  font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase;
-  color: #6b7280; user-select: none;
-}
-.bcard__menu-sep::after { content: ""; flex: 1; height: 1px; background: rgba(255,255,255,.08); }
+/* Plain divider line separating the Docker-container ops (主人: 加个分隔线就好). */
+.bcard__menu-sep { height: 1px; margin: 5px 10px; background: rgba(255,255,255,.08); }
 /* Portaled to document.body to escape .bcard's overflow:hidden (which clipped the
    dropdown). Inline top/left position it under the kebab; here just a high
    stacking order (below toast/drawer) + word-wrapping items so nothing overflows. */

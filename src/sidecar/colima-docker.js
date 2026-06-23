@@ -409,10 +409,14 @@ async function restart({ container = "cicy-code-docker-8008", port = 8008, volum
 async function update({ onProgress, container = "cicy-code-docker-8008", port = 8008 } = {}) {
   const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
   await startVM({});
-  emit({ phase: "image", status: "running", message: "更新 cicy-code(拉取最新版)…" });
+  emit({ phase: "image", status: "running", message: "更新 cicy-code(npm 拉取最新版)…" });
+  // 容器里的 cicy-code 是 npm 全局装的(~/.npm-global/bin/cicy-code),没有 update 脚本。
+  // 直接 npm 装最新版(CN 走 npmmirror),再 docker restart 让容器以新版本重起 cicy-code。
   try {
-    await shStream(`docker --context ${CTX} exec ${container} bash -lc "command -v cicy-code-update.sh >/dev/null && cicy-code-update.sh || /usr/local/bin/cicy-code-update.sh"`,
+    await shStream(`docker --context ${CTX} exec ${container} bash -lc "npm install -g cicy-code@latest --registry https://registry.npmmirror.com"`,
       { emit, phase: "image", timeout: 300000 });
+    emit({ phase: "container", status: "running", message: "重启容器以应用新版本…" });
+    await dk(`restart ${container}`, { timeout: 60000 });
   } catch (e) { emit({ phase: "done", status: "error", message: `更新失败:${e.message}(试试「升级」重装)` }); return { ok: false, reason: "update_failed" }; }
   const healthy = await docker.waitUntil(() => probeHealth(port), { totalMs: 120000, everyMs: 3000 });
   emit({ phase: "done", status: healthy ? "done" : "error", message: healthy ? "cicy-code 已更新到最新 🎉" : "更新了但 :8008 还没响应——稍等或点重试" });

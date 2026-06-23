@@ -1782,6 +1782,15 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
   const [busy, setBusy] = useState("");   // "" | bootstrap | restart | stop | upgrade | probe
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmRecreate, setConfirmRecreate] = useState(false); // 重建容器 in-app 确认弹窗(不用 native confirm)
+  // 容器里 cicy-code 的版本(卡片底部显示,主人: team bottom 以前有版本)。docker-only 下
+  // :8008 就是容器,running 时从 sidecar.versions() 的 running(= :8008 /api/health 版本)拿。
+  const [codeVer, setCodeVer] = useState(null);
+  useEffect(() => {
+    if (!status?.running) { setCodeVer(null); return; }
+    let dead = false;
+    window.cicy?.sidecar?.versions?.().then((v) => { if (!dead) setCodeVer((v && v.running) || null); }).catch(() => {});
+    return () => { dead = true; };
+  }, [status?.running]);
   // Inline rename (mirrors LocalTeamCard): double-click the title to edit.
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -2021,10 +2030,19 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
                 ref={menuRef}
                 style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: MENU_W }}
                 onClick={(e) => e.stopPropagation()}>
-                {/* 常用:更新 / 刷新窗口 / 帐单 / 地址 */}
+                {/* cicy-code 操作:更新 / 重启 cicy-code / 停止(都是容器内的 cicy-code,不是 Docker 容器) */}
                 <button type="button" data-id="DockerCard-update" className="bcard__menu-item is-accent" onClick={runUpdate}>
                   {tr("docker.update", "更新 cicy-code")}
                 </button>
+                <button type="button" data-id="DockerCard-restart" className="bcard__menu-item"
+                  onClick={() => runOp("restart", () => window.cicy.docker.appRestart(), tr("docker.restarted", "已重启 cicy-code"))}>
+                  {tr("docker.restart", "重启 cicy-code")}
+                </button>
+                <button type="button" data-id="DockerCard-stop" className="bcard__menu-item is-danger"
+                  onClick={() => runOp("stop", () => window.cicy.docker.appStop(), tr("docker.stopped", "已停止 cicy-code"))}>
+                  {tr("docker.stop", "停止 cicy-code")}
+                </button>
+                {/* 常用:刷新窗口 / 帐单 / 地址 */}
                 <button type="button" data-id="DockerCard-reload" className="bcard__menu-item"
                   onClick={(e) => { e.stopPropagation(); setMenuOpen(false); window.cicy?.tabs?.reloadIfOpen?.("http://127.0.0.1:8008", displayName); }}>
                   {tr("docker.reloadWindow", "刷新窗口")}
@@ -2033,20 +2051,8 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
                   onClick={() => { setMenuOpen(false); openCloudPage(dockerTeam?.cloud_team_id ? `?team=${encodeURIComponent(dockerTeam.cloud_team_id)}` : "?view=usage"); }}>
                   {tr("docker.billing", "帐单")}
                 </button>
-                <button type="button" data-id="DockerCard-addr" className="bcard__menu-item"
-                  title={tr("localTeams.copyAddr", "点击复制地址")}
-                  style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-                  onClick={(e) => { e.stopPropagation(); setMenuOpen(false); try { navigator.clipboard.writeText("http://127.0.0.1:8008"); } catch {} }}>
-                  http://127.0.0.1:8008
-                </button>
-                {/* ── Docker 容器操作(归到一起,divider 分隔)── */}
-                <div className="bcard__menu-sep" data-id="DockerCard-menu-sep" role="separator">
-                  <span>{tr("docker.opsGroup", "Docker 容器")}</span>
-                </div>
-                <button type="button" data-id="DockerCard-restart" className="bcard__menu-item"
-                  onClick={() => runOp("restart", () => window.cicy.docker.appRestart(), tr("docker.restarted", "已重启 cicy-code"))}>
-                  {tr("docker.restart", "重启 cicy-code")}
-                </button>
+                {/* 分隔线:下面是真正操作整个 Docker 容器的(重启 Docker / 重建 Docker) */}
+                <div className="bcard__menu-sep" data-id="DockerCard-menu-sep" role="separator" aria-hidden />
                 <button type="button" data-id="DockerCard-docker-restart" className="bcard__menu-item"
                   onClick={() => runOp("restart", () => window.cicy.docker.appDockerRestart(), tr("docker.dockerRestarted", "已重启 Docker 容器"))}>
                   {tr("docker.dockerRestart", "重启 Docker")}
@@ -2054,10 +2060,6 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
                 <button type="button" data-id="DockerCard-recreate" className="bcard__menu-item is-danger"
                   onClick={(e) => { e.stopPropagation(); setMenuOpen(false); setConfirmRecreate(true); }}>
                   {tr("docker.recreate", "重建 Docker")}
-                </button>
-                <button type="button" data-id="DockerCard-stop" className="bcard__menu-item is-danger"
-                  onClick={() => runOp("stop", () => window.cicy.docker.appStop(), tr("docker.stop", "停止 cicy-code"))}>
-                  {tr("docker.stop", "停止")}
                 </button>
               </div>,
               document.body
@@ -2090,7 +2092,10 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
             </h3>
           )}
         </div>
-        <div className="bcard__meta"><span className="bcard__chip">Docker</span></div>
+        <div className="bcard__meta">
+          <span className="bcard__chip">Docker</span>
+          {codeVer && <span className="bcard__ver" data-id="DockerCard-ver" style={{ marginLeft: 8, fontSize: 11, opacity: 0.6 }}>v{codeVer}</span>}
+        </div>
       </div>
       <button
         type="button"
