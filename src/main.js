@@ -947,34 +947,37 @@ electronApp.whenReady().then(async () => {
       } catch (e) { log.warn(`[auth] persist failed: ${e.message}`); }
     };
 
+    // Shared result hook for BOTH login flows — the 127.0.0.1 loopback window AND
+    // the email device-poll. Persist the token, report the device, notify the
+    // renderer. A completed email login is thus indistinguishable downstream.
+    const onAuthResult = (payload) => {
+      if (payload && payload.token) {
+        saveDesktopAuth(payload);
+        // Now that we have a real owner-bound login token, report this
+        // machine to the cloud (best-effort; safe to call repeatedly —
+        // cloud upserts by (owner, deviceId)).
+        try {
+          // Order matters: register the DEVICE FIRST, THEN the local team(s).
+          // POST /api/team/register 404s when the device isn't registered yet,
+          // so firing both concurrently (the old bug) let team-sync race ahead
+          // of device-register → 404 → gateway key never injected → apiKey 空.
+          // Chain them so syncAllLocalTeams only runs after the device exists.
+          require("./cloud/cloud-client")
+            .registerDevice()
+            .then(() => require("./backends/local-teams").syncAllLocalTeams())
+            .catch((e) => log.warn(`[cloud] device/team register (on login) failed: ${e.message}`));
+        } catch (e) { log.warn(`[cloud] device register hook failed: ${e.message}`); }
+      }
+      const hw = require("./backends/homepage-window");
+      const w = hw.getHomepageWindow && hw.getHomepageWindow();
+      if (w && !w.isDestroyed()) {
+        try { w.webContents.send("auth:complete", payload); } catch {}
+      }
+    };
+
     __ipcMainAuth.handle("auth:login-start", async () => {
       try {
-        const _info = await auth.startLogin({
-          onResult: (payload) => {
-            if (payload && payload.token) {
-              saveDesktopAuth(payload);
-              // Now that we have a real owner-bound login token, report this
-              // machine to the cloud (best-effort; safe to call repeatedly —
-              // cloud upserts by (owner, deviceId)).
-              try {
-                // Order matters: register the DEVICE FIRST, THEN the local team(s).
-                // POST /api/team/register 404s when the device isn't registered yet,
-                // so firing both concurrently (the old bug) let team-sync race ahead
-                // of device-register → 404 → gateway key never injected → apiKey 空.
-                // Chain them so syncAllLocalTeams only runs after the device exists.
-                require("./cloud/cloud-client")
-                  .registerDevice()
-                  .then(() => require("./backends/local-teams").syncAllLocalTeams())
-                  .catch((e) => log.warn(`[cloud] device/team register (on login) failed: ${e.message}`));
-              } catch (e) { log.warn(`[cloud] device register hook failed: ${e.message}`); }
-            }
-            const hw = require("./backends/homepage-window");
-            const w = hw.getHomepageWindow && hw.getHomepageWindow();
-            if (w && !w.isDestroyed()) {
-              try { w.webContents.send("auth:complete", payload); } catch {}
-            }
-          },
-        });
+        const _info = await auth.startLogin({ onResult: onAuthResult });
         // Return the login URL so the renderer can offer a manual "open / copy
         // link" fallback when the browser didn't auto-open (openExternal failed).
         return { ok: true, url: _info && _info.url };
@@ -984,6 +987,21 @@ electronApp.whenReady().then(async () => {
       }
     });
     __ipcMainAuth.handle("auth:login-cancel", () => { auth.cancel(); return { ok: true }; });
+
+    // Email magic-link DEVICE-POLL login. Cross-device safe: the link can be
+    // clicked on a phone and the desktop still completes via cloud polling
+    // (todo#196). Reuses onAuthResult so it lands exactly like the loopback flow.
+    const authEmail = require("./backends/auth-email");
+    __ipcMainAuth.handle("auth:email-start", async (_e, email) => {
+      try {
+        const info = await authEmail.startEmailLogin({ email, onResult: onAuthResult });
+        return { ok: true, email: info && info.email };
+      } catch (e) {
+        log.warn(`[auth] email-start failed: ${e.message}`);
+        return { ok: false, error: e.message };
+      }
+    });
+    __ipcMainAuth.handle("auth:email-cancel", () => { authEmail.cancel(); return { ok: true }; });
 
     // Origin-independent restore. The homepage SPA calls this on mount; if its
     // own (origin-scoped) localStorage has no token, it adopts this one — so a

@@ -260,6 +260,9 @@ export default function App() {
   const [authRestoring, setAuthRestoring] = useState(() => !safeGet(TOKEN_KEY));
   const [loggingIn, setLoggingIn] = useState(false);
   const [loginUrl, setLoginUrl] = useState(""); // shown as a manual fallback when the browser doesn't auto-open
+  // Email magic-link device-poll login (cross-device: the link works on a phone).
+  const [email, setEmail] = useState("");
+  const [emailSent, setEmailSent] = useState(false); // true once the link email is sent → "等待点击" state
   const [appVer, setAppVer] = useState(""); // cicy-desktop version, shown bottom-right
   useEffect(() => {
     window.cicy?.app?.getVersion?.().then((v) => setAppVer((v && v.desktop) || "")).catch(() => {});
@@ -541,6 +544,7 @@ export default function App() {
     if (!window.cicy?.auth?.onComplete) return;
     return window.cicy.auth.onComplete((payload) => {
       setLoggingIn(false);
+      setEmailSent(false); // either flow completing clears the email "等待点击" state
       if (payload?.error) {
         setError(humanError(payload.error));
         return;
@@ -581,6 +585,28 @@ export default function App() {
       return;
     }
     setLoginUrl(r.url || "");
+  }
+
+  // Email magic-link device-poll login. Sends the link, then waits for the user
+  // to click it on ANY device (the desktop polls the cloud) — fixes the loopback's
+  // "clicked on my phone → desktop hangs" problem.
+  async function handleEmailLogin() {
+    if (!window.cicy?.auth?.emailLoginStart) {
+      setError("auth bridge missing");
+      return;
+    }
+    const addr = email.trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr)) {
+      setError(tr("auth.badEmail", "请输入有效的邮箱地址"));
+      return;
+    }
+    setError("");
+    const r = await window.cicy.auth.emailLoginStart(addr);
+    if (!r?.ok) {
+      setError(humanError(r?.error || "email login failed"));
+      return;
+    }
+    setEmailSent(true);
   }
 
   function handleLogout() {
@@ -636,7 +662,7 @@ export default function App() {
         <div className="glow" aria-hidden />
         <div className="card">
           <Brand />
-          {!loggingIn && (
+          {!loggingIn && !emailSent && (
             <>
               <p className="tagline">{tr("auth.tagline", "登录以同步你的团队、配置与 AI 助手")}</p>
               <button className="btn-primary" onClick={handleLogin}>
@@ -644,6 +670,38 @@ export default function App() {
                 <ArrowIcon />
               </button>
               <p className="hint">{tr("auth.autoOpenHint", "点击后会自动打开浏览器")}</p>
+              <div className="login-divider" data-id="LoginDivider"><span>{tr("auth.or", "或")}</span></div>
+              <input
+                type="email"
+                className="login-email-input"
+                data-id="EmailLoginInput"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") handleEmailLogin(); }}
+                placeholder={tr("auth.emailPlaceholder", "你的邮箱")}
+                autoComplete="email"
+                spellCheck={false}
+              />
+              <button className="btn-ghost" data-id="EmailLoginSubmit" onClick={handleEmailLogin}>
+                {tr("auth.emailLogin", "用邮件登录（手机也能点链接）")}
+              </button>
+            </>
+          )}
+          {emailSent && (
+            <>
+              <p className="tagline" data-id="EmailSentTagline">{tr("auth.emailSentTagline", "登录链接已发送")}</p>
+              <p className="hint" data-id="EmailSentHint" style={{ textAlign: "center" }}>
+                {tr("auth.emailSentHint", "到邮箱打开链接即可（手机、电脑都行），这里会自动登录。")}
+                <br />{email}
+              </p>
+              <div className="spinner-row">
+                <Spinner />
+                <span>{tr("auth.emailWaiting", "等待你点击链接…")}</span>
+              </div>
+              <button className="btn-ghost" data-id="EmailSentCancel" onClick={() => {
+                window.cicy?.auth?.emailLoginCancel?.();
+                setEmailSent(false);
+              }}>{tr("auth.cancel", "取消")}</button>
             </>
           )}
           {loggingIn && (

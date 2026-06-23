@@ -140,6 +140,20 @@ body {
 .btn-ghost:hover { color: #e5e7eb; background: rgba(255,255,255,.04); border-color: rgba(255,255,255,.14); }
 .btn-ghost:disabled { opacity: .4; cursor: default; }
 
+/* Email magic-link device-poll login (cross-device). */
+.login-divider { display: flex; align-items: center; gap: 10px; margin: 4px 0; color: #6b7280; font-size: 11.5px; }
+.login-divider::before, .login-divider::after { content: ""; flex: 1; height: 1px; background: rgba(255,255,255,.08); }
+.login-email-input {
+  -webkit-app-region: no-drag;
+  appearance: none; width: 100%; box-sizing: border-box;
+  background: rgba(255,255,255,.03); color: #e5e7eb;
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 8px; padding: 8px 12px; font-size: 13px;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.login-email-input::placeholder { color: #6b7280; }
+.login-email-input:focus { outline: none; border-color: rgba(99,102,241,.55); background: rgba(255,255,255,.05); }
+
 .hint { margin: 0; font-size: 11.5px; color: #6b7280; }
 .spinner-row { display: inline-flex; align-items: center; gap: 8px; color: #c7cdd6; font-size: 13px; }
 .spin { animation: spin 1s linear infinite; }

@@ -241,6 +241,12 @@ contextBridge.exposeInMainWorld("cicy", {
   auth: {
     loginStart:  ()  => logInvoke("auth:login-start"),
     loginCancel: ()  => logInvoke("auth:login-cancel"),
+    // Email magic-link device-poll login (cross-device: the link works when
+    // clicked on a phone). emailLoginStart resolves once the email is sent
+    // ({ ok, email } | { ok:false, error }); the actual login lands later on the
+    // same auth:complete event (onComplete below) as the loopback flow.
+    emailLoginStart:  (email) => logInvoke("auth:email-start", email),
+    emailLoginCancel: ()      => logInvoke("auth:email-cancel"),
     // Durable, origin-independent login persisted in main (global.json).
     // getSaved() restores it when this origin's localStorage is empty;
     // logout() clears it (the only thing that should).
