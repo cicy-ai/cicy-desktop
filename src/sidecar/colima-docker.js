@@ -54,6 +54,13 @@ function baseImagePath() { return path.join(os.homedir(), "cicy-ai", "colima", `
 const BREW_PATHS = "/opt/homebrew/bin:/usr/local/bin:/opt/homebrew/sbin:/usr/local/sbin";
 function shEnv() { return { ...process.env, PATH: `${BREW_PATHS}:${process.env.PATH || ""}` }; }
 
+// Homebrew 默认前缀(按 arch):Apple Silicon=/opt/homebrew,Intel=/usr/local。
+// brew 二进制装完落在 <prefix>/bin/brew —— 已经在 BREW_PATHS 里,装完即可被 command -v 找到。
+const BREW_PREFIX  = IS_ARM ? "/opt/homebrew" : "/usr/local";
+// Homebrew 源码 tarball:官方「Untar anywhere」装法(解压即用,不走 git clone,不需要
+// Xcode/CLT —— colima/docker 都是预编译 bottle,无编译步骤)。可用环境变量换 CN 镜像。
+const BREW_TARBALL = process.env.CICY_BREW_TARBALL || "https://github.com/Homebrew/brew/tarball/master";
+
 // 在 Mac 宿主跑一条 bash 命令(execFile,无壳注入;命令串原样交给 bash -lc)。
 function sh(cmd, { timeout = 60000 } = {}) {
   return new Promise((resolve, reject) => {
@@ -101,14 +108,61 @@ function brewInstalled()   { return hasCmd("brew"); }
 function colimaInstalled()  { return hasCmd("colima"); }
 function dockerCliInstalled(){ return hasCmd("docker"); }
 
-// Homebrew 缺失:没法静默装(需要交互 + Xcode Command Line Tools)。给出明确指引,
-// 让卡片把这步交还给用户,而不是假装在装。
+// 自动装 Homebrew —— 纯 App 内,不甩给用户一条命令、也不假装在装。
+// 难点:GUI 启动的 Electron 没有 tty,sudo 弹不出密码框。所以唯一的特权操作(建前缀 +
+// chown 给当前用户)用 osascript「with administrator privileges」弹一次原生系统密码框完成;
+// 之后用官方「Untar anywhere」把 brew 解压进自己拥有的前缀,全程不再需要 sudo。
+async function autoInstallBrew({ emit } = {}) {
+  const user = os.userInfo().username;
+
+  // 1) 一次性提权:建前缀 + chown(弹系统密码框)。AppleScript 写临时文件再 osascript,
+  //    避开 bash→osascript→shell 三层嵌套引号。
+  emit && emit({ phase: "install-docker", status: "running",
+    message: "安装 Homebrew:即将弹出系统密码框,请输入你的 Mac 登录密码授权…" });
+  const scpt = path.join(os.tmpdir(), "cicy-brew-prep.applescript");
+  fs.writeFileSync(scpt,
+    `do shell script "mkdir -p '${BREW_PREFIX}' && chown -R '${user}':admin '${BREW_PREFIX}'" ` +
+    `with administrator privileges with prompt "CiCy Desktop 需要管理员权限来安装 Homebrew(只需输入一次 Mac 登录密码)"`);
+  try {
+    await sh(`osascript ${JSON.stringify(scpt)}`, { timeout: 180000 });
+  } catch (e) {
+    const why = String(e.stderr || e.message || "");
+    const cancelled = /-128|User canceled|用户.*取消/i.test(why);
+    emit && emit({ phase: "install-docker", status: "error",
+      message: cancelled ? "已取消授权 —— 安装 Homebrew 需要管理员密码,点「重试」再来一次。"
+                         : `获取管理员权限失败:${why.slice(0, 160)}(点重试)` });
+    return false;
+  } finally { try { fs.unlinkSync(scpt); } catch {} }
+
+  // 2) 解压 Homebrew 进前缀(Untar anywhere,无 sudo)。brew 落在 <prefix>/bin/brew。
+  emit && emit({ phase: "install-docker", status: "running", message: "下载并解压 Homebrew…" });
+  try {
+    await shStream(
+      `curl -fL --retry 3 ${JSON.stringify(BREW_TARBALL)} | tar xz --strip-components 1 -C ${JSON.stringify(BREW_PREFIX)} 2>&1`,
+      { emit, phase: "install-docker", timeout: 600000 });
+  } catch (e) {
+    emit && emit({ phase: "install-docker", status: "error",
+      message: `Homebrew 下载/解压失败:${String(e.stdout || e.message || "").slice(-160)}(点重试)` });
+    return false;
+  }
+
+  // 3) 验证能跑(顺手关掉首次 install 的隐式 auto-update,tarball 装法不是 git 仓库)。
+  try { await sh(`HOMEBREW_NO_AUTO_UPDATE=1 ${BREW_PREFIX}/bin/brew --version`, { timeout: 60000 }); }
+  catch {
+    emit && emit({ phase: "install-docker", status: "error", message: "Homebrew 解压完成但无法运行(点重试)" });
+    return false;
+  }
+  emit && emit({ phase: "install-docker", status: "running", message: "Homebrew 安装完成 ✅" });
+  return true;
+}
+
 async function ensureBrew({ emit } = {}) {
   if (await brewInstalled()) return true;
+  if (await autoInstallBrew({ emit }) && (await brewInstalled())) return true;
+  // 兜底:自动装没成,给手动指引(用户自己装好后点「重试」仍可继续)。
   emit && emit({ phase: "install-docker", status: "error",
-    message: "未检测到 Homebrew —— 请先在「终端」执行安装:\n" +
-      '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"\n' +
-      "装好后回来点「重试」。" });
+    message: "Homebrew 自动安装未完成。可在「终端」手动安装后点「重试」:\n" +
+      '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"' });
   return false;
 }
 
@@ -116,7 +170,8 @@ async function ensureBrew({ emit } = {}) {
 // Docker 引擎本体由 colima 在 VM 里提供。
 async function installColima({ emit } = {}) {
   emit && emit({ phase: "install-docker", status: "running", message: "通过 Homebrew 安装 Colima 与 docker CLI(几分钟,下面是实时进度)…" });
-  await shStream("brew install colima docker 2>&1", { emit, phase: "install-docker", timeout: 1200000 });
+  // HOMEBREW_NO_AUTO_UPDATE:tarball 装法不是 git 仓库,跳过隐式 auto-update(走 API 装 bottle)。
+  await shStream("HOMEBREW_NO_AUTO_UPDATE=1 brew install colima docker 2>&1", { emit, phase: "install-docker", timeout: 1200000 });
 }
 
 // ---- Colima VM 生命周期 --------------------------------------------------
