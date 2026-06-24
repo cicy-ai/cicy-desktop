@@ -318,7 +318,7 @@ function shareMountArg() {
   } catch { return ""; }
 }
 
-async function runContainer({ port = 8009, container = "cicy-code-docker-8009", volume = "cicy-team-8009", env = {}, mountHostDocker = false } = {}) {
+async function runContainer({ port = 8009, container = "cicy-code-docker-8009", volume = "cicy-team-8009", env = {} } = {}) {
   if (await probeHealth(port)) return { adopted: true };
   try { await dk(`rm -f ${container}`, { timeout: 20000 }); } catch {} // 替换同名残留容器
   const envArgs = Object.entries(env || {})
@@ -329,11 +329,8 @@ async function runContainer({ port = 8009, container = "cicy-code-docker-8009", 
   // docker-only 后 mihomo 只在容器里,这些口不暴露则主机系统 Chrome 的代理 127.0.0.1:(20000+N)
   // 连不上。默认 20001-20032(32 个 profile),CICY_CHROME_PROXY_PORTS 可调。
   const CHROME_PROXY_PORTS = process.env.CICY_CHROME_PROXY_PORTS || "20001-20032";
-  // 「挂载宿主 Docker」开关:把 colima VM 里的 docker.sock 挂进容器,里面的 agent 就能用
-  // docker 起兄弟容器(docker-out-of-docker)。这个 sock 即容器所在 VM 的 docker 守护进程。
-  const sockArg = mountHostDocker ? "-v /var/run/docker.sock:/var/run/docker.sock" : "";
   const mk = (s) => `run -d --name ${container} --restart unless-stopped ${PLATFORM_FLAG} ` +
-    `-p 127.0.0.1:${port}:8008 -p 127.0.0.1:${CHROME_PROXY_PORTS}:${CHROME_PROXY_PORTS} -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${sockArg} ${s} ${envArgs} ${IMAGE}`;
+    `-p 127.0.0.1:${port}:8008 -p 127.0.0.1:${CHROME_PROXY_PORTS}:${CHROME_PROXY_PORTS} -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${s} ${envArgs} ${IMAGE}`;
   const share = shareMountArg();
   try {
     await dk(mk(share), { timeout: 90000 });
@@ -424,7 +421,7 @@ async function bootstrap(opts = {}) {
   return _bootstrapInFlight;
 }
 
-async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-docker-8009", volume = "cicy-team-8009", env = {}, mountHostDocker = false } = {}) {
+async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-docker-8009", volume = "cicy-team-8009", env = {} } = {}) {
   const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
 
   // 0) 快路径:已健康 → 秒返回(幂等)。
@@ -461,7 +458,7 @@ async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-dock
   // 5) 容器
   if (!(await probeHealth(port))) {
     emit({ phase: "container", status: "running", message: "启动 cicy-code 服务…" });
-    try { await runContainer({ port, container, volume, env, mountHostDocker }); }
+    try { await runContainer({ port, container, volume, env }); }
     catch (e) { emit({ phase: "container", status: "error", message: `服务启动失败:${e.message}(点重试)` }); return { ok: false, reason: "container_start_failed" }; }
   }
 
@@ -511,9 +508,9 @@ async function dockerRestart({ container = "cicy-code-docker-8009" } = {}) {
 
 // 重建:强删占该端口的任何容器 + 目标容器,再 docker run(用新 env,如新 docker team
 // 网关 key)。保留 bind-mount 宿主目录(数据/api_token 不丢)。破坏性 → 调用方要 confirm。
-async function recreate({ port = 8009, container = "cicy-code-docker-8009", volume = "cicy-team-8009", env = {}, mountHostDocker = false } = {}) {
+async function recreate({ port = 8009, container = "cicy-code-docker-8009", volume = "cicy-team-8009", env = {} } = {}) {
   try { await dk(`ps -aq --filter publish=${port} | xargs -r docker --context ${CTX} rm -f 2>/dev/null; docker --context ${CTX} rm -f ${container} 2>/dev/null; true`, { timeout: 30000 }); } catch {}
-  const r = await runContainer({ port, container, volume, env, mountHostDocker });
+  const r = await runContainer({ port, container, volume, env });
   try { await ensureDesktopShortcut(volume, port); } catch {}
   return r;
 }
@@ -532,7 +529,43 @@ async function hasGatewayKey(container = "cicy-code-docker-8009") {
   catch { return false; }
 }
 
+// 「授权容器访问 Mac」(不挂 docker):colima 自带 host.docker.internal 指向 Mac 主机,Mac
+// sshd 已在 :22。把容器公钥写进 Mac 的 ~/.ssh/authorized_keys(容器没 key 就先 ssh-keygen),
+// 并在容器里写 ~/.ssh/config 加 `mac` 别名(→ host.docker.internal)→ 容器内 `ssh mac` 即可
+// 上 Mac 主机跑命令。Electron 主进程就以 Mac 用户跑,直接 fs 写 authorized_keys;容器侧走
+// docker exec。比挂 docker.sock 更通用,且不碰 socket 的 GID 权限那摊事。
+async function authorizeHostSsh({ container = "cicy-code-docker-8009" } = {}) {
+  const user = os.userInfo().username; // Electron 跑在哪个 Mac 用户下 → 容器要 ssh 的目标用户
+  // 1) 容器里确保有 keypair(都没有就生成 ed25519)
+  await dk(`exec ${container} sh -c 'mkdir -p $HOME/.ssh && chmod 700 $HOME/.ssh; { [ -f $HOME/.ssh/id_ed25519 ] || [ -f $HOME/.ssh/id_rsa ]; } || ssh-keygen -t ed25519 -N "" -f $HOME/.ssh/id_ed25519 -q'`, { timeout: 30000 });
+  // 2) 读容器公钥(ed25519 + rsa 都收)
+  const { stdout } = await dk(`exec ${container} sh -c 'cat $HOME/.ssh/id_ed25519.pub $HOME/.ssh/id_rsa.pub 2>/dev/null'`, { timeout: 15000 });
+  const pubs = String(stdout).split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  if (!pubs.length) throw new Error("容器公钥读取失败");
+  // 3) 写进 Mac 主机 ~/.ssh/authorized_keys(去重)。主进程就是 Mac 用户,直接 fs。
+  const sshDir = path.join(os.homedir(), ".ssh");
+  fs.mkdirSync(sshDir, { recursive: true }); try { fs.chmodSync(sshDir, 0o700); } catch {}
+  const ak = path.join(sshDir, "authorized_keys");
+  let cur = ""; try { cur = fs.readFileSync(ak, "utf8"); } catch {}
+  const have = new Set(cur.split(/\r?\n/).map((l) => l.trim()));
+  const add = pubs.filter((k) => !have.has(k));
+  if (add.length) fs.appendFileSync(ak, (cur && !cur.endsWith("\n") ? "\n" : "") + add.join("\n") + "\n");
+  try { fs.chmodSync(ak, 0o600); } catch {}
+  // 4) 容器里写 ~/.ssh/config 加 `mac` 别名(base64 传,免三层嵌套引号)
+  const cfg = `Host mac\n  HostName host.docker.internal\n  User ${user}\n  StrictHostKeyChecking accept-new\n  ConnectTimeout 10\n`;
+  const b64 = Buffer.from(cfg).toString("base64");
+  await dk(`exec ${container} sh -c 'echo ${b64} | base64 -d > $HOME/.ssh/config && chmod 600 $HOME/.ssh/config'`, { timeout: 15000 });
+  // 5) 端到端验证:容器内 ssh mac 跑一条
+  let verified = false, detail = "";
+  try {
+    const v = await dk(`exec ${container} ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=8 mac 'echo CICY_SSH_OK; hostname'`, { timeout: 25000 });
+    detail = String(v.stdout || "").trim();
+    verified = /CICY_SSH_OK/.test(detail);
+  } catch (e) { detail = String(e.stderr || e.stdout || e.message || "").trim().slice(-200); }
+  return { ok: true, user, added: add.length, verified, detail };
+}
+
 module.exports = {
   bootstrap, status, restart, stop, dockerRestart, recreate, update, upgrade, runContainer, readContainerToken,
-  vmExists, colimaInstalled, dockerCliInstalled, engineUp, imagePresent, probeHealth, hasGatewayKey,
+  vmExists, colimaInstalled, dockerCliInstalled, engineUp, imagePresent, probeHealth, hasGatewayKey, authorizeHostSsh,
 };

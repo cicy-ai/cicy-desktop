@@ -165,7 +165,7 @@ contextBridge.exposeInMainWorld("cicy", {
     appRestart:   ()  => logInvoke("docker:app-restart"),          // supervisorctl 重启 cicy-code
     appDockerRestart: () => logInvoke("docker:app-docker-restart"), // docker restart 整个容器
     appRecreate:  ()  => logInvoke("docker:app-recreate"),         // 删容器+重建(换 key,需 confirm)
-    appSetHostDocker: (on) => logInvoke("docker:app-set-host-docker", on), // 开关「挂载宿主 Docker」→ recreate
+    appAuthorizeHostSsh: () => logInvoke("docker:app-authorize-host-ssh"), // 仅 macOS:授权容器经 SSH 访问 Mac
     appUpdate:    ()  => logInvoke("docker:app-update"),
     appStop:      ()  => logInvoke("docker:app-stop"),
     appUpgrade:   ()  => logInvoke("docker:app-upgrade"),
