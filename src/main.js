@@ -1377,25 +1377,38 @@ function cleanup() {
   log.info("[Cleanup] shutting down child services");
   try { cicyCodeSidecar.stop(); } catch (e) { /* best-effort */ }
 
-  // Kill cicy-code, all tmux servers, gotty/ttyd, and code-server processes
-  // that the cicy-code sidecar may have spawned. best-effort, sync, cross-platform.
+  // Reap leftover NATIVE host helpers from the pre-docker-only era (a stray
+  // cicy-code.exe / ttyd / gotty / code-server). 主人: quitting CiCy Desktop must
+  // NOT touch Docker — in docker-only these all run INSIDE the container, and the
+  // Docker engine (colima VM on mac / WSL distro+dockerd on win) is a separate
+  // background service that survives the app + the container is --restart
+  // unless-stopped. So we ONLY kill exact native host targets, never the engine.
   try {
     const { execSync } = require("child_process");
     const targets = ["cicy-code", "ttyd", "gotty", "code-server"];
 
     if (process.platform === "win32") {
-      // Windows: taskkill /F /IM <name>.exe (and base name in case extension differs)
+      // Windows: taskkill /F /IM <name>.exe — EXACT image name, no wildcards, so it
+      // can only hit a native cicy-code.exe (retired), never wsl.exe / dockerd /
+      // vmmem / the WSL distro. We never `wsl --terminate/--shutdown` on quit.
       for (const t of targets) {
         try { execSync(`taskkill /F /IM ${t}.exe`, { stdio: "ignore", windowsHide: true }); } catch {}
-        try { execSync(`taskkill /F /IM ${t}`, { stdio: "ignore", windowsHide: true }); } catch {}
       }
-      // Windows has no tmux by default; nothing to do.
     } else {
-      // macOS / Linux: pkill matches by command line.
-      for (const t of targets) {
-        try { execSync(`pkill -f ${t}`, { stdio: "ignore" }); } catch {}
+      // macOS / Linux: pkill matches by FULL command line. ⚠️ docker-only: cicy-code
+      // / ttyd / gotty / code-server all run INSIDE the container, NOT on the host —
+      // there is normally nothing here to kill. CRITICAL: never `pkill -f cicy-code`
+      // plainly — the colima profile is named `cicy-code`, so the Lima VM hostagent
+      // runs as `limactl ... colima-cicy-code` and a bare match KILLS THE VM on every
+      // quit → next launch sees Docker "down" and re-bootstraps ("重新 install" bug).
+      // Anchor cicy-code to the native --desktop sidecar form (retired) only.
+      const unixPats = ["cicy-code --desktop", "ttyd", "gotty", "code-server"];
+      for (const p of unixPats) {
+        try { execSync(`pkill -f '${p}'`, { stdio: "ignore" }); } catch {}
       }
-      try { execSync(`tmux kill-server`, { stdio: "ignore" }); } catch {}
+      // Host tmux only (native path, retired); the container's tmux is in its own
+      // namespace and unaffected. (No -f cicy-code match here either.)
+      try { execSync(`pkill -f 'tmux.*cicy'`, { stdio: "ignore" }); } catch {}
     }
   } catch (e) {
     log.warn(`[Cleanup] kill children failed: ${e.message}`);
