@@ -841,6 +841,12 @@ body {
 .bcard__menu-item.is-danger:hover { background: rgba(239,68,68,.16); color: #fff; }
 /* Plain divider line in the DockerCard ⋯ menu (cicy-code ops 上 / Docker 容器 ops 下). */
 .bcard__menu-sep { height: 1px; margin: 5px 10px; background: rgba(255,255,255,.08); }
+/* Switch-style menu item (Chrome 代理): label 左 + 小开关右. */
+.bcard__menu-item--switch { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.bcard__switch { flex: none; width: 30px; height: 17px; border-radius: 999px; background: rgba(255,255,255,.16); position: relative; transition: background .15s; }
+.bcard__switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 13px; height: 13px; border-radius: 50%; background: #fff; transition: transform .15s; }
+.bcard__switch.is-on { background: var(--accent-text, #4f8cff); }
+.bcard__switch.is-on::after { transform: translateX(13px); }
 /* Portaled to document.body to escape .bcard's overflow:hidden (which clipped the
    dropdown). Inline top/left position it under the kebab; here just a high
    stacking order (below toast/drawer) + word-wrapping items so nothing overflows. */

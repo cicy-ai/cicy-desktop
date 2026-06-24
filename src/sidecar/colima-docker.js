@@ -325,12 +325,11 @@ async function runContainer({ port = 8009, container = "cicy-code-docker-8009", 
     .filter(([, v]) => v != null && v !== "")
     .map(([k, v]) => `-e ${k}='${String(v).replace(/'/g, "'\\''")}'`)
     .join(" ");
-  // 主人(A 方案): 映射 mihomo 的 per-Chrome-profile 监听口段(约定 20000+N)回主机回环。
-  // docker-only 后 mihomo 只在容器里,这些口不暴露则主机系统 Chrome 的代理 127.0.0.1:(20000+N)
-  // 连不上。默认 20001-20032(32 个 profile),CICY_CHROME_PROXY_PORTS 可调。
-  const CHROME_PROXY_PORTS = process.env.CICY_CHROME_PROXY_PORTS || "20001-20032";
+  // 主人方案: Chrome 的 per-profile 代理(127.0.0.1:2000N)改由「宿主 mihomo」(host-mihomo.js)
+  // 服务,不再从容器 publish 20001-32 —— colima/Lima 转发那个端口段始终到不了容器里只绑
+  // 127.0.0.1 的监听(Chrome 一直 ERR_EMPTY_RESPONSE)。容器只暴露 cicy-code 的 :8009。
   const mk = (s) => `run -d --name ${container} --restart unless-stopped ${PLATFORM_FLAG} ` +
-    `-p 127.0.0.1:${port}:8008 -p 127.0.0.1:${CHROME_PROXY_PORTS}:${CHROME_PROXY_PORTS} -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${s} ${envArgs} ${IMAGE}`;
+    `-p 127.0.0.1:${port}:8008 -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${s} ${envArgs} ${IMAGE}`;
   const share = shareMountArg();
   try {
     await dk(mk(share), { timeout: 90000 });
@@ -565,7 +564,15 @@ async function authorizeHostSsh({ container = "cicy-code-docker-8009" } = {}) {
   return { ok: true, user, added: add.length, verified, detail };
 }
 
+// 读容器里 cicy-code 生成的 mihomo.yaml —— host-mihomo 用它在宿主重建 Chrome 代理配置
+// (含云端下发的真实上游节点)。
+async function readMihomoConfig(container = "cicy-code-docker-8009") {
+  const { stdout } = await dk(`exec ${container} cat /home/cicy/cicy-ai/db/mihomo.yaml`, { timeout: 15000 });
+  return String(stdout || "");
+}
+
 module.exports = {
   bootstrap, status, restart, stop, dockerRestart, recreate, update, upgrade, runContainer, readContainerToken,
   vmExists, colimaInstalled, dockerCliInstalled, engineUp, imagePresent, probeHealth, hasGatewayKey, authorizeHostSsh,
+  readMihomoConfig,
 };

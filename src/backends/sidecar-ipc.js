@@ -24,6 +24,7 @@ const sidecar = require("../sidecar/cicy-code");
 const docker = require("../sidecar/docker");
 const wslDocker = require("../sidecar/wsl-docker"); // Docker-版 via WSL2+Ubuntu (方案 A, win32)
 const colimaDocker = require("../sidecar/colima-docker"); // Docker-版 via Colima (Lima VM, darwin)
+const hostMihomo = require("../sidecar/host-mihomo"); // 宿主侧 mihomo —— 给系统 Chrome 的 per-profile 代理
 // 按平台分发 Docker-版 cicy-code 的运行层:darwin → Colima,win32 → WSL2。两者同接口
 // (bootstrap/status/restart/stop/dockerRestart/recreate/update/upgrade/runContainer/
 // readContainerToken),所以下面的 handler 共用一份逻辑,只换底层模块。
@@ -61,6 +62,9 @@ const cc = (() => { try { return require("../cloud/cloud-client"); } catch { ret
 const DOCKER_TEAMS_FILE = path.join(os.homedir(), "cicy-ai", "db", "docker-teams.json");
 function readDockerTeams() { try { return JSON.parse(fs.readFileSync(DOCKER_TEAMS_FILE, "utf8")) || {}; } catch { return {}; } }
 function writeDockerTeams(obj) { try { fs.mkdirSync(path.dirname(DOCKER_TEAMS_FILE), { recursive: true }); fs.writeFileSync(DOCKER_TEAMS_FILE, JSON.stringify(obj, null, 2)); } catch {} }
+// 「Chrome 代理」开关:在宿主起一个 mihomo(host-mihomo)服务系统 Chrome 的 per-profile 代理,
+// 配置从容器里 cp 出来。按 volume 存 docker-teams.json[volume].chromeProxy。
+function chromeProxyEnabled() { try { return !!(readDockerTeams()[APP_VOLUME] || {}).chromeProxy; } catch { return false; } }
 let dockerTeamReg = null; // { teamId, title, apiKey } — 缓存,appOpts 读它
 
 // docker 团队的权威来源 = cloud(w-10122 #197):POST /api/team/docker/register 按
@@ -105,7 +109,7 @@ function register({ sidecarLogPath } = {}) {
       // 容器里 cicy-code 的版本(DockerCard 底部显示):running 时读 :APP_PORT/api/health。
       let ver = null;
       if (s.running) { try { ver = await require("../sidecar/version").running(APP_PORT); } catch {} }
-      _dockerStatusCache = { installed: !!s.distro, dockerRunning: !!s.engineUp, running: !!s.running, unknown: !!s.unknown, version: ver, port: APP_PORT, platform: process.platform, ts: Date.now() };
+      _dockerStatusCache = { installed: !!s.distro, dockerRunning: !!s.engineUp, running: !!s.running, unknown: !!s.unknown, version: ver, port: APP_PORT, platform: process.platform, chromeProxy: chromeProxyEnabled(), chromeProxyRunning: hostMihomo.running(), ts: Date.now() };
     } catch (e) {
       _dockerStatusCache = { installed: false, dockerRunning: false, running: false, unknown: true, port: APP_PORT, platform: process.platform, error: e.message, ts: Date.now() };
     }
@@ -140,6 +144,8 @@ function register({ sidecarLogPath } = {}) {
             await refreshDockerStatus();
           }
         } catch (e) { log.warn(`[docker-daemon] key self-heal failed: ${e.message}`); }
+        // Chrome 代理:开关开着但宿主 mihomo 没跑 → 拉起(从容器同步配置,幂等)。
+        try { await maybeStartChromeProxy(); } catch (e) { log.warn(`[chrome-proxy] auto-start failed: ${e.message}`); }
       }
     } finally { _dockerDaemonBusy = false; }
     return _dockerStatusCache;
@@ -147,6 +153,18 @@ function register({ sidecarLogPath } = {}) {
   function startDockerStatusDaemon() {
     setTimeout(() => { reconcileDocker().catch(() => {}); }, 2000);     // shortly after startup
     setInterval(() => { reconcileDocker().catch(() => {}); }, 60000);   // keep fresh + self-heal
+  }
+
+  // 宿主 Chrome 代理:开关开着才做。从容器 cp 出 mihomo 配置 → host-mihomo 在宿主起/续。
+  // 已在跑也同步一次配置(容器侧节点可能被云端更新),变了才重启。幂等。
+  async function maybeStartChromeProxy() {
+    if (!chromeProxyEnabled() || !APP_DOCKER_SUPPORTED) return;
+    const yaml = await appDocker.readMihomoConfig(APP_CONTAINER);
+    if (hostMihomo.binPresent() && hostMihomo.running()) {
+      if (hostMihomo.writeConfig(yaml)) hostMihomo.start({ force: true });
+      return;
+    }
+    await hostMihomo.enable({ containerYaml: yaml });
   }
 
   ipcMain.handle("sidecar:status", async () => {
@@ -339,6 +357,26 @@ function register({ sidecarLogPath } = {}) {
     if (process.platform !== "darwin") return { ok: false, error: "仅 macOS 支持(容器经 host.docker.internal 访问 Mac)" };
     try {
       return await appDocker.authorizeHostSsh({ container: APP_CONTAINER });
+    } catch (err) { return { ok: false, error: err.message }; }
+  });
+
+  // ⋯ menu 开关 → 「Chrome 代理」:在宿主起一个 mihomo 服务系统 Chrome 的 per-profile 代理
+  // (127.0.0.1:2000N)。配置从容器里 cp 出来(含云端下发的真实节点),DNS 关掉、控制口错开。
+  // 容器不再 publish 20001-32(那条路在 colima/WSL 下根本不通)。开关存 docker-teams.json[volume]。
+  ipcMain.handle("docker:app-chrome-proxy", async (e, on) => {
+    if (!APP_DOCKER_SUPPORTED) return { ok: false, error: "Chrome 代理仅支持 Windows / macOS" };
+    try {
+      const store = readDockerTeams();
+      store[APP_VOLUME] = { ...(store[APP_VOLUME] || {}), chromeProxy: !!on };
+      writeDockerTeams(store);
+      if (on) {
+        const containerYaml = await appDocker.readMihomoConfig(APP_CONTAINER);
+        await hostMihomo.enable({ containerYaml, emit: (ev) => { try { e.sender.send("docker:app-progress", ev); } catch {} } });
+      } else {
+        hostMihomo.stop();
+      }
+      await refreshDockerStatus().catch(() => {});
+      return { ok: true, chromeProxy: !!on, running: hostMihomo.running() };
     } catch (err) { return { ok: false, error: err.message }; }
   });
 

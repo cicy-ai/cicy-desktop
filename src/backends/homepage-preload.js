@@ -166,6 +166,7 @@ contextBridge.exposeInMainWorld("cicy", {
     appDockerRestart: () => logInvoke("docker:app-docker-restart"), // docker restart 整个容器
     appRecreate:  ()  => logInvoke("docker:app-recreate"),         // 删容器+重建(换 key,需 confirm)
     appAuthorizeHostSsh: () => logInvoke("docker:app-authorize-host-ssh"), // 仅 macOS:授权容器经 SSH 访问 Mac
+    appChromeProxy: (on) => logInvoke("docker:app-chrome-proxy", on), // 开关:宿主 mihomo 给系统 Chrome 当 per-profile 代理
     appUpdate:    ()  => logInvoke("docker:app-update"),
     appStop:      ()  => logInvoke("docker:app-stop"),
     appUpgrade:   ()  => logInvoke("docker:app-upgrade"),
