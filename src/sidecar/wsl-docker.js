@@ -411,7 +411,7 @@ function shareMountArg() {
   } catch (e) { log.warn(`[wsl-docker] Share mount setup failed: ${e.message}`); return ""; }
 }
 
-async function runContainer({ port = 8009, container = "cicy-code-docker", volume = "cicy-team-8009", env = {} } = {}) {
+async function runContainer({ port = 8009, container = "cicy-code-docker", volume = "cicy-team-8009", env = {}, mountHostDocker = false } = {}) {
   // 每次容器"启动"(含已在跑被 adopt)都确保桌面快捷方式存在 —— 不存在就建,坏了就修。
   if (await probeHealth(port)) { ensureDesktopShortcut(volume, port).catch(() => {}); return { adopted: true }; }
   // Replace any stale same-named container.
@@ -428,7 +428,10 @@ async function runContainer({ port = 8009, container = "cicy-code-docker", volum
   // 主人(A 方案): 映射 mihomo 的 per-Chrome-profile 监听口段(约定 20000+N)回主机回环 —— docker-only
   // 后这些口只在容器里,不暴露则主机系统 Chrome 的代理 127.0.0.1:(20000+N) 连不上. 默认 20001-20032.
   const CHROME_PROXY_PORTS = process.env.CICY_CHROME_PROXY_PORTS || "20001-20032";
-  const cmd = `docker run -d --name ${container} --restart unless-stopped --dns 223.5.5.5 --dns 8.8.8.8 -p 127.0.0.1:${port}:8008 -p 127.0.0.1:${CHROME_PROXY_PORTS}:${CHROME_PROXY_PORTS} -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${shareMountArg()} ${envArgs} ${IMAGE}`;
+  // 「挂载宿主 Docker」开关:把 WSL 发行版里的 docker.sock 挂进容器,里面的 agent 就能用
+  // docker 起兄弟容器(docker-out-of-docker)。这个 sock 即容器所在 WSL docker 守护进程。
+  const sockArg = mountHostDocker ? "-v /var/run/docker.sock:/var/run/docker.sock" : "";
+  const cmd = `docker run -d --name ${container} --restart unless-stopped --dns 223.5.5.5 --dns 8.8.8.8 -p 127.0.0.1:${port}:8008 -p 127.0.0.1:${CHROME_PROXY_PORTS}:${CHROME_PROXY_PORTS} -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${sockArg} ${shareMountArg()} ${envArgs} ${IMAGE}`;
   await wslRun(cmd, { timeout: 60000 });
   ensureDesktopShortcut(volume, port).catch(() => {});
   return { started: true };
@@ -545,7 +548,7 @@ async function bootstrap(opts = {}) {
   return _bootstrapInFlight;
 }
 
-async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-docker", volume = "cicy-team", env = {} } = {}) {
+async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-docker", volume = "cicy-team", env = {}, mountHostDocker = false } = {}) {
   const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
 
   // Structured, PERSISTED trace of the whole run (electron-log → main.log) so a
@@ -633,7 +636,7 @@ async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-dock
   begin("run-container");
   if (!(await probeHealth(port))) {
     emit({ phase: "container", status: "running", message: "启动 cicy-code 服务…" });
-    try { await runContainer({ port, container, volume, env }); }
+    try { await runContainer({ port, container, volume, env, mountHostDocker }); }
     catch (e) { fail("container_start_failed", e.message); emit({ phase: "container", status: "error", message: `服务启动失败：${e.message}（点重试）` }); finish(false, "container_start_failed"); return { ok: false, reason: "container_start_failed" }; }
     done();
   } else done(true);
@@ -699,11 +702,11 @@ async function dockerRestart({ container = "cicy-code-docker-8009" } = {}) {
 // 重建容器:docker rm -f 旧容器 + docker run 新容器(用新 env,如新的 docker team 网关
 // key)。**保留 volume**(数据/api_token/deviceId 不丢),只是换掉容器本身 + env。
 // 破坏性(短暂中断 + 换 key)→ 调用方要 confirm。
-async function recreate({ port = 8009, container = "cicy-code-docker-8009", volume = "cicy-team-8009", env = {} } = {}) {
+async function recreate({ port = 8009, container = "cicy-code-docker-8009", volume = "cicy-team-8009", env = {}, mountHostDocker = false } = {}) {
   // 强删占用该端口的**任何**容器(含老名字 cicy-code-docker)+ 目标容器 —— 否则
   // runContainer 开头的 probeHealth 看到旧容器还健康会 adopt 它、不重建,key 就换不了。
   try { await wslRun(`docker ps -aq --filter publish=${port} | xargs -r docker rm -f 2>/dev/null; docker rm -f ${container} 2>/dev/null; true`, { timeout: 30000 }); } catch {}
-  const r = await runContainer({ port, container, volume, env });
+  const r = await runContainer({ port, container, volume, env, mountHostDocker });
   try { await ensureDesktopShortcut(volume, port); } catch {}
   return r;
 }

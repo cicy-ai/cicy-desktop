@@ -61,6 +61,9 @@ const cc = (() => { try { return require("../cloud/cloud-client"); } catch { ret
 const DOCKER_TEAMS_FILE = path.join(os.homedir(), "cicy-ai", "db", "docker-teams.json");
 function readDockerTeams() { try { return JSON.parse(fs.readFileSync(DOCKER_TEAMS_FILE, "utf8")) || {}; } catch { return {}; } }
 function writeDockerTeams(obj) { try { fs.mkdirSync(path.dirname(DOCKER_TEAMS_FILE), { recursive: true }); fs.writeFileSync(DOCKER_TEAMS_FILE, JSON.stringify(obj, null, 2)); } catch {} }
+// 「挂载宿主 Docker」开关(docker-out-of-docker):把宿主 docker.sock 挂进容器,让里面的
+// agent 能起兄弟容器。按 volume 存在 docker-teams.json[volume].mountHostDocker。
+function hostDockerMount() { try { return !!(readDockerTeams()[APP_VOLUME] || {}).mountHostDocker; } catch { return false; } }
 let dockerTeamReg = null; // { teamId, title, apiKey } — 缓存,appOpts 读它
 
 // docker 团队的权威来源 = cloud(w-10122 #197):POST /api/team/docker/register 按
@@ -78,7 +81,7 @@ async function ensureDockerTeam() {
     const r = await cc.registerDockerTeam({ port: APP_PORT });
     if (r && r.ok && r.apiKey) {
       dockerTeamReg = { teamId: r.teamId, title: r.title || `Docker :${APP_PORT}`, apiKey: r.apiKey };
-      try { const store = readDockerTeams(); store[APP_VOLUME] = { teamId: r.teamId, title: dockerTeamReg.title, apiKey: r.apiKey }; writeDockerTeams(store); } catch {}
+      try { const store = readDockerTeams(); store[APP_VOLUME] = { ...(store[APP_VOLUME] || {}), teamId: r.teamId, title: dockerTeamReg.title, apiKey: r.apiKey }; writeDockerTeams(store); } catch {}
       return dockerTeamReg;
     }
     return cachedFallback(); // cloud 返回异常 → offline 兜底
@@ -105,9 +108,9 @@ function register({ sidecarLogPath } = {}) {
       // 容器里 cicy-code 的版本(DockerCard 底部显示):running 时读 :APP_PORT/api/health。
       let ver = null;
       if (s.running) { try { ver = await require("../sidecar/version").running(APP_PORT); } catch {} }
-      _dockerStatusCache = { installed: !!s.distro, dockerRunning: !!s.engineUp, running: !!s.running, unknown: !!s.unknown, version: ver, port: APP_PORT, platform: process.platform, ts: Date.now() };
+      _dockerStatusCache = { installed: !!s.distro, dockerRunning: !!s.engineUp, running: !!s.running, unknown: !!s.unknown, version: ver, port: APP_PORT, platform: process.platform, mountHostDocker: hostDockerMount(), ts: Date.now() };
     } catch (e) {
-      _dockerStatusCache = { installed: false, dockerRunning: false, running: false, unknown: true, port: APP_PORT, platform: process.platform, error: e.message, ts: Date.now() };
+      _dockerStatusCache = { installed: false, dockerRunning: false, running: false, unknown: true, port: APP_PORT, platform: process.platform, mountHostDocker: hostDockerMount(), error: e.message, ts: Date.now() };
     }
     try { fs.mkdirSync(path.dirname(DOCKER_STATUS_FILE), { recursive: true }); fs.writeFileSync(DOCKER_STATUS_FILE, JSON.stringify(_dockerStatusCache)); } catch {}
     return _dockerStatusCache;
@@ -238,7 +241,7 @@ function register({ sidecarLogPath } = {}) {
     await ensureDockerTeam().catch(() => {});
     const env = { CICY_AI_GATEWAY_LLM_ENDPOINT: GATEWAY_ENDPOINT };
     if (dockerTeamReg && dockerTeamReg.apiKey) env.CICY_AI_GATEWAY_LLM_API_KEY = dockerTeamReg.apiKey;
-    return { port: APP_PORT, container: APP_CONTAINER, volume: APP_VOLUME, env };
+    return { port: APP_PORT, container: APP_CONTAINER, volume: APP_VOLUME, env, mountHostDocker: hostDockerMount() };
   };
   // Register the running :8009 instance as a (custom) team so the card's "打开"
   // reuses the token-injected open/reload flow. addTeam dedups by host:port.
@@ -329,6 +332,27 @@ function register({ sidecarLogPath } = {}) {
       await registerAppTeam();
       return { ok: true };
     } catch (e) { return { ok: false, error: e.message }; }
+  });
+
+  // ⋯ menu 开关 → 「挂载宿主 Docker」(docker-out-of-docker):把宿主(colima VM / WSL)的
+  // docker.sock 挂进容器,里面的 agent 就能用 docker 起兄弟容器。socket 挂载只能在 docker run
+  // 时定 → 必须 recreate(保留 volume 数据)。开关状态存 docker-teams.json[volume].mountHostDocker,
+  // appOpts/status 都读它。mac(colima)/ win(WSL)同一套。
+  ipcMain.handle("docker:app-set-host-docker", async (e, on) => {
+    if (!APP_DOCKER_SUPPORTED) return { ok: false, error: "unsupported_platform" };
+    try {
+      const store = readDockerTeams();
+      store[APP_VOLUME] = { ...(store[APP_VOLUME] || {}), mountHostDocker: !!on };
+      writeDockerTeams(store);
+      await ensureDockerTeam();
+      await appDocker.recreate({
+        ...(await appOpts()),
+        onProgress: (ev) => { try { e.sender.send("docker:app-progress", ev); } catch {} },
+      });
+      await registerAppTeam();
+      await refreshDockerStatus().catch(() => {});
+      return { ok: true, mountHostDocker: !!on };
+    } catch (err) { return { ok: false, error: err.message }; }
   });
 
   // ⋯ menu → 更新 cicy-code: pull the latest cicy-code into the container +

@@ -318,7 +318,7 @@ function shareMountArg() {
   } catch { return ""; }
 }
 
-async function runContainer({ port = 8009, container = "cicy-code-docker-8009", volume = "cicy-team-8009", env = {} } = {}) {
+async function runContainer({ port = 8009, container = "cicy-code-docker-8009", volume = "cicy-team-8009", env = {}, mountHostDocker = false } = {}) {
   if (await probeHealth(port)) return { adopted: true };
   try { await dk(`rm -f ${container}`, { timeout: 20000 }); } catch {} // 替换同名残留容器
   const envArgs = Object.entries(env || {})
@@ -329,8 +329,11 @@ async function runContainer({ port = 8009, container = "cicy-code-docker-8009", 
   // docker-only 后 mihomo 只在容器里,这些口不暴露则主机系统 Chrome 的代理 127.0.0.1:(20000+N)
   // 连不上。默认 20001-20032(32 个 profile),CICY_CHROME_PROXY_PORTS 可调。
   const CHROME_PROXY_PORTS = process.env.CICY_CHROME_PROXY_PORTS || "20001-20032";
+  // 「挂载宿主 Docker」开关:把 colima VM 里的 docker.sock 挂进容器,里面的 agent 就能用
+  // docker 起兄弟容器(docker-out-of-docker)。这个 sock 即容器所在 VM 的 docker 守护进程。
+  const sockArg = mountHostDocker ? "-v /var/run/docker.sock:/var/run/docker.sock" : "";
   const mk = (s) => `run -d --name ${container} --restart unless-stopped ${PLATFORM_FLAG} ` +
-    `-p 127.0.0.1:${port}:8008 -p 127.0.0.1:${CHROME_PROXY_PORTS}:${CHROME_PROXY_PORTS} -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${s} ${envArgs} ${IMAGE}`;
+    `-p 127.0.0.1:${port}:8008 -p 127.0.0.1:${CHROME_PROXY_PORTS}:${CHROME_PROXY_PORTS} -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${sockArg} ${s} ${envArgs} ${IMAGE}`;
   const share = shareMountArg();
   try {
     await dk(mk(share), { timeout: 90000 });
@@ -421,7 +424,7 @@ async function bootstrap(opts = {}) {
   return _bootstrapInFlight;
 }
 
-async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-docker-8009", volume = "cicy-team-8009", env = {} } = {}) {
+async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-docker-8009", volume = "cicy-team-8009", env = {}, mountHostDocker = false } = {}) {
   const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
 
   // 0) 快路径:已健康 → 秒返回(幂等)。
@@ -458,7 +461,7 @@ async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-dock
   // 5) 容器
   if (!(await probeHealth(port))) {
     emit({ phase: "container", status: "running", message: "启动 cicy-code 服务…" });
-    try { await runContainer({ port, container, volume, env }); }
+    try { await runContainer({ port, container, volume, env, mountHostDocker }); }
     catch (e) { emit({ phase: "container", status: "error", message: `服务启动失败:${e.message}(点重试)` }); return { ok: false, reason: "container_start_failed" }; }
   }
 
@@ -508,9 +511,9 @@ async function dockerRestart({ container = "cicy-code-docker-8009" } = {}) {
 
 // 重建:强删占该端口的任何容器 + 目标容器,再 docker run(用新 env,如新 docker team
 // 网关 key)。保留 bind-mount 宿主目录(数据/api_token 不丢)。破坏性 → 调用方要 confirm。
-async function recreate({ port = 8009, container = "cicy-code-docker-8009", volume = "cicy-team-8009", env = {} } = {}) {
+async function recreate({ port = 8009, container = "cicy-code-docker-8009", volume = "cicy-team-8009", env = {}, mountHostDocker = false } = {}) {
   try { await dk(`ps -aq --filter publish=${port} | xargs -r docker --context ${CTX} rm -f 2>/dev/null; docker --context ${CTX} rm -f ${container} 2>/dev/null; true`, { timeout: 30000 }); } catch {}
-  const r = await runContainer({ port, container, volume, env });
+  const r = await runContainer({ port, container, volume, env, mountHostDocker });
   try { await ensureDesktopShortcut(volume, port); } catch {}
   return r;
 }

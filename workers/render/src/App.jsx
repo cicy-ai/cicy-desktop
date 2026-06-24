@@ -1896,6 +1896,20 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
     } finally { setBusy(""); checkStatus(); }
   }, [checkStatus]);
 
+  // 开关「挂载宿主 Docker」(docker-out-of-docker):socket 挂载只能在创建时定 → 后端会
+  // recreate 容器(保留 volume 数据),所以这是个稍重的操作,给运行中 toast。
+  const toggleHostDocker = useCallback(async (on) => {
+    setMenuOpen(false); setBusy("recreate");
+    toast.show({ id: "docker-op", message: on ? tr("docker.hostDockerOn", "挂载宿主 Docker(重建容器中…)") : tr("docker.hostDockerOff", "取消挂载宿主 Docker(重建容器中…)"), status: "running" });
+    try {
+      const r = await window.cicy.docker.appSetHostDocker(on);
+      if (r?.ok) toast.show({ id: "docker-op", message: on ? tr("docker.hostDockerDone", "已挂载宿主 Docker") : tr("docker.hostDockerUndone", "已取消挂载宿主 Docker"), status: "done", ttl: 2500 });
+      else toast.show({ id: "docker-op", message: (r?.error || tr("docker.opFailed", "操作失败")), status: "error", ttl: 6000 });
+    } catch (e) {
+      toast.show({ id: "docker-op", message: e.message, status: "error", ttl: 6000 });
+    } finally { setBusy(""); checkStatus(); }
+  }, [checkStatus]);
+
   // Render on Windows (WSL2) and macOS (Colima) — the two platforms the
   // Docker-版 backend supports. window.cicy.platform is sync, so we can decide
   // immediately without waiting on the async appStatus probe.
@@ -2024,8 +2038,17 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
                   onClick={() => { setMenuOpen(false); openCloudPage(dockerTeam?.cloud_team_id ? `?team=${encodeURIComponent(dockerTeam.cloud_team_id)}` : "?view=usage"); }}>
                   {tr("docker.billing", "帐单")}
                 </button>
-                {/* 分隔线:下面是操作整个 Docker 容器的(重启 Docker / 重建 Docker)*/}
+                {/* 分隔线:下面是操作整个 Docker 容器的(挂载宿主 Docker / 重启 Docker / 重建 Docker)*/}
                 <div className="bcard__menu-sep" data-id="DockerCard-menu-sep" role="separator" aria-hidden />
+                {/* 开关:把宿主(colima VM / WSL)的 docker.sock 挂进容器 → 里面 agent 能起兄弟容器 */}
+                <button type="button" data-id="DockerCard-mount-host-docker"
+                  className="bcard__menu-item bcard__menu-item--switch"
+                  role="menuitemcheckbox" aria-checked={!!status?.mountHostDocker}
+                  title={tr("docker.hostDockerHint", "把本机 Docker 挂进容器,里面可起兄弟容器(切换会重建容器)")}
+                  onClick={() => toggleHostDocker(!status?.mountHostDocker)}>
+                  <span>{tr("docker.mountHostDocker", "挂载宿主 Docker")}</span>
+                  <span className={`bcard__switch${status?.mountHostDocker ? " is-on" : ""}`} data-id="DockerCard-mount-host-docker-switch" aria-hidden />
+                </button>
                 <button type="button" data-id="DockerCard-docker-restart" className="bcard__menu-item"
                   onClick={() => runOp("restart", () => window.cicy.docker.appDockerRestart(), tr("docker.dockerRestarted", "已重启 Docker 容器"))}>
                   {tr("docker.dockerRestart", "重启 Docker")}
