@@ -898,7 +898,7 @@ electronApp.whenReady().then(async () => {
       for (let i = 0; i < 30; i++) {
         try {
           if (await cicyCodeSidecar.probeExisting(sidecarPort)) {
-            const r = await lt.addTeam({ base_url: `http://127.0.0.1:${sidecarPort}`, name: "本地团队" });
+            const r = await lt.addTeam({ base_url: `http://127.0.0.1:${sidecarPort}`, name: i18n.t("localTeams.defaultName") });
             if (r && r.ok) log.info(`[Sidecar] local team ${r.upserted ? "refreshed" : "registered"} (${r.id})`);
             else log.warn(`[Sidecar] local team auto-register failed: ${r && r.error}`);
             return;

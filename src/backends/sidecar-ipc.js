@@ -21,6 +21,7 @@ const log = require("electron-log");
 // probes WSL live → never blocks the UI / strands it on 「重试检测」).
 const DOCKER_STATUS_FILE = path.join(os.homedir(), "cicy-ai", "db", "docker-status.json");
 const sidecar = require("../sidecar/cicy-code");
+const i18n = require("../i18n");
 const docker = require("../sidecar/docker");
 const wslDocker = require("../sidecar/wsl-docker"); // Docker-版 via WSL2+Ubuntu (方案 A, win32)
 const colimaDocker = require("../sidecar/colima-docker"); // Docker-版 via Colima (Lima VM, darwin)
@@ -216,7 +217,7 @@ function register({ sidecarLogPath } = {}) {
           const lt = require("./local-teams");
           const tok = await docker.readContainerToken(PORT);
           await lt.addTeam({
-            base_url: `http://127.0.0.1:${PORT}`, name: "本地团队",
+            base_url: `http://127.0.0.1:${PORT}`, name: i18n.t("localTeams.defaultName"),
             ...(tok ? { api_token: tok } : {}),
           });
         } catch { /* best-effort — the stack itself is up */ }

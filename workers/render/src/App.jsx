@@ -115,13 +115,19 @@ const updateDrawer = {
   finish({ ok, message } = {}) {
     if (!drawerState) return;
     const status = ok ? "done" : "error";
-    const line = { id: ++drawerLogSeq, t: clockHHMMSS(), phase: "done", status, message: message || (ok ? "更新完成" : "更新失败") };
+    const line = { id: ++drawerLogSeq, t: clockHHMMSS(), phase: "done", status, message: message || (ok ? tr("updateDrawer.done", "更新完成") : tr("updateDrawer.failed", "更新失败")) };
     drawerState = { ...drawerState, status, phase: "done", minimized: false, logs: [...drawerState.logs, line], lastAt: Date.now() };
     emitDrawer();
   },
   close() { drawerState = null; emitDrawer(); },
 };
-const DRAWER_PHASES = [["download", "下载"], ["swap", "切换"], ["done", "完成"]];
+const DRAWER_PHASE_KEYS = ["download", "swap", "done"];
+// 渲染期取 label(模块加载时 i18n 桥可能还没就绪 → 必须运行时算,否则非中文用户看到中文)。
+const drawerPhaseLabel = (k) => ({
+  download: tr("updateDrawer.phaseDownload", "下载"),
+  swap: tr("updateDrawer.phaseSwap", "切换"),
+  done: tr("updateDrawer.phaseDone", "完成"),
+}[k] || k);
 function UpdateDrawerHost() {
   const [st, setSt] = useState(drawerState);
   useEffect(() => { drawerListeners.add(setSt); return () => { drawerListeners.delete(setSt); }; }, []);
@@ -138,12 +144,12 @@ function UpdateDrawerHost() {
 
   if (!st) return null;
   const running = st.status === "running";
-  const phaseIdx = DRAWER_PHASES.findIndex(([k]) => k === st.phase);
+  const phaseIdx = DRAWER_PHASE_KEYS.findIndex((k) => k === st.phase);
   if (st.minimized) {
     return (
       <button type="button" className={`drawer-min drawer-min--${st.status}`} data-id="UpdateDrawer-restore" onClick={() => updateDrawer.restore()}>
         <span className="drawer-min__spark">{running ? <Spinner /> : st.status === "done" ? "✓" : st.status === "reboot" ? "⟳" : "!"}</span>
-        <span className="drawer-min__label">更新 cicy-code{st.toVer ? ` · v${st.toVer}` : ""}</span>
+        <span className="drawer-min__label">{tr("updateDrawer.title", "更新 cicy-code")}{st.toVer ? ` · v${st.toVer}` : ""}</span>
       </button>
     );
   }
@@ -156,17 +162,18 @@ function UpdateDrawerHost() {
               {running ? <Spinner /> : st.status === "done" ? "✓" : st.status === "reboot" ? "⟳" : "!"}
             </span>
             <div>
-              <div className="drawer__h">更新 cicy-code</div>
-              <div className="drawer__sub">{st.fromVer ? `v${st.fromVer}` : "当前"} → {st.toVer ? `v${st.toVer}` : "最新版"}</div>
+              <div className="drawer__h">{tr("updateDrawer.title", "更新 cicy-code")}</div>
+              <div className="drawer__sub">{st.fromVer ? `v${st.fromVer}` : tr("updateDrawer.current", "当前")} → {st.toVer ? `v${st.toVer}` : tr("updateDrawer.latest", "最新版")}</div>
             </div>
           </div>
           <div className="drawer__headbtns">
-            <button type="button" className="drawer__x" data-id="UpdateDrawer-min" title="最小化" onClick={() => updateDrawer.minimize()} aria-label="minimize">‒</button>
+            <button type="button" className="drawer__x" data-id="UpdateDrawer-min" title={tr("updateDrawer.minimize", "最小化")} onClick={() => updateDrawer.minimize()} aria-label="minimize">‒</button>
           </div>
         </div>
 
         <div className="drawer__steps" data-id="UpdateDrawer-steps">
-          {DRAWER_PHASES.map(([k, label], i) => {
+          {DRAWER_PHASE_KEYS.map((k, i) => {
+            const label = drawerPhaseLabel(k);
             const done = st.status === "done" || i < phaseIdx;
             const active = i === phaseIdx && running;
             const err = st.status === "error" && i === phaseIdx;
@@ -174,7 +181,7 @@ function UpdateDrawerHost() {
               <div key={k} className={`drawer__step${active ? " is-active" : ""}${done ? " is-done" : ""}${err ? " is-error" : ""}`}>
                 <span className="drawer__step-dot">{done ? "✓" : err ? "!" : i + 1}</span>
                 <span className="drawer__step-label">{label}</span>
-                {i < DRAWER_PHASES.length - 1 && <span className="drawer__step-bar" />}
+                {i < DRAWER_PHASE_KEYS.length - 1 && <span className="drawer__step-bar" />}
               </div>
             );
           })}
@@ -182,11 +189,11 @@ function UpdateDrawerHost() {
 
         <div className="drawer__log" data-id="UpdateDrawer-log" ref={logRef}>
           {st.logs.length === 0
-            ? <div className="drawer__log-empty">准备中…</div>
+            ? <div className="drawer__log-empty">{tr("updateDrawer.preparing", "准备中…")}</div>
             : st.logs.map((l) => (
               <div key={l.id} className="drawer__line" data-status={l.status}>
                 <span className="drawer__t">{l.t}</span>
-                <span className={`drawer__badge drawer__badge--${l.phase}`}>{({ download: "下载", swap: "切换", done: "完成" })[l.phase] || l.phase}</span>
+                <span className={`drawer__badge drawer__badge--${l.phase}`}>{drawerPhaseLabel(l.phase)}</span>
                 <span className="drawer__linemsg">{l.message}</span>
               </div>
             ))}
@@ -194,25 +201,25 @@ function UpdateDrawerHost() {
 
         {stuck && running && (
           <div className="drawer__hint" data-id="UpdateDrawer-stuck">
-            正在等待新版本就绪，耗时比平常久。可以放到后台继续，完成或失败都会提示。
+            {tr("updateDrawer.stuckHint", "正在等待新版本就绪，耗时比平常久。可以放到后台继续，完成或失败都会提示。")}
           </div>
         )}
 
         <div className="drawer__foot">
           {running ? (
             <>
-              <span className="drawer__foot-status">更新进行中…</span>
+              <span className="drawer__foot-status">{tr("updateDrawer.inProgress", "更新进行中…")}</span>
             </>
           ) : st.status === "error" ? (
             <>
-              <span className="drawer__foot-status is-error">更新失败</span>
-              {st.onRetry && <button type="button" className="drawer__btn is-accent" data-id="UpdateDrawer-retry" onClick={() => st.onRetry()}>重试</button>}
-              <button type="button" className="drawer__btn" data-id="UpdateDrawer-dismiss" onClick={() => updateDrawer.close()}>关闭</button>
+              <span className="drawer__foot-status is-error">{tr("updateDrawer.failed", "更新失败")}</span>
+              {st.onRetry && <button type="button" className="drawer__btn is-accent" data-id="UpdateDrawer-retry" onClick={() => st.onRetry()}>{tr("common.retry", "重试")}</button>}
+              <button type="button" className="drawer__btn" data-id="UpdateDrawer-dismiss" onClick={() => updateDrawer.close()}>{tr("common.close", "关闭")}</button>
             </>
           ) : (
             <>
-              <span className="drawer__foot-status is-done">已更新到最新</span>
-              <button type="button" className="drawer__btn is-accent" data-id="UpdateDrawer-finish" onClick={() => updateDrawer.close()}>完成</button>
+              <span className="drawer__foot-status is-done">{tr("updateDrawer.updatedLatest", "已更新到最新")}</span>
+              <button type="button" className="drawer__btn is-accent" data-id="UpdateDrawer-finish" onClick={() => updateDrawer.close()}>{tr("common.done", "完成")}</button>
             </>
           )}
         </div>
@@ -317,7 +324,7 @@ export default function App() {
       if (teamsRes?.status === 401) {
         if (!reauthing.current && window.cicy?.auth?.loginStart) {
           reauthing.current = true;
-          setProfileError("会话已过期,正在重新登录…");
+          setProfileError(tr("auth.sessionExpired", "会话已过期,正在重新登录…"));
           try { await window.cicy.auth.loginStart(); } catch {}
         }
         return;
@@ -565,7 +572,7 @@ export default function App() {
           setUserId(String(payload.userId));
         }
         setError("");
-        setWelcome(payload.reused ? "已恢复你之前的登录" : "登录成功");
+        setWelcome(payload.reused ? tr("auth.welcomeBack", "已恢复你之前的登录") : tr("auth.loginSuccess", "登录成功"));
         setTimeout(() => setWelcome(""), 3000);
       }
     });
@@ -792,10 +799,10 @@ export default function App() {
         <div className="app__tabsrow">
           <div className="app__tabs">
             {[
-              { k: "all",    label: "全部",   n: localCount + customCount + cloudCount },
-              { k: "local",  label: "本地",   n: localCount },
-              { k: "cloud",  label: "私有云", n: cloudCount },
-              { k: "custom", label: "自定义", n: customCount },
+              { k: "all",    label: tr("teamFilter.all", "全部"),   n: localCount + customCount + cloudCount },
+              { k: "local",  label: tr("teamFilter.local", "本地"),   n: localCount },
+              { k: "cloud",  label: tr("teamFilter.cloud", "私有云"), n: cloudCount },
+              { k: "custom", label: tr("teamFilter.custom", "自定义"), n: customCount },
             ].map(({ k, label, n }) => (
               <button
                 key={k}
@@ -825,9 +832,9 @@ export default function App() {
 
         {profileError && (
           <div className="error" style={{ marginBottom: 12 }}>
-            云端: {profileError}
+            {tr("common.cloud", "云端")}: {profileError}
             <button className="btn-ghost" style={{ marginLeft: 8 }} onClick={() => fetchProfile(token || accessToken, userId)}>
-              重试
+              {tr("common.retry", "重试")}
             </button>
           </div>
         )}
@@ -876,7 +883,7 @@ export default function App() {
 
         {!profileLoading && !profileError && teams && teams.length === 0 && !localTeams?.length && (
           <div className="empty" style={{ marginTop: 14 }}>
-            还没有团队 — 安装本地 cicy-code 起一个本地 team，或在云端创建。
+            {tr("teams.emptyHint", "还没有团队 — 安装本地 cicy-code 起一个本地 team，或在云端创建。")}
           </div>
         )}
       </main>
@@ -1190,10 +1197,10 @@ function Header({ me, welcome, onLogout, mitmTeam }) {
         {open && (
           <div className="user-chip__menu" data-id="UserChip-menu" role="menu">
             <button type="button" data-id="UserChip-wallet" className="user-chip__menu-item" onClick={() => goDash("?view=wallet")}>
-              我的钱包
+              {tr("userMenu.wallet", "我的钱包")}
             </button>
             <button type="button" data-id="UserChip-billing" className="user-chip__menu-item" onClick={() => goDash("?view=usage")}>
-              我的账单
+              {tr("userMenu.billing", "我的账单")}
             </button>
             <button type="button" data-id="UserChip-trusted-sites" className="user-chip__menu-item" onClick={() => { setOpen(false); setTrustOpen(true); }}>
               {tr("trustedSites.menu", "受信任站点")}
@@ -1212,7 +1219,7 @@ function Header({ me, welcome, onLogout, mitmTeam }) {
             )}
             <div className="user-chip__menu-sep" aria-hidden />
             <button type="button" data-id="UserChip-logout" className="user-chip__menu-item is-danger" onClick={() => { setOpen(false); onLogout(); }}>
-              退出
+              {tr("userMenu.logout", "退出")}
             </button>
             <div className="user-chip__menu-version" data-id="UserChip-version">
               CiCy Desktop {appVer ? `v${appVer}` : "…"}
@@ -2337,7 +2344,7 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
       if (kind === "update" || kind === "restart" || kind === "start") checkUpdate(false);
     }
   };
-  const BUSY_LABEL = { start: "启动中…", restart: "重启中…", update: "更新中…", stop: "停止中…" };
+  const BUSY_LABEL = { start: tr("busy.start", "启动中…"), restart: tr("busy.restart", "重启中…"), update: tr("busy.update", "更新中…"), stop: tr("busy.stop", "停止中…") };
 
   // 打开 flow (主人 spec): start the LOCAL daemon if it's down (with a 启动中…
   // toast), then open. The window itself is opened by openTeam() in main, which
@@ -2583,11 +2590,11 @@ function cmpVer(a, b) {
 }
 
 const LOCAL_STATUS = {
-  running:       { tone: "ok",   label: "running",    cta: "打开" },
-  stopped:       { tone: "off",  label: "stopped",    cta: "未运行" },
-  auth_error:    { tone: "warn", label: "auth error", cta: "Token 失效" },
-  misconfigured: { tone: "err",  label: "bad config", cta: "URL 错误" },
-  error:         { tone: "err",  label: "error",      cta: "异常" },
+  running:       { tone: "ok",   label: "running",    cta: tr("localStatus.open", "打开") },
+  stopped:       { tone: "off",  label: "stopped",    cta: tr("localStatus.notRunning", "未运行") },
+  auth_error:    { tone: "warn", label: "auth error", cta: tr("localStatus.tokenInvalid", "Token 失效") },
+  misconfigured: { tone: "err",  label: "bad config", cta: tr("localStatus.badUrl", "URL 错误") },
+  error:         { tone: "err",  label: "error",      cta: tr("localStatus.error", "异常") },
 };
 
 // 私有云 / (历史)云端团队卡片。产品方向变更(w-10032):公有云不做了,主打 private
@@ -2613,7 +2620,7 @@ function TeamCard({ team, onOpen, onRename }) {
   };
   const hostUrl = team.host_url || "";
   const billTeamId = team.teamId || team.id; // /dash?team=<teamId>(URL 不带 key)
-  const kindLabel = isPrivate ? "私有云" : (team.team_kind === "personal" ? "个人" : "共享");
+  const kindLabel = isPrivate ? tr("teamKind.private", "私有云") : (team.team_kind === "personal" ? tr("teamKind.personal", "个人") : tr("teamKind.shared", "共享"));
   const openUrl = isPrivate ? hostUrl : (team.workspace_url || team.workspace_direct_url);
   const hasUrl = !!openUrl;
 
@@ -2760,7 +2767,7 @@ function Brand() {
       <div className="brand-mark"><BrandGlyph /></div>
       <div className="brand-text">
         <div className="brand-name">CiCy Desktop</div>
-        <div className="brand-sub">团队 AI 协作工作台</div>
+        <div className="brand-sub">{tr("app.brandSub", "团队 AI 协作工作台")}</div>
       </div>
     </div>
   );

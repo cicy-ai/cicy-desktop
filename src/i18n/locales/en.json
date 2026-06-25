@@ -1,7 +1,8 @@
 {
   "app": {
     "name": "CiCy Desktop",
-    "apiTitle": "CiCy Desktop API"
+    "apiTitle": "CiCy Desktop API",
+    "brandSub": "Team AI collaboration workspace"
   },
   "tray": {
     "openHomepage": "Open CiCy Desktop",
@@ -77,7 +78,23 @@
   "localTeams": {
     "unnamed": "Unnamed",
     "rename": "Rename",
-    "renameHint": "Double-click or click ✎ to rename"
+    "renameHint": "Double-click or click ✎ to rename",
+    "open": "Open",
+    "renameFailed": "Rename wasn't saved, reverted",
+    "startOpen": "Start & open",
+    "manage": "Manage local cicy-code",
+    "more": "More",
+    "reloadWindow": "Reload window",
+    "billing": "Billing",
+    "removeConfirm": "Confirm removal?",
+    "remove": "Remove",
+    "copyAddr": "Click to copy address",
+    "version": "Version",
+    "saving": "Saving…",
+    "saved": "Saved",
+    "kindLocal": "Local",
+    "kindCustom": "Custom",
+    "defaultName": "Local team"
   },
   "cli": {
     "controllerTitle": "cicy - CiCy Desktop Controller",
@@ -159,13 +176,40 @@
     "dockerRestarted": "Docker container restarted",
     "recreate": "Rebuild Docker",
     "billing": "Billing",
-    "openNoToken": "Service not ready yet — wait a few seconds and click Open again (or 「Restart」 from the card menu)."
+    "openNoToken": "Service not ready yet — wait a few seconds and click Open again (or 「Restart」 from the card menu).",
+    "retry": "Retry",
+    "run": "Install & start",
+    "manual": "Install Docker manually",
+    "updated": "cicy-code updated to latest",
+    "updateFailed": "Update failed",
+    "authorizingHost": "Authorizing container to access Mac (configuring SSH)…",
+    "authorizedHostOk": "Authorized: the container can `ssh mac` to reach the Mac ✅",
+    "authorizedHostPartial": "Public key written to Mac (not verified; try `ssh mac` in the container manually)",
+    "chromeProxyOn": "Enabling Chrome proxy (host mihomo)…",
+    "chromeProxyOff": "Disabling Chrome proxy…",
+    "chromeProxyDone": "Chrome proxy enabled ✅",
+    "chromeProxyUndone": "Chrome proxy disabled",
+    "wslUnresponsive": "WSL not responding · click “Retry check”",
+    "opening": "Opening…",
+    "probing": "Checking…",
+    "retryProbe": "Retry check",
+    "wslStillStuck": "WSL still not responding — you may need to restart Windows and try again",
+    "probeFailed": "Check failed, please retry",
+    "authorizeHostHint": "Add the container's public key to the Mac's authorized_keys so `ssh mac` works inside the container",
+    "authorizeHost": "Authorize container to access Mac",
+    "chromeProxyHint": "Run a mihomo on this machine to proxy system Chrome profiles (127.0.0.1:2000N). Config synced from the container.",
+    "chromeProxy": "Chrome proxy",
+    "recreateConfirm": "This deletes and recreates the current container (volume data kept) to switch to the dedicated team's gateway key. Recreate?",
+    "recreated": "Docker container recreated",
+    "recreateOk": "Recreate"
   },
   "common": {
     "close": "Close",
     "retry": "Retry",
     "done": "Done",
-    "minimize": "Minimize"
+    "minimize": "Minimize",
+    "cancel": "Cancel",
+    "cloud": "Cloud"
   },
   "auth": {
     "restoring": "Restoring login…",
@@ -178,6 +222,119 @@
     "browserNotOpened": "Browser didn't open?",
     "openManually": "Open login page manually",
     "copyLink": "Copy link",
-    "linkCopied": "Link copied — paste it into your browser"
+    "linkCopied": "Link copied — paste it into your browser",
+    "badEmail": "Please enter a valid email address",
+    "emailLabel": "Enter your email to sign in with a magic link",
+    "emailPlaceholder": "you@example.com",
+    "emailLogin": "Send login link",
+    "emailHint": "Tap the link in the email on your phone to sign in on this computer too",
+    "or": "or",
+    "emailSentTagline": "Login email sent",
+    "emailSentHint": "Open the link from your inbox (phone or computer) and you'll be signed in here automatically.",
+    "emailWaiting": "Waiting for confirmation…",
+    "sessionExpired": "Session expired, signing in again…",
+    "welcomeBack": "Restored your previous session",
+    "loginSuccess": "Signed in"
+  },
+  "teams": {
+    "addHint": "Create a new private cloud team",
+    "add": "Add team",
+    "emptyHint": "No teams yet — install local cicy-code to start a local team, or create one in the cloud."
+  },
+  "trustedSites": {
+    "addFailed": "Add failed",
+    "removeFailed": "Remove failed",
+    "title": "Trusted sites",
+    "warn": "⚠ Sites in this list can run commands (exec) on your computer. Only add addresses you fully trust.",
+    "placeholder": "Add a site, e.g. app.cicy-ai.com or my-cloud.example.org",
+    "add": "Add",
+    "loading": "Loading…",
+    "empty": "None",
+    "builtin": "Built-in",
+    "remove": "Remove",
+    "menu": "Trusted sites"
+  },
+  "audit": {
+    "loadFailed": "Load failed",
+    "title": "Audit log",
+    "count": "Total",
+    "refresh": "Refresh",
+    "all": "All",
+    "rpc": "RPC calls",
+    "auth": "Auth decisions",
+    "search": "Search source / tool / command…",
+    "colTime": "Time",
+    "colType": "Type",
+    "colSource": "Source",
+    "colOp": "Operation",
+    "colDetail": "Detail",
+    "loading": "Loading…",
+    "empty": "No audit records",
+    "noMatch": "No matching records",
+    "menu": "Audit log"
+  },
+  "sidecar": {
+    "found": "New version found",
+    "upToDate": "Already up to date",
+    "notRunning": "cicy-code not running",
+    "checkFailed": "Update check failed",
+    "failed": "Operation failed",
+    "startFailed": "Start failed",
+    "checking2": "Checking…",
+    "checkUpdate": "Check for updates",
+    "updated": "Updated to latest",
+    "updateTo": "Update to",
+    "restarted": "Restarted",
+    "restart": "Restart",
+    "stoppedDone": "Stopped",
+    "stop": "Stop"
+  },
+  "teamCard": {
+    "noHost": "No address set",
+    "noUrl": "No URL"
+  },
+  "updateDrawer": {
+    "done": "Update complete",
+    "failed": "Update failed",
+    "phaseDownload": "Download",
+    "phaseSwap": "Switch",
+    "phaseDone": "Done",
+    "title": "Update cicy-code",
+    "current": "current",
+    "latest": "latest",
+    "minimize": "Minimize",
+    "preparing": "Preparing…",
+    "stuckHint": "Waiting for the new version to be ready — taking longer than usual. You can leave it in the background; you'll be notified when it finishes or fails.",
+    "inProgress": "Updating…",
+    "updatedLatest": "Updated to latest"
+  },
+  "teamFilter": {
+    "all": "All",
+    "local": "Local",
+    "cloud": "Private cloud",
+    "custom": "Custom"
+  },
+  "userMenu": {
+    "wallet": "My wallet",
+    "billing": "My billing",
+    "logout": "Log out"
+  },
+  "busy": {
+    "start": "Starting…",
+    "restart": "Restarting…",
+    "update": "Updating…",
+    "stop": "Stopping…"
+  },
+  "localStatus": {
+    "open": "Open",
+    "notRunning": "Not running",
+    "tokenInvalid": "Token invalid",
+    "badUrl": "Bad URL",
+    "error": "Error"
+  },
+  "teamKind": {
+    "private": "Private cloud",
+    "personal": "Personal",
+    "shared": "Shared"
   }
 }
