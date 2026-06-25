@@ -891,27 +891,24 @@ electronApp.whenReady().then(async () => {
       .then((r) => { if (r && r.id) log.info(`[Sidecar] local team placeholder registered (${r.id})`); })
       .catch((e) => log.warn(`[Sidecar] placeholder register failed: ${e.message}`));
 
-    // 起 native cicy-code(npx cicy-code,见 cicy-code.js)。已在跑就 adopt,不双开。
-    cicyCodeSidecar
-      .start({ logPath: path.join(os.homedir(), "logs", "cicy-code-sidecar.log") })
-      .then((c) => { if (c) log.info(`[Sidecar] cicy-code spawned pid=${c.pid}`); })
-      .catch((e) => log.warn(`[Sidecar] cicy-code start failed: ${e.message}`));
-    startSidecarWatchdog();
-
-    // :8008 起来后 upsert 一次:刷新卡状态 + 让 addTeam 去云端拿这个本地 team 的 gateway
-    // key + teamId 注入 global.json(主人: 启动之后先去拿 llm api_key 和 team id)。
+    // **不在 boot 静默 start**(主人 bug 修复): 首次启动要装 Node/brew/tmux 等依赖,必须让
+    // 用户在点「启动并打开」时**看着 drawer 装**(命令/进度/错误/重试)。boot 静默装会:① 用户
+    // 看不到卡在哪 ② 和用户点击重复 spawn 抢锁。所以这里只:① 注册占位卡 ② 若 cicy-code 已在
+    // 跑(上次保活留下的)就 adopt 刷新状态 + 拿 key/teamId。真正的启动/安装由 sidecar:start
+    // (点「启动并打开」)驱动,带 drawer。
     (async () => {
       for (let i = 0; i < 40; i++) {
         try {
           if (await cicyCodeSidecar.probeExisting(sidecarPort)) {
             const r = await lt.addTeam({ base_url: `http://127.0.0.1:${sidecarPort}`, name: i18n.t("localTeams.defaultName") });
-            if (r && r.id) log.info(`[Sidecar] local team ready (${r.id}) — key/teamId synced`);
+            if (r && r.id) log.info(`[Sidecar] adopted running cicy-code → local team ready (${r.id})`);
+            startSidecarWatchdog(); // 已在跑 → 起 watchdog 保活(崩了重起,此时依赖已装、起得快)
             return;
           }
-        } catch (e) { log.warn(`[Sidecar] local team refresh error: ${e.message}`); }
+        } catch (e) { log.warn(`[Sidecar] adopt probe error: ${e.message}`); }
         await new Promise((res) => setTimeout(res, 3000));
       }
-      log.warn(`[Sidecar] :${sidecarPort} never came up within ~2min (card stays as 未运行)`);
+      log.info(`[Sidecar] :${sidecarPort} 未在跑 — 占位卡显示「未运行」,等用户点「启动并打开」(带安装 drawer)`);
     })();
   }
 

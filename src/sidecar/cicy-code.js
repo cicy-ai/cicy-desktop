@@ -50,23 +50,107 @@ async function ensureNode({ emit } = {}) {
     `https://cdn.npmmirror.com/binaries/node/${NODE_VER}/${fname}`, // CN-fast
     `https://nodejs.org/dist/${NODE_VER}/${fname}`,                 // 官方兜底
   ];
-  e({ phase: "node", status: "running", message: `未检测到可用 Node,正在安装 Node ${NODE_VER}(约 50MB)…` });
+  e({ phase: "node", status: "running", message: `未检测到可用 Node(系统无 node 或版本 <20),正在安装 Node ${NODE_VER}(约 50MB)…` });
   fs.mkdirSync(NODE_HOME, { recursive: true });
   const tmp = path.join(os.tmpdir(), `cicy-${fname}`);
   for (const url of urls) {
     try {
+      e({ phase: "node", status: "running", message: `$ curl -fL -o ${tmp} ${url}` });
       await pexec("curl", ["-fL", "--retry", "2", "-o", tmp, url], 300000);
+      e({ phase: "node", status: "running", message: `$ tar -xzf <node> -C ${NODE_HOME} --strip-components 1` });
       await pexec("tar", ["-xzf", tmp, "-C", NODE_HOME, "--strip-components", "1"], 120000);
       if (fs.existsSync(path.join(NODE_HOME, "bin", "node")) && fs.existsSync(path.join(NODE_HOME, "bin", "npx"))) {
         try { fs.unlinkSync(tmp); } catch {}
-        e({ phase: "node", status: "done", message: `Node ${NODE_VER} 安装完成` });
+        e({ phase: "node", status: "done", message: `Node ${NODE_VER} 安装完成 → ${path.join(NODE_HOME, "bin")}` });
         return path.join(NODE_HOME, "bin");
       }
-    } catch (err) { console.warn(`[cicy-code-sidecar] node install failed (${url}): ${err.message}`); }
+      e({ phase: "node", status: "running", message: `解压后没找到 node/npx,换下一个源…` });
+    } catch (err) {
+      console.warn(`[cicy-code-sidecar] node install failed (${url}): ${err.message}`);
+      e({ phase: "node", status: "running", message: `Node 下载失败(${url.includes("npmmirror") ? "npmmirror" : "nodejs.org"}):${String(err.message).slice(0, 160)} — 换源重试…` });
+    }
   }
   try { fs.unlinkSync(tmp); } catch {}
-  e({ phase: "node", status: "error", message: "Node 自动安装失败 —— 请打开 https://nodejs.org 下载安装 Node(LTS),装好后点「重试」" });
+  e({ phase: "node", status: "error", message: "❌ Node 自动安装失败(两个源都没成)—— 请打开 https://nodejs.org 下载安装 Node(选 LTS),装好后点「重试」" });
   return null;
+}
+
+// ── 网络环境探测(CN 用 npmmirror,海外用 npmjs)──────────────────────────────
+// 主人(npx 执行前要看本机网络,CN 用 CN mirror): 探 generate_204,能 204(够到 Google/有代理)
+// = 海外;超时/失败(GFW)= CN。探一次缓存。CICY_NPM_REGISTRY 覆盖时不探。
+let _cnCache = null;
+function probeIsCN() {
+  if (_cnCache !== null) return _cnCache;
+  _cnCache = new Promise((resolve) => {
+    let done = false; const fin = (cn) => { if (!done) { done = true; resolve(cn); } };
+    try {
+      const req = require("https").get("https://www.gstatic.com/generate_204", { timeout: 2500 }, (res) => { const ok = res.statusCode === 204; res.destroy(); fin(!ok); });
+      req.on("timeout", () => { req.destroy(); fin(true); });
+      req.on("error", () => fin(true));
+    } catch { fin(true); }
+  });
+  return _cnCache;
+}
+
+// ── Homebrew + 系统依赖 ───────────────────────────────────────────────────────
+const BREW_DIRS = ["/opt/homebrew/bin", "/usr/local/bin"];
+function findBrew() { for (const d of BREW_DIRS) { const p = path.join(d, "brew"); try { if (fs.existsSync(p)) return p; } catch {} } return null; }
+function cmdExists(name, pathEnv) {
+  try { execFileSync("bash", ["-lc", `command -v ${name} >/dev/null 2>&1`], { timeout: 8000, env: { ...process.env, PATH: pathEnv } }); return true; } catch { return false; }
+}
+// brew install <dep>,逐行把输出 emit 到 drawer。CN 用 USTC bottle 镜像加速。
+function brewInstallStream(brew, dep, env, e) {
+  return new Promise((resolve) => {
+    e({ phase: "deps", status: "running", message: `$ brew install ${dep}` });
+    let buf = "";
+    const ch = spawn(brew, ["install", dep], { env });
+    const pump = (b) => { buf += b.toString("utf8"); let nl; while ((nl = buf.indexOf("\n")) >= 0) { const line = buf.slice(0, nl).replace(/\r$/, "").trim(); buf = buf.slice(nl + 1); if (line) e({ phase: "deps", status: "running", message: line.slice(0, 200) }); } };
+    ch.stdout.on("data", pump); ch.stderr.on("data", pump);
+    ch.on("close", (code) => resolve(code === 0));
+    ch.on("error", (err) => { e({ phase: "deps", status: "running", message: `brew install ${dep} 起不来: ${err.message}` }); resolve(false); });
+  });
+}
+
+// 完整环境引导:CN 探测 → node24 → brew → brew 装 tmux/jq → mihomo(best-effort)。
+// 返回 { nodeBinDir, registry } 或 null(失败,drawer 已 emit 原因 + 可重试)。
+async function ensureEnv({ emit } = {}) {
+  const e = emit || (() => {});
+  // 1) 网络环境 → registry + bottle 镜像
+  const cn = process.env.CICY_NPM_REGISTRY ? true : await probeIsCN();
+  const registry = process.env.CICY_NPM_REGISTRY || (cn ? "https://registry.npmmirror.com" : "https://registry.npmjs.org");
+  e({ phase: "net", status: "running", message: `网络环境:${cn ? "国内(CN)→ 用 npmmirror + USTC bottle 镜像" : "海外 → 用 npmjs"}` });
+
+  // 2) Node(系统 ≥20 用,否则装 Node 24)
+  const nodeBinDir = await ensureNode({ emit });
+  if (!nodeBinDir) return null;
+
+  // 3+4) Homebrew + tmux/jq(cicy-code 跑 tmux 多 agent 必需,首次它自己装很慢且会和我们抢锁,
+  // 所以这里**预装好**,cicy-code 启动时已就绪)。
+  const pathEnv = `${nodeBinDir}:${BREW_DIRS.join(":")}:${NODE_SEARCH.join(":")}:/usr/bin:/bin:${process.env.PATH || ""}`;
+  const brew = findBrew();
+  if (!brew) {
+    e({ phase: "deps", status: "error", message: "❌ 未检测到 Homebrew(装 tmux 等依赖要用)。请在「终端」执行后点「重试」:\n/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"" });
+    return null;
+  }
+  const brewEnv = { ...process.env, PATH: pathEnv, HOMEBREW_NO_AUTO_UPDATE: "1", ...(cn ? { HOMEBREW_BOTTLE_DOMAIN: process.env.HOMEBREW_BOTTLE_DOMAIN || "https://mirrors.ustc.edu.cn/homebrew-bottles" } : {}) };
+  for (const dep of ["tmux", "jq"]) {
+    if (cmdExists(dep, pathEnv)) { e({ phase: "deps", status: "running", message: `✓ ${dep} 已安装` }); continue; }
+    e({ phase: "deps", status: "running", message: `安装依赖 ${dep}(可能要几分钟)…` });
+    const ok = await brewInstallStream(brew, dep, brewEnv, e);
+    if (!ok) { e({ phase: "deps", status: "error", message: `❌ brew install ${dep} 失败(见上方日志),点「重试」` }); return null; }
+    e({ phase: "deps", status: "running", message: `✓ ${dep} 安装完成` });
+  }
+
+  // 5) mihomo(Chrome 代理用,best-effort —— 失败不挡 cicy-code 启动)
+  try {
+    if (!cmdExists("mihomo", pathEnv) && !cmdExists("cicy-mihomo", pathEnv)) {
+      e({ phase: "deps", status: "running", message: `$ npx -y cicy-mihomo install(后台,失败不影响启动)` });
+      const m = spawn(path.join(nodeBinDir, "npx"), ["-y", "cicy-mihomo", "install"], { env: { ...process.env, PATH: pathEnv, npm_config_registry: registry }, stdio: "ignore", detached: true });
+      m.unref();
+    }
+  } catch {}
+
+  return { nodeBinDir, registry };
 }
 
 const DEFAULT_PORT = Number(process.env.CICY_CODE_PORT || 8008);
@@ -141,7 +225,15 @@ async function startFromRuntime({ logPath, port }) {
 }
 
 async function start({ logPath, port = DEFAULT_PORT, force = false, version = null, emit = null } = {}) {
-  if (child && !force) return child;
+  // **永不重复 spawn 活着的实例**(主人 bug 修复): cicy-code 首次启动要 `brew install tmux`
+  // 等依赖,要几分钟,这期间 :8008 还没 bind。watchdog(:8008 探不到)和用户点「启动」都会
+  // 再调 start() —— 如果再 spawn 一个,多个实例抢 brew tmux 的锁 → 全部「环境初始化失败」→
+  // :8008 永远起不来。所以:只要我们 spawn 的 child 进程还活着(没 exit),一律复用,绝不再
+  // spawn,连 force 也不行(update() 是先 stop() 杀掉 child 再 start,那时 child 已 null)。
+  if (child && child.exitCode == null && child.signalCode == null) {
+    console.log(`[cicy-code-sidecar] already running pid=${child.pid} (setup may be in progress) — reuse, no double-spawn`);
+    return child;
+  }
 
   // 主人(2026-06 方向回调): mac 资源吃不消 docker(colima VM 压垮内存被 jetsam 杀)→
   // macOS/Linux 改回 native cicy-code(:8008,走 `npx cicy-code`)。Windows 仍走 docker。
@@ -152,12 +244,14 @@ async function start({ logPath, port = DEFAULT_PORT, force = false, version = nu
     return null;
   }
 
-  // 1) 确保有可用 Node(系统 node≥20,否则装 Node 24;再不行提示用户去 nodejs.org 自己装)。
-  const nodeBinDir = await ensureNode({ emit });
-  if (!nodeBinDir) { console.warn("[cicy-code-sidecar] no usable Node — cannot npx cicy-code"); return null; }
+  // 1) 完整环境引导(CN 探测 → node24 → brew → 预装 tmux/jq → mihomo),全程 emit 到 drawer。
+  //    预装好依赖,cicy-code 启动时已就绪、不再自己慢慢 brew 装、不再和我们抢锁。
+  const env0 = await ensureEnv({ emit });
+  if (!env0) { console.warn("[cicy-code-sidecar] ensureEnv failed — cannot start"); return null; }
+  const { nodeBinDir, registry } = env0;
 
   // 2) `npx cicy-code` —— npm 按本机真实架构拉 cicy-code-<plat>,文件用户自己拥有(无跨架构/
-  //    权限坑)。用上面那个 Node 的 npx,并把它的 bin 放 PATH 首位让 npx 找到自己的 node/npm。
+  //    权限坑)。用上面那个 Node 的 npx,并把它的 bin + brew 放 PATH 首位让 cicy-code 找到 tmux/jq。
   let stdio = ["ignore", "ignore", "ignore"];
   if (logPath) {
     fs.mkdirSync(path.dirname(logPath), { recursive: true });
@@ -165,8 +259,7 @@ async function start({ logPath, port = DEFAULT_PORT, force = false, version = nu
     stdio = ["ignore", fd, fd];
   }
   const npxAbs = path.join(nodeBinDir, "npx");
-  const childPath = `${nodeBinDir}:${NODE_SEARCH.join(":")}:${process.env.PATH || ""}`;
-  const registry = process.env.CICY_NPM_REGISTRY || "https://registry.npmmirror.com";
+  const childPath = `${nodeBinDir}:${BREW_DIRS.join(":")}:${NODE_SEARCH.join(":")}:/usr/bin:/bin:${process.env.PATH || ""}`;
   const env = {
     ...process.env,
     CICY_CODE_PORT: String(port),
@@ -389,4 +482,4 @@ async function update({ logPath, port = DEFAULT_PORT, emit } = {}) {
   }
 }
 
-module.exports = { start, stop, restart, update, probeExisting, clearNpxCache, isUpdating };
+module.exports = { start, stop, restart, update, probeExisting, clearNpxCache, isUpdating, ensureEnv, ensureNode };

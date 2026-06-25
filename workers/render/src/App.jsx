@@ -87,9 +87,9 @@ let drawerState = null; // null = closed
 function emitDrawer() { drawerListeners.forEach((l) => l(drawerState)); }
 function clockHHMMSS() { const d = new Date(); return d.toTimeString().slice(0, 8); }
 const updateDrawer = {
-  open({ teamId, fromVer, toVer, onRetry } = {}) {
+  open({ teamId, fromVer, toVer, onRetry, title } = {}) {
     drawerState = {
-      teamId, fromVer: fromVer || null, toVer: toVer || null,
+      teamId, title: title || null, fromVer: fromVer || null, toVer: toVer || null,
       status: "running",   // running | done | error
       phase: "download",   // download | swap | done
       logs: [],
@@ -149,7 +149,7 @@ function UpdateDrawerHost() {
     return (
       <button type="button" className={`drawer-min drawer-min--${st.status}`} data-id="UpdateDrawer-restore" onClick={() => updateDrawer.restore()}>
         <span className="drawer-min__spark">{running ? <Spinner /> : st.status === "done" ? "✓" : st.status === "reboot" ? "⟳" : "!"}</span>
-        <span className="drawer-min__label">{tr("updateDrawer.title", "更新 cicy-code")}{st.toVer ? ` · v${st.toVer}` : ""}</span>
+        <span className="drawer-min__label">{st.title || tr("updateDrawer.title", "更新 cicy-code")}{st.toVer ? ` · v${st.toVer}` : ""}</span>
       </button>
     );
   }
@@ -162,7 +162,7 @@ function UpdateDrawerHost() {
               {running ? <Spinner /> : st.status === "done" ? "✓" : st.status === "reboot" ? "⟳" : "!"}
             </span>
             <div>
-              <div className="drawer__h">{tr("updateDrawer.title", "更新 cicy-code")}</div>
+              <div className="drawer__h">{st.title || tr("updateDrawer.title", "更新 cicy-code")}</div>
               <div className="drawer__sub">{st.fromVer ? `v${st.fromVer}` : tr("updateDrawer.current", "当前")} → {st.toVer ? `v${st.toVer}` : tr("updateDrawer.latest", "最新版")}</div>
             </div>
           </div>
@@ -2353,18 +2353,30 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
   // creating the window — so we never pop a blank page that needs a manual
   // reload. (/api/health is NOT used — it's unreliable mid-boot; the gate is a
   // raw TCP probe.) Remote/custom teams just open and show their own UI.
+  // 启动本地 cicy-code,带**安装进度抽屉**(主人: 首次要装 Node + cicy-code 自己 brew 装
+  // tmux 依赖,几分钟,必须让用户看见执行什么命令/卡在哪/出什么错,且能重试)。
+  // sidecar:start 会流式 emit:Node 下载命令 + npx cicy-code + brew 装依赖的日志逐行推过来。
+  const runStartFlow = async () => {
+    setBusy("start");
+    updateDrawer.open({ teamId: team.id, title: tr("sidecar.startTitle", "启动 cicy-code"), onRetry: runStartFlow });
+    updateDrawer.push({ phase: "download", status: "running", message: tr("sidecar.starting", "启动 cicy-code(首次需安装 Node + 依赖,日志见下)…") });
+    const unsub = window.cicy?.sidecar?.onOpProgress?.((ev) => updateDrawer.push(ev));
+    let r;
+    try { r = await window.cicy.sidecar.start(); } catch (e) { r = { ok: false, error: e?.message || String(e) }; }
+    try { unsub?.(); } catch {}
+    setBusy(""); onRefresh?.();
+    if (!r?.ok || r?.warning) {
+      updateDrawer.finish({ ok: false, message: tr("sidecar.startFailed", "启动失败") + (r?.error ? `: ${r.error}` : r?.warning ? `: ${r.warning}` : "") });
+      return false;
+    }
+    updateDrawer.finish({ ok: true, message: tr("sidecar.startedOk", "cicy-code 已就绪") });
+    return true;
+  };
   const handleOpen = async () => {
     if (busy) return;
     if (!running && local && window.cicy?.sidecar?.start) {
-      setBusy("start");
-      toast.show({ id: opToastId, message: BUSY_LABEL.start, status: "running", progress: undefined });
-      const r = await window.cicy.sidecar.start().catch((e) => ({ ok: false, error: e?.message || String(e) }));
-      setBusy(""); onRefresh?.();
-      if (!r?.ok || r?.warning) { // didn't come up — surface it, don't open a dead link
-        toast.show({ id: opToastId, message: tr("sidecar.startFailed", "启动失败") + (r?.error ? `: ${r.error}` : r?.warning ? `: ${r.warning}` : ""), status: "error", ttl: 8000 });
-        return;
-      }
-      toast.dismiss(opToastId); // came up — no lingering toast, the window opens
+      const ok = await runStartFlow();
+      if (!ok) return; // 没起来 — 抽屉里有日志 + 重试,不开死链
     }
     onOpen(); // openTeam() gates on list_windows + TCP liveness before showing
   };

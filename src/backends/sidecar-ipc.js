@@ -423,19 +423,41 @@ function register({ sidecarLogPath } = {}) {
 
   // Start (or reuse) the cicy-code daemon. probeExisting inside start() reuses
   // a healthy :8008; otherwise it spawns `npx cicy-code` / the Docker container.
-  ipcMain.handle("sidecar:start", async () => {
+  ipcMain.handle("sidecar:start", async (e) => {
+    // 流式把安装进度推给抽屉(主人: "为什么不弹 drawer 显示安装日志,卡在哪我怎么知道"):
+    //  - ensureNode 的 Node 下载进度 → 走 start({emit})
+    //  - npx cicy-code + cicy-code 首次 `brew install tmux` 装依赖的输出 → 都写在 sidecarLogPath,
+    //    这里 tail 这个文件、逐行 emit,用户就能看见在装啥、卡在哪。
+    const emit = (ev) => { try { e.sender.send("sidecar:op-progress", { op: "start", ...ev }); } catch {} };
     try {
       if (await sidecar.probeExisting(PORT)) return { ok: true, alreadyRunning: true };
-      const child = await sidecar.start({ logPath: sidecarLogPath, force: false });
-      // Wait briefly for it to bind :8008 so the homepage's poll flips to
-      // "running" on the next tick.
-      for (let i = 0; i < 20; i++) {
-        if (await sidecar.probeExisting(PORT)) return { ok: true, pid: child?.pid || null };
-        await new Promise((r) => setTimeout(r, 250));
+      let pos = 0; try { pos = fs.statSync(sidecarLogPath).size; } catch {}
+      const tail = setInterval(() => {
+        try {
+          const sz = fs.statSync(sidecarLogPath).size;
+          if (sz > pos) {
+            const buf = Buffer.alloc(sz - pos);
+            const fd = fs.openSync(sidecarLogPath, "r"); fs.readSync(fd, buf, 0, sz - pos, pos); fs.closeSync(fd);
+            pos = sz;
+            for (const line of buf.toString("utf8").split(/\r?\n/)) { const m = line.trim(); if (m) emit({ phase: "download", status: "running", message: m.slice(0, 240) }); }
+          }
+        } catch {}
+      }, 500);
+      const child = await sidecar.start({ logPath: sidecarLogPath, force: false, emit });
+      // Node 下载 + cicy-code 首次 brew 装依赖很慢 → 等到 ~6 分钟;子进程退出(失败)立即停手。
+      let up = false;
+      for (let i = 0; i < 720; i++) {
+        if (await sidecar.probeExisting(PORT)) { up = true; break; }
+        if (child && child.exitCode != null) break;
+        await new Promise((r) => setTimeout(r, 500));
       }
-      return { ok: true, pid: child?.pid || null, warning: "spawned but did not bind :8008 within 5s" };
-    } catch (e) {
-      return { ok: false, error: e.message };
+      clearInterval(tail);
+      if (up) { emit({ phase: "done", status: "done", message: "cicy-code 已就绪 :8008" }); return { ok: true, pid: child?.pid || null }; }
+      if (child && child.exitCode != null) { emit({ phase: "done", status: "error", message: `cicy-code 启动失败(exit=${child.exitCode}),见上方日志` }); return { ok: false, error: `cicy-code exited (${child.exitCode}) — 见安装日志` }; }
+      return { ok: true, pid: child?.pid || null, warning: "6 分钟内未就绪(可能还在装依赖,见日志)" };
+    } catch (err) {
+      emit({ phase: "done", status: "error", message: `启动失败：${err.message}` });
+      return { ok: false, error: err.message };
     }
   });
 
