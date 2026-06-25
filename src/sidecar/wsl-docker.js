@@ -586,11 +586,10 @@ async function bootstrap(opts = {}) {
   return _bootstrapInFlight;
 }
 
-// 命名统一(主人 bug 修复): 默认容器/卷名带 -8009 后缀,和 readContainerToken / restart /
-// recreate / runContainer 的默认一致。之前 _bootstrap 默认 cicy-team / cicy-code-docker,
-// 而 readContainerToken 读 cicy-team-8009 → 泛型 docker:bootstrap 建的卷读不到 token → 卡登录。
-// (live 的 docker:app-bootstrap 一直传显式 APP_* 名,不受影响;这里只是把泛型路径也对齐。)
-async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-docker-8009", volume = "cicy-team-8009", env = {} } = {}) {
+// 注意: 默认容器/卷名保持 cicy-team / cicy-code-docker(回退主人实测"现在不行了"的改动)。
+// live 路径(docker:app-bootstrap)始终传显式 APP_*(cicy-team-8009)名,不靠这里的默认;
+// 改默认会让既有 cicy-team 卷的装机对不上 → 退回原值。
+async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-docker", volume = "cicy-team", env = {} } = {}) {
   const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
 
   // Structured, PERSISTED trace of the whole run (electron-log → main.log) so a

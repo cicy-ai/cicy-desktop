@@ -480,23 +480,23 @@ async function update({ logPath, port = DEFAULT_PORT, emit } = {}) {
     e({ phase: "download", status: "running", message: "检查最新版本…" });
     const latest = await localbin.latestVersion();
     if (!latest) throw new Error("无法获取最新版本号");
-    const cur = localbin.currentVersion();              // 磁盘 manifest:只用来决定要不要下载
-    const needDownload = !cur || localbin.cmpVer(latest, cur) > 0;
 
     // 1) 杀干净
     e({ phase: "swap", status: "running", message: "停止 cicy-code…" });
     await stop({ port });
     await new Promise(r => setTimeout(r, 400));
 
-    // 2) 落后才下载(此时 cicy-code.exe 已死,Windows 也能覆盖)
-    if (needDownload) {
-      e({ phase: "download", status: "running", message: `下载 ${latest}…` });
-      await localbin.fetchToLocalBin(latest, { emit });
-    }
+    // 2) 清 npx 缓存(主人 bug 修复): daemon 是 `npx cicy-code` 跑的、走 ~/.npm/_npx 缓存,
+    //    根本不看 localbin 下载的 ~/.local/bin。之前 update 往 localbin 下载 + start 复用 npx
+    //    缓存 → 永远还是旧版(2.3.24 发了但 homepage 一直 2.3.23)。改成:清掉 npx 对 cicy-code
+    //    的缓存,下面再用 `cicy-code@<latest>` 重启,npx 就会重新从 registry 拉新版。
+    // 一律清(不被 localbin manifest 门控): npx 缓存才是锁住旧版的真凶,manifest 在 npx 路径下不可信。
+    e({ phase: "download", status: "running", message: `准备更新到 ${latest}（清 npx 缓存,重启时重新拉取）…` });
+    try { clearNpxCache(); } catch (err) { console.warn(`[cicy-code-sidecar] update clearNpxCache: ${err.message}`); }
 
-    // 3) 起
-    e({ phase: "swap", status: "running", message: "启动 cicy-code…" });
-    const c = await start({ logPath, port, force: true });
+    // 3) 起:钉死 cicy-code@<latest>,绕开 npx 对裸 `cicy-code` 的缓存,确保拉到新版
+    e({ phase: "swap", status: "running", message: `启动 cicy-code@${latest}…` });
+    const c = await start({ logPath, port, force: true, version: latest });
 
     // 4) 探活:等 TCP 监听起来。注意:cicy-code 启动会先恢复团队的 agent 面板
     //    (w-1xx,可能十几个),:8008 在这些 REPL 拉起之后才 bind —— 繁忙团队这一步
