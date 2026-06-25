@@ -496,7 +496,9 @@ async function update({ logPath, port = DEFAULT_PORT, emit } = {}) {
 
     // 3) 起:钉死 cicy-code@<latest>,绕开 npx 对裸 `cicy-code` 的缓存,确保拉到新版
     e({ phase: "swap", status: "running", message: `启动 cicy-code@${latest}…` });
-    const c = await start({ logPath, port, force: true, version: latest });
+    // 传 emit: 让 start→ensureEnv 的「检查网络是否为 CN → 选 registry(CN=npmmirror)」+ npx
+    // 下载进度都显示在更新抽屉里(主人: 更新没探测 CN 网络 → 其实探了,但没 emit 出来,看不见)。
+    const c = await start({ logPath, port, force: true, version: latest, emit: e });
 
     // 4) 探活:等 TCP 监听起来。注意:cicy-code 启动会先恢复团队的 agent 面板
     //    (w-1xx,可能十几个),:8008 在这些 REPL 拉起之后才 bind —— 繁忙团队这一步
