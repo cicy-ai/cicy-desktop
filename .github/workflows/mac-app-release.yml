@@ -44,13 +44,22 @@ jobs:
       # 装进 node_modules(--force 绕过 EBADPLATFORM),让 electron-builder 两架构都打包,
       # localbin 按用户机器选对应那份。必须在所有 npm install 之后(否则被剪枝)。
       - name: Bundle BOTH macOS arches of cicy-code/mihomo (runner is single-arch)
+        shell: bash
         run: |
-          pkgs=$(node -e "const o=require('./package.json').optionalDependencies||{}; const w=['cicy-code-darwin-x64','cicy-code-darwin-arm64','cicy-mihomo-darwin-x64','cicy-mihomo-darwin-arm64']; console.log(w.filter(p=>o[p]).map(p=>p+'@'+o[p]).join(' '))")
-          echo "force-installing both arches: $pkgs"
-          npm install --no-save --no-audit --force $pkgs
-          echo "--- bundled darwin subpackages ---"
-          ls node_modules | grep -E 'cicy-(code|mihomo)-darwin' || true
-          for a in x64 arm64; do test -f "node_modules/cicy-code-darwin-$a/cicy-code" || { echo "::error::cicy-code-darwin-$a binary missing after force-install"; exit 1; }; done
+          set -e
+          # `npm install --force` 在已有 lockfile 的项目里会判 "up to date" 跳过非本机架构
+          # → 改用 `npm pack`(纯按名下 tarball,不看 os/cpu/lockfile)+ 解压进 node_modules。
+          for pkg in cicy-code-darwin-x64 cicy-code-darwin-arm64 cicy-mihomo-darwin-x64 cicy-mihomo-darwin-arm64; do
+            ver=$(node -e "const o=require('./package.json').optionalDependencies||{}; process.stdout.write(o['$pkg']||'')")
+            [ -z "$ver" ] && { echo "skip $pkg (not pinned)"; continue; }
+            bin=cicy-code; case "$pkg" in cicy-mihomo*) bin=mihomo;; esac
+            if [ -f "node_modules/$pkg/$bin" ]; then echo "$pkg present (native arch)"; continue; fi
+            echo "npm pack $pkg@$ver → node_modules/$pkg"
+            tmp=$(mktemp -d); ( cd "$tmp" && npm pack "$pkg@$ver" --silent ); tar -xzf "$tmp"/*.tgz -C "$tmp"
+            rm -rf "node_modules/$pkg"; mkdir -p "node_modules/$pkg"; cp -R "$tmp/package/." "node_modules/$pkg/"; rm -rf "$tmp"
+          done
+          echo "--- bundled darwin subpackages ---"; ls node_modules | grep -E 'cicy-(code|mihomo)-darwin' || true
+          for a in x64 arm64; do test -f "node_modules/cicy-code-darwin-$a/cicy-code" || { echo "::error::cicy-code-darwin-$a binary missing"; exit 1; }; done
 
       # NOTE: the homepage SPA is rebuilt automatically by the prebuild:mac npm
       # hook (scripts/build-homepage.cjs) right before `npm run build:mac` below,
