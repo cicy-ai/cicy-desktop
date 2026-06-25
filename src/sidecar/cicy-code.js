@@ -94,9 +94,11 @@ async function startFromRuntime({ logPath, port }) {
 async function start({ logPath, port = DEFAULT_PORT, force = false, version = null } = {}) {
   if (child && !force) return child;
 
-  // 主人: native :8008 退役 —— 不再在本机起 cicy-code。docker team(:8009 容器)不变,
-  // 用户用那张 Docker 卡。这里直接返回,native 一律不起。
-  return null;
+  // 主人(2026-06 方向回调): mac 资源吃不消 docker —— colima VM 在 16G 机上把内存压垮,
+  // jetsam 拿 SIGKILL 乱杀进程(cicy-code 被误伤)。所以 macOS/Linux 改回 native cicy-code
+  // (:8008,本机直接跑二进制,省掉 4–8G 的 VM)。Windows 仍走 docker(WSL :8009,由
+  // sidecar-ipc 管),native 一律不起。
+  if (process.platform === "win32") return null;
 
   if (!force && await probeExisting(port)) {
     console.log(`[cicy-code-sidecar] existing instance on :${port}, reusing`);
@@ -138,8 +140,13 @@ async function start({ logPath, port = DEFAULT_PORT, force = false, version = nu
   // tmux-based multi-agent), same as mac/linux — no longer the single headless
   // 团队助手.
   const args = ["--desktop"];
-  child = spawn(exe, args, { stdio, detached: false, windowsHide: true, env });
-  console.log(`[cicy-code-sidecar] spawned ${exe} ${args.join(" ")} pid=${child.pid} port=${port} log=${logPath || "(none)"}`);
+  // 退出保活(主人):mac/linux 把 native cicy-code spawn 成 detached + unref,让它脱离
+  // Electron 的进程组——退出 App 不带走 daemon(及其 tmux agent),下次启动 probeExisting
+  // 探到就 adopt。Windows 不走这条(docker)。
+  const detached = process.platform !== "win32";
+  child = spawn(exe, args, { stdio, detached, windowsHide: true, env });
+  console.log(`[cicy-code-sidecar] spawned ${exe} ${args.join(" ")} pid=${child.pid} port=${port} detached=${detached} log=${logPath || "(none)"}`);
+  if (detached) { try { child.unref(); } catch {} }
 
   child.on("exit", (code, signal) => {
     console.log(`[cicy-code-sidecar] exited code=${code} signal=${signal}`);

@@ -1923,11 +1923,10 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
     } finally { setBusy(""); checkStatus(); }
   }, [checkStatus]);
 
-  // Render on Windows (WSL2) and macOS (Colima) — the two platforms the
-  // Docker-版 backend supports. window.cicy.platform is sync, so we can decide
-  // immediately without waiting on the async appStatus probe.
+  // Render on Windows (WSL2) only. 主人(2026-06 回调): macOS 改回 native cicy-code(:8008),
+  // 不再有 Docker 卡 —— mac 的本地团队走 LocalTeamCard。window.cicy.platform is sync.
   const platform = window.cicy?.platform || status?.platform;
-  if (platform !== "win32" && platform !== "darwin") return null;
+  if (platform !== "win32") return null;
 
   // Distinct states (主人: 状态分清楚):
   //   running       — :8009 container healthy → 打开

@@ -36,6 +36,10 @@ const { execFile, execFileSync } = require("child_process");
 
 const IS_WIN = process.platform === "win32";
 const REGISTRY = process.env.CICY_NPM_REGISTRY || "https://registry.npmmirror.com";
+// 多 registry 回退(主人): npmmirror(CN 快)优先,失败回退 npmjs.org(官方)。新发布的
+// cicy-code-<plat> 子包/新版本先到 npmjs,npmmirror 同步有延迟 —— 只查 npmmirror 会
+// "package not found" 把 seed/更新 整死(实测 mac:npm view cicy-code-darwin-x64 失败)。
+const REGISTRIES = [REGISTRY, "https://registry.npmjs.org"].filter((r, i, a) => a.indexOf(r) === i);
 const LOCAL_BIN = path.join(os.homedir(), ".local", "bin");
 const MANIFEST = path.join(LOCAL_BIN, ".cicy-localbin.json");
 
@@ -122,9 +126,15 @@ function npmExec(args, timeout = 600000) {
   });
 }
 
-// Latest published version of the per-platform subpackage.
+// Latest published version of the per-platform subpackage. Tries npmmirror then
+// npmjs.org (REGISTRIES) so a not-yet-mirrored package/version still resolves.
 async function latestVersion(name = DEFAULT) {
-  return (await npmExec(["view", pkgFor(name), "version", `--registry=${REGISTRY}`], 30000)).trim();
+  let lastErr;
+  for (const reg of REGISTRIES) {
+    try { return (await npmExec(["view", pkgFor(name), "version", `--registry=${reg}`], 30000)).trim(); }
+    catch (e) { lastErr = e; }
+  }
+  throw lastErr || new Error(`latestVersion ${pkgFor(name)}: all registries failed`);
 }
 
 // Point ~/.local/bin/<base> at a version-named binary: symlink on POSIX, a plain
@@ -210,7 +220,12 @@ async function fetchToLocalBin(ver, { emit, name = DEFAULT } = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cicy-lb-"));
   try {
     e({ phase: "download", status: "running", message: `下载 ${label} ${ver}…` });
-    const out = await npmExec(["pack", `${pkgFor(name)}@${ver}`, `--registry=${REGISTRY}`, "--pack-destination", tmp]);
+    let out, lastErr;
+    for (const reg of REGISTRIES) {
+      try { out = await npmExec(["pack", `${pkgFor(name)}@${ver}`, `--registry=${reg}`, "--pack-destination", tmp]); break; }
+      catch (e2) { lastErr = e2; }
+    }
+    if (!out) throw lastErr || new Error(`pack ${pkgFor(name)}@${ver}: all registries failed`);
     const tgz = path.join(tmp, out.trim().split("\n").pop().trim());
     await new Promise((resolve, reject) =>
       execFile("tar", ["-xzf", tgz, "-C", tmp], { windowsHide: true, timeout: 120000 }, (err) => (err ? reject(err) : resolve())));

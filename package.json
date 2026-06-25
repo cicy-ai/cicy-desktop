@@ -137,9 +137,20 @@
     "zod": "3.25",
     "electron-updater": "6.6.2"
   },
-  "//optionalDependencies": "docker-only(主人): host cicy-code/mihomo 二进制不再内置 —— cicy-code + mihomo 都只在 docker 容器里跑(npm 装/镜像预装),host 永远不起,所以去掉了 cicy-code-<plat> / cicy-mihomo-<plat> 子包。只留 electron。",
+  "//optionalDependencies": "主人(2026-06 回调): mac/linux 改回 native cicy-code(:8008,colima 在 16G mac 上压垮内存)→ 重新内置 cicy-code-<plat> / cicy-mihomo-<plat>,localbin.fromBundle 零网络 seed(npm 仅作更新通道,带 npmmirror→npmjs 回退)。这些由 scripts/sync-runtime-deps.cjs 在 tag-push 时同步到最新版。npm 的 os/cpu 字段保证每个平台只装自己那份。Windows 仍走 docker(WSL :8009),它那份 cicy-code-windows 用不到但 bundle 着无害。",
   "optionalDependencies": {
-    "electron": "41.0.3"
+    "electron": "41.0.3",
+    "cicy-code-darwin-x64": "2.3.22",
+    "cicy-code-darwin-arm64": "2.3.22",
+    "cicy-code-linux-x64": "2.3.22",
+    "cicy-code-linux-arm64": "2.3.22",
+    "cicy-code-windows-x64": "2.3.22",
+    "cicy-mihomo-darwin-x64": "1.10.4",
+    "cicy-mihomo-darwin-arm64": "1.10.4",
+    "cicy-mihomo-linux-x64": "1.10.4",
+    "cicy-mihomo-linux-arm64": "1.10.4",
+    "cicy-mihomo-windows-x64": "1.10.4",
+    "cicy-mihomo-windows-arm64": "1.10.4"
   },
   "devDependencies": {
     "@babel/core": "^7.29.0",

@@ -877,24 +877,38 @@ electronApp.whenReady().then(async () => {
   setupAppIcons();
   ensureDesktopLauncher();
   ensureAutoLaunch();
-  // 主人: native :8008 退役 —— 不再起本机 cicy-code、不再 watchdog 保活、不再把它
-  // 自动注册成「本地团队」。cicy-code 只在 docker 容器里跑(Docker 卡,:8009 那套不变,
-  // 由 sidecar-ipc 自己管理)。cicyCodeSidecar 仍保留供 :8008 探活/版本查询用。
-  //
-  // 升级清理:历史遗留的「本地团队」(http://127.0.0.1:8008)节点现在是死的(native 没了),
-  // 它那张连不上的卡得删掉。只删这个 native :8008 节点;docker :8009 + 自定义团队不动。
-  (async () => {
-    try {
+  // 主人(2026-06 方向回调): mac/linux 改回 native cicy-code(:8008,本机直接跑二进制)——
+  // colima VM 在 16G mac 上把内存压垮被 jetsam SIGKILL。Windows 仍走 docker(WSL :8009,
+  // 由 sidecar-ipc 管),不在这里起 native。
+  if (process.platform !== "win32") {
+    // Start bundled cicy-code daemon as a sidecar. Reuses an existing instance on
+    // :8008 if one is already running (probeExisting → adopt, never double-spawn).
+    cicyCodeSidecar
+      .start({ logPath: path.join(os.homedir(), "logs", "cicy-code-sidecar.log") })
+      .then((c) => { if (c) log.info(`[Sidecar] cicy-code spawned pid=${c.pid}`); })
+      .catch((e) => log.warn(`[Sidecar] cicy-code start failed: ${e.message}`));
+    startSidecarWatchdog();
+
+    // Auto-register the local sidecar as 本地团队 once :8008 answers (主人: 一装好就要
+    // 有占位卡)。addTeam upserts by host:port + auto-fills api_token, so re-runs are
+    // no-ops. A fresh boot may seed/npm-pull the binary first, so probe up to ~90s.
+    (async () => {
+      const sidecarPort = Number(process.env.CICY_CODE_PORT || 8008);
       const lt = require("./backends/local-teams");
-      const teams = await lt.list().catch(() => []);
-      for (const t of (teams || [])) {
-        if (/\/\/127\.0\.0\.1:8008(\/|$|\b)/.test(String(t.base_url || ""))) {
-          await lt.removeTeam(t.id).catch(() => {});
-          log.info(`[migrate] removed retired native :8008 team ${t.id}`);
-        }
+      for (let i = 0; i < 30; i++) {
+        try {
+          if (await cicyCodeSidecar.probeExisting(sidecarPort)) {
+            const r = await lt.addTeam({ base_url: `http://127.0.0.1:${sidecarPort}`, name: "本地团队" });
+            if (r && r.ok) log.info(`[Sidecar] local team ${r.upserted ? "refreshed" : "registered"} (${r.id})`);
+            else log.warn(`[Sidecar] local team auto-register failed: ${r && r.error}`);
+            return;
+          }
+        } catch (e) { log.warn(`[Sidecar] local team auto-register error: ${e.message}`); }
+        await new Promise((res) => setTimeout(res, 3000));
       }
-    } catch {}
-  })();
+      log.warn(`[Sidecar] local team auto-register gave up — :${sidecarPort} never came up`);
+    })();
+  }
 
   // Backend launcher: app menu + IPC handlers. Menu adds a Backends top-level
   // entry; IPC powers the launcher window (src/backends/launcher.html).
@@ -1375,40 +1389,30 @@ electronApp.on("window-all-closed", () => {
 
 function cleanup() {
   log.info("[Cleanup] shutting down child services");
-  try { cicyCodeSidecar.stop(); } catch (e) { /* best-effort */ }
+  // 退出保活(主人): macOS/Linux 的 native cicy-code(:8008)+ 它的 tmux agent 退出 App 时
+  // 不杀 —— daemon spawn 成 detached,关窗口不打断正在跑的 agent,下次启动 probeExisting
+  // adopt 即可。所以这里 **不** cicyCodeSidecar.stop()、**不** pkill cicy-code/tmux。
 
-  // Reap leftover NATIVE host helpers from the pre-docker-only era (a stray
-  // cicy-code.exe / ttyd / gotty / code-server). 主人: quitting CiCy Desktop must
-  // NOT touch Docker — in docker-only these all run INSIDE the container, and the
-  // Docker engine (colima VM on mac / WSL distro+dockerd on win) is a separate
-  // background service that survives the app + the container is --restart
-  // unless-stopped. So we ONLY kill exact native host targets, never the engine.
+  // Reap only leftover legacy host helpers (ttyd / gotty / code-server) — never the
+  // cicy-code daemon, never tmux, never the Docker engine. 主人: quitting CiCy Desktop
+  // must NOT touch the cicy-code daemon (native :8008 keep-alive) NOR Docker (colima VM /
+  // WSL distro — separate background services; the :8009 container is --restart unless-stopped).
   try {
     const { execSync } = require("child_process");
-    const targets = ["cicy-code", "ttyd", "gotty", "code-server"];
 
     if (process.platform === "win32") {
-      // Windows: taskkill /F /IM <name>.exe — EXACT image name, no wildcards, so it
-      // can only hit a native cicy-code.exe (retired), never wsl.exe / dockerd /
-      // vmmem / the WSL distro. We never `wsl --terminate/--shutdown` on quit.
-      for (const t of targets) {
+      // Windows: native cicy-code 不用(走 docker),只清 legacy host 残留。EXACT image
+      // name,never wsl.exe / dockerd / vmmem / the WSL distro。
+      for (const t of ["ttyd", "gotty", "code-server"]) {
         try { execSync(`taskkill /F /IM ${t}.exe`, { stdio: "ignore", windowsHide: true }); } catch {}
       }
     } else {
-      // macOS / Linux: pkill matches by FULL command line. ⚠️ docker-only: cicy-code
-      // / ttyd / gotty / code-server all run INSIDE the container, NOT on the host —
-      // there is normally nothing here to kill. CRITICAL: never `pkill -f cicy-code`
-      // plainly — the colima profile is named `cicy-code`, so the Lima VM hostagent
-      // runs as `limactl ... colima-cicy-code` and a bare match KILLS THE VM on every
-      // quit → next launch sees Docker "down" and re-bootstraps ("重新 install" bug).
-      // Anchor cicy-code to the native --desktop sidecar form (retired) only.
-      const unixPats = ["cicy-code --desktop", "ttyd", "gotty", "code-server"];
-      for (const p of unixPats) {
+      // macOS / Linux: 只清 legacy host strays。CRITICAL: never `pkill -f cicy-code` —
+      // 既会杀 native :8008 daemon(保活),又会误杀 colima 的 Lima hostagent
+      // (`limactl ... colima-cicy-code`)。也不动 tmux(agent 会话保活)。
+      for (const p of ["ttyd", "gotty", "code-server"]) {
         try { execSync(`pkill -f '${p}'`, { stdio: "ignore" }); } catch {}
       }
-      // Host tmux only (native path, retired); the container's tmux is in its own
-      // namespace and unaffected. (No -f cicy-code match here either.)
-      try { execSync(`pkill -f 'tmux.*cicy'`, { stdio: "ignore" }); } catch {}
     }
   } catch (e) {
     log.warn(`[Cleanup] kill children failed: ${e.message}`);

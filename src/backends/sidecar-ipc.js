@@ -29,8 +29,10 @@ const hostMihomo = require("../sidecar/host-mihomo"); // 宿主侧 mihomo ——
 // (bootstrap/status/restart/stop/dockerRestart/recreate/update/upgrade/runContainer/
 // readContainerToken),所以下面的 handler 共用一份逻辑,只换底层模块。
 const appDocker = process.platform === "darwin" ? colimaDocker : wslDocker;
-// Docker-版 cicy-code 支持的平台(win32 = WSL2,darwin = Colima)。其他平台不放行。
-const APP_DOCKER_SUPPORTED = process.platform === "win32" || process.platform === "darwin";
+// Docker-版 cicy-code 只剩 Windows(WSL2)。主人(2026-06 回调): macOS 改回 native cicy-code
+// (:8008,colima 在 16G mac 上压垮内存被 jetsam 杀)→ darwin 不再走 docker,这里不放行,
+// 所有 docker:app-* handler / reconcile / chrome-proxy 在 mac 上全部 no-op,DockerCard 不显示。
+const APP_DOCKER_SUPPORTED = process.platform === "win32";
 
 const PORT = Number(process.env.CICY_CODE_PORT || 8008);
 
@@ -151,6 +153,7 @@ function register({ sidecarLogPath } = {}) {
     return _dockerStatusCache;
   }
   function startDockerStatusDaemon() {
+    if (!APP_DOCKER_SUPPORTED) return; // mac/linux: native cicy-code,不跑 docker reconcile(否则 colima 反复重试)
     setTimeout(() => { reconcileDocker().catch(() => {}); }, 2000);     // shortly after startup
     setInterval(() => { reconcileDocker().catch(() => {}); }, 60000);   // keep fresh + self-heal
   }
