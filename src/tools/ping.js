@@ -28,7 +28,7 @@ module.exports = (registerTool) => {
       const os = require("os");
       const path = require("path");
 
-      const newToken = crypto.randomBytes(32).toString("hex");
+      const newToken = "cicy_" + crypto.randomBytes(32).toString("hex");
       const tokenPath = path.join(os.homedir(), "cicy-ai", "global.json");
 
       updateGlobalConfig(tokenPath, (config) => {

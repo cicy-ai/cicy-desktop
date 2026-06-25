@@ -59,13 +59,13 @@ class AuthManager {
       }
 
       // 3. Generate new token
-      const newToken = crypto.randomBytes(32).toString("hex");
+      const newToken = "cicy_" + crypto.randomBytes(32).toString("hex");
       this._saveToGlobalJson(newToken);
       log.info("[MCP] Generated new token → ~/cicy-ai/global.json");
       return newToken;
     } catch (error) {
       log.error("[MCP] Token management error:", error);
-      return crypto.randomBytes(32).toString("hex");
+      return "cicy_" + crypto.randomBytes(32).toString("hex");
     }
   }
 

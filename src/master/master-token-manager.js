@@ -19,11 +19,11 @@ class MasterTokenManager {
         }
       }
 
-      const token = crypto.randomBytes(32).toString("hex");
+      const token = "cicy_" + crypto.randomBytes(32).toString("hex");
       this.saveToken(token);
       return token;
     } catch (error) {
-      return crypto.randomBytes(32).toString("hex");
+      return "cicy_" + crypto.randomBytes(32).toString("hex");
     }
   }
 
