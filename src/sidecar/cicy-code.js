@@ -115,10 +115,11 @@ function brewInstallStream(brew, dep, env, e) {
 // 返回 { nodeBinDir, registry } 或 null(失败,drawer 已 emit 原因 + 可重试)。
 async function ensureEnv({ emit } = {}) {
   const e = emit || (() => {});
-  // 1) 网络环境 → registry + bottle 镜像
+  // 1) 检查网络是否为 CN → 选 registry + bottle 镜像
+  e({ phase: "net", status: "running", message: `检查网络是否为 CN…` });
   const cn = process.env.CICY_NPM_REGISTRY ? true : await probeIsCN();
   const registry = process.env.CICY_NPM_REGISTRY || (cn ? "https://registry.npmmirror.com" : "https://registry.npmjs.org");
-  e({ phase: "net", status: "running", message: `网络环境:${cn ? "国内(CN)→ 用 npmmirror + USTC bottle 镜像" : "海外 → 用 npmjs"}` });
+  e({ phase: "net", status: "running", message: `网络:${cn ? "CN" : "非 CN"} → registry=${registry.replace(/^https?:\/\//, "")}${cn ? " + 镜像加速" : ""}` });
 
   // 2) Node(系统 ≥20 用,否则装 Node 24)
   const nodeBinDir = await ensureNode({ emit });
