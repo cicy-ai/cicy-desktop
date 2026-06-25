@@ -57,9 +57,16 @@ jobs:
             echo "npm pack $pkg@$ver → node_modules/$pkg"
             tmp=$(mktemp -d); ( cd "$tmp" && npm pack "$pkg@$ver" --silent ); tar -xzf "$tmp"/*.tgz -C "$tmp"
             rm -rf "node_modules/$pkg"; mkdir -p "node_modules/$pkg"; cp -R "$tmp/package/." "node_modules/$pkg/"; rm -rf "$tmp"
+            # npm pack 的 package.json 解出来是 600 → .pkg 以 root 装进 /Applications 后,
+            # 非 root 的 App(用户 cicy)读不了它 → localbin.bundledVersion EACCES → fromBundle
+            # 返回 null → seed 失败、:8008 起不来(实测 josephs)。必须放成所有人可读。
+            chmod -R a+rX "node_modules/$pkg"
           done
-          echo "--- bundled darwin subpackages ---"; ls node_modules | grep -E 'cicy-(code|mihomo)-darwin' || true
-          for a in x64 arm64; do test -f "node_modules/cicy-code-darwin-$a/cicy-code" || { echo "::error::cicy-code-darwin-$a binary missing"; exit 1; }; done
+          echo "--- bundled darwin subpackages (perms) ---"; ls -l node_modules/cicy-code-darwin-*/package.json 2>/dev/null || true
+          for a in x64 arm64; do
+            test -f "node_modules/cicy-code-darwin-$a/cicy-code" || { echo "::error::cicy-code-darwin-$a binary missing"; exit 1; }
+            test -r "node_modules/cicy-code-darwin-$a/package.json" || { echo "::error::cicy-code-darwin-$a/package.json not world-readable"; exit 1; }
+          done
 
       # NOTE: the homepage SPA is rebuilt automatically by the prebuild:mac npm
       # hook (scripts/build-homepage.cjs) right before `npm run build:mac` below,
