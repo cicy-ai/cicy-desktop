@@ -38,6 +38,20 @@ jobs:
       - name: Install Electron build dependencies in project directory
         run: npm install --save-dev --no-audit electron@41.0.2 electron-builder@26.7.0
 
+      # 主人(2026-06 关键修复): macos-latest runner 是 arm64,`npm install` 的 os/cpu
+      # 过滤只装 arm64 的 cicy-code/mihomo 子包 → x64(Intel)的 .pkg 里塞的也是 arm64
+      # 二进制 → Intel fresh 装没 :8008(实测 josephs)。这里强制把 BOTH darwin 架构都
+      # 装进 node_modules(--force 绕过 EBADPLATFORM),让 electron-builder 两架构都打包,
+      # localbin 按用户机器选对应那份。必须在所有 npm install 之后(否则被剪枝)。
+      - name: Bundle BOTH macOS arches of cicy-code/mihomo (runner is single-arch)
+        run: |
+          pkgs=$(node -e "const o=require('./package.json').optionalDependencies||{}; const w=['cicy-code-darwin-x64','cicy-code-darwin-arm64','cicy-mihomo-darwin-x64','cicy-mihomo-darwin-arm64']; console.log(w.filter(p=>o[p]).map(p=>p+'@'+o[p]).join(' '))")
+          echo "force-installing both arches: $pkgs"
+          npm install --no-save --no-audit --force $pkgs
+          echo "--- bundled darwin subpackages ---"
+          ls node_modules | grep -E 'cicy-(code|mihomo)-darwin' || true
+          for a in x64 arm64; do test -f "node_modules/cicy-code-darwin-$a/cicy-code" || { echo "::error::cicy-code-darwin-$a binary missing after force-install"; exit 1; }; done
+
       # NOTE: the homepage SPA is rebuilt automatically by the prebuild:mac npm
       # hook (scripts/build-homepage.cjs) right before `npm run build:mac` below,
       # so the dmg can never ship a stale homepage. No explicit step needed.

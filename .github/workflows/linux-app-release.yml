@@ -36,6 +36,17 @@ jobs:
       - name: Install Electron build dependencies
         run: npm install --save-dev --no-audit electron@41.0.2 electron-builder@26.7.0
 
+      # 主人(2026-06 关键修复): runner 是 x64,npm 只装 linux-x64 的 cicy-code/mihomo →
+      # linux-arm64 用户的包里塞的是 x64 二进制。强制把两个 linux 架构都装进 node_modules,
+      # electron-builder 两架构都打包,localbin 按用户机器选。必须在所有 npm install 之后。
+      - name: Bundle BOTH linux arches of cicy-code/mihomo (runner is single-arch)
+        run: |
+          pkgs=$(node -e "const o=require('./package.json').optionalDependencies||{}; const w=['cicy-code-linux-x64','cicy-code-linux-arm64','cicy-mihomo-linux-x64','cicy-mihomo-linux-arm64']; console.log(w.filter(p=>o[p]).map(p=>p+'@'+o[p]).join(' '))")
+          echo "force-installing both arches: $pkgs"
+          npm install --no-save --no-audit --force $pkgs
+          ls node_modules | grep -E 'cicy-(code|mihomo)-linux' || true
+          for a in x64 arm64; do test -f "node_modules/cicy-code-linux-$a/cicy-code" || { echo "::error::cicy-code-linux-$a binary missing"; exit 1; }; done
+
       # NOTE: the homepage SPA is rebuilt automatically by the prebuild:linux npm
       # hook (scripts/build-homepage.cjs) right before `npm run build:linux` below,
       # so the AppImage can never ship a stale homepage. No explicit step needed.
