@@ -340,13 +340,16 @@ function register({ sidecarLogPath } = {}) {
 
   // ⋯ menu → 重建 Docker:删容器 + 用新 env(docker team 网关 key)重新 docker run(保留
   // volume 数据)。换 key 的唯一途径。渲染端已 confirm。
-  ipcMain.handle("docker:app-recreate", async () => {
+  ipcMain.handle("docker:app-recreate", async (e) => {
     try {
       await ensureDockerTeam();
-      await appDocker.recreate({ ...(await appOpts()) });
+      await appDocker.recreate({
+        ...(await appOpts()),
+        onProgress: (ev) => { try { e.sender.send("docker:app-progress", ev); } catch {} },
+      });
       await registerAppTeam();
       return { ok: true };
-    } catch (e) { return { ok: false, error: e.message }; }
+    } catch (err) { return { ok: false, error: err.message }; }
   });
 
   // ⋯ menu(仅 macOS)→ 「授权容器访问 Mac」:不挂 docker,改走 SSH。colima 自带

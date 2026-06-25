@@ -21,6 +21,8 @@ const log = require("electron-log"); // persisted main.log — bootstrap timing/
 // Dedicated distro name — NEVER reuse/clobber a user's own "Ubuntu" distro.
 const DISTRO   = process.env.CICY_WSL_DISTRO || "cicy-code-wsl";
 const IMAGE    = process.env.CICY_DOCKER_IMAGE || "cicybot/cicy-code:latest";
+// 主人: 容器额外暴露的端口段(给容器内 agent 跑服务用),宿主 127.0.0.1 直达。
+const EXTRA_PORTS = process.env.CICY_EXTRA_PORTS || "18000-19999";
 // PRE-BAKED WSL rootfs (built in CI, .github/workflows/build-wsl-package.yml):
 // Ubuntu 22.04 + Docker Engine + the cicy-code image already loaded into
 // /var/lib/docker, with dockerd auto-start via /etc/wsl.conf. We just download
@@ -360,6 +362,25 @@ async function loadImage(winTarballPath, { emit } = {}) {
   if (m && m[1] !== IMAGE) { try { await wslRun(`docker tag ${m[1]} ${IMAGE}`, { timeout: 15000 }); } catch {} }
 }
 
+// 主人修复「卡在旧镜像」: imagePresent() 只看本地有没有 `:latest`,旧镜像在就永远跳过下载。
+// 改成校验 OSS tarball ETag:缺镜像、或 ETag 跟上次 load 不一致 → 重下重载(删旧缓存包)。
+// 非破坏性:不删发行版/不删 volume。返回是否真刷新了。与 colima 端逻辑一致。
+async function ensureFreshImage({ emit } = {}) {
+  const e = (ev) => { try { emit && emit(ev); } catch {} };
+  const present = await imagePresent();
+  const remote = await docker.remoteImageEtag().catch(() => "");
+  const loaded = docker.readLoadedImageEtag();
+  if (present && remote && loaded && remote === loaded) return false;
+  if (present && !remote) return false; // 拿不到远端指纹,保守不刷
+  if (present && remote !== loaded) { e({ phase: "image", status: "running", message: "检测到更新的镜像,正在拉取最新版…" }); docker.clearImageTarball(); }
+  let tarball;
+  try { tarball = await docker.downloadImageTarball({ emit }); }
+  catch (err) { if (present) { e({ phase: "image", status: "running", message: `最新镜像下载失败(${err.message}),沿用现有镜像` }); return false; } throw err; }
+  await loadImage(tarball, { emit });
+  if (remote) docker.writeLoadedImageEtag(remote);
+  return true;
+}
+
 // HTTP /health probe on 127.0.0.1:port from Windows — WSL2 forwards localhost,
 // so a container published on :port is reachable here. Reuse docker.js's probe.
 const probeHealth = docker.probeHealth;
@@ -375,40 +396,47 @@ const probeHealth = docker.probeHealth;
 //     network-exposed; the api_token gates access. WSL2's localhost relay then
 //     forwards the distro's 127.0.0.1:<port> to Windows 127.0.0.1:<port>.
 // Only :<port> is published — sshd/cron stay inside the container's own netns.
-// Shared folder bind: the CURRENT Windows user's ~/Desktop/Share ↔
-// /home/cicy/cicy-ai/Share in the container — a drop-zone both the user and the
-// agent can read/write. Auto-created (with a readme) on every container start if
-// missing; os.homedir() makes it per-user (never hard-coded to one account).
-// Returns the docker `-v` arg, or "" if setup fails (mount is best-effort).
-const SHARE_README = `# CiCy 共享目录 / Shared Folder
+// Persistent workspace bind: the CURRENT Windows user's ~/projects ↔
+// /home/cicy/projects in the container — both the user and the agent read/write
+// it, and it lives on the host disk so it survives container delete/rebuild.
+// Auto-created (with a README) on every container start if missing; os.homedir()
+// makes it per-user (never hard-coded). Returns the `-v` arg, or "" on failure.
+const PROJECTS_README = `# CiCy 持久工作区 / Persistent Workspace
 
-这个文件夹与 CiCy 容器之间双向共享 —— 你和容器里的 agent 都能读写同一份文件。
+这个文件夹与 CiCy 容器双向共享,而且是**持久的** —— 它在你电脑的真实磁盘上,
+不在容器里。容器删了、重建了、升级了,这里的文件都还在,不会丢。
 
-- 你的电脑上: ~/Desktop/Share （就是这个文件夹）
-- 容器里: /home/cicy/cicy-ai/Share
+- 你的电脑上: ~/projects （就是这个文件夹）
+- 容器里: /home/cicy/projects
 
-把文件丢进来,CiCy 里的 agent 就能访问;agent 写到容器 Share 里的东西,也会出现在这里。
+把代码仓库 / 项目放在这里,CiCy 里的 agent 就能直接读写;它们改的东西也实时
+出现在你电脑上。容器是临时的,这个目录才是你工作的家。
 
 ---
 
-This folder is shared both ways between your computer and the CiCy container.
+This folder is shared both ways with the CiCy container and is **persistent** —
+it lives on your computer's real disk, not inside the container. Delete, rebuild
+or upgrade the container and everything here survives.
 
-- On your computer: ~/Desktop/Share (this folder)
-- Inside the container: /home/cicy/cicy-ai/Share
+- On your computer: ~/projects (this folder)
+- Inside the container: /home/cicy/projects
 
-Drop files here for CiCy agents to read; files agents write to Share show up here too.
+Put your repos / projects here; CiCy agents read and write them directly, and
+their changes show up live on your machine. The container is disposable — this
+directory is where your work actually lives.
 `;
 
-function shareMountArg() {
+// 主人: 把宿主 ~/projects 挂进容器 /home/cicy/projects(~ 用 os.homedir() 展开,绝不写死)。
+// Windows 路径 C:\Users\<user>\projects → WSL 视图 /mnt/c/Users/<user>/projects。
+function projectsMountArg() {
   try {
-    const winShare = path.join(os.homedir(), "Desktop", "Share");
-    fs.mkdirSync(winShare, { recursive: true });
-    const readme = path.join(winShare, "readme.md");
-    if (!fs.existsSync(readme)) { try { fs.writeFileSync(readme, SHARE_README); } catch {} }
-    // C:\Users\<user>\Desktop\Share → /mnt/c/Users/<user>/Desktop/Share (WSL view)
-    const wslShare = winShare.replace(/^([A-Za-z]):/, (_, d) => `/mnt/${d.toLowerCase()}`).replace(/\\/g, "/");
-    return `-v '${wslShare}':/home/cicy/cicy-ai/Share`;
-  } catch (e) { log.warn(`[wsl-docker] Share mount setup failed: ${e.message}`); return ""; }
+    const winProjects = path.join(os.homedir(), "projects");
+    fs.mkdirSync(winProjects, { recursive: true });
+    const readme = path.join(winProjects, "README.md");
+    if (!fs.existsSync(readme)) { try { fs.writeFileSync(readme, PROJECTS_README); } catch {} }
+    const wslProjects = winProjects.replace(/^([A-Za-z]):/, (_, d) => `/mnt/${d.toLowerCase()}`).replace(/\\/g, "/");
+    return `-v '${wslProjects}':/home/cicy/projects`;
+  } catch (e) { log.warn(`[wsl-docker] projects mount setup failed: ${e.message}`); return ""; }
 }
 
 async function runContainer({ port = 8009, container = "cicy-code-docker", volume = "cicy-team-8009", env = {} } = {}) {
@@ -427,7 +455,7 @@ async function runContainer({ port = 8009, container = "cicy-code-docker", volum
   // 223.5.5.5 (CN-fast) first, Google 8.8.8.8 as the overseas fallback.
   // 主人方案: Chrome 的 per-profile 代理改由「宿主 mihomo」(host-mihomo.js)服务,不再从容器
   // publish 20001-32(WSL/colima 转发那段口到不了容器里只绑 127.0.0.1 的监听)。容器只暴露 :8009。
-  const cmd = `docker run -d --name ${container} --restart unless-stopped --dns 223.5.5.5 --dns 8.8.8.8 -p 127.0.0.1:${port}:8008 -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${shareMountArg()} ${envArgs} ${IMAGE}`;
+  const cmd = `docker run -d --name ${container} --restart unless-stopped --dns 223.5.5.5 --dns 8.8.8.8 -p 127.0.0.1:${port}:8008 -p 127.0.0.1:${EXTRA_PORTS}:${EXTRA_PORTS} -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${projectsMountArg()} ${envArgs} ${IMAGE}`;
   await wslRun(cmd, { timeout: 60000 });
   ensureDesktopShortcut(volume, port).catch(() => {});
   return { started: true };
@@ -616,17 +644,14 @@ async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-dock
     done();
   } else done(true);
 
-  // 5) Base image — pre-baked into the package, so this normally just confirms.
-  //    The download-tarball path is a fallback for a non-pre-baked rootfs.
+  // 5) Base image — pre-baked into the package, normally just confirms; but if the
+  //    OSS tarball has a newer build (ETag changed) it refreshes (主人:别卡旧镜像)。
   begin("ensure-image");
-  if (!(await imagePresent())) {
-    let tarball;
-    try { tarball = await docker.downloadImageTarball({ emit }); }
-    catch (e) { fail("image_download_failed", e.message); emit({ phase: "image", status: "error", message: `镜像下载失败：${e.message}（点重试续传）` }); finish(false, "image_download_failed"); return { ok: false, reason: "image_download_failed" }; }
-    try { await loadImage(tarball, { emit }); }
-    catch (e) { fail("image_load_failed", e.message); emit({ phase: "image", status: "error", message: `镜像导入失败：${e.message}（点重试）` }); finish(false, "image_load_failed"); return { ok: false, reason: "image_load_failed" }; }
-    done();
-  } else done(true);
+  try { await ensureFreshImage({ emit }); done(); }
+  catch (e) {
+    if (!(await imagePresent())) { fail("image_download_failed", e.message); emit({ phase: "image", status: "error", message: `镜像下载失败：${e.message}（点重试续传）` }); finish(false, "image_download_failed"); return { ok: false, reason: "image_download_failed" }; }
+    emit({ phase: "image", status: "running", message: `镜像刷新失败（${e.message}），沿用现有镜像` }); done(true);
+  }
 
   // 6) Container (phase "container" = 启动服务)
   begin("run-container");
@@ -698,7 +723,10 @@ async function dockerRestart({ container = "cicy-code-docker-8009" } = {}) {
 // 重建容器:docker rm -f 旧容器 + docker run 新容器(用新 env,如新的 docker team 网关
 // key)。**保留 volume**(数据/api_token/deviceId 不丢),只是换掉容器本身 + env。
 // 破坏性(短暂中断 + 换 key)→ 调用方要 confirm。
-async function recreate({ port = 8009, container = "cicy-code-docker-8009", volume = "cicy-team-8009", env = {} } = {}) {
+async function recreate({ onProgress, port = 8009, container = "cicy-code-docker-8009", volume = "cicy-team-8009", env = {} } = {}) {
+  const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
+  // 重建 = 用最新镜像重建。OSS 有更新版先刷新(非破坏性,不删发行版/volume),再 rm + run。
+  try { await ensureFreshImage({ emit }); } catch (e) { emit({ phase: "image", status: "running", message: `镜像刷新跳过(${e.message}),用现有镜像重建` }); }
   // 强删占用该端口的**任何**容器(含老名字 cicy-code-docker)+ 目标容器 —— 否则
   // runContainer 开头的 probeHealth 看到旧容器还健康会 adopt 它、不重建,key 就换不了。
   try { await wslRun(`docker ps -aq --filter publish=${port} | xargs -r docker rm -f 2>/dev/null; docker rm -f ${container} 2>/dev/null; true`, { timeout: 30000 }); } catch {}

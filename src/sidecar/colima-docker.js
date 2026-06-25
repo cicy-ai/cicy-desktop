@@ -37,6 +37,12 @@ const IMAGE   = process.env.CICY_DOCKER_IMAGE || "cicybot/cicy-code:latest";
 const IS_ARM  = process.arch === "arm64";
 const ARCH_TAG = IS_ARM ? "arm64" : "amd64";
 const PLATFORM_FLAG = IS_ARM ? "--platform linux/amd64" : "";
+// 主人: 容器额外暴露的端口段(给容器内 agent 跑服务用),宿主 127.0.0.1 直达。
+const EXTRA_PORTS = process.env.CICY_EXTRA_PORTS || "18000-19999";
+// 主人: Colima VM 资源,4C8G 起步(可用 env 覆盖,不写死)。
+const VM_CPUS   = process.env.CICY_COLIMA_CPUS   || "4";
+const VM_MEMORY = process.env.CICY_COLIMA_MEMORY || "8";
+const VM_DISK   = process.env.CICY_COLIMA_DISK   || "30";
 
 // Colima 基础 VM 镜像:colima `start` 默认从 github.com/abiosoft/colima-core 下,
 // CN 直接 EOF 拉不下来(真机实测)。colima 0.10.3 没有 --disk-image-mirror(那是
@@ -222,7 +228,7 @@ async function startVM({ emit } = {}) {
   const vzArgs = IS_ARM
     ? `--vm-type vz --vz-rosetta --mount-type virtiofs`
     : `--vm-type vz --mount-type virtiofs`;
-  const common = `--cpus 2 --memory 4 --disk 30 ${diskArgs}`;
+  const common = `--cpus ${VM_CPUS} --memory ${VM_MEMORY} --disk ${VM_DISK} ${diskArgs}`;
   for (let attempt = 1; attempt <= 3; attempt++) {
     emit && emit({ phase: "container", status: "running", message: `启动 Colima 运行环境(首次较慢,请耐心)…${attempt > 1 ? `(重试 ${attempt})` : ""}` });
     try {
@@ -263,6 +269,28 @@ async function loadImage(tarball, { emit } = {}) {
   if (m && m[1] !== IMAGE) { try { await dk(`tag ${m[1]} ${IMAGE}`, { timeout: 15000 }); } catch {} }
 }
 
+// 主人修复「为什么没用最新的 docker」: imagePresent() 只看本地有没有 `:latest` 标签,
+// 旧镜像在就永远跳过下载 → 卡在过期镜像。这里改成校验 OSS tarball 的 ETag:本地缺镜像、
+// 或 OSS 的 ETag 跟上次 load 的不一致 → 重下重载(删旧缓存包,避免同尺寸被误跳过)。
+// 非破坏性:不删 VM、不删 volume(数据/token 不丢)。返回是否真的刷新了。
+async function ensureFreshImage({ emit } = {}) {
+  const e = (ev) => { try { emit && emit(ev); } catch {} };
+  const present = await imagePresent();
+  const remote = await docker.remoteImageEtag().catch(() => "");
+  const loaded = docker.readLoadedImageEtag();
+  // 本地有镜像、且能证明是最新(ETag 一致)→ 不动。HEAD 失败(remote 空)时不强刷,
+  // 避免离线/被墙时把能用的旧镜像也拖垮。
+  if (present && remote && loaded && remote === loaded) return false;
+  if (present && !remote) return false; // 拿不到远端指纹,保守不刷
+  if (present && remote !== loaded) { e({ phase: "image", status: "running", message: "检测到更新的镜像,正在拉取最新版…" }); docker.clearImageTarball(); }
+  let tarball;
+  try { tarball = await docker.downloadImageTarball({ emit }); }
+  catch (err) { if (present) { e({ phase: "image", status: "running", message: `最新镜像下载失败(${err.message}),沿用现有镜像` }); return false; } throw err; }
+  await loadImage(tarball, { emit });
+  if (remote) docker.writeLoadedImageEtag(remote);
+  return true;
+}
+
 // 宿主 127.0.0.1:port 健康探针 —— Lima 自动把 VM 内 127.0.0.1 端口转发到宿主。
 const probeHealth = docker.probeHealth;
 
@@ -277,44 +305,41 @@ const probeHealth = docker.probeHealth;
 //     bind-mount 会用空的宿主目录**遮住镜像里预装的 /home/cicy**(cicy-code 装在那),
 //     entrypoint 找不到就试图全局 npm 重装 → EACCES 崩溃,:8009 起不来。named volume
 //     首次挂载会**从镜像内容预填充**,容器才看得到预装的 cicy-code(和 WSL 一致)。
-// Shared folder bind: the CURRENT macOS user's ~/Desktop/Share ↔
-// /home/cicy/cicy-ai/Share in the container. Auto-created (with a readme) on every
-// container start if missing; os.homedir() makes it per-user. Colima mounts the
-// host $HOME into the VM, so the direct path works (no /mnt translation like WSL).
-const SHARE_README = `# CiCy 共享目录 / Shared Folder
+// 主人: 把宿主 ~/projects 挂进容器 /home/cicy/projects(~ 用 os.homedir() 展开,绝不写死)。
+// Colima 把宿主 $HOME 挂进 VM,所以直接路径就能用(不像 WSL 要 /mnt 转换)。
+// 源目录不存在先建出来,否则 docker 建挂载点会报错挡住容器启动。
+const PROJECTS_README = `# CiCy 持久工作区 / Persistent Workspace
 
-这个文件夹与 CiCy 容器之间双向共享 —— 你和容器里的 agent 都能读写同一份文件。
+这个文件夹与 CiCy 容器双向共享,而且是**持久的** —— 它在你电脑的真实磁盘上,
+不在容器里。容器删了、重建了、升级了,这里的文件都还在,不会丢。
 
-- 你的电脑上: ~/Desktop/Share （就是这个文件夹）
-- 容器里: /home/cicy/cicy-ai/Share
+- 你的电脑上: ~/projects （就是这个文件夹）
+- 容器里: /home/cicy/projects
 
-把文件丢进来,CiCy 里的 agent 就能访问;agent 写到容器 Share 里的东西,也会出现在这里。
+把代码仓库 / 项目放在这里,CiCy 里的 agent 就能直接读写;它们改的东西也实时
+出现在你电脑上。容器是临时的,这个目录才是你工作的家。
 
 ---
 
-This folder is shared both ways between your computer and the CiCy container.
+This folder is shared both ways with the CiCy container and is **persistent** —
+it lives on your computer's real disk, not inside the container. Delete, rebuild
+or upgrade the container and everything here survives.
 
-- On your computer: ~/Desktop/Share (this folder)
-- Inside the container: /home/cicy/cicy-ai/Share
+- On your computer: ~/projects (this folder)
+- Inside the container: /home/cicy/projects
 
-Drop files here for CiCy agents to read; files agents write to Share show up here too.
+Put your repos / projects here; CiCy agents read and write them directly, and
+their changes show up live on your machine. The container is disposable — this
+directory is where your work actually lives.
 `;
 
-function shareMountArg() {
+function projectsMountArg() {
   try {
-    // 主人: Share 真实目录放 ~/cicy-ai/Share —— 不能用 ~/Desktop:macOS TCC 挡着 colima(VM)
-    // 访问 Desktop/Documents/Downloads,docker 建挂载源时报 'mkdir …/Desktop: operation not
-    // permitted' → 容器起不来。~/cicy-ai 非 TCC、colima 能挂。再在 Desktop 放个软链(桌面可见;
-    // 失败无所谓,真实目录已可用)。
-    const share = path.join(os.homedir(), "cicy-ai", "Share");
-    fs.mkdirSync(share, { recursive: true });
-    const readme = path.join(share, "readme.md");
-    if (!fs.existsSync(readme)) { try { fs.writeFileSync(readme, SHARE_README); } catch {} }
-    try {
-      const link = path.join(os.homedir(), "Desktop", "Share");
-      if (!fs.existsSync(link)) fs.symlinkSync(share, link);
-    } catch {}
-    return `-v '${share}':/home/cicy/cicy-ai/Share`;
+    const dir = path.join(os.homedir(), "projects");
+    fs.mkdirSync(dir, { recursive: true });
+    const readme = path.join(dir, "README.md");
+    if (!fs.existsSync(readme)) { try { fs.writeFileSync(readme, PROJECTS_README); } catch {} }
+    return `-v '${dir}':/home/cicy/projects`;
   } catch { return ""; }
 }
 
@@ -329,15 +354,16 @@ async function runContainer({ port = 8009, container = "cicy-code-docker-8009", 
   // 服务,不再从容器 publish 20001-32 —— colima/Lima 转发那个端口段始终到不了容器里只绑
   // 127.0.0.1 的监听(Chrome 一直 ERR_EMPTY_RESPONSE)。容器只暴露 cicy-code 的 :8009。
   const mk = (s) => `run -d --name ${container} --restart unless-stopped ${PLATFORM_FLAG} ` +
-    `-p 127.0.0.1:${port}:8008 -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${s} ${envArgs} ${IMAGE}`;
-  const share = shareMountArg();
+    `-p 127.0.0.1:${port}:8008 -p 127.0.0.1:${EXTRA_PORTS}:${EXTRA_PORTS} ` +
+    `-e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${s} ${envArgs} ${IMAGE}`;
+  const mounts = projectsMountArg();
   try {
-    await dk(mk(share), { timeout: 90000 });
+    await dk(mk(mounts), { timeout: 90000 });
   } catch (e) {
-    if (!share) throw e;
-    // 兜底: 带 Share 启动失败(如 macOS TCC 挡 colima 访问挂载源)→ 去掉 Share 重试,保证容器
-    // 一定能起(Share 只是附加共享目录,不该挡住整个服务). 主人: '容器起不来' 的修复.
-    console.warn(`[colima] 带 Share 启动失败,去掉 Share 重试: ${e.message}`);
+    if (!mounts) throw e;
+    // 兜底: 带挂载启动失败(如 colima 访问挂载源出错)→ 去掉附加挂载重试,保证容器
+    // 一定能起(projects 只是附加共享目录,不该挡住整个服务). 主人: '容器起不来' 的修复.
+    console.warn(`[colima] 带挂载启动失败,去掉附加挂载重试: ${e.message}`);
     try { await dk(`rm -f ${container}`, { timeout: 20000 }); } catch {}
     await dk(mk(""), { timeout: 90000 });
   }
@@ -445,13 +471,11 @@ async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-dock
     }
   }
 
-  // 4) 镜像(docker load R2 包)
-  if (!(await imagePresent())) {
-    let tarball;
-    try { tarball = await docker.downloadImageTarball({ emit }); }
-    catch (e) { emit({ phase: "image", status: "error", message: `镜像下载失败:${e.message}(点重试续传)` }); return { ok: false, reason: "image_download_failed" }; }
-    try { await loadImage(tarball, { emit }); }
-    catch (e) { emit({ phase: "image", status: "error", message: `镜像导入失败:${e.message}(点重试)` }); return { ok: false, reason: "image_load_failed" }; }
+  // 4) 镜像(docker load R2 包)—— 缺镜像就下,镜像在但 OSS 有更新版也刷新(主人:别卡旧镜像)
+  try { await ensureFreshImage({ emit }); }
+  catch (e) {
+    if (!(await imagePresent())) { emit({ phase: "image", status: "error", message: `镜像下载失败:${e.message}(点重试续传)` }); return { ok: false, reason: "image_download_failed" }; }
+    emit({ phase: "image", status: "running", message: `镜像刷新失败(${e.message}),沿用现有镜像` });
   }
 
   // 5) 容器
@@ -507,7 +531,10 @@ async function dockerRestart({ container = "cicy-code-docker-8009" } = {}) {
 
 // 重建:强删占该端口的任何容器 + 目标容器,再 docker run(用新 env,如新 docker team
 // 网关 key)。保留 bind-mount 宿主目录(数据/api_token 不丢)。破坏性 → 调用方要 confirm。
-async function recreate({ port = 8009, container = "cicy-code-docker-8009", volume = "cicy-team-8009", env = {} } = {}) {
+async function recreate({ onProgress, port = 8009, container = "cicy-code-docker-8009", volume = "cicy-team-8009", env = {} } = {}) {
+  const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
+  // 重建 = 用最新镜像重建。OSS 有更新版先刷新(非破坏性,不删 VM/volume),再 rm + run。
+  try { await ensureFreshImage({ emit }); } catch (e) { emit({ phase: "image", status: "running", message: `镜像刷新跳过(${e.message}),用现有镜像重建` }); }
   try { await dk(`ps -aq --filter publish=${port} | xargs -r docker --context ${CTX} rm -f 2>/dev/null; docker --context ${CTX} rm -f ${container} 2>/dev/null; true`, { timeout: 30000 }); } catch {}
   const r = await runContainer({ port, container, volume, env });
   try { await ensureDesktopShortcut(volume, port); } catch {}

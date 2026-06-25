@@ -181,6 +181,38 @@ function headSize(url, hops = 5) {
   });
 }
 
+// HEAD the URL and return a freshness fingerprint (ETag, else Last-Modified).
+// Mirrors headSize (follows redirects, node http so it works without curl).
+// "" on any failure → callers treat unknown as "can't prove fresh".
+function headETag(url, hops = 5) {
+  return new Promise((resolve) => {
+    if (hops <= 0) return resolve("");
+    const lib = url.startsWith("https:") ? https : http;
+    const req = lib.request(url, { method: "HEAD", timeout: 15000, headers: { "User-Agent": DL_UA } }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        res.resume();
+        return headETag(res.headers.location, hops - 1).then(resolve);
+      }
+      resolve(String(res.headers["etag"] || res.headers["last-modified"] || "").trim());
+    });
+    req.on("error", () => resolve(""));
+    req.on("timeout", () => { req.destroy(); resolve(""); });
+    req.end();
+  });
+}
+
+// Marker recording the OSS fingerprint of the image tarball we last `docker load`ed.
+// Lets recreate/bootstrap detect a refreshed OSS image (same `:latest` tag, new
+// content) and re-pull — without it, `imagePresent()` stays true forever and the
+// machine is pinned to a stale image (主人 bug: "为什么没用最新的docker").
+function imageEtagPath() { return path.join(downloadsDir(), "cicy-code-latest.etag"); }
+function readLoadedImageEtag() { try { return fs.readFileSync(imageEtagPath(), "utf8").trim(); } catch { return ""; } }
+function writeLoadedImageEtag(v) { try { fs.writeFileSync(imageEtagPath(), String(v || "")); } catch {} }
+async function remoteImageEtag() { return headETag(R2_TARBALL); }
+// Drop the cached tarball so a stale copy on disk can't be reused (downloadImageTarball
+// skips a complete file by size, which a same-size new image would wrongly satisfy).
+function clearImageTarball() { try { fs.unlinkSync(imageTarballPath()); } catch {} }
+
 // Download `url`→`dest` but: SKIP if the file is already complete, RESUME if it's
 // a partial, retry with progress, fall back to `mirror`. This is the core of the
 // user's "下载了就不重复下载 / 步骤走过的不要再走".
@@ -735,4 +767,6 @@ module.exports = {
   launchElevated, wslMissing, ensureWsl,
   // platform-agnostic download/retry primitives, reused by native.js
   ensureDownloaded, curlDownload, withRetry, waitUntil, run, headSize,
+  // image freshness (主人: 修「重建仍用旧镜像」—— 校验 OSS ETag 变了才重下重载)
+  headETag, remoteImageEtag, readLoadedImageEtag, writeLoadedImageEtag, clearImageTarball,
 };
