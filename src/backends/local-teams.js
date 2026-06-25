@@ -166,10 +166,12 @@ async function probeLiveness(baseUrl, token) {
     const port = Number(parsed.port) || (parsed.protocol === "https:" ? 443 : 80);
     const open = await probePort(parsed.hostname, port);
     if (!open) return { status: "stopped", version: null, error: "port_closed" };
-    const health = await probeHealth(baseUrl, token); // best-effort enrichment
-    if (health.status === 401 || health.status === 403) return { status: "auth_error", version: health.version || null, error: null };
-    // Port is listening → the daemon is up. Health timing out just means busy.
-    return { status: "running", version: health.version || null, error: health.ok ? null : (health.error || null) };
+    // 探活不用 token(主人): 死活完全由裸 TCP 端口判定。/api/health 仅用来补版本号,**不带 token**
+    // —— 本地团队真正用的 token 是 ~/cicy-ai/global.json 的 api_token,在 openTeam 时实时拿;若这里
+    // 带上 teams.json 里可能已陈旧的快照,旧 token → 401 → 会把活着的守护进程误标成 auth_error。
+    // 端口开着就是 running,health 401/超时都不降级。
+    const health = await probeHealth(baseUrl, "");
+    return { status: "running", version: health.version || null, error: null };
   }
   const health = await probeHealth(baseUrl, token);
   return { status: classify(health), version: health.version || null, error: health.error || null };
@@ -224,9 +226,14 @@ async function openTeam(id, opts = {}) {
   if (!node) return { ok: false, error: "team not found" };
   const baseUrl = (node.base_url || "").replace(/\/$/, "");
   if (!baseUrl) return { ok: false, error: "no base_url" };
-  // opts.token (a LIVE-read token, e.g. the :8009 container's own) takes
-  // precedence over any stored token — the Docker team stores none.
-  const token = (opts && opts.token) || node.api_token || "";
+  // ?token= 实时拿(主人): 本地团队的 token 就是 ~/cicy-ai/global.json 的 api_token(和 cicy-code
+  // 共用同一份)—— 打开时**实时读 global.json**,cicy-code 轮换 token 也立刻跟得上,绝不吃 teams.json
+  // 里可能已陈旧的快照(陈旧 → ?token= 旧值 → :8008 拒 → 卡登录/白屏)。opts.token(如 :8009 容器
+  // 自己实时拿的)优先级最高;非本地团队仍用存的 node.api_token。
+  let isLocalUrl = false;
+  try { const h = new URL(baseUrl).hostname; isLocalUrl = h === "127.0.0.1" || h === "localhost" || h === "::1"; } catch {}
+  const token = (opts && opts.token)
+    || (isLocalUrl ? (readGlobal()?.api_token || node.api_token || "") : (node.api_token || ""));
   const url = token ? `${baseUrl}/?token=${encodeURIComponent(token)}` : baseUrl;
 
   // Compare by origin+pathname only — token + hash both vary per

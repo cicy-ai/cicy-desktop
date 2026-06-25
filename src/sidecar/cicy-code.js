@@ -42,8 +42,21 @@ const pexec = (cmd, args, timeout) => new Promise((res, rej) => execFile(cmd, ar
 // Returns a bin dir with node+npx (node≥20), or null. emit streams progress to a drawer.
 async function ensureNode({ emit } = {}) {
   const e = emit || (() => {});
+  // 找到/装完 node 就**立刻把它的 bin 放进本进程 PATH 首位**(主人指出的 bug): 否则后续任何不显式
+  // 传 PATH 的 execFile("npm"/"npx"/"tar"...) 还会命中系统老 node(如 josephs 的 node13)。放在 ensureNode
+  // 里 → 所有调用方、所有 return 分支都覆盖,不会漏。
+  const adopt = (dir) => {
+    if (dir) {
+      if (!String(process.env.PATH || "").split(":").includes(dir)) {
+        process.env.PATH = `${dir}:${process.env.PATH || ""}`;
+      }
+      // 我们装的 runtime node → 软链 node/npm/npx 进 ~/.local/bin,用户 shell 直接能用。
+      if (dir === path.join(NODE_HOME, "bin")) linkBinsToDefaultPath(dir, ["node", "npm", "npx"], e);
+    }
+    return dir;
+  };
   let dir = findUsableNode();
-  if (dir) return dir;
+  if (dir) return adopt(dir);
   const arch = process.arch === "arm64" ? "arm64" : "x64";
   const fname = `node-${NODE_VER}-darwin-${arch}.tar.gz`;
   const urls = [
@@ -62,7 +75,7 @@ async function ensureNode({ emit } = {}) {
       if (fs.existsSync(path.join(NODE_HOME, "bin", "node")) && fs.existsSync(path.join(NODE_HOME, "bin", "npx"))) {
         try { fs.unlinkSync(tmp); } catch {}
         e({ phase: "node", status: "done", message: `Node ${NODE_VER} 安装完成 → ${path.join(NODE_HOME, "bin")}` });
-        return path.join(NODE_HOME, "bin");
+        return adopt(path.join(NODE_HOME, "bin"));
       }
       e({ phase: "node", status: "running", message: `解压后没找到 node/npx,换下一个源…` });
     } catch (err) {
@@ -95,6 +108,23 @@ function probeIsCN() {
 // ── Homebrew + 系统依赖 ───────────────────────────────────────────────────────
 const BREW_DIRS = ["/opt/homebrew/bin", "/usr/local/bin"];
 function findBrew() { for (const d of BREW_DIRS) { const p = path.join(d, "brew"); try { if (fs.existsSync(p)) return p; } catch {} } return null; }
+
+// 把 runtime 二进制软链进 ~/.local/bin —— cicy 约定的用户 bin(cicy-code setup 会把它加进 shell
+// PATH,cicy-mihomo 包装器也在那),用户 shell 里直接 `node`/`npm`/`mihomo` 就能用,不用全路径。
+const LOCAL_BIN = path.join(os.homedir(), ".local", "bin");
+function linkBinsToDefaultPath(srcDir, names, e) {
+  try {
+    fs.mkdirSync(LOCAL_BIN, { recursive: true });
+    for (const x of names) {
+      const target = path.join(srcDir, x);
+      if (!fs.existsSync(target)) continue;
+      const link = path.join(LOCAL_BIN, x);
+      try { fs.unlinkSync(link); } catch {}
+      try { fs.symlinkSync(target, link); } catch (err) { e && e({ phase: "deps", status: "running", message: `软链 ${link} 失败:${err.message}` }); }
+    }
+    e && e({ phase: "deps", status: "running", message: `已软链 ${names.join("/")} → ~/.local/bin` });
+  } catch {}
+}
 function cmdExists(name, pathEnv) {
   try { execFileSync("bash", ["-lc", `command -v ${name} >/dev/null 2>&1`], { timeout: 8000, env: { ...process.env, PATH: pathEnv } }); return true; } catch { return false; }
 }
@@ -121,7 +151,7 @@ async function ensureEnv({ emit } = {}) {
   const registry = process.env.CICY_NPM_REGISTRY || (cn ? "https://registry.npmmirror.com" : "https://registry.npmjs.org");
   e({ phase: "net", status: "running", message: `网络:${cn ? "CN" : "非 CN"} → registry=${registry.replace(/^https?:\/\//, "")}${cn ? " + 镜像加速" : ""}` });
 
-  // 2) Node(系统 ≥20 用,否则装 Node 24)
+  // 2) Node(系统 ≥20 用,否则装 Node 24)—— ensureNode 内部已把 node bin 放进 process.env.PATH 首位。
   const nodeBinDir = await ensureNode({ emit });
   if (!nodeBinDir) return null;
 
@@ -142,16 +172,39 @@ async function ensureEnv({ emit } = {}) {
     e({ phase: "deps", status: "running", message: `✓ ${dep} 安装完成` });
   }
 
-  // 5) mihomo(Chrome 代理用,best-effort —— 失败不挡 cicy-code 启动)
+  // mihomo 二进制 —— desktop 用自己装的 node24 预装(主人诊断的根因 + 修法):
+  //   cicy-code 装 mihomo 二进制走 `npm pack cicy-mihomo-<os>-<arch>`;josephs 之前是系统 node13
+  //   (自带 npm6 太老)→ pack 不下来 → 二进制装不上(cicy-mihomo skill 包装器本身不需要 npm 能装,
+  //   但**二进制**需要)。所以这里用 ensureNode 装好的 **node24** 把二进制 `npm pack` 进 runtime store
+  //   (~/cicy-ai/runtime/mihomo/<ver>/mihomo,走现成 runtime.js,无签名/quarantine 问题),再把路径
+  //   通过 MIHOMO_BIN 注入给 cicy-code → 它的 cicy-mihomo 包装器直接用,不再依赖 cicy-code 侧 npm 版本。
+  //   best-effort:装不上不挡 cicy-code 启动(mihomo 只是 Chrome 代理才用)。
+  let mihomoBin = null;
   try {
-    if (!cmdExists("mihomo", pathEnv) && !cmdExists("cicy-mihomo", pathEnv)) {
-      e({ phase: "deps", status: "running", message: `$ npx -y cicy-mihomo install(后台,失败不影响启动)` });
-      const m = spawn(path.join(nodeBinDir, "npx"), ["-y", "cicy-mihomo", "install"], { env: { ...process.env, PATH: pathEnv, npm_config_registry: registry }, stdio: "ignore", detached: true });
-      m.unref();
+    const runtime = require("./runtime");
+    mihomoBin = runtime.binPath("mihomo");
+    if (!mihomoBin) {
+      const prevPath = process.env.PATH;
+      process.env.PATH = `${nodeBinDir}:${BREW_DIRS.join(":")}:${process.env.PATH || ""}`; // 让 runtime 的 execFile("npm") 命中 node24
+      try {
+        e({ phase: "deps", status: "running", message: "安装 mihomo 二进制(node24 → npm pack cicy-mihomo)…" });
+        const { latest } = await runtime.checkUpdate("mihomo");
+        if (latest) {
+          await runtime.fetchVersion("mihomo", latest, { emit: e });
+          runtime.switchCurrent("mihomo", latest);
+          mihomoBin = runtime.binPath("mihomo");
+        }
+      } finally { process.env.PATH = prevPath; }
     }
-  } catch {}
+    if (mihomoBin) {
+      linkBinsToDefaultPath(path.dirname(mihomoBin), ["mihomo"], e); // ~/.local/bin/mihomo → runtime
+      e({ phase: "deps", status: "done", message: `✓ mihomo 就绪 → ${mihomoBin}` });
+    }
+  } catch (err) {
+    e({ phase: "deps", status: "running", message: `mihomo 预装跳过(不挡启动):${String(err.message).slice(0, 160)}` });
+  }
 
-  return { nodeBinDir, registry };
+  return { nodeBinDir, registry, mihomoBin };
 }
 
 const DEFAULT_PORT = Number(process.env.CICY_CODE_PORT || 8008);
@@ -249,7 +302,7 @@ async function start({ logPath, port = DEFAULT_PORT, force = false, version = nu
   //    预装好依赖,cicy-code 启动时已就绪、不再自己慢慢 brew 装、不再和我们抢锁。
   const env0 = await ensureEnv({ emit });
   if (!env0) { console.warn("[cicy-code-sidecar] ensureEnv failed — cannot start"); return null; }
-  const { nodeBinDir, registry } = env0;
+  const { nodeBinDir, registry, mihomoBin } = env0;
 
   // 2) `npx cicy-code` —— npm 按本机真实架构拉 cicy-code-<plat>,文件用户自己拥有(无跨架构/
   //    权限坑)。用上面那个 Node 的 npx,并把它的 bin + brew 放 PATH 首位让 cicy-code 找到 tmux/jq。
@@ -267,6 +320,9 @@ async function start({ logPath, port = DEFAULT_PORT, force = false, version = nu
     PORT: String(port),
     npm_config_registry: registry,
     PATH: childPath, // 给 npx 自己找 node/npm
+    // mihomo 二进制 desktop 已用 node24 预装到 runtime store(避开 node13 的 npm6 装不上的坑)→
+    // 注入 MIHOMO_BIN,cicy-code 的 cicy-mihomo 包装器直接用,不再自己 npm pack。
+    ...(mihomoBin ? { MIHOMO_BIN: mihomoBin } : {}),
   };
   const spec = version ? `cicy-code@${version}`
     : (process.env.CICY_CODE_VERSION ? `cicy-code@${process.env.CICY_CODE_VERSION}` : "cicy-code");

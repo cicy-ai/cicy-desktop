@@ -68,6 +68,8 @@ function wslRun(cmd, { timeout = 60000, distro = DISTRO } = {}) {
 // rapid output doesn't flood the log; resolves { stdout } with the full tail.
 function wslRunStream(cmd, { emit, phase = "install-docker", timeout = 900000, distro = DISTRO } = {}) {
   return new Promise((resolve, reject) => {
+    // 主人标准: 每步先把「执行的命令是什么」打到 drawer(和 mac 的 `$ brew install …` 一致)。
+    if (emit) emit({ phase, status: "running", message: `$ ${cmd.length > 200 ? cmd.slice(0, 200) + " …" : cmd}` });
     const child = spawn("wsl", ["-d", distro, "-u", "root", "--", "bash", "-lc", cmd], { windowsHide: true });
     let buf = "", tail = "", last = 0;
     const pump = (chunk) => {
@@ -88,6 +90,13 @@ function wslRunStream(cmd, { emit, phase = "install-docker", timeout = 900000, d
     child.on("error", (e) => { clearTimeout(timer); reject(e); });
     child.on("close", (code) => { clearTimeout(timer); code === 0 ? resolve({ stdout: tail }) : reject(Object.assign(new Error(`exit ${code}`), { stdout: tail })); });
   });
+}
+
+// 把失败的真 stderr/stdout 尾巴拼出来(主人标准: "报错是什么" —— 不能只显示 "exit 100")。
+// wslRun reject 时把 err.stdout/err.stderr 挂上;这里取最后 ~600 字符贴进 drawer。
+function errTail(e) {
+  const s = String((e && (e.stderr || e.stdout)) || "").trim();
+  return s ? `\n\n${s.slice(-600)}` : "";
 }
 
 // Is `DISTRO` registered? `wsl -l -q` lists installed distros (UTF-16LE).
@@ -183,7 +192,7 @@ async function installDistro({ emit } = {}) {
   //    import actually fails for lack of it (never downgrade an existing kernel).
   const installDir = path.join(process.env["LOCALAPPDATA"] || path.join(os.homedir(), "AppData", "Local"), "cicy-code-wsl");
   try { fs.mkdirSync(installDir, { recursive: true }); } catch {}
-  emit && emit({ phase: "container", status: "running", message: "导入运行环境到 WSL2…" });
+  emit && emit({ phase: "container", status: "running", message: `$ wsl --import ${DISTRO} "${installDir}" "${dest}" --version 2（约 444MB,1-4 分钟,无实时进度,请耐心)` });
   try {
     await importTarball(dest, installDir);
   } catch (e) {
@@ -302,7 +311,8 @@ async function launchDockerd() {
     { timeout: 20000 });
 }
 
-async function startEngine() {
+async function startEngine({ emit } = {}) {
+  const e = (ev) => { try { emit && emit(ev); } catch {} };
   // Up to 3 attempts. Each: launch dockerd (detached, returns instantly) then POLL
   // the socket in SHORT, SEPARATE wsl calls — never hold the distro in one 120s call
   // (that both masked wedges and blocked everything else). Cold first boot of a
@@ -311,17 +321,20 @@ async function startEngine() {
     const at0 = Date.now();
     let stuck = false;
     log.info(`[startEngine] attempt ${attempt}/3 — keepalive + launch dockerd (detached) + poll socket`);
+    e({ phase: "container", status: "running", message: `$ setsid --fork dockerd（第 ${attempt}/3 次,detached）` });
     ensureKeepalive(); // hold the distro open BEFORE launching, or the teardown kills dockerd
     try { await launchDockerd(); }
-    catch (e) { stuck = true; log.warn(`[startEngine] attempt ${attempt} launch errored — WSL stuck? ${e.message}`); }
+    catch (err) { stuck = true; log.warn(`[startEngine] attempt ${attempt} launch errored — WSL stuck? ${err.message}`); e({ phase: "container", status: "running", message: `dockerd 启动命令卡住(WSL 可能 wedged):${err.message}` }); }
     if (!stuck) {
       const deadline = Date.now() + 90000;
       while (Date.now() < deadline) {
-        if (await dockerEngineUp()) { log.info(`[startEngine] ✓ dockerd up on attempt ${attempt} (${((Date.now() - at0) / 1000).toFixed(1)}s)`); return true; }
+        if (await dockerEngineUp()) { log.info(`[startEngine] ✓ dockerd up on attempt ${attempt} (${((Date.now() - at0) / 1000).toFixed(1)}s)`); e({ phase: "container", status: "running", message: `✓ dockerd 已就绪(${((Date.now() - at0) / 1000).toFixed(0)}s)` }); return true; }
+        if ((Date.now() - at0) % 10000 < 2100) e({ phase: "container", status: "running", message: `等待 dockerd socket…(已 ${((Date.now() - at0) / 1000).toFixed(0)}s)` });
         await new Promise((r) => setTimeout(r, 2000));
       }
     }
     log.warn(`[startEngine] attempt ${attempt} dockerd not up after ${((Date.now() - at0) / 1000).toFixed(1)}s`);
+    e({ phase: "container", status: "running", message: `第 ${attempt} 次 dockerd 未起,${stuck ? "wsl --shutdown 重置后" : "清理残留 socket 后"}重试…` });
     // Recover. A stuck launch = WSL wedged → `wsl --shutdown` (full VM reset — the
     // ONLY thing that clears a real wedge; --terminate isn't enough). Otherwise
     // dockerd just died/is slow → clear stale runtime files for a clean relaunch.
@@ -439,7 +452,7 @@ function projectsMountArg() {
   } catch (e) { log.warn(`[wsl-docker] projects mount setup failed: ${e.message}`); return ""; }
 }
 
-async function runContainer({ port = 8009, container = "cicy-code-docker", volume = "cicy-team-8009", env = {} } = {}) {
+async function runContainer({ port = 8009, container = "cicy-code-docker", volume = "cicy-team-8009", env = {}, emit } = {}) {
   // 每次容器"启动"(含已在跑被 adopt)都确保桌面快捷方式存在 —— 不存在就建,坏了就修。
   if (await probeHealth(port)) { ensureDesktopShortcut(volume, port).catch(() => {}); return { adopted: true }; }
   // Replace any stale same-named container.
@@ -456,7 +469,8 @@ async function runContainer({ port = 8009, container = "cicy-code-docker", volum
   // 主人方案: Chrome 的 per-profile 代理改由「宿主 mihomo」(host-mihomo.js)服务,不再从容器
   // publish 20001-32(WSL/colima 转发那段口到不了容器里只绑 127.0.0.1 的监听)。容器只暴露 :8009。
   const cmd = `docker run -d --name ${container} --restart unless-stopped --dns 223.5.5.5 --dns 8.8.8.8 -p 127.0.0.1:${port}:8008 -p 127.0.0.1:${EXTRA_PORTS}:${EXTRA_PORTS} -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${projectsMountArg()} ${envArgs} ${IMAGE}`;
-  await wslRun(cmd, { timeout: 60000 });
+  emit && emit({ phase: "container", status: "running", message: `$ ${cmd.length > 220 ? cmd.slice(0, 220) + " …" : cmd}` });
+  await wslRun(cmd, { timeout: 60000 }); // 失败时 err.stderr 带 docker 真错误 → _bootstrap 的 errTail 显示
   ensureDesktopShortcut(volume, port).catch(() => {});
   return { started: true };
 }
@@ -572,7 +586,11 @@ async function bootstrap(opts = {}) {
   return _bootstrapInFlight;
 }
 
-async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-docker", volume = "cicy-team", env = {} } = {}) {
+// 命名统一(主人 bug 修复): 默认容器/卷名带 -8009 后缀,和 readContainerToken / restart /
+// recreate / runContainer 的默认一致。之前 _bootstrap 默认 cicy-team / cicy-code-docker,
+// 而 readContainerToken 读 cicy-team-8009 → 泛型 docker:bootstrap 建的卷读不到 token → 卡登录。
+// (live 的 docker:app-bootstrap 一直传显式 APP_* 名,不受影响;这里只是把泛型路径也对齐。)
+async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-docker-8009", volume = "cicy-team-8009", env = {} } = {}) {
   const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
 
   // Structured, PERSISTED trace of the whole run (electron-log → main.log) so a
@@ -614,7 +632,7 @@ async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-dock
   // 2) Ubuntu distro
   begin("ensure-distro");
   if (!(await distroInstalled())) {
-    try { await installDistro({ emit }); } catch (e) { fail("distro_install_failed", e.message); emit({ phase: "install-docker", status: "error", message: `Ubuntu 安装失败：${e.message}（点重试）` }); finish(false, "distro_install_failed"); return { ok: false, reason: "distro_install_failed" }; }
+    try { await installDistro({ emit }); } catch (e) { fail("distro_install_failed", e.message); emit({ phase: "install-docker", status: "error", message: `Ubuntu 安装失败：${e.message}（点重试）${errTail(e)}` }); finish(false, "distro_install_failed"); return { ok: false, reason: "distro_install_failed" }; }
     const t0 = Date.now();
     const ok = await docker.waitUntil(() => distroInstalled(), { totalMs: 600000, everyMs: 5000, onTick: () => emit({ phase: "install-docker", status: "running", message: `正在下载/注册 Ubuntu…（已 ${Math.round((Date.now() - t0) / 1000)}s,首次较慢请耐心）` }) });
     if (!ok) { fail("distro_not_ready"); emit({ phase: "install-docker", status: "error", message: "Ubuntu 还没装好——稍等或点「重试」" }); finish(false, "distro_not_ready"); return { ok: false, reason: "distro_not_ready" }; }
@@ -624,7 +642,7 @@ async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-dock
   // 3) Docker Engine inside Ubuntu
   begin("install-docker-engine");
   if (!(await dockerInstalled())) {
-    try { await installDockerEngine({ emit }); } catch (e) { fail("docker_install_failed", e.message); emit({ phase: "install-docker", status: "error", message: `Docker 安装失败：${e.message}（点重试）` }); finish(false, "docker_install_failed"); return { ok: false, reason: "docker_install_failed" }; }
+    try { await installDockerEngine({ emit }); } catch (e) { fail("docker_install_failed", e.message); emit({ phase: "install-docker", status: "error", message: `Docker 安装失败：${e.message}（点重试）${errTail(e)}` }); finish(false, "docker_install_failed"); return { ok: false, reason: "docker_install_failed" }; }
     done();
   } else done(true);
 
@@ -632,7 +650,7 @@ async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-dock
   begin("start-dockerd");
   if (!(await dockerEngineUp())) {
     emit({ phase: "container", status: "running", message: "启动 Docker 引擎（首次较慢，请耐心）…" });
-    const started = await startEngine(); // 3 clean attempts internally
+    const started = await startEngine({ emit }); // 3 clean attempts internally
     const up = started || await docker.waitUntil(dockerEngineUp, { totalMs: 120000, everyMs: 3000 });
     if (!up) {
       const dlog = await dockerdLogTail();
@@ -649,7 +667,7 @@ async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-dock
   begin("ensure-image");
   try { await ensureFreshImage({ emit }); done(); }
   catch (e) {
-    if (!(await imagePresent())) { fail("image_download_failed", e.message); emit({ phase: "image", status: "error", message: `镜像下载失败：${e.message}（点重试续传）` }); finish(false, "image_download_failed"); return { ok: false, reason: "image_download_failed" }; }
+    if (!(await imagePresent())) { fail("image_download_failed", e.message); emit({ phase: "image", status: "error", message: `镜像下载失败：${e.message}（点重试续传）${errTail(e)}` }); finish(false, "image_download_failed"); return { ok: false, reason: "image_download_failed" }; }
     emit({ phase: "image", status: "running", message: `镜像刷新失败（${e.message}），沿用现有镜像` }); done(true);
   }
 
@@ -657,8 +675,8 @@ async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-dock
   begin("run-container");
   if (!(await probeHealth(port))) {
     emit({ phase: "container", status: "running", message: "启动 cicy-code 服务…" });
-    try { await runContainer({ port, container, volume, env }); }
-    catch (e) { fail("container_start_failed", e.message); emit({ phase: "container", status: "error", message: `服务启动失败：${e.message}（点重试）` }); finish(false, "container_start_failed"); return { ok: false, reason: "container_start_failed" }; }
+    try { await runContainer({ port, container, volume, env, emit }); }
+    catch (e) { fail("container_start_failed", e.message); emit({ phase: "container", status: "error", message: `服务启动失败：${e.message}（点重试）${errTail(e)}` }); finish(false, "container_start_failed"); return { ok: false, reason: "container_start_failed" }; }
     done();
   } else done(true);
 
@@ -730,7 +748,7 @@ async function recreate({ onProgress, port = 8009, container = "cicy-code-docker
   // 强删占用该端口的**任何**容器(含老名字 cicy-code-docker)+ 目标容器 —— 否则
   // runContainer 开头的 probeHealth 看到旧容器还健康会 adopt 它、不重建,key 就换不了。
   try { await wslRun(`docker ps -aq --filter publish=${port} | xargs -r docker rm -f 2>/dev/null; docker rm -f ${container} 2>/dev/null; true`, { timeout: 30000 }); } catch {}
-  const r = await runContainer({ port, container, volume, env });
+  const r = await runContainer({ port, container, volume, env, emit });
   try { await ensureDesktopShortcut(volume, port); } catch {}
   return r;
 }

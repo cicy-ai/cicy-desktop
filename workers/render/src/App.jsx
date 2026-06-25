@@ -270,10 +270,6 @@ export default function App() {
   // Email magic-link device-poll login (cross-device: the link works on a phone).
   const [email, setEmail] = useState("");
   const [emailSent, setEmailSent] = useState(false); // true once the link email is sent → "等待点击" state
-  const [appVer, setAppVer] = useState(""); // cicy-desktop version, shown bottom-right
-  useEffect(() => {
-    window.cicy?.app?.getVersion?.().then((v) => setAppVer((v && v.desktop) || "")).catch(() => {});
-  }, []);
   const [error, setError] = useState("");
   const [welcome, setWelcome] = useState("");
   // Fetched after login: { id, display_name, username, email, ... }
@@ -785,12 +781,6 @@ export default function App() {
   return (
     <div className="shell shell--app">
       <div className="glow glow--app" aria-hidden />
-      {appVer && (
-        <div data-id="VersionBadge" title={`CiCy Desktop v${appVer}`}
-          style={{ position: "fixed", bottom: 8, right: 12, fontSize: 11, lineHeight: 1, color: "rgba(255,255,255,0.4)", userSelect: "text", zIndex: 60, pointerEvents: "none" }}>
-          v{appVer}
-        </div>
-      )}
       <div className="shell__left">
       <Header me={me} welcome={welcome} onLogout={handleLogout}
         mitmTeam={localList.length > 0 ? localList[0] : null} />

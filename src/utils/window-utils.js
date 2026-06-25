@@ -317,11 +317,22 @@ function createWindow(options = {}, accountIdx = 1, forceNew = false) {
     proxyRules = config.proxy;
     proxySource = "global";
   }
-  if (proxyRules) {
+  // account 0 = 本地团队共享会话(连 localhost 的 cicy-code)→ **绝不走代理**(主人确认 + 实测白板根因):
+  // 否则 gotty 终端 ws `ws://127.0.0.1:8008/ttyd/<pane>/ws` 被路由进 chrome 代理(mihomo:20001)→
+  // ERR_CONNECTION_REFUSED → webtty slave closed → 终端白板。强制 direct,顺便清掉该持久会话上
+  // 可能残留的旧代理(profile-store 之前给 account 0 存过)。
+  if (accountIdx === 0) {
     ses
-      .setProxy({ proxyRules })
+      .setProxy({ mode: "direct" })
+      .then(() => log.info(`[Proxy] account 0(本地团队)强制直连,不走代理`))
+      .catch((err) => log.error(`[Proxy] account 0 direct 失败:`, err));
+  } else if (proxyRules) {
+    // 用户 profile(N>=1)用代理,但 **localhost 一律 bypass** —— 在 profile 里开本地团队、或任何
+    // 到本机 cicy-code 的连接都直连,不被代理拦。
+    ses
+      .setProxy({ proxyRules, proxyBypassRules: "127.0.0.1,localhost,[::1]" })
       .then(() => {
-        log.info(`[Proxy] Account ${accountIdx} 已设置代理 (${proxySource}): ${proxyRules}`);
+        log.info(`[Proxy] Account ${accountIdx} 已设置代理 (${proxySource}): ${proxyRules}(bypass localhost)`);
       })
       .catch((err) => {
         log.error(`[Proxy] Account ${accountIdx} 设置代理失败:`, err);
