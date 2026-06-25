@@ -18,7 +18,56 @@ const os = require("os");
 const http = require("http");
 const net = require("net");
 const path = require("path");
-const { spawn, execFileSync } = require("child_process");
+const { spawn, execFileSync, execFile } = require("child_process");
+
+// ── Node runtime bootstrap ───────────────────────────────────────────────────
+// 主人(2026-06): native cicy-code 走 `npx cicy-code`,需要一个**可用**的 Node。但用户
+// 机器可能没 node,或 node 太老(实测 josephs 是 node v13/npx6,老 npx 跑不动)。所以:
+// 系统有 node≥20 就用;没有/太老 → 下载 Node 24 到 ~/cicy-ai/runtime/node(免 sudo,
+// 用户自己拥有);下载也失败 → 提示用户去 nodejs.org 自己装。
+const NODE_VER = process.env.CICY_NODE_VERSION || "v24.18.0";
+const NODE_HOME = path.join(os.homedir(), "cicy-ai", "runtime", "node");
+const NODE_SEARCH = ["/usr/local/bin", "/opt/homebrew/bin", path.join(os.homedir(), ".local", "bin"), path.join(NODE_HOME, "bin")];
+function nodeMajor(bin) {
+  try { const m = String(execFileSync(bin, ["-v"], { encoding: "utf8", timeout: 5000 })).match(/v(\d+)\./); return m ? Number(m[1]) : 0; } catch { return 0; }
+}
+function findUsableNode() {
+  for (const d of NODE_SEARCH) {
+    const node = path.join(d, "node"), npx = path.join(d, "npx");
+    try { if (fs.existsSync(node) && fs.existsSync(npx) && nodeMajor(node) >= 20) return d; } catch {}
+  }
+  return null;
+}
+const pexec = (cmd, args, timeout) => new Promise((res, rej) => execFile(cmd, args, { timeout, windowsHide: true }, (e) => (e ? rej(e) : res())));
+// Returns a bin dir with node+npx (node≥20), or null. emit streams progress to a drawer.
+async function ensureNode({ emit } = {}) {
+  const e = emit || (() => {});
+  let dir = findUsableNode();
+  if (dir) return dir;
+  const arch = process.arch === "arm64" ? "arm64" : "x64";
+  const fname = `node-${NODE_VER}-darwin-${arch}.tar.gz`;
+  const urls = [
+    `https://cdn.npmmirror.com/binaries/node/${NODE_VER}/${fname}`, // CN-fast
+    `https://nodejs.org/dist/${NODE_VER}/${fname}`,                 // 官方兜底
+  ];
+  e({ phase: "node", status: "running", message: `未检测到可用 Node,正在安装 Node ${NODE_VER}(约 50MB)…` });
+  fs.mkdirSync(NODE_HOME, { recursive: true });
+  const tmp = path.join(os.tmpdir(), `cicy-${fname}`);
+  for (const url of urls) {
+    try {
+      await pexec("curl", ["-fL", "--retry", "2", "-o", tmp, url], 300000);
+      await pexec("tar", ["-xzf", tmp, "-C", NODE_HOME, "--strip-components", "1"], 120000);
+      if (fs.existsSync(path.join(NODE_HOME, "bin", "node")) && fs.existsSync(path.join(NODE_HOME, "bin", "npx"))) {
+        try { fs.unlinkSync(tmp); } catch {}
+        e({ phase: "node", status: "done", message: `Node ${NODE_VER} 安装完成` });
+        return path.join(NODE_HOME, "bin");
+      }
+    } catch (err) { console.warn(`[cicy-code-sidecar] node install failed (${url}): ${err.message}`); }
+  }
+  try { fs.unlinkSync(tmp); } catch {}
+  e({ phase: "node", status: "error", message: "Node 自动安装失败 —— 请打开 https://nodejs.org 下载安装 Node(LTS),装好后点「重试」" });
+  return null;
+}
 
 const DEFAULT_PORT = Number(process.env.CICY_CODE_PORT || 8008);
 
@@ -91,13 +140,11 @@ async function startFromRuntime({ logPath, port }) {
   return c;
 }
 
-async function start({ logPath, port = DEFAULT_PORT, force = false, version = null } = {}) {
+async function start({ logPath, port = DEFAULT_PORT, force = false, version = null, emit = null } = {}) {
   if (child && !force) return child;
 
-  // 主人(2026-06 方向回调): mac 资源吃不消 docker —— colima VM 在 16G 机上把内存压垮,
-  // jetsam 拿 SIGKILL 乱杀进程(cicy-code 被误伤)。所以 macOS/Linux 改回 native cicy-code
-  // (:8008,本机直接跑二进制,省掉 4–8G 的 VM)。Windows 仍走 docker(WSL :8009,由
-  // sidecar-ipc 管),native 一律不起。
+  // 主人(2026-06 方向回调): mac 资源吃不消 docker(colima VM 压垮内存被 jetsam 杀)→
+  // macOS/Linux 改回 native cicy-code(:8008,走 `npx cicy-code`)。Windows 仍走 docker。
   if (process.platform === "win32") return null;
 
   if (!force && await probeExisting(port)) {
@@ -105,47 +152,35 @@ async function start({ logPath, port = DEFAULT_PORT, force = false, version = nu
     return null;
   }
 
-  // UNIFIED model (主人指令): run our OWN binary at ~/.local/bin/cicy-code on
-  // every platform — never `npx cicy-code` (which reuses a stale globally-installed
-  // copy and shadows updates). localbin seeds from the bundled subpackage on first
-  // run (zero network) and uses npm ONLY as a download channel for updates; the run
-  // path is always stable.
-  const localbin = require("./localbin");
-  let exe = localbin.currentLink();
-  if (!exe) {
-    try { exe = (await localbin.ensure({ version }))?.exe; }
-    catch (e) { console.warn(`[cicy-code-sidecar] localbin ensure failed: ${e.message}`); }
-  } else {
-    // Present — let ensure() do a zero-network bundle upgrade if cicy-desktop
-    // itself was updated and now ships a newer cicy-code (版本高了就更新).
-    try { await localbin.ensure({ version }); } catch {}
-  }
-  if (!exe) { console.warn("[cicy-code-sidecar] no cicy-code binary available"); return null; }
+  // 1) 确保有可用 Node(系统 node≥20,否则装 Node 24;再不行提示用户去 nodejs.org 自己装)。
+  const nodeBinDir = await ensureNode({ emit });
+  if (!nodeBinDir) { console.warn("[cicy-code-sidecar] no usable Node — cannot npx cicy-code"); return null; }
 
-  // 主人: 不再 seed host mihomo —— docker-only 后 mihomo 只在容器里跑(host 不用)。
-  // 内置的 cicy-mihomo-<plat> 依赖已从 package.json 移除。
-
+  // 2) `npx cicy-code` —— npm 按本机真实架构拉 cicy-code-<plat>,文件用户自己拥有(无跨架构/
+  //    权限坑)。用上面那个 Node 的 npx,并把它的 bin 放 PATH 首位让 npx 找到自己的 node/npm。
   let stdio = ["ignore", "ignore", "ignore"];
   if (logPath) {
     fs.mkdirSync(path.dirname(logPath), { recursive: true });
     const fd = fs.openSync(logPath, "a");
     stdio = ["ignore", fd, fd];
   }
+  const npxAbs = path.join(nodeBinDir, "npx");
+  const childPath = `${nodeBinDir}:${NODE_SEARCH.join(":")}:${process.env.PATH || ""}`;
+  const registry = process.env.CICY_NPM_REGISTRY || "https://registry.npmmirror.com";
   const env = {
     ...process.env,
     CICY_CODE_PORT: String(port),
     PORT: String(port),
+    npm_config_registry: registry,
+    PATH: childPath, // 给 npx 自己找 node/npm
   };
-  // --helper removed (主人指令): Windows now runs cicy-code in normal mode (full
-  // tmux-based multi-agent), same as mac/linux — no longer the single headless
-  // 团队助手.
-  const args = ["--desktop"];
-  // 退出保活(主人):mac/linux 把 native cicy-code spawn 成 detached + unref,让它脱离
-  // Electron 的进程组——退出 App 不带走 daemon(及其 tmux agent),下次启动 probeExisting
-  // 探到就 adopt。Windows 不走这条(docker)。
+  const spec = version ? `cicy-code@${version}`
+    : (process.env.CICY_CODE_VERSION ? `cicy-code@${process.env.CICY_CODE_VERSION}` : "cicy-code");
+  emit && emit({ phase: "cicy-code", status: "running", message: "启动 cicy-code(首次会下载 + 装依赖,请稍候)…" });
+  // 退出保活(主人):detached + unref → 关 App 不带走 daemon(及其 tmux agent),下次 adopt。
   const detached = process.platform !== "win32";
-  child = spawn(exe, args, { stdio, detached, windowsHide: true, env });
-  console.log(`[cicy-code-sidecar] spawned ${exe} ${args.join(" ")} pid=${child.pid} port=${port} detached=${detached} log=${logPath || "(none)"}`);
+  child = spawn(npxAbs, ["-y", spec], { stdio, detached, windowsHide: true, env });
+  console.log(`[cicy-code-sidecar] spawned ${npxAbs} -y ${spec} pid=${child.pid} port=${port} registry=${registry} detached=${detached} log=${logPath || "(none)"}`);
   if (detached) { try { child.unref(); } catch {} }
 
   child.on("exit", (code, signal) => {

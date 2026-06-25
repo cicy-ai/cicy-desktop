@@ -881,32 +881,37 @@ electronApp.whenReady().then(async () => {
   // colima VM 在 16G mac 上把内存压垮被 jetsam SIGKILL。Windows 仍走 docker(WSL :8009,
   // 由 sidecar-ipc 管),不在这里起 native。
   if (process.platform !== "win32") {
-    // Start bundled cicy-code daemon as a sidecar. Reuses an existing instance on
-    // :8008 if one is already running (probeExisting → adopt, never double-spawn).
+    const sidecarPort = Number(process.env.CICY_CODE_PORT || 8008);
+    const lt = require("./backends/local-teams");
+
+    // 占位卡(主人: "先有一个 :8008 占位"): 开机**立刻无条件**注册本地团队,homepage 永远有
+    // 这张卡 —— :8008 没起来时显示「未运行」+ 启动/安装入口(不会再空首页);起来后下面的
+    // probe 循环 upsert 一次,状态翻 running + 触发 gateway key/teamId 注入。addTeam 幂等。
+    lt.addTeam({ base_url: `http://127.0.0.1:${sidecarPort}`, name: i18n.t("localTeams.defaultName") })
+      .then((r) => { if (r && r.id) log.info(`[Sidecar] local team placeholder registered (${r.id})`); })
+      .catch((e) => log.warn(`[Sidecar] placeholder register failed: ${e.message}`));
+
+    // 起 native cicy-code(npx cicy-code,见 cicy-code.js)。已在跑就 adopt,不双开。
     cicyCodeSidecar
       .start({ logPath: path.join(os.homedir(), "logs", "cicy-code-sidecar.log") })
       .then((c) => { if (c) log.info(`[Sidecar] cicy-code spawned pid=${c.pid}`); })
       .catch((e) => log.warn(`[Sidecar] cicy-code start failed: ${e.message}`));
     startSidecarWatchdog();
 
-    // Auto-register the local sidecar as 本地团队 once :8008 answers (主人: 一装好就要
-    // 有占位卡)。addTeam upserts by host:port + auto-fills api_token, so re-runs are
-    // no-ops. A fresh boot may seed/npm-pull the binary first, so probe up to ~90s.
+    // :8008 起来后 upsert 一次:刷新卡状态 + 让 addTeam 去云端拿这个本地 team 的 gateway
+    // key + teamId 注入 global.json(主人: 启动之后先去拿 llm api_key 和 team id)。
     (async () => {
-      const sidecarPort = Number(process.env.CICY_CODE_PORT || 8008);
-      const lt = require("./backends/local-teams");
-      for (let i = 0; i < 30; i++) {
+      for (let i = 0; i < 40; i++) {
         try {
           if (await cicyCodeSidecar.probeExisting(sidecarPort)) {
             const r = await lt.addTeam({ base_url: `http://127.0.0.1:${sidecarPort}`, name: i18n.t("localTeams.defaultName") });
-            if (r && r.ok) log.info(`[Sidecar] local team ${r.upserted ? "refreshed" : "registered"} (${r.id})`);
-            else log.warn(`[Sidecar] local team auto-register failed: ${r && r.error}`);
+            if (r && r.id) log.info(`[Sidecar] local team ready (${r.id}) — key/teamId synced`);
             return;
           }
-        } catch (e) { log.warn(`[Sidecar] local team auto-register error: ${e.message}`); }
+        } catch (e) { log.warn(`[Sidecar] local team refresh error: ${e.message}`); }
         await new Promise((res) => setTimeout(res, 3000));
       }
-      log.warn(`[Sidecar] local team auto-register gave up — :${sidecarPort} never came up`);
+      log.warn(`[Sidecar] :${sidecarPort} never came up within ~2min (card stays as 未运行)`);
     })();
   }
 
