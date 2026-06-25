@@ -444,16 +444,25 @@ function register({ sidecarLogPath } = {}) {
         } catch {}
       }, 500);
       const child = await sidecar.start({ logPath: sidecarLogPath, force: false, emit });
+      // start() 返回 null = ensureEnv 失败(node/brew/tmux 没装成,emit 已说原因)或没 spawn 成。
+      // **立刻报错返回**,别进 6 分钟干等(否则 child 一直是 null、break 条件永不成立,drawer 卡在
+      // 「进行中」、不翻 error、不出重试按钮 —— 主人实测的 bug)。
+      if (!child) {
+        clearInterval(tail);
+        if (await sidecar.probeExisting(PORT)) { emit({ phase: "done", status: "done", message: "cicy-code 已就绪 :8008" }); return { ok: true }; }
+        emit({ phase: "done", status: "error", message: "❌ 环境准备失败(见上方日志),修好后点「重试」" });
+        return { ok: false, error: "环境准备失败 — 见安装日志" };
+      }
       // Node 下载 + cicy-code 首次 brew 装依赖很慢 → 等到 ~6 分钟;子进程退出(失败)立即停手。
       let up = false;
       for (let i = 0; i < 720; i++) {
         if (await sidecar.probeExisting(PORT)) { up = true; break; }
-        if (child && child.exitCode != null) break;
+        if (child.exitCode != null) break;
         await new Promise((r) => setTimeout(r, 500));
       }
       clearInterval(tail);
       if (up) { emit({ phase: "done", status: "done", message: "cicy-code 已就绪 :8008" }); return { ok: true, pid: child?.pid || null }; }
-      if (child && child.exitCode != null) { emit({ phase: "done", status: "error", message: `cicy-code 启动失败(exit=${child.exitCode}),见上方日志` }); return { ok: false, error: `cicy-code exited (${child.exitCode}) — 见安装日志` }; }
+      if (child.exitCode != null) { emit({ phase: "done", status: "error", message: `cicy-code 启动失败(exit=${child.exitCode}),见上方日志` }); return { ok: false, error: `cicy-code exited (${child.exitCode}) — 见安装日志` }; }
       return { ok: true, pid: child?.pid || null, warning: "6 分钟内未就绪(可能还在装依赖,见日志)" };
     } catch (err) {
       emit({ phase: "done", status: "error", message: `启动失败：${err.message}` });
