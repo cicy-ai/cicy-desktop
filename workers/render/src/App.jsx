@@ -394,10 +394,12 @@ export default function App() {
     if (!at || !window.cicy?.cloud?.fetch || !next) return { ok: false, error: "no session / empty" };
     try { new URL(next); } catch { return { ok: false, error: "地址格式不对(需 http(s)://…)" }; }
     try {
+      // 云端 PATCH 收的是 **hostUrl(驼峰)**,虽然 GET /api/teams 返回的是 host_url(下划线)——
+      // 实测过:host_url 会被忽略(400 nothing_to_update),hostUrl 才真正改(200)。
       const r = await window.cicy.cloud.fetch(`${CLOUD_BASE}/api/teams/${id}`, {
         method: "PATCH",
         headers: { Authorization: `Bearer ${at}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ host_url: next }),
+        body: JSON.stringify({ hostUrl: next }),
       });
       if (r?.ok) { await refreshCloudTeams(); return { ok: true }; }
       return { ok: false, error: `${r?.status || "?"} ${r?.error || ""}` };
