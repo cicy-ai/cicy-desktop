@@ -23,36 +23,10 @@ jobs:
           node-version: "20"
           cache: "npm"
 
-      - name: Setup Go (for cicy-code sidecar build)
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.25'
-
-      - name: Read cicy-code ref pin
-        id: cicy_code_ref
-        shell: bash
-        run: |
-          ref="$(cat .cicy-code-ref | tr -d '[:space:]')"
-          echo "ref=${ref}" >> "$GITHUB_OUTPUT"
-          if ! [[ "$ref" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-            echo "::error::.cicy-code-ref must be a release tag (vX.Y.Z), got: $ref"
-            exit 1
-          fi
-
-      - name: Checkout cicy-code as sibling
-        uses: actions/checkout@v4
-        with:
-          repository: cicy-ai/cicy-code
-          ref: ${{ steps.cicy_code_ref.outputs.ref }}
-          path: cicy-code
-
-      - name: Build cicy-code sidecar binaries (linux amd64 + arm64)
-        shell: bash
-        working-directory: cicy-code
-        run: |
-          SKIP_TTYD_ASSET=1 SKIP_SKILLS_EMBED=1 bash build.sh all
-          ls -lh dist/
-
+      # cicy-code is NOT built-from-source here anymore (主人 2026-06): bundled
+      # sidecar = the per-platform optionalDependency, seeded by localbin at runtime.
+      # The .cicy-code-ref source-build → vendor/cicy-code path was stale + never
+      # packaged, so it's removed. Sync just pins optionalDeps to latest.
       - name: Sync runtime deps to latest (cicy-code + cicy-mihomo; drop msys2)
         run: node scripts/sync-runtime-deps.cjs
 
@@ -69,7 +43,6 @@ jobs:
       - name: Build Linux app (deb + AppImage)
         shell: bash
         env:
-          CICY_CODE_DIST_DIR: ${{ github.workspace }}/cicy-code/dist
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail

@@ -23,44 +23,12 @@ jobs:
           node-version: "20"
           cache: "npm"
 
-      - name: Setup Go (for cicy-code sidecar build)
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.25'
-
-      - name: Read cicy-code ref pin
-        id: cicy_code_ref
-        shell: bash
-        run: |
-          ref="$(cat .cicy-code-ref | tr -d '[:space:]')"
-          echo "ref=${ref}" >> "$GITHUB_OUTPUT"
-          # Enforce: ref must be a tagged release (vX.Y.Z), not a branch.
-          # This guarantees a deterministic build and lets the homepage
-          # display the same version it shipped with.
-          if ! [[ "$ref" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-            echo "::error::.cicy-code-ref must be a release tag (vX.Y.Z), got: $ref"
-            exit 1
-          fi
-
-      - name: Checkout cicy-code as sibling
-        uses: actions/checkout@v4
-        with:
-          repository: cicy-ai/cicy-code
-          ref: ${{ steps.cicy_code_ref.outputs.ref }}
-          path: cicy-code
-
-      - name: Build cicy-code sidecar binaries (darwin amd64 + arm64)
-        # `bash build.sh all` runs prepare_embed (cicy-skills tarball, frontend,
-        # ttyd assets) and cross-compiles all four darwin/linux targets.
-        # We only need the two darwin slots for the Mac .app, but building
-        # the linux ones here is cheap (~20s) and keeps the prepare:sidecar
-        # script's "all targets at once" mode happy.
-        shell: bash
-        working-directory: cicy-code
-        run: |
-          bash build.sh all
-          ls -lh dist/
-
+      # cicy-code is NOT built-from-source here anymore. 主人(2026-06): the bundled
+      # sidecar = the per-platform optionalDependency (cicy-code-<plat>, prebuilt +
+      # arm64 linker-adhoc-signed), seeded at runtime by localbin.fromBundle. The old
+      # .cicy-code-ref source-build → vendor/cicy-code path was stale + never packaged
+      # (vendor/ not in package.json files), so it's removed. Sync just pins the
+      # optionalDeps to the latest published cicy-code/cicy-mihomo.
       - name: Sync runtime deps to latest (cicy-code + cicy-mihomo; drop msys2)
         run: node scripts/sync-runtime-deps.cjs
 
@@ -100,16 +68,13 @@ jobs:
           iconutil -c icns build/icon.iconset -o build/logo.icns || { echo "::warning::iconutil failed"; exit 0; }
 
       - name: Build macOS app (dmg + zip, unsigned)
-        # prebuild:mac (declared in package.json) chains npm run prepare:sidecar
-        # which reads CICY_CODE_DIST_DIR and populates vendor/cicy-code/.
-        # CSC_IDENTITY_AUTO_DISCOVERY=false stops electron-builder from probing
-        # the runner keychain for a cert it does not have; combined with
-        # build.mac.identity=null in package.json this produces a clean
-        # unsigned build (with the cicy-code sidecar ad-hoc signed by
-        # prepare-cicy-code-sidecar.js so Apple Silicon will exec it).
+        # CSC_IDENTITY_AUTO_DISCOVERY=false stops electron-builder from probing the
+        # runner keychain for a cert it does not have; combined with
+        # build.mac.identity=null in package.json this produces a clean unsigned
+        # build. The cicy-code sidecar arrives via the optionalDependency
+        # (arm64 is linker-adhoc-signed already), seeded by localbin at runtime.
         shell: bash
         env:
-          CICY_CODE_DIST_DIR: ${{ github.workspace }}/cicy-code/dist
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -161,7 +126,6 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CICY_CODE_DIST_DIR: ${{ github.workspace }}/cicy-code/dist
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: |
           gh release upload "${{ steps.meta.outputs.tag }}" dist/*.dmg dist/*.zip \
