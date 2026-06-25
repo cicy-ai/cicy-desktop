@@ -386,6 +386,24 @@ export default function App() {
     } catch (e) { return { ok: false, error: e.message }; }
   }, [refreshCloudTeams]);
 
+  // 改私有云的访问地址(host_url)—— 和改名同源,走云端 PATCH /api/teams/<id> {host_url}。
+  // 成功后重拉云端团队,卡片地址即时更新(主人: 私有云可以改 url)。
+  const updateCloudTeamUrl = useCallback(async (id, hostUrl) => {
+    const at = bearerRef.current;
+    const next = String(hostUrl || "").trim();
+    if (!at || !window.cicy?.cloud?.fetch || !next) return { ok: false, error: "no session / empty" };
+    try { new URL(next); } catch { return { ok: false, error: "地址格式不对(需 http(s)://…)" }; }
+    try {
+      const r = await window.cicy.cloud.fetch(`${CLOUD_BASE}/api/teams/${id}`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${at}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ host_url: next }),
+      });
+      if (r?.ok) { await refreshCloudTeams(); return { ok: true }; }
+      return { ok: false, error: `${r?.status || "?"} ${r?.error || ""}` };
+    } catch (e) { return { ok: false, error: e.message }; }
+  }, [refreshCloudTeams]);
+
   // First profile fetch on mount. The cloud console endpoints (/api/user/self,
   // /api/teams) authenticate the owner-bound LOGIN token (the sk-xxx from the
   // /cb callback) — NOT the console access_token (the cloud never mints one;
@@ -867,6 +885,7 @@ export default function App() {
                 if (url) window.cicy?.tabs?.open?.(url, t.name || t.title || "");
               }}
               onRename={renameCloudTeam}
+              onEditUrl={updateCloudTeamUrl}
             />
           ))}
         </div>
@@ -2602,7 +2621,7 @@ const LOCAL_STATUS = {
 // 私有云 / (历史)云端团队卡片。产品方向变更(w-10032):公有云不做了,主打 private
 // (用户自托管,数据不出企业)。private 字段:{name,kind:"private",status,apiKey,
 // gatewayUrl,host_url,titleVersion,deviceId:""}。卡片展示名字+host_url,点开可看/复制 apiKey。
-function TeamCard({ team, onOpen, onRename }) {
+function TeamCard({ team, onOpen, onRename, onEditUrl }) {
   const isPrivate = team.kind === "private";
   const statusOk = team.status === "active";
   const serverName = team.name || team.title || "—";
@@ -2621,9 +2640,16 @@ function TeamCard({ team, onOpen, onRename }) {
     try { const r = await onRename(team.id, next); if (!r?.ok) setPendingName(null); } catch { setPendingName(null); }
   };
   const hostUrl = team.host_url || "";
+  // Inline 改私有云地址(host_url)—— 和改名同样的乐观更新:本地先显示 pendingUrl,云端
+  // PATCH 成功后 refreshCloudTeams 把真值同步回来,pendingUrl 清空。
+  const [editingUrl, setEditingUrl] = useState(false);
+  const [urlDraft, setUrlDraft] = useState("");
+  const [pendingUrl, setPendingUrl] = useState(null);
+  const displayHostUrl = pendingUrl != null ? pendingUrl : hostUrl;
+  useEffect(() => { if (pendingUrl != null && hostUrl === pendingUrl) setPendingUrl(null); }, [hostUrl, pendingUrl]);
   const billTeamId = team.teamId || team.id; // /dash?team=<teamId>(URL 不带 key)
   const kindLabel = isPrivate ? tr("teamKind.private", "私有云") : (team.team_kind === "personal" ? tr("teamKind.personal", "个人") : tr("teamKind.shared", "共享"));
-  const openUrl = isPrivate ? hostUrl : (team.workspace_url || team.workspace_direct_url);
+  const openUrl = isPrivate ? displayHostUrl : (team.workspace_url || team.workspace_direct_url);
   const hasUrl = !!openUrl;
 
   // ⋯ menu (reload) — mirrors LocalTeamCard so EVERY card has a 刷新窗口. Reload
@@ -2656,6 +2682,14 @@ function TeamCard({ team, onOpen, onRename }) {
   // 刷新窗口:三卡完全同一逻辑——tabs.reloadIfOpen 按 URL 找开着的 tab 就 reload,
   // 没开就不操作(不偷偷开新窗)。
   const doReload = (e) => { e?.stopPropagation?.(); if (!hasUrl) return; setMenuOpen(false); window.cicy?.tabs?.reloadIfOpen?.(openUrl, name); };
+  const startEditUrl = () => { setUrlDraft(hostUrl); setEditingUrl(true); setMenuOpen(false); };
+  const commitUrl = async () => {
+    setEditingUrl(false);
+    const next = String(urlDraft || "").trim();
+    if (!onEditUrl || !next || next === hostUrl) return;
+    setPendingUrl(next);
+    try { const r = await onEditUrl(team.id, next); if (!r?.ok) setPendingUrl(null); } catch { setPendingUrl(null); }
+  };
   // 主人令:私有云卡片不展示 api key(安全)。key 只在云端 dash / 注入 global.json 用。
   return (
     <div data-id="TeamCard" className={`bcard bcard--cloud${statusOk ? " bcard--online" : ""}`}>
@@ -2667,7 +2701,7 @@ function TeamCard({ team, onOpen, onRename }) {
         </div>
         <div className="bcard__top-right">
           {team.is_trial && <span className="bcard__badge">trial</span>}
-          {(hasUrl || billTeamId != null) && (
+          {(hasUrl || billTeamId != null || (isPrivate && onEditUrl)) && (
             <div className="bcard__menuwrap" ref={menuWrap} onClick={(e) => e.stopPropagation()}>
               <button
                 type="button"
@@ -2701,7 +2735,13 @@ function TeamCard({ team, onOpen, onRename }) {
                       title={tr("localTeams.copyAddr", "点击复制地址")}
                       style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
                       onClick={(e) => { e.stopPropagation(); setMenuOpen(false); try { navigator.clipboard.writeText(openUrl || hostUrl || ""); } catch {} }}>
-                      {isPrivate ? (hostUrl || openUrl) : (openUrl || team.runtime_region || team.region || "—")}
+                      {isPrivate ? (displayHostUrl || openUrl) : (openUrl || team.runtime_region || team.region || "—")}
+                    </button>
+                  )}
+                  {isPrivate && onEditUrl && (
+                    <button type="button" data-id="TeamCard-edit-url" className="bcard__menu-item"
+                      onClick={(e) => { e.stopPropagation(); startEditUrl(); }}>
+                      {hostUrl ? tr("teamCard.editUrl", "更改访问地址") : tr("teamCard.setUrl", "填写访问地址")}
                     </button>
                   )}
                 </div>,
@@ -2735,6 +2775,20 @@ function TeamCard({ team, onOpen, onRename }) {
           </h3>
         )}
         </div>
+        {editingUrl && (
+          <input
+            data-id="TeamCard-url-input"
+            autoFocus
+            value={urlDraft}
+            placeholder="https://你的私有云地址:端口"
+            onChange={(e) => setUrlDraft(e.target.value)}
+            onFocus={(e) => e.target.select()}
+            onClick={(e) => e.stopPropagation()}
+            onBlur={commitUrl}
+            onKeyDown={(e) => { if (e.nativeEvent.isComposing || e.keyCode === 229) return; if (e.key === "Enter") commitUrl(); else if (e.key === "Escape") setEditingUrl(false); }}
+            style={{ width: "100%", font: "inherit", fontSize: 12, padding: "3px 6px", margin: "2px 0 4px", border: "1px solid #3b82f6", borderRadius: 6, background: "#0d1117", color: "#e6edf3", boxSizing: "border-box" }}
+          />
+        )}
         <div className="bcard__meta">
           <span className="bcard__chip">{kindLabel}</span>
           {!isPrivate && team.membership_status && team.membership_status !== "active" && (

@@ -291,7 +291,9 @@
   },
   "teamCard": {
     "noHost": "No address set",
-    "noUrl": "No URL"
+    "noUrl": "No URL",
+    "editUrl": "Modifier l'URL d'accès",
+    "setUrl": "Définir l'URL d'accès"
   },
   "updateDrawer": {
     "done": "Update complete",

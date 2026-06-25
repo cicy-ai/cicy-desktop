@@ -291,7 +291,9 @@
   },
   "teamCard": {
     "noHost": "No address set",
-    "noUrl": "No URL"
+    "noUrl": "No URL",
+    "editUrl": "アクセスURLを変更",
+    "setUrl": "アクセスURLを設定"
   },
   "updateDrawer": {
     "done": "Update complete",

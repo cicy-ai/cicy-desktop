@@ -291,7 +291,9 @@
   },
   "teamCard": {
     "noHost": "未填访问地址",
-    "noUrl": "无 URL"
+    "noUrl": "无 URL",
+    "editUrl": "更改访问地址",
+    "setUrl": "填写访问地址"
   },
   "updateDrawer": {
     "done": "更新完成",
