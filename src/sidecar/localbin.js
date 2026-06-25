@@ -35,11 +35,36 @@ const path = require("path");
 const { execFile, execFileSync } = require("child_process");
 
 const IS_WIN = process.platform === "win32";
-const REGISTRY = process.env.CICY_NPM_REGISTRY || "https://registry.npmmirror.com";
-// 多 registry 回退(主人): npmmirror(CN 快)优先,失败回退 npmjs.org(官方)。新发布的
-// cicy-code-<plat> 子包/新版本先到 npmjs,npmmirror 同步有延迟 —— 只查 npmmirror 会
-// "package not found" 把 seed/更新 整死(实测 mac:npm view cicy-code-darwin-x64 失败)。
-const REGISTRIES = [REGISTRY, "https://registry.npmjs.org"].filter((r, i, a) => a.indexOf(r) === i);
+const NPMMIRROR = "https://registry.npmmirror.com"; // CN-fast
+const NPMJS = "https://registry.npmjs.org";         // 官方,新版本/新子包先到这
+
+// 主人(2026-06): 按网络环境选 registry 顺序,两边都用各自最快的源(对方做回退)。
+//   CN(GFW 内):npmmirror 优先 → npmjs 兜底
+//   非CN:        npmjs 优先     → npmmirror 兜底(npmmirror 海外慢,别让它当首选)
+// 判断:探 generate_204 —— 能 204(够到 Google/有代理)= 非CN;超时/失败 = CN。探一次缓存。
+// CICY_NPM_REGISTRY 覆盖时强制该源优先(测试/私有源用)。
+let _cnProbe = null;
+function probeIsCN() {
+  if (_cnProbe) return _cnProbe;
+  _cnProbe = new Promise((resolve) => {
+    let done = false;
+    const fin = (cn) => { if (!done) { done = true; resolve(cn); } };
+    try {
+      const req = require("https").get("https://www.gstatic.com/generate_204", { timeout: 2000 }, (res) => {
+        const ok = res.statusCode === 204; res.destroy(); fin(!ok); // 204 够到 = 非CN
+      });
+      req.on("timeout", () => { req.destroy(); fin(true); }); // 超时 = GFW = CN
+      req.on("error", () => fin(true));                        // 连不上 = CN
+    } catch { fin(true); }
+  });
+  return _cnProbe;
+}
+async function registries() {
+  const override = process.env.CICY_NPM_REGISTRY;
+  if (override) return [override, NPMJS, NPMMIRROR].filter((r, i, a) => a.indexOf(r) === i);
+  const cn = await probeIsCN();
+  return cn ? [NPMMIRROR, NPMJS] : [NPMJS, NPMMIRROR];
+}
 const LOCAL_BIN = path.join(os.homedir(), ".local", "bin");
 const MANIFEST = path.join(LOCAL_BIN, ".cicy-localbin.json");
 
@@ -126,11 +151,12 @@ function npmExec(args, timeout = 600000) {
   });
 }
 
-// Latest published version of the per-platform subpackage. Tries npmmirror then
-// npmjs.org (REGISTRIES) so a not-yet-mirrored package/version still resolves.
+// Latest published version of the per-platform subpackage. Tries the env-ordered
+// registries (CN→npmmirror first, 非CN→npmjs first) so a not-yet-mirrored
+// package/version still resolves and 非CN 不被慢镜像拖住。
 async function latestVersion(name = DEFAULT) {
   let lastErr;
-  for (const reg of REGISTRIES) {
+  for (const reg of await registries()) {
     try { return (await npmExec(["view", pkgFor(name), "version", `--registry=${reg}`], 30000)).trim(); }
     catch (e) { lastErr = e; }
   }
@@ -221,7 +247,7 @@ async function fetchToLocalBin(ver, { emit, name = DEFAULT } = {}) {
   try {
     e({ phase: "download", status: "running", message: `下载 ${label} ${ver}…` });
     let out, lastErr;
-    for (const reg of REGISTRIES) {
+    for (const reg of await registries()) {
       try { out = await npmExec(["pack", `${pkgFor(name)}@${ver}`, `--registry=${reg}`, "--pack-destination", tmp]); break; }
       catch (e2) { lastErr = e2; }
     }
