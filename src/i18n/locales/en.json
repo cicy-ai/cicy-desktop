@@ -201,7 +201,8 @@
     "chromeProxy": "Chrome proxy",
     "recreateConfirm": "This deletes and recreates the current container (volume data kept) to switch to the dedicated team's gateway key. Recreate?",
     "recreated": "Docker container recreated",
-    "recreateOk": "Recreate"
+    "recreateOk": "Recreate",
+    "runningWslBroken": "Running · ⚠ WSL unmanaged (open works; update/restart needs WSL repair)"
   },
   "common": {
     "close": "Close",

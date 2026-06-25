@@ -556,10 +556,15 @@ function ensureDesktopShortcut(volume = "cicy-team-8009", port = 8009) {
 
 // Composite status for the card.
 async function status(port = 8009) {
-  // `unknown` = WSL didn't answer a probe (stuck/booting). The homepage uses it
-  // to show 「检测中/WSL 无响应·重试」instead of falsely showing 「下载安装」.
+  // **:8009 健康优先,且永不静默**(主人: 出了问题要看得到、能排查):
+  // 先独立 HTTP 探活 —— 哪怕 `wsl --list` 抽风查不到发行版(实测:WSL/Windows 更新会把
+  // 正在跑的发行版孤儿化,管理命令报「没有已安装的分发版」,但容器还在后台服务 :8009),
+  // 只要 :8009 真健康,就是 running、卡片就给「打开」。同时把这种「服务在跑但 WSL 管不到」
+  // 的异常用 wslUnmanaged 标出来,卡片显式提示「运行中·WSL 管理异常,更新/重启需修复」,
+  // 不再让用户面对一个打不开、没报错的死卡。
+  const healthy = await probeHealth(port);
   const miss = await docker.wslMissing();           // true | false | null(unknown)
-  if (miss === null) return { wsl: false, distro: false, engineUp: false, running: false, unknown: true };
+  if (miss === null) return { wsl: false, distro: false, engineUp: false, running: healthy, unknown: !healthy, healthy, wslUnmanaged: healthy };
   const wsl = !miss;
   let distro = false, unknown = false;
   if (wsl) {
@@ -567,8 +572,10 @@ async function status(port = 8009) {
     if (di === null) unknown = true; else distro = !!di;
   }
   const engineUp = !!(distro && (await dockerEngineUp()));
-  const running = !!(engineUp && (await probeHealth(port)));
-  return { wsl, distro, engineUp, running, unknown };
+  const running = healthy || !!(engineUp && (await probeHealth(port)));
+  // 服务在跑(:8009 健康)但 wsl 查不到发行版/引擎 → WSL 被孤儿化,管理(更新/重启)会失败。
+  const wslUnmanaged = healthy && !engineUp;
+  return { wsl, distro, engineUp, running, unknown: unknown && !healthy, healthy, wslUnmanaged };
 }
 
 // Guard against overlapping bootstrap runs (double-click 重试 / re-entrancy):

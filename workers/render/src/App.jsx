@@ -1956,10 +1956,13 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
   // reboot). Do NOT fall through to 「下载安装」— that lies (it IS installed, WSL
   // just didn't answer). Show a retry state so the user re-probes, not reinstalls.
   const unknown = !!status?.unknown && !running && !dockerRunning && !installed;
-  const tone = running ? "ok" : (dockerRunning || installed || unknown) ? "warn" : "off";
+  // WSL 被孤儿化:容器在跑(:8009 健康)但 wsl 查不到发行版 → 可打开,但更新/重启会失败。
+  // 显式标出来,不让用户面对一个静默打不开的死卡(主人: 出了问题要看得到、能排查)。
+  const wslUnmanaged = !!status?.wslUnmanaged;
+  const tone = running ? (wslUnmanaged ? "warn" : "ok") : (dockerRunning || installed || unknown) ? "warn" : "off";
   const isBusy = !!busy;
   const stateText = running
-    ? tr("docker.running", "运行中")
+    ? (wslUnmanaged ? tr("docker.runningWslBroken", "运行中 · ⚠ WSL 管理异常(能打开;更新/重启需修复 WSL)") : tr("docker.running", "运行中"))
     : dockerRunning
       ? tr("docker.notRunning", "未启动 · 点「启动」")
       : installed
