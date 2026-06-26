@@ -209,7 +209,9 @@
     "recreateOk": "Recreate",
     "runningWslBroken": "En marche · ⚠ WSL non géré (ouverture OK ; mise à jour/redémarrage = réparer WSL)",
     "openFailed": "Échec d'ouverture",
-    "openTitle": "Ouvrir l'équipe Docker"
+    "openTitle": "Ouvrir l'équipe Docker",
+    "repairWsl": "Réparer WSL",
+    "wslBrokenRepair": "WSL non géré · cliquez Réparer WSL pour réinstaller"
   },
   "common": {
     "close": "Close",

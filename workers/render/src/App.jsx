@@ -2072,13 +2072,17 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
   // reboot). Do NOT fall through to 「下载安装」— that lies (it IS installed, WSL
   // just didn't answer). Show a retry state so the user re-probes, not reinstalls.
   const unknown = !!status?.unknown && !running && !dockerRunning && !installed;
-  // WSL 被孤儿化:容器在跑(:8009 健康)但 wsl 查不到发行版 → 可打开,但更新/重启会失败。
-  // 显式标出来,不让用户面对一个静默打不开的死卡(主人: 出了问题要看得到、能排查)。
+  // WSL 被孤儿化::8009 看着健康(可能只是 wslhost 僵尸攥着端口),但 distro 已从 WSL
+  // 消失 → token 读不到、打不开。所以 wslUnmanaged 不再是「可打开」,而是「需修复」:
+  // CTA 走「修复 WSL」自动重装(bootstrap 会杀僵尸端口 + wsl --shutdown + 重新 import)。
   const wslUnmanaged = !!status?.wslUnmanaged;
-  const tone = running ? (wslUnmanaged ? "warn" : "ok") : (dockerRunning || installed || unknown) ? "warn" : "off";
+  const realRunning = running && !wslUnmanaged; // 真能打开 = 健康 且 WSL 没孤儿化
+  const tone = realRunning ? "ok" : (wslUnmanaged || dockerRunning || installed || unknown) ? "warn" : "off";
   const isBusy = !!busy;
-  const stateText = running
-    ? (wslUnmanaged ? tr("docker.runningWslBroken", "运行中 · ⚠ WSL 管理异常(能打开;更新/重启需修复 WSL)") : tr("docker.running", "运行中"))
+  const stateText = wslUnmanaged
+    ? tr("docker.wslBrokenRepair", "WSL 管理异常 · 点「修复 WSL」重装")
+    : running
+    ? tr("docker.running", "运行中")
     : dockerRunning
       ? tr("docker.notRunning", "未启动 · 点「启动」")
       : installed
@@ -2093,8 +2097,10 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
     ? tr("docker.probing", "检测中…")
     : isBusy
     ? tr("docker.working", "处理中…")
-    : running
+    : realRunning
       ? tr("localTeams.open", "打开")
+      : wslUnmanaged
+        ? tr("docker.repairWsl", "修复 WSL")
       : dockerRunning
         ? tr("docker.start", "启动")
         : installed
@@ -2105,7 +2111,9 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
 
   const onCta = async () => {
     if (isBusy) return;
-    if (running) {
+    // WSL 孤儿化 → 走「修复」(bootstrap 杀僵尸端口 + wsl --shutdown + 重新 import),不进打开。
+    if (wslUnmanaged) { runBootstrap(); return; }
+    if (realRunning) {
       // 主人令:打开很慢 → 先探这个 :8009 tab 开过没。开过(openedWc 里有它的
       // webContentsId)就**直接 active 秒切**,不再拿 token / 注册 team(那是慢的根)。
       try {

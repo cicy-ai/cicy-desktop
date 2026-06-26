@@ -209,7 +209,9 @@
     "recreateOk": "Recreate",
     "runningWslBroken": "実行中 · ⚠ WSL 管理異常(開けます;更新/再起動は WSL 修復が必要)",
     "openFailed": "オープン失敗",
-    "openTitle": "Docker チームを開く"
+    "openTitle": "Docker チームを開く",
+    "repairWsl": "WSL を修復",
+    "wslBrokenRepair": "WSL 管理異常 · 「WSL を修復」で再インストール"
   },
   "common": {
     "close": "Close",

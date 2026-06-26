@@ -209,7 +209,9 @@
     "recreateOk": "Recreate",
     "runningWslBroken": "Running · ⚠ WSL unmanaged (open works; update/restart needs WSL repair)",
     "openFailed": "Open failed",
-    "openTitle": "Open Docker team"
+    "openTitle": "Open Docker team",
+    "repairWsl": "Repair WSL",
+    "wslBrokenRepair": "WSL unmanaged · click Repair WSL to reinstall"
   },
   "common": {
     "close": "Close",

@@ -151,6 +151,19 @@ function wslShutdown() {
   });
 }
 
+// Kill whatever Windows process is LISTENING on 127.0.0.1:<port>. The orphaned-distro
+// failure mode: the distro gets unregistered (wsl --list empty) but a ZOMBIE
+// wslhost.exe keeps holding the :8009 port-forward — so health probes still 200
+// even after `wsl --shutdown`, masking that the backend is gone and the port is
+// occupied (a fresh re-import's container can't bind :8009). Get-NetTCPConnection →
+// Stop-Process the owner. Best-effort; resolves regardless.
+function killPortListener(port) {
+  return new Promise((resolve) => {
+    const ps = `Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }`;
+    execFile("powershell", ["-NoProfile", "-Command", ps], { windowsHide: true, timeout: 15000 }, () => resolve());
+  });
+}
+
 // `wsl --terminate <distro>`: stop the distro so the NEXT `wsl -d` cold-boots it
 // clean. This is the fix for the「引擎没起来」-on-fresh-install failure: a distro
 // straight out of `wsl --import` is frequently half-initialized / unresponsive,
@@ -630,13 +643,28 @@ async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-dock
   };
   log.info(`[bootstrap] START port=${port} container=${container} volume=${volume}`);
 
-  // 0) Fast path: already healthy → instant no-op (idempotent one-shot).
+  // 0) Fast path: healthy AND the distro is TRULY wsl-managed → instant no-op.
+  //    BUT a ZOMBIE :8009 (distro unregistered from WSL, yet a leftover wslhost.exe
+  //    still holds the port-forward → health 200 even after `wsl --shutdown`) is NOT
+  //    a working install: token can't be read, 「打开」would fail forever. Only skip
+  //    on health when distroInstalled() is CONFIRMED true; if it's CONFIRMED false
+  //    (wsl --list worked and the distro is gone) → zombie: kill the port squatter +
+  //    `wsl --shutdown`, then fall through to a full re-import. `null`(flaky list)→
+  //    treat as maybe-fine, keep the old health-only no-op (don't nuke a good setup).
   begin("probe-healthy");
-  if (await probeHealth(port)) {
+  const healthy0 = await probeHealth(port);
+  const di0 = healthy0 ? await distroInstalled() : null; // true | false | null
+  if (healthy0 && di0 !== false) {
     done();
     emit({ phase: "done", status: "done", message: "Docker cicy-code 已就绪 🎉" });
     finish(true);
     return { ok: true, container };
+  }
+  if (healthy0 && di0 === false) {
+    emit({ phase: "container", status: "running", message: "检测到 :8009 被僵尸进程占用(WSL 已无此发行版),正在清理端口 + 重置 WSL 后重装…" });
+    try { await killPortListener(port); } catch (e) {}
+    try { await wslShutdown(); } catch (e) {}
+    await new Promise((r) => setTimeout(r, 1500));
   }
   done();
 

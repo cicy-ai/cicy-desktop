@@ -209,7 +209,9 @@
     "recreateOk": "确定重建",
     "runningWslBroken": "运行中 · ⚠ WSL 管理异常(能打开;更新/重启需修复 WSL)",
     "openFailed": "打开失败",
-    "openTitle": "打开 Docker 团队"
+    "openTitle": "打开 Docker 团队",
+    "repairWsl": "修复 WSL",
+    "wslBrokenRepair": "WSL 管理异常 · 点「修复 WSL」重装"
   },
   "common": {
     "close": "关闭",
