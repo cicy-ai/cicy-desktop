@@ -482,7 +482,10 @@ async function runContainer({ port = 8009, container = "cicy-code-docker", volum
   // 223.5.5.5 (CN-fast) first, Google 8.8.8.8 as the overseas fallback.
   // 主人方案: Chrome 的 per-profile 代理改由「宿主 mihomo」(host-mihomo.js)服务,不再从容器
   // publish 20001-32(WSL/colima 转发那段口到不了容器里只绑 127.0.0.1 的监听)。容器只暴露 :8009。
-  const cmd = `docker run -d --name ${container} --restart unless-stopped --dns 223.5.5.5 --dns 8.8.8.8 -p 127.0.0.1:${port}:8008 -p 127.0.0.1:${EXTRA_PORTS}:${EXTRA_PORTS} -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${projectsMountArg()} ${envArgs} ${IMAGE}`;
+  // 只发布 :8009(单端口,1 个 docker-proxy)。EXTRA_PORTS 那段 18000-19999(2000 个端口)
+  // 已删——docker 默认每端口起一个 userland-proxy 进程 → 2000 进程,docker run 卡死/吃内存/
+  // 偶发失败(主人实测)。容器内 agent 服务需要从 Windows 直达时再按需单独暴露。
+  const cmd = `docker run -d --name ${container} --restart unless-stopped --dns 223.5.5.5 --dns 8.8.8.8 -p 127.0.0.1:${port}:8008 -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${projectsMountArg()} ${envArgs} ${IMAGE}`;
   emit && emit({ phase: "container", status: "running", message: `$ ${cmd.length > 220 ? cmd.slice(0, 220) + " …" : cmd}` });
   await wslRun(cmd, { timeout: 60000 }); // 失败时 err.stderr 带 docker 真错误 → _bootstrap 的 errTail 显示
   ensureDesktopShortcut(volume, port).catch(() => {});
