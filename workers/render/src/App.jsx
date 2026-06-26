@@ -1843,7 +1843,7 @@ function DockerInstallDrawerHost() {
             : st.logs.map((l) => (
               <div key={l.id} className="drawer__line" data-status={l.status}>
                 <span className="drawer__t">{l.t}</span>
-                <span className={`drawer__badge drawer__badge--${l.phase}`}>{DOCKER_BADGE[l.phase] || l.phase}</span>
+                <span className={`drawer__badge drawer__badge--${l.phase}`}>{tr(`dockerBadge.${l.phase}`, DOCKER_BADGE[l.phase] || l.phase)}</span>
                 <span className="drawer__linemsg">{l.message}</span>
               </div>
             ))}

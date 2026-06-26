@@ -461,5 +461,13 @@
     "opened": "已打开",
     "hintOpenFailed": "拿到 token 但打开窗口失败:{{err}}",
     "hintException": "打开过程异常:{{err}}"
+  },
+  "dockerBadge": {
+    "install-docker": "准备",
+    "image": "下载",
+    "container": "启动",
+    "health": "启动",
+    "done": "完成",
+    "open": "打开"
   }
 }

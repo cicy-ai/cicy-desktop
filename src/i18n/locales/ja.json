@@ -461,5 +461,13 @@
     "opened": "開きました",
     "hintOpenFailed": "token は取得しましたがウィンドウを開けませんでした:{{err}}",
     "hintException": "オープン中に例外:{{err}}"
+  },
+  "dockerBadge": {
+    "install-docker": "準備",
+    "image": "DL",
+    "container": "起動",
+    "health": "起動",
+    "done": "完了",
+    "open": "開く"
   }
 }

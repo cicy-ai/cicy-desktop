@@ -461,5 +461,13 @@
     "opened": "Opened",
     "hintOpenFailed": "Got the token but failed to open the window: {{err}}",
     "hintException": "Open failed with an exception: {{err}}"
+  },
+  "dockerBadge": {
+    "install-docker": "Prep",
+    "image": "Download",
+    "container": "Start",
+    "health": "Start",
+    "done": "Done",
+    "open": "Open"
   }
 }

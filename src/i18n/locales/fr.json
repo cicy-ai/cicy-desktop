@@ -461,5 +461,13 @@
     "opened": "Ouvert",
     "hintOpenFailed": "Token obtenu mais échec d'ouverture de la fenêtre : {{err}}",
     "hintException": "Exception lors de l'ouverture : {{err}}"
+  },
+  "dockerBadge": {
+    "install-docker": "Prép.",
+    "image": "Téléch.",
+    "container": "Démarr.",
+    "health": "Démarr.",
+    "done": "Terminé",
+    "open": "Ouvrir"
   }
 }
