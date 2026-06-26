@@ -580,7 +580,7 @@ function launchElevated(exe, args, { emit } = {}) {
       const vbs = path.join(os.tmpdir(), "cicy-docker-elevate.vbs");
       const argStr = args.join(" ").replace(/"/g, '""');
       const exeEsc = String(exe).replace(/"/g, '""');
-      fs.writeFileSync(vbs, `Set s = CreateObject("Shell.Application")\r\ns.ShellExecute "${exeEsc}", "${argStr}", "", "runas", 1\r\n`, "utf8");
+      fs.writeFileSync(vbs, `Set s = CreateObject("Shell.Application")\r\ns.ShellExecute "${exeEsc}", "${argStr}", "", "runas", 0\r\n`, "utf8");
       const child = spawn("cscript", ["//nologo", vbs], { windowsHide: true, detached: true, stdio: "ignore" });
       let done = false; const fin = (ok) => { if (!done) { done = true; resolve(ok); } };
       child.on("error", () => {

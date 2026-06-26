@@ -41,6 +41,12 @@ const KERNEL_MSI_URL = process.env.CICY_WSL_KERNEL_URL || "https://wslstorestora
 // kernel is a fast no-op). Streams a progress bar; non-fatal on download failure
 // so we still attempt the import (the kernel may already be there).
 async function ensureWslKernel({ emit } = {}) {
+  // 已有 WSL2 内核就别再装(msiexec 提权会弹 UAC + 可能卡死)。`wsl --status` 报出内核
+  // 版本号(如 5.15.x)= 内核已就绪 → 直接跳过。这对"已经有 WSL2 的用户"是常态。
+  try {
+    const out = await new Promise((res) => execFile("wsl", ["--status"], { timeout: 15000, windowsHide: true, encoding: "utf16le" }, (e, o) => res(e ? "" : String(o || ""))));
+    if (/\d+\.\d+\.\d+/.test(out)) { emit && emit({ phase: "install-docker", status: "running", message: "WSL2 内核已就绪,跳过安装" }); return; }
+  } catch (e) {}
   const msi = path.join(docker.downloadsDir(), "wsl_update_x64.msi");
   try { await docker.ensureDownloaded(KERNEL_MSI_URL, msi, null, { emit, phase: "install-docker", label: "下载 WSL2 内核" }); }
   catch (e) { emit && emit({ phase: "install-docker", status: "running", message: `WSL2 内核下载失败:${e.message}（尝试继续）` }); return; }
