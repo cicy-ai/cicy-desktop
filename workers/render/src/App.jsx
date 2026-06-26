@@ -2065,7 +2065,10 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
   //   dockerRunning — engine up, no container → 启动 (build/start container)
   //   installed     — Docker on disk but engine down → 启动 Docker
   //   else          — not installed → 下载安装
-  const running = !!status?.running || dockerTeam?.status === "running";
+  // 有 live status 就信它;status 还没加载到(null)才用 dockerTeam 快照兜底。
+  // 否则 teams.json 里陈旧的 status:"running" 会盖过「容器其实已停/:8009 down」的真实
+  // 状态 → 卡片显示死「打开」(点了必失败)。主人: 真相单一,以 live 探测为准。
+  const running = status ? !!status.running : (dockerTeam?.status === "running");
   const dockerRunning = !!status?.dockerRunning;
   const installed = !!status?.installed;
   // unknown = the status probe couldn't reach WSL (stuck / still booting after a
