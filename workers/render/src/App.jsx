@@ -861,6 +861,13 @@ export default function App() {
   const dockerCloudTeam = (dockerTeam && dockerTeam.cloud_team_id)
     ? (teams || []).find((t) => String(t.teamId || t.id) === String(dockerTeam.cloud_team_id))
     : null;
+  // Map a cloud_team_id → the team's short non-guessable URL code (from /api/teams),
+  // used for the 账单 deeplink so the URL isn't an enumerable sequential id.
+  const cloudCodeFor = (cloudTeamId) => {
+    if (!cloudTeamId) return null;
+    const ct = (teams || []).find((t) => String(t.teamId || t.id) === String(cloudTeamId));
+    return (ct && ct.code) || null;
+  };
   // Split the cicyDesktopNodes list into 本地 (the localhost:8008 sidecar the
   // desktop owns — full lifecycle) vs 自定义 (deeplink-added nodes, usually
   // remote — probe-only, no restart/stop/update, just 打开).
@@ -981,7 +988,7 @@ export default function App() {
 
         <div className="app__grid">
           {showLocal && localList.map((t) => (
-            <LocalTeamCard key={"local:" + t.id} team={t} onOpen={() => openLocalTeam(t.id)} onRename={renameLocalTeam} onRefresh={fetchLocalTeams} />
+            <LocalTeamCard key={"local:" + t.id} team={t} cloudCode={cloudCodeFor(t.cloud_team_id)} onOpen={() => openLocalTeam(t.id)} onRename={renameLocalTeam} onRefresh={fetchLocalTeams} />
           ))}
           {/* 主人: native :8008 退役 —— 不再有"本地团队 正在启动"占位卡(native 已删,
               :8008 永远不会起来,占位会一直转)。cicy-code 用下面的 Docker 卡(:8009)。 */}
@@ -998,12 +1005,13 @@ export default function App() {
                 } catch (e) { console.warn("[DockerCard] open", e); }
               }}
               cloudTitle={dockerCloudTeam?.title}
+              cloudCode={dockerCloudTeam?.code}
               onRename={dockerTeam?.cloud_team_id ? ((title) => renameCloudTeam(dockerTeam.cloud_team_id, title)) : undefined}
               onRefresh={fetchLocalTeams}
             />
           )}
           {showCustom && customList.map((t) => (
-            <LocalTeamCard key={"custom:" + t.id} team={t} onOpen={() => openLocalTeam(t.id)} onRename={renameLocalTeam} onRefresh={fetchLocalTeams} />
+            <LocalTeamCard key={"custom:" + t.id} team={t} cloudCode={cloudCodeFor(t.cloud_team_id)} onOpen={() => openLocalTeam(t.id)} onRename={renameLocalTeam} onRefresh={fetchLocalTeams} />
           ))}
           {showCloud && cloudList.map((t) => (
             <TeamCard
@@ -1905,7 +1913,7 @@ function DockerInstallDrawerHost() {
 // in Docker on :8009, alongside the native local daemon (:8008). If Docker
 // Desktop is missing, the install flow downloads its installer to the user's
 // Desktop and runs it (主人指令), streaming progress through the drawer above.
-function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
+function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRefresh }) {
   const [status, setStatus] = useState(null);
   const [busy, setBusy] = useState("");   // "" | bootstrap | restart | stop | upgrade | probe
   const [menuOpen, setMenuOpen] = useState(false);
@@ -2226,7 +2234,7 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
                   {tr("docker.reloadWindow", "刷新窗口")}
                 </button>
                 <button type="button" data-id="DockerCard-billing" className="bcard__menu-item"
-                  onClick={() => { setMenuOpen(false); openCloudPage(dockerTeam?.cloud_team_id ? `?team=${encodeURIComponent(dockerTeam.cloud_team_id)}` : "?view=usage"); }}>
+                  onClick={() => { setMenuOpen(false); openCloudPage((cloudCode || dockerTeam?.cloud_team_id) ? `?team=${encodeURIComponent(cloudCode || dockerTeam.cloud_team_id)}` : "?view=usage"); }}>
                   {tr("docker.billing", "帐单")}
                 </button>
                 {/* 分隔线:下面是操作整个 Docker 容器的(授权访问 Mac / 重启 Docker / 重建 Docker)*/}
@@ -2333,7 +2341,7 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
   );
 }
 
-function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
+function LocalTeamCard({ team, cloudCode, onOpen, onRename, onRefresh }) {
   const statusInfo = LOCAL_STATUS[team.status] || LOCAL_STATUS.error;
   const tone = statusInfo.tone;
   // Inline rename — 产品级:点名字即编辑、乐观更新、行内"保存中/已保存"、失败回滚。
@@ -2696,7 +2704,7 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
                       // Per-team billing (w-10032): /dash?team=<teamId> + handoff
                       // ticket. teamId = the cloud_team_id we stored on name-sync;
                       // no key in the URL — dash fetches it via session.
-                      openCloudPage(`?team=${encodeURIComponent(team.cloud_team_id)}`);
+                      openCloudPage(`?team=${encodeURIComponent(cloudCode || team.cloud_team_id)}`);
                     }}
                   >
                     {tr("localTeams.billing", "账单")}
