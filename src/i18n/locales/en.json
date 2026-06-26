@@ -244,7 +244,21 @@
   "teams": {
     "addHint": "Create a new private cloud team",
     "add": "Add team",
-    "emptyHint": "No teams yet — install local cicy-code to start a local team, or create one in the cloud."
+    "emptyHint": "No teams yet — install local cicy-code to start a local team, or create one in the cloud.",
+    "addCustom": "Custom team",
+    "addCustomSub": "Enter address & name manually",
+    "addPrivate": "Private cloud team",
+    "addPrivateSub": "Add in the cloud team center",
+    "customTitle": "Add custom team",
+    "customSub": "Connect to an existing cicy-code address",
+    "customNameLabel": "Name",
+    "customNamePlaceholder": "My team",
+    "customUrlLabel": "Address URL",
+    "customTokenLabel": "Token (optional)",
+    "urlRequired": "Please enter the address URL",
+    "badUrl": "Invalid URL (must include http(s)://)",
+    "adding": "Adding…",
+    "addAction": "Add"
   },
   "trustedSites": {
     "addFailed": "Add failed",

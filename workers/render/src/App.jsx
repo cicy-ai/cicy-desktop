@@ -289,6 +289,15 @@ export default function App() {
   // Used to distinguish "not yet probed" (unknown) from "probed and empty"
   // (cloud-only) in localHelperState below.
   const [localTeamsFetched, setLocalTeamsFetched] = useState(false);
+  // 「新加团队」下拉 + 自定义团队 modal(主人): 点按钮出两个选项——自定义(本 modal 输 url/title)
+  // 或私有云(跳云端团队中心)。自定义走 localTeams.add({base_url,name,api_token})。
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [customOpen, setCustomOpen] = useState(false);
+  const [customTitle, setCustomTitle] = useState("");
+  const [customUrl, setCustomUrl] = useState("");
+  const [customToken, setCustomToken] = useState("");
+  const [customBusy, setCustomBusy] = useState(false);
+  const [customErr, setCustomErr] = useState("");
   // Tab state for the team grid: "all" | "local" | "cloud".
   const [tab, setTab] = useState("all");
 
@@ -434,6 +443,25 @@ export default function App() {
       setLocalTeamsFetched(true);
     }
   }, []);
+  // 自定义团队:输 url(必填)+ title + 可选 token → localTeams.add(upsert by base_url)。
+  // 成功后关 modal、刷新、切到「自定义」tab。出错就地显示、可重试,按钮全程 disable+loading。
+  async function submitCustom() {
+    if (customBusy) return;
+    const url = customUrl.trim();
+    if (!url) { setCustomErr(tr("teams.urlRequired", "请输入地址 URL")); return; }
+    try { new URL(url); } catch { setCustomErr(tr("teams.badUrl", "URL 无效(需含 http(s)://)")); return; }
+    setCustomErr(""); setCustomBusy(true);
+    try {
+      const r = await window.cicy.localTeams.add({ base_url: url, name: customTitle.trim(), api_token: customToken.trim() });
+      if (!r || r.ok === false) { setCustomErr(humanError(r?.error || "add failed")); return; }
+      setCustomOpen(false); setCustomTitle(""); setCustomUrl(""); setCustomToken("");
+      await fetchLocalTeams(); setTab("custom");
+    } catch (e) {
+      setCustomErr(humanError(e?.message || String(e)));
+    } finally {
+      setCustomBusy(false);
+    }
+  }
   // Rename a local team: persist via localTeams.update then refresh the list.
   // Empty name falls back to 未命名 (mirrors local-teams.addTeam default).
   const renameLocalTeam = useCallback(async (id, name) => {
@@ -836,17 +864,70 @@ export default function App() {
               </button>
             ))}
           </div>
-          {/* 行尾:新加团队 → 跳浏览器到云端 dash 私有云页 */}
-          <button
-            type="button"
-            data-id="AddTeamButton"
-            className="app__add-team"
-            title={tr("teams.addHint", "在云端新建私有云团队")}
-            onClick={() => openCloudPage("?tab=private")}
-          >
-            + {tr("teams.add", "新加团队")}
-          </button>
+          {/* 行尾:新加团队 → 下拉两个选项:① 自定义(modal 输 url/title)② 私有云(跳云端团队中心) */}
+          <div data-id="AddTeamWrap" style={{ position: "relative" }}>
+            <button
+              type="button"
+              data-id="AddTeamButton"
+              className="app__add-team"
+              title={tr("teams.addHint", "添加团队")}
+              onClick={() => setAddMenuOpen((v) => !v)}
+            >
+              + {tr("teams.add", "新加团队")}
+            </button>
+            {addMenuOpen && (
+              <>
+                <div onClick={() => setAddMenuOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+                <div data-id="AddTeamMenu" role="menu" style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 41, minWidth: 240, background: "var(--card, #1b1d22)", border: "1px solid var(--border, #2c2f36)", borderRadius: 10, boxShadow: "0 10px 30px rgba(0,0,0,.45)", overflow: "hidden" }}>
+                  <button type="button" data-id="AddTeamMenu-custom" className="bcard__menu-item" style={{ display: "block", width: "100%", textAlign: "left", padding: "11px 14px", border: "none", background: "transparent", cursor: "pointer", color: "inherit" }}
+                    onClick={() => { setAddMenuOpen(false); setCustomErr(""); setCustomOpen(true); }}>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{tr("teams.addCustom", "自定义团队")}</div>
+                    <div style={{ fontSize: 11, opacity: .6, marginTop: 2 }}>{tr("teams.addCustomSub", "手动输入地址和名称")}</div>
+                  </button>
+                  <button type="button" data-id="AddTeamMenu-private" className="bcard__menu-item" style={{ display: "block", width: "100%", textAlign: "left", padding: "11px 14px", border: "none", borderTop: "1px solid var(--border, #2c2f36)", background: "transparent", cursor: "pointer", color: "inherit" }}
+                    onClick={() => { setAddMenuOpen(false); openCloudPage("?tab=private"); }}>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{tr("teams.addPrivate", "私有云团队")}</div>
+                    <div style={{ fontSize: 11, opacity: .6, marginTop: 2 }}>{tr("teams.addPrivateSub", "去云端团队中心添加")}</div>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
+
+        {/* 自定义团队 modal:输 名称 + 地址 URL + 可选 token → localTeams.add */}
+        {customOpen && (
+          <div data-id="CustomTeamModal" style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.5)" }}
+            onClick={() => { if (!customBusy) setCustomOpen(false); }}>
+            <div onClick={(e) => e.stopPropagation()} style={{ width: 400, maxWidth: "92vw", background: "var(--card, #1b1d22)", border: "1px solid var(--border, #2c2f36)", borderRadius: 14, padding: 22, boxShadow: "0 20px 60px rgba(0,0,0,.5)" }}>
+              <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{tr("teams.customTitle", "添加自定义团队")}</div>
+              <div style={{ fontSize: 12, opacity: .6, marginBottom: 16 }}>{tr("teams.customSub", "连接到一个已有的 cicy-code 地址")}</div>
+
+              <label style={{ display: "block", fontSize: 12, opacity: .75, marginBottom: 6 }}>{tr("teams.customNameLabel", "名称")}</label>
+              <input data-id="CustomTeamModal-title" className="login-email-input" style={{ width: "100%", marginBottom: 14 }}
+                value={customTitle} onChange={(e) => setCustomTitle(e.target.value)} placeholder={tr("teams.customNamePlaceholder", "我的团队")} spellCheck={false} autoFocus />
+
+              <label style={{ display: "block", fontSize: 12, opacity: .75, marginBottom: 6 }}>{tr("teams.customUrlLabel", "地址 URL")}</label>
+              <input data-id="CustomTeamModal-url" className="login-email-input" style={{ width: "100%", marginBottom: 14 }}
+                value={customUrl} onChange={(e) => setCustomUrl(e.target.value)} placeholder="https://example.com:8008" spellCheck={false}
+                onKeyDown={(e) => { if (e.key === "Enter") submitCustom(); }} />
+
+              <label style={{ display: "block", fontSize: 12, opacity: .75, marginBottom: 6 }}>{tr("teams.customTokenLabel", "Token(可选)")}</label>
+              <input data-id="CustomTeamModal-token" className="login-email-input" style={{ width: "100%", marginBottom: 6 }}
+                value={customToken} onChange={(e) => setCustomToken(e.target.value)} placeholder="api_token" spellCheck={false}
+                onKeyDown={(e) => { if (e.key === "Enter") submitCustom(); }} />
+
+              {customErr && <div className="error" style={{ marginTop: 10 }}>{customErr}</div>}
+
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 18 }}>
+                <button type="button" className="btn-ghost" data-id="CustomTeamModal-cancel" disabled={customBusy} onClick={() => setCustomOpen(false)}>{tr("common.cancel", "取消")}</button>
+                <button type="button" className="btn-primary" data-id="CustomTeamModal-submit" disabled={customBusy} onClick={submitCustom}>
+                  {customBusy ? tr("teams.adding", "添加中…") : tr("teams.addAction", "添加")}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Docker 安装卡已下线 (主人令): Windows 走原生 cicy-code.exe --helper,不再用 Docker。 */}
         {/* HTTPS 审计 tip(MitmConsentCard)已移入右上角用户菜单(user-chip 下拉)。 */}

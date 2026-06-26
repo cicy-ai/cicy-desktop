@@ -244,7 +244,21 @@
   "teams": {
     "addHint": "在云端新建私有云团队",
     "add": "新加团队",
-    "emptyHint": "还没有团队 — 安装本地 cicy-code 起一个本地 team，或在云端创建。"
+    "emptyHint": "还没有团队 — 安装本地 cicy-code 起一个本地 team，或在云端创建。",
+    "addCustom": "自定义团队",
+    "addCustomSub": "手动输入地址和名称",
+    "addPrivate": "私有云团队",
+    "addPrivateSub": "去云端团队中心添加",
+    "customTitle": "添加自定义团队",
+    "customSub": "连接到一个已有的 cicy-code 地址",
+    "customNameLabel": "名称",
+    "customNamePlaceholder": "我的团队",
+    "customUrlLabel": "地址 URL",
+    "customTokenLabel": "Token(可选)",
+    "urlRequired": "请输入地址 URL",
+    "badUrl": "URL 无效(需含 http(s)://)",
+    "adding": "添加中…",
+    "addAction": "添加"
   },
   "trustedSites": {
     "addFailed": "添加失败",
