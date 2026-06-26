@@ -936,7 +936,7 @@ export default function App() {
 
               {customErr && <div className="error" style={{ marginTop: 10 }}>{customErr}</div>}
 
-              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 18 }}>
+              <div className="modal-actions">
                 <button type="button" className="btn-ghost" data-id="CustomTeamModal-cancel" disabled={customBusy} onClick={() => setCustomOpen(false)}>{tr("common.cancel", "取消")}</button>
                 <button type="button" className="btn-primary" data-id="CustomTeamModal-submit" disabled={customBusy} onClick={submitCustom}>
                   {customBusy ? tr("teams.adding", "添加中…") : tr("teams.addAction", "添加")}
@@ -2742,13 +2742,13 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
           style={{ width: 400, maxWidth: "92vw", background: "var(--card, #1b1d22)", border: "1px solid var(--border, #2c2f36)", borderRadius: 14, padding: 22, boxShadow: "0 20px 60px rgba(0,0,0,.5)" }}>
           <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{tr("teamCard.editUrl", "更改访问地址")}</div>
           <div style={{ fontSize: 12, opacity: .6, marginBottom: 16 }}>{team.name}</div>
-          <input data-id="LocalTeamCard-url-input" autoFocus className="login-email-input" style={{ width: "100%" }}
+          <textarea data-id="LocalTeamCard-url-input" autoFocus rows={3} className="login-email-input" style={{ width: "100%", resize: "vertical", lineHeight: 1.5, fontFamily: "var(--mono)" }}
             value={urlDraft} placeholder="https://example.com:8008" spellCheck={false}
             disabled={urlBusy}
-            onChange={(e) => setUrlDraft(e.target.value)}
-            onKeyDown={(e) => { if (e.nativeEvent.isComposing || e.keyCode === 229) return; if (e.key === "Enter") commitUrl(); else if (e.key === "Escape") setEditingUrl(false); }} />
+            onChange={(e) => setUrlDraft(e.target.value.replace(/[\r\n]+/g, ""))}
+            onKeyDown={(e) => { if (e.nativeEvent.isComposing || e.keyCode === 229) return; if (e.key === "Enter") { e.preventDefault(); commitUrl(); } else if (e.key === "Escape") setEditingUrl(false); }} />
           {urlErr && <div className="error" style={{ marginTop: 8, fontSize: 12 }}>{urlErr}</div>}
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 18 }}>
+          <div className="modal-actions">
             <button type="button" className="btn-ghost" disabled={urlBusy} onClick={() => setEditingUrl(false)}>{tr("common.cancel", "取消")}</button>
             <button type="button" className="btn-primary" data-id="LocalTeamCard-url-save" disabled={urlBusy} onClick={commitUrl}>{urlBusy ? tr("common.saving", "保存中…") : tr("common.save", "保存")}</button>
           </div>
@@ -2816,7 +2816,7 @@ function ConfirmModal({ open, title, message, confirmLabel, danger, onConfirm, o
         style={{ width: 360, maxWidth: "92vw", background: "var(--card, #1b1d22)", border: "1px solid var(--border, #2c2f36)", borderRadius: 14, padding: 22, boxShadow: "0 20px 60px rgba(0,0,0,.5)" }}>
         <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>{title}</div>
         {message && <div style={{ fontSize: 13, opacity: .7, marginBottom: 16 }}>{message}</div>}
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 18 }}>
+        <div className="modal-actions">
           <button type="button" className="btn-ghost" onClick={onCancel}>{tr("common.cancel", "取消")}</button>
           <button type="button" className="btn-primary" data-id="ConfirmModal-ok"
             style={danger ? { background: "#dc2626", borderColor: "#dc2626" } : {}}
@@ -3011,11 +3011,11 @@ function TeamCard({ team, onOpen, onRename, onEditUrl, onDelete }) {
           style={{ width: 400, maxWidth: "92vw", background: "var(--card, #1b1d22)", border: "1px solid var(--border, #2c2f36)", borderRadius: 14, padding: 22, boxShadow: "0 20px 60px rgba(0,0,0,.5)" }}>
           <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{hostUrl ? tr("teamCard.editUrl", "更改访问地址") : tr("teamCard.setUrl", "填写访问地址")}</div>
           <div style={{ fontSize: 12, opacity: .6, marginBottom: 16 }}>{name}</div>
-          <input data-id="TeamCard-url-input" autoFocus className="login-email-input" style={{ width: "100%" }}
+          <textarea data-id="TeamCard-url-input" autoFocus rows={3} className="login-email-input" style={{ width: "100%", resize: "vertical", lineHeight: 1.5, fontFamily: "var(--mono)" }}
             value={urlDraft} placeholder="https://你的私有云地址:端口" spellCheck={false}
-            onChange={(e) => setUrlDraft(e.target.value)}
-            onKeyDown={(e) => { if (e.nativeEvent.isComposing || e.keyCode === 229) return; if (e.key === "Enter") commitUrl(); else if (e.key === "Escape") setEditingUrl(false); }} />
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 18 }}>
+            onChange={(e) => setUrlDraft(e.target.value.replace(/[\r\n]+/g, ""))}
+            onKeyDown={(e) => { if (e.nativeEvent.isComposing || e.keyCode === 229) return; if (e.key === "Enter") { e.preventDefault(); commitUrl(); } else if (e.key === "Escape") setEditingUrl(false); }} />
+          <div className="modal-actions">
             <button type="button" className="btn-ghost" onClick={() => setEditingUrl(false)}>{tr("common.cancel", "取消")}</button>
             <button type="button" className="btn-primary" data-id="TeamCard-url-save" onClick={commitUrl}>{tr("common.save", "保存")}</button>
           </div>
