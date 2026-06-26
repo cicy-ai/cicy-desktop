@@ -1695,8 +1695,9 @@ let dockerDrawerLogSeq = 0;
 let dockerDrawerState = null; // null = closed
 function emitDockerDrawer() { dockerDrawerListeners.forEach((l) => l(dockerDrawerState)); }
 const dockerDrawer = {
-  open({ onRetry } = {}) {
-    dockerDrawerState = { status: "running", phase: "install-docker", logs: [], bars: {}, minimized: false, onRetry: onRetry || null, lastAt: Date.now() };
+  open({ onRetry, kind } = {}) {
+    // kind: "install"(默认,安装/升级,带 4 段 stepper)| "open"(打开失败报告,纯日志+hint,无 stepper)
+    dockerDrawerState = { status: "running", phase: "install-docker", kind: kind || "install", logs: [], bars: {}, minimized: false, onRetry: onRetry || null, lastAt: Date.now() };
     emitDockerDrawer();
   },
   minimize() { if (dockerDrawerState) { dockerDrawerState = { ...dockerDrawerState, minimized: true }; emitDockerDrawer(); } },
@@ -1741,7 +1742,7 @@ const dockerDrawer = {
   close() { dockerDrawerState = null; emitDockerDrawer(); },
 };
 const DOCKER_PHASES = [["install-docker", "准备环境"], ["image", "下载运行环境"], ["container", "启动服务"], ["done", "完成"]];
-const DOCKER_BADGE = { "install-docker": "准备", image: "下载", container: "启动", health: "启动", done: "完成" };
+const DOCKER_BADGE = { "install-docker": "准备", image: "下载", container: "启动", health: "启动", done: "完成", open: "打开" };
 const DOCKER_DL_LABEL = { "install-docker": "Docker Desktop", image: "基础镜像" };
 function fmtBytes(n) {
   if (!Number.isFinite(n)) return "?";
@@ -1774,8 +1775,10 @@ function DockerInstallDrawerHost() {
   useEffect(() => { const el = logRef.current; if (el) el.scrollTop = el.scrollHeight; }, [st?.logs?.length]);
   if (!st) return null;
   const running = st.status === "running";
+  const isOpen = st.kind === "open"; // 打开失败报告:无安装 stepper、标题/失败标签用「打开」
   const phaseIdx = DOCKER_PHASES.findIndex(([k]) => k === st.phase);
-  const dlBars = ["install-docker", "image"].filter((k) => st.bars?.[k]);
+  const dlBars = isOpen ? [] : ["install-docker", "image"].filter((k) => st.bars?.[k]);
+  const drawerTitle = isOpen ? tr("docker.openTitle", "打开 Docker 团队") : tr("docker.setupTitle", "安装 Docker cicy-code");
   // Minimized → a floating restore chip (op keeps running in the background).
   if (st.minimized) {
     const pcts = dlBars.map((k) => st.bars[k]?.progress).filter(Number.isFinite);
@@ -1783,7 +1786,7 @@ function DockerInstallDrawerHost() {
     return (
       <button type="button" className={`drawer-min drawer-min--${st.status}`} data-id="DockerDrawer-restore" onClick={() => dockerDrawer.restore()}>
         <span className="drawer-min__spark">{running ? <Spinner /> : st.status === "done" ? "✓" : st.status === "reboot" ? "⟳" : "!"}</span>
-        <span className="drawer-min__label">{tr("docker.setupTitle", "安装 Docker cicy-code")}{overall != null ? ` · ${overall}%` : ""}</span>
+        <span className="drawer-min__label">{drawerTitle}{overall != null ? ` · ${overall}%` : ""}</span>
       </button>
     );
   }
@@ -1796,7 +1799,7 @@ function DockerInstallDrawerHost() {
               {running ? <Spinner /> : st.status === "done" ? "✓" : st.status === "reboot" ? "⟳" : "!"}
             </span>
             <div>
-              <div className="drawer__h">{tr("docker.setupTitle", "安装 Docker cicy-code")}</div>
+              <div className="drawer__h">{drawerTitle}</div>
               <div className="drawer__sub">127.0.0.1:8009</div>
             </div>
           </div>
@@ -1805,7 +1808,7 @@ function DockerInstallDrawerHost() {
           </div>
         </div>
 
-        <div className="drawer__steps" data-id="DockerDrawer-steps">
+        {!isOpen && <div className="drawer__steps" data-id="DockerDrawer-steps">
           {DOCKER_PHASES.map(([k, label], i) => {
             const done = st.status === "done" || (phaseIdx >= 0 && i < phaseIdx);
             const active = i === phaseIdx && running;
@@ -1818,7 +1821,7 @@ function DockerInstallDrawerHost() {
               </div>
             );
           })}
-        </div>
+        </div>}
 
         {dlBars.length > 0 && (
           <div className="drawer__dlbars" data-id="DockerDrawer-dlbars">
@@ -1849,7 +1852,7 @@ function DockerInstallDrawerHost() {
         <div className="drawer__foot">
           {running ? (
             <>
-              <span className="drawer__foot-status">{tr("docker.installing2", "安装进行中…")}</span>
+              <span className="drawer__foot-status">{isOpen ? tr("docker.opening", "打开中…") : tr("docker.installing2", "安装进行中…")}</span>
             </>
           ) : st.status === "reboot" ? (
             <>
@@ -1859,7 +1862,7 @@ function DockerInstallDrawerHost() {
             </>
           ) : st.status === "error" ? (
             <>
-              <span className="drawer__foot-status is-error">{tr("docker.failed", "安装失败")}</span>
+              <span className="drawer__foot-status is-error">{isOpen ? tr("docker.openFailed", "打开失败") : tr("docker.failed", "安装失败")}</span>
               {st.onRetry && <button type="button" className="drawer__btn is-accent" data-id="DockerDrawer-retry" onClick={() => st.onRetry()}>{tr("common.retry", "重试")}</button>}
               <button type="button" className="drawer__btn" data-id="DockerDrawer-dismiss" onClick={() => dockerDrawer.close()}>{tr("common.close", "关闭")}</button>
             </>
@@ -2108,20 +2111,18 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
         const r = await window.cicy?.tabs?.activateIfOpen?.("http://127.0.0.1:8009");
         if (r?.active) return;
       } catch {}
-      // 没开过 → 走慢路径(读容器 token 最多 ~50s)。开 drawer 实时流式显示每条命令/
-      // 输出/错误(主人三原则:可见);成功静默收起;失败留住 + 可排查 hint + 重试。
+      // 没开过 → 走慢路径(读容器 token 最多 ~50s)。进行中只显示 CTA 的「打开中…」spinner
+      // (不复用安装 stepper,免得看着像全绿其实在重试)。成功=静默秒开;失败=才开 drawer,
+      // 一次性回放全部命令/输出/错误日志 + 可排查 hint + 重试,直接定格在红色失败态。
       setBusy("open");
-      dockerDrawer.open({ onRetry: onCta });
-      const unsub = window.cicy?.docker?.onAppProgress?.((ev) => dockerDrawer.push(ev));
-      try {
-        const r = await window.cicy?.docker?.appOpen?.();
-        if (r && r.ok) dockerDrawer.close();
-        else dockerDrawer.finish({ ok: false, message: r?.hint || r?.error || tr("docker.openFailed", "打开失败") });
-      } catch (e) {
-        dockerDrawer.finish({ ok: false, message: e?.message || tr("docker.openFailed", "打开失败") });
-      } finally {
-        try { unsub && unsub(); } catch {}
-        setBusy("");
+      let res = null;
+      try { res = await window.cicy?.docker?.appOpen?.(); }
+      catch (e) { res = { ok: false, hint: e?.message || tr("docker.openFailed", "打开失败"), log: [] }; }
+      setBusy("");
+      if (res && res.ok === false) {
+        dockerDrawer.open({ onRetry: onCta, kind: "open" });
+        (res.log || []).forEach((l) => dockerDrawer.push(l));
+        dockerDrawer.finish({ ok: false, message: res.hint || res.error || tr("docker.openFailed", "打开失败") });
       }
       return;
     }

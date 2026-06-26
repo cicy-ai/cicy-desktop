@@ -307,7 +307,7 @@ function register({ sidecarLogPath } = {}) {
     if (!APP_DOCKER_SUPPORTED) return { ok: false, error: "unsupported_platform", hint: "Docker cicy-code 仅支持 Windows" };
     const log = [];
     const onLog = (ev = {}) => {
-      const line = { phase: "container", status: ev.status || "running", message: ev.message || "" };
+      const line = { phase: "open", status: ev.status || "running", message: ev.message || "" };
       log.push(line);
       try { e.sender.send("docker:app-progress", line); } catch (e2) {}
     };
@@ -316,30 +316,26 @@ function register({ sidecarLogPath } = {}) {
       onLog({ message: tt("readToken", { container: APP_CONTAINER, volume: APP_VOLUME }) });
       const tok = await appDocker.readContainerToken(APP_PORT, APP_CONTAINER, APP_VOLUME, { onLog });
       if (!tok) {
-        // 给出能排查的原因,而不是甩个 no_token。
+        // 给出能排查的原因,而不是甩个 no_token。hint 只在 return(渲染层 finish 显示一次,
+        // 不再 onLog 进 log[],否则和 finish 重复弹两遍)。
         let hint = tt("hintNoToken");
         try {
           const s = await refreshDockerStatus();
           if (s && s.wslUnmanaged) hint = tt("hintWslUnmanaged", { port: APP_PORT });
           else if (s && !s.running) hint = tt("hintNotRunning");
         } catch (e2) {}
-        onLog({ status: "error", message: hint });
         return { ok: false, error: "no_token", hint, log };
       }
       onLog({ message: tt("registering") });
       const reg = await registerAppTeam();
-      if (!reg.id) { const hint = tt("hintRegisterFailed"); onLog({ status: "error", message: hint }); return { ok: false, error: "register_failed", hint, log }; }
+      if (!reg.id) return { ok: false, error: "register_failed", hint: tt("hintRegisterFailed"), log };
       onLog({ message: tt("opening", { url: `http://127.0.0.1:${APP_PORT}` }) });
       const lt = require("./local-teams");
       const r = await lt.openTeam(reg.id, { token: tok }); // open with the LIVE token
       if (r && r.ok) { onLog({ status: "done", message: tt("opened") }); return { ok: true }; }
-      const hint = tt("hintOpenFailed", { err: (r && r.error) || "open_failed" });
-      onLog({ status: "error", message: hint });
-      return { ok: false, error: (r && r.error) || "open_failed", hint, log };
+      return { ok: false, error: (r && r.error) || "open_failed", hint: tt("hintOpenFailed", { err: (r && r.error) || "open_failed" }), log };
     } catch (err) {
-      const hint = tt("hintException", { err: err.message });
-      onLog({ status: "error", message: hint });
-      return { ok: false, error: err.message, hint, log };
+      return { ok: false, error: err.message, hint: tt("hintException", { err: err.message }), log };
     }
   });
 

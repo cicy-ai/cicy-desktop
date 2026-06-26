@@ -208,7 +208,8 @@
     "recreated": "Docker container recreated",
     "recreateOk": "Recreate",
     "runningWslBroken": "Running · ⚠ WSL unmanaged (open works; update/restart needs WSL repair)",
-    "openFailed": "Open failed"
+    "openFailed": "Open failed",
+    "openTitle": "Open Docker team"
   },
   "common": {
     "close": "Close",

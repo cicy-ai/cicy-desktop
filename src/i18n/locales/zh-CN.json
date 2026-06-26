@@ -208,7 +208,8 @@
     "recreated": "已重建 Docker 容器",
     "recreateOk": "确定重建",
     "runningWslBroken": "运行中 · ⚠ WSL 管理异常(能打开;更新/重启需修复 WSL)",
-    "openFailed": "打开失败"
+    "openFailed": "打开失败",
+    "openTitle": "打开 Docker 团队"
   },
   "common": {
     "close": "关闭",
