@@ -149,10 +149,10 @@ function provisionElectronFromMirror(bundledDir) {
   let localSz = 0; try { localSz = fs.statSync(dest).size; } catch {}
   const complete = localSz >= 50 * 1024 * 1024 && (!expected || localSz === expected);
   if (complete) {
-    console.log(`✓ 复用已下载的 Electron:${dest}`);
+    console.log(`[ok] 复用已下载的 Electron:${dest}`);
   } else {
     const resuming = localSz > 0;
-    console.log(`⬇️  下载 Electron ${ELECTRON_VERSION}(来源:${src}${resuming ? ",断点续传" : ""})→ ${dest}`);
+    console.log(`  下载 Electron ${ELECTRON_VERSION}(来源:${src}${resuming ? ",断点续传" : ""})→ ${dest}`);
     // -C - 断点续传(部分则 206 续,缺则 200 全下);-# 进度条;inherit 让进度条画到终端。
     execFileSync(curl, ["-fL", "-#", "-C", "-", "--retry", "5", "--retry-delay", "2", "--connect-timeout", "20", "-o", dest, url], { stdio: "inherit" });
     try { localSz = fs.statSync(dest).size; } catch {}
@@ -213,14 +213,14 @@ function ensureElectron() {
   // which is broken on win32 + node 24 (@electron-internal extract-zip native
   // binding "intentionally not published" → "Cannot find native binding").
   try { ensureMinimalElectronPkg(bundledDir); }
-  catch (e) { console.warn(`⚠️  could not set up electron dir ${bundledDir}: ${e.message}`); return; }
-  console.log(`⚙️  Fetching Electron ${ELECTRON_VERSION} from mirror (one-time)…`);
+  catch (e) { console.warn(`[warn]  could not set up electron dir ${bundledDir}: ${e.message}`); return; }
+  console.log(`[setup]  Fetching Electron ${ELECTRON_VERSION} from mirror (one-time)…`);
   try {
     provisionElectronFromMirror(bundledDir);
     if (electronBinaryHealthy(bundledDir)) return;
-    console.warn(`⚠️  Electron provisioned but health check still failing.`);
+    console.warn(`[warn]  Electron provisioned but health check still failing.`);
   } catch (e) {
-    console.warn(`⚠️  Electron provision from mirror failed: ${e.message}`);
+    console.warn(`[warn]  Electron provision from mirror failed: ${e.message}`);
   }
 }
 
@@ -268,7 +268,7 @@ for (let i = 0; i < args.length; i++) {
   } else if (arg === "-v" || arg === "--version") {
     showVersion = true;
   } else if (arg === "-j" || arg === "--json") {
-    console.error("❌ --json is only supported by cicy-rpc");
+    console.error("[x] --json is only supported by cicy-rpc");
     process.exit(1);
   } else if (arg === "-cn" || arg === "--cn") {
     useCNMirror = true;
@@ -289,12 +289,12 @@ for (let i = 0; i < args.length; i++) {
 }
 
 if (!Number.isFinite(masterPort) || masterPort <= 0) {
-  console.error("❌ Invalid --master-port value");
+  console.error("[x] Invalid --master-port value");
   process.exit(1);
 }
 
 if (!Number.isFinite(workerPort) || workerPort <= 0) {
-  console.error("❌ Invalid --port value");
+  console.error("[x] Invalid --port value");
   process.exit(1);
 }
 
@@ -306,9 +306,9 @@ if (showVersion) {
 if (useCNMirror) {
   try {
     execSync("npm config set registry https://registry.npmmirror.com", { stdio: "inherit" });
-    console.log("📦 Using CN npm mirror: https://registry.npmmirror.com");
+    console.log("[npm] Using CN npm mirror: https://registry.npmmirror.com");
   } catch (err) {
-    console.error("❌ Failed to set npm mirror:", err.message);
+    console.error("[x] Failed to set npm mirror:", err.message);
   }
 }
 
@@ -349,13 +349,13 @@ RPC commands moved to: cicy-rpc`);
 }
 
 function update() {
-  console.log("🔄 Updating cicy...");
+  console.log("[update] Updating cicy...");
   try {
     execSync("git pull", { cwd: PACKAGE_ROOT, stdio: "inherit" });
     execSync("npm install", { cwd: PACKAGE_ROOT, stdio: "inherit" });
-    console.log("✅ cicy updated successfully");
+    console.log("[ok] cicy updated successfully");
   } catch (err) {
-    console.error("❌ Update failed:", err.message);
+    console.error("[x] Update failed:", err.message);
     process.exit(1);
   }
 }
@@ -458,7 +458,7 @@ async function stopPid(pid, label) {
   try {
     process.kill(pid, "SIGTERM");
   } catch (error) {
-    console.error(`❌ Failed to stop ${label}: ${error.message}`);
+    console.error(`[x] Failed to stop ${label}: ${error.message}`);
     return false;
   }
 
@@ -473,7 +473,7 @@ async function stopPid(pid, label) {
     process.kill(pid, "SIGKILL");
     return true;
   } catch (error) {
-    console.error(`❌ Failed to force stop ${label}: ${error.message}`);
+    console.error(`[x] Failed to force stop ${label}: ${error.message}`);
     return false;
   }
 }
@@ -516,7 +516,7 @@ function killAllElectronProcesses() {
 }
 
 function hardCleanupBeforeStart({ masterPort, workerPort }) {
-  console.log("🧹 Cleaning up previous instance…");
+  console.log("[cleanup] Cleaning up previous instance…");
   killListenersByPort(masterPort);
   killListenersByPort(workerPort);
   killAllElectronProcesses();
@@ -526,7 +526,7 @@ function startForegroundCluster() {
   hardCleanupBeforeStart({ masterPort, workerPort });
   ensureDesktopCommandFile();
   startWorkerOnly({ workerPort }).catch((error) => {
-    console.error(`❌ Failed to start worker: ${error.message}`);
+    console.error(`[x] Failed to start worker: ${error.message}`);
     process.exit(1);
   });
 }
@@ -538,19 +538,19 @@ function executeCommand(cmd) {
       break;
     case "stop":
       stop().catch((error) => {
-        console.error(`❌ Failed to stop cicy worker: ${error.message}`);
+        console.error(`[x] Failed to stop cicy worker: ${error.message}`);
         process.exit(1);
       });
       break;
     case "status":
       status().catch((error) => {
-        console.error(`❌ Failed to get cicy worker status: ${error.message}`);
+        console.error(`[x] Failed to get cicy worker status: ${error.message}`);
         process.exit(1);
       });
       break;
     case "restart":
       restart().catch((error) => {
-        console.error(`❌ Failed to restart cicy worker: ${error.message}`);
+        console.error(`[x] Failed to restart cicy worker: ${error.message}`);
         process.exit(1);
       });
       break;
@@ -633,7 +633,7 @@ function ensureMacDesktopApp() {
       fs.copyFileSync(icns, path.join(appDir, "Contents", "Resources", "applet.icns"));
     }
     try { const t = new Date(); fs.utimesSync(appDir, t, t); } catch {}
-    console.log(`📎 Desktop shortcut: ${appDir}`);
+    console.log(`[shortcut] Desktop shortcut: ${appDir}`);
   } finally {
     try { fs.unlinkSync(tmp); } catch {}
   }
@@ -654,7 +654,7 @@ Terminal=false
 Categories=Development;
 `);
   fs.chmodSync(file, 0o755);
-  console.log(`📎 Desktop shortcut: ${file}`);
+  console.log(`[shortcut] Desktop shortcut: ${file}`);
 }
 
 function ensureWindowsShortcut() {
@@ -682,7 +682,7 @@ $s.Save()
 `);
   try {
     execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${ps}"`, { stdio: "ignore" });
-    console.log(`📎 Desktop shortcut: ${lnk}`);
+    console.log(`[shortcut] Desktop shortcut: ${lnk}`);
   } finally {
     try { fs.unlinkSync(ps); } catch {}
   }
@@ -946,9 +946,9 @@ async function startWorkerOnly({ workerPort }) {
   // httpEnabled=automationEnabled), so don't advertise http://localhost:PORT or
   // the /console/chrome UI: those URLs are dead unless CICY_DESKTOP_HTTP=1/--mcp.
   // Renderer RPC goes through electronRPC injected in preload, not this port.
-  console.log("🚀 Starting CiCy Desktop…");
-  console.log(`📄 Token file: ${tokenManager.getConfigPath()}`);
-  console.log("🛑 Press Ctrl+C to stop processes started by this command");
+  console.log("[start] Starting CiCy Desktop…");
+  console.log(`[token] Token file: ${tokenManager.getConfigPath()}`);
+  console.log("[stop] Press Ctrl+C to stop processes started by this command");
 
   const electronSpawn = resolveElectronSpawn();
   const workerChild = spawn(
@@ -1000,7 +1000,7 @@ async function startWorkerOnly({ workerPort }) {
 
   workerChild.once("exit", async (code, signal) => {
     if (shuttingDown) return;
-    console.error(`❌ Worker exited (code=${code}, signal=${signal})`);
+    console.error(`[x] Worker exited (code=${code}, signal=${signal})`);
     await handleShutdown(code || 1);
   });
 }
@@ -1021,24 +1021,24 @@ async function startMasterCluster({ masterPort, workerPort }) {
     startedAt: new Date().toISOString(),
   });
 
-  console.log(`🚀 Target master ${masterBaseUrl}`);
-  console.log(`📄 Token file: ${tokenManager.getConfigPath()}`);
+  console.log(`[start] Target master ${masterBaseUrl}`);
+  console.log(`[token] Token file: ${tokenManager.getConfigPath()}`);
 
   const masterRunning = await checkMaster(masterBaseUrl);
   if (masterRunning) {
     const worker = await findReusableWorker(masterBaseUrl, workerPort);
     if (worker) {
       await focusExistingWorker(worker, `http://localhost:${workerPort}`, workerUiUrl);
-      console.log("✅ Reused existing master and worker, focused Electron window");
+      console.log("[ok] Reused existing master and worker, focused Electron window");
       return;
     }
   }
 
-  console.log("🛑 Press Ctrl+C to stop processes started by this command");
+  console.log("[stop] Press Ctrl+C to stop processes started by this command");
 
   let masterChild = null;
   if (!masterRunning) {
-    console.log(`🚀 Starting master on ${masterBaseUrl}`);
+    console.log(`[start] Starting master on ${masterBaseUrl}`);
     masterChild = spawn(process.execPath, [MASTER_ENTRY], {
       cwd: PACKAGE_ROOT,
       env: {
@@ -1060,10 +1060,10 @@ async function startMasterCluster({ masterPort, workerPort }) {
 
     await waitForMasterReady(masterChild, masterPort);
   } else {
-    console.log("♻️ Reusing existing master");
+    console.log("[reuse] Reusing existing master");
   }
 
-  console.log(`🚀 Starting worker on http://localhost:${workerPort}`);
+  console.log(`[start] Starting worker on http://localhost:${workerPort}`);
   const workerChild = await startWorker({ workerPort, masterBaseUrl, token, workerUiUrl });
 
   writeClusterState({
@@ -1095,14 +1095,14 @@ async function startMasterCluster({ masterPort, workerPort }) {
   if (masterChild) {
     masterChild.once("exit", async (code, signal) => {
       if (shuttingDown) return;
-      console.error(`❌ Master exited (code=${code}, signal=${signal})`);
+      console.error(`[x] Master exited (code=${code}, signal=${signal})`);
       await handleShutdown(code || 1);
     });
   }
 
   workerChild.once("exit", async (code, signal) => {
     if (shuttingDown) return;
-    console.error(`❌ Worker exited (code=${code}, signal=${signal})`);
+    console.error(`[x] Worker exited (code=${code}, signal=${signal})`);
     await handleShutdown(code || 1);
   });
 }
@@ -1127,7 +1127,7 @@ function getClusterLogFiles(workerPort) {
 async function stop() {
   const state = getRunningClusterState();
   if (!state) {
-    console.log("❌ cicy worker is not running");
+    console.log("[x] cicy worker is not running");
     clearClusterState();
     return;
   }
@@ -1137,20 +1137,20 @@ async function stop() {
   clearClusterState();
 
   if (stoppedMaster || stoppedWorker) {
-    console.log(`✅ cicy worker stopped (pid:${state.workerPid || "-"})`);
+    console.log(`[ok] cicy worker stopped (pid:${state.workerPid || "-"})`);
   } else {
-    console.log("❌ cicy worker is not running");
+    console.log("[x] cicy worker is not running");
   }
 }
 
 async function status() {
   const state = getRunningClusterState();
   if (!state) {
-    console.log("❌ cicy worker is not running");
+    console.log("[x] cicy worker is not running");
     return;
   }
 
-  console.log("✅ cicy worker is running");
+  console.log("[ok] cicy worker is running");
   console.log(
     `- worker pid: ${state.workerPid || "reused external"} (${state.workerRunning ? "running" : "stopped"})`
   );
@@ -1173,7 +1173,7 @@ function logs() {
   );
 
   if (!logFiles.length) {
-    console.log("❌ No worker logs found");
+    console.log("[x] No worker logs found");
     console.log(`- logs dir: ${LOGS_DIR}`);
     console.log(
       `- expected worker log: ${path.join(LOGS_DIR, `cicy-desktop-${workerPortForLogs}.log`)}`
@@ -1182,10 +1182,10 @@ function logs() {
   }
 
   if (state) {
-    console.log("✅ Following cicy worker logs");
+    console.log("[ok] Following cicy worker logs");
     console.log(`- worker url: http://localhost:${state.workerPort}`);
   } else {
-    console.log("⚠️  Worker is not currently running, showing latest available logs");
+    console.log("[warn]  Worker is not currently running, showing latest available logs");
   }
   logFiles.forEach((filePath) => console.log(`- ${filePath}`));
 
