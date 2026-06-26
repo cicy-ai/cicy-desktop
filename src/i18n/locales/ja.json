@@ -94,7 +94,12 @@
     "saved": "Saved",
     "kindLocal": "Local",
     "kindCustom": "Custom",
-    "defaultName": "Local team"
+    "defaultName": "Local team",
+    "deleteTitle": "チームを削除",
+    "deleteMsg": "«{{name}}» を削除しますか?元に戻せません。",
+    "removing": "削除中…",
+    "removed": "削除しました",
+    "removeFailed": "削除失敗"
   },
   "cli": {
     "controllerTitle": "cicy - CiCy Desktop Controller",
@@ -212,7 +217,11 @@
     "cancel": "Cancel",
     "cloud": "Cloud",
     "on": "オン",
-    "off": "オフ"
+    "off": "オフ",
+    "confirm": "確認",
+    "delete": "削除",
+    "saving": "保存中…",
+    "noAuth": "未ログイン"
   },
   "auth": {
     "restoring": "ログインを復元中…",
@@ -258,7 +267,8 @@
     "urlRequired": "アドレス URL を入力してください",
     "badUrl": "無効な URL(http(s):// が必要)",
     "adding": "追加中…",
-    "addAction": "追加"
+    "addAction": "追加",
+    "urlExists": "このアドレスは既に存在します"
   },
   "trustedSites": {
     "addFailed": "Add failed",
@@ -313,13 +323,54 @@
     "lanEnabling": "LAN アクセスを有効化、再起動中…",
     "lanDisabling": "LAN アクセスを無効化、再起動中…",
     "lanFailed": "失敗",
-    "lanHint": "有効にすると同一 LAN の端末から本機 IP でアクセス可(api_token は必須);切替で cicy-code 自動再起動"
+    "lanHint": "有効にすると同一 LAN の端末から本機 IP でアクセス可(api_token は必須);切替で cicy-code 自動再起動",
+    "binPrepFail": "cicy-code の準備に失敗: {{err}}",
+    "binMissing": "利用可能な cicy-code バイナリがありません",
+    "starting": "cicy-code を起動中{{lan}}…",
+    "lanSuffix": "(LAN アクセス)",
+    "nodeInstalling": "利用可能な Node が見つかりません(未インストールまたは <20)。Node {{ver}} をインストール中(約50MB)…",
+    "nodeDone": "Node {{ver}} インストール完了 → {{dir}}",
+    "nodeExtractRetry": "展開後に node/npx が見つかりません。次のソースへ…",
+    "nodeDownloadFail": "Node ダウンロード失敗({{src}}): {{err}} — 別ソースで再試行…",
+    "nodeFailed": "❌ Node 自動インストール失敗(両ソースとも)—— https://nodejs.org から Node(LTS)を入れて「再試行」",
+    "linkFail": "シンボリックリンク {{link}} 失敗: {{err}}",
+    "linked": "{{names}} を ~/.local/bin にリンクしました",
+    "brewSpawnFail": "brew install {{dep}} を起動できません: {{err}}",
+    "netChecking": "ネットワークが CN か確認中…",
+    "netResult": "ネットワーク: {{net}} → registry={{registry}}{{mirror}}",
+    "netCN": "CN",
+    "netNonCN": "非CN",
+    "netMirror": " + ミラー高速化",
+    "brewMissing": "❌ Homebrew が見つかりません(tmux 等の導入に必要)。ターミナルで実行後「再試行」:",
+    "depInstalled": "✓ {{dep}} インストール済み",
+    "depInstalling": "{{dep}} をインストール中(数分かかる場合があります)…",
+    "depFail": "❌ brew install {{dep}} 失敗(上のログ参照)、「再試行」",
+    "depDone": "✓ {{dep}} インストール完了",
+    "mihomoInstalling": "mihomo バイナリをインストール中(node24 → npm pack cicy-mihomo)…",
+    "mihomoReady": "✓ mihomo 準備完了 → {{bin}}",
+    "mihomoSkip": "mihomo の事前導入をスキップ(起動は継続): {{err}}",
+    "checkingLatest": "最新バージョンを確認中…",
+    "swapping": "{{ver}} に切替、cicy-code を再起動中…",
+    "startingAgents": "cicy-code を起動中…(agent パネルを復元中)",
+    "notUpInTime": "cicy-code が {{secs}}s 以内に起動しませんでした",
+    "upToDateVer": "最新です {{ver}}",
+    "updatedTo": "{{ver}} に更新しました",
+    "startedUnknownVer": "起動しました(バージョン不明、想定 {{ver}})",
+    "updateFail": "更新に失敗: {{err}}",
+    "downloading": "{{label}} {{ver}} をダウンロード中…",
+    "ready": "{{label}} {{ver}} 準備完了"
   },
   "teamCard": {
     "noHost": "No address set",
     "noUrl": "No URL",
     "editUrl": "アクセスURLを変更",
-    "setUrl": "アクセスURLを設定"
+    "setUrl": "アクセスURLを設定",
+    "delete": "削除",
+    "deleteTitle": "チームを削除",
+    "deleteMsg": "このプライベートクラウドチームをクラウドから削除し,全デバイスに影響します。«{{name}}» を削除しますか?",
+    "deleted": "チームを削除しました",
+    "deleteFailed": "削除失敗",
+    "editAddr": "アドレスを変更"
   },
   "updateDrawer": {
     "done": "Update complete",

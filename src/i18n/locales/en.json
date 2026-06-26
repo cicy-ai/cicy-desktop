@@ -94,7 +94,12 @@
     "saved": "Saved",
     "kindLocal": "Local",
     "kindCustom": "Custom",
-    "defaultName": "Local team"
+    "defaultName": "Local team",
+    "deleteTitle": "Delete team",
+    "deleteMsg": "Delete «{{name}}»? This cannot be undone.",
+    "removing": "Removing…",
+    "removed": "Removed",
+    "removeFailed": "Remove failed"
   },
   "cli": {
     "controllerTitle": "cicy - CiCy Desktop Controller",
@@ -212,7 +217,11 @@
     "cancel": "Cancel",
     "cloud": "Cloud",
     "on": "On",
-    "off": "Off"
+    "off": "Off",
+    "confirm": "Confirm",
+    "delete": "Delete",
+    "saving": "Saving…",
+    "noAuth": "Not logged in"
   },
   "auth": {
     "restoring": "Restoring login…",
@@ -258,7 +267,8 @@
     "urlRequired": "Please enter the address URL",
     "badUrl": "Invalid URL (must include http(s)://)",
     "adding": "Adding…",
-    "addAction": "Add"
+    "addAction": "Add",
+    "urlExists": "This address already exists"
   },
   "trustedSites": {
     "addFailed": "Add failed",
@@ -313,13 +323,54 @@
     "lanEnabling": "Enabling LAN access, restarting…",
     "lanDisabling": "Disabling LAN access, restarting…",
     "lanFailed": "Failed",
-    "lanHint": "When on, other devices on your LAN can reach this machine's IP (api_token still required); toggling auto-restarts cicy-code"
+    "lanHint": "When on, other devices on your LAN can reach this machine's IP (api_token still required); toggling auto-restarts cicy-code",
+    "binPrepFail": "Failed to prepare cicy-code: {{err}}",
+    "binMissing": "No usable cicy-code binary",
+    "starting": "Starting cicy-code{{lan}}…",
+    "lanSuffix": " (LAN access)",
+    "nodeInstalling": "No usable Node found (missing or <20), installing Node {{ver}} (~50MB)…",
+    "nodeDone": "Node {{ver}} installed → {{dir}}",
+    "nodeExtractRetry": "node/npx not found after extract, trying next source…",
+    "nodeDownloadFail": "Node download failed ({{src}}): {{err}} — retrying another source…",
+    "nodeFailed": "❌ Node auto-install failed (both sources). Install Node (LTS) from https://nodejs.org, then click Retry",
+    "linkFail": "symlink {{link}} failed: {{err}}",
+    "linked": "symlinked {{names}} → ~/.local/bin",
+    "brewSpawnFail": "brew install {{dep}} could not start: {{err}}",
+    "netChecking": "Checking whether network is CN…",
+    "netResult": "Network: {{net}} → registry={{registry}}{{mirror}}",
+    "netCN": "CN",
+    "netNonCN": "non-CN",
+    "netMirror": " + mirror",
+    "brewMissing": "❌ Homebrew not found (needed for tmux etc.). Run this in Terminal then click Retry:",
+    "depInstalled": "✓ {{dep}} already installed",
+    "depInstalling": "Installing {{dep}} (may take a few minutes)…",
+    "depFail": "❌ brew install {{dep}} failed (see log above), click Retry",
+    "depDone": "✓ {{dep}} installed",
+    "mihomoInstalling": "Installing mihomo binary (node24 → npm pack cicy-mihomo)…",
+    "mihomoReady": "✓ mihomo ready → {{bin}}",
+    "mihomoSkip": "mihomo pre-install skipped (non-blocking): {{err}}",
+    "checkingLatest": "Checking latest version…",
+    "swapping": "Switching to {{ver}}, restarting cicy-code…",
+    "startingAgents": "Starting cicy-code… (restoring agent panels, please wait)",
+    "notUpInTime": "cicy-code did not start within {{secs}}s",
+    "upToDateVer": "Already up to date {{ver}}",
+    "updatedTo": "Updated to {{ver}}",
+    "startedUnknownVer": "Started (version unknown, expected {{ver}})",
+    "updateFail": "Update failed: {{err}}",
+    "downloading": "Downloading {{label}} {{ver}}…",
+    "ready": "{{label}} {{ver}} ready"
   },
   "teamCard": {
     "noHost": "No address set",
     "noUrl": "No URL",
     "editUrl": "Edit access URL",
-    "setUrl": "Set access URL"
+    "setUrl": "Set access URL",
+    "delete": "Delete",
+    "deleteTitle": "Delete team",
+    "deleteMsg": "This will remove the private cloud team from the cloud, affecting all devices. Delete «{{name}}»?",
+    "deleted": "Team deleted",
+    "deleteFailed": "Delete failed",
+    "editAddr": "Edit address"
   },
   "updateDrawer": {
     "done": "Update complete",

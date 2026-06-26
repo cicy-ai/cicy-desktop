@@ -424,7 +424,11 @@ function normaliseUrl(u) {
   try {
     const p = new URL(String(u || "").trim());
     const port = p.port || (p.protocol === "https:" ? "443" : "80");
-    return `${p.hostname.toLowerCase()}:${port}`;
+    let host = p.hostname.toLowerCase();
+    // 回环地址归一:localhost / ::1 与 127.0.0.1 是同一个端点,去重时算同一个
+    // (否则「自定义」加 localhost:8008 不会被识别成已有的 127.0.0.1:8008 本地团队)。
+    if (host === "localhost" || host === "::1" || host === "[::1]") host = "127.0.0.1";
+    return `${host}:${port}`;
   } catch { return ""; }
 }
 
@@ -520,33 +524,21 @@ async function addTeam(spec) {
   const baseUrlRaw = String(spec.base_url || "").trim();
   if (!baseUrlRaw) return { ok: false, error: "base_url required" };
   try { new URL(baseUrlRaw); } catch { return { ok: false, error: "bad base_url" }; }
-  const baseUrl = baseUrlRaw.replace(/\/$/, "");
+  // base_url 必须是干净的 origin(scheme://host:port[/path])——绝不能带 ?token= / #hash。
+  // 用户从「自定义」粘贴的 LAN 链接常带 ?token=...,直接存进去会:① 泄露 token 进 teams.json,
+  // ② 打开时 ?token= 拼两次 URL 坏掉,③ 后续 reconcile 撞 dedup。这里统一剥掉 query+hash。
+  let baseUrl = baseUrlRaw.replace(/\/$/, "");
+  try { const u = new URL(baseUrl); u.search = ""; u.hash = ""; baseUrl = u.toString().replace(/\/$/, ""); } catch {}
   const baseUrlKey = normaliseUrl(baseUrl);
   let port = null;
   try { port = parseInt(new URL(baseUrl).port, 10) || null; } catch {}
 
-  // Token auto-fill: when the team is on localhost, cicy-code and cicy-desktop
-  // share the same `~/cicy-ai/global.json` and the daemon's own api_token is
-  // already there. The cloud Team Helper agent regularly forgets to read +
-  // pass it, leaving the swap URL with no `?token=` and stranding the user
-  // at a login screen. Auto-fill from local global.json (top-level api_token)
-  // so the common case "Just Works", even when spec.api_token is empty.
-  // skipTokenAutofill: the :8009 Docker team must NEVER store a token — its token
-  // is read LIVE from the container on every open (主人: teams.json 不存 8009 的
-  // token / docker 的 token 是实时拿的). Without this guard the auto-fill below
-  // back-fills the HOST 8008 token, which 8009 rejects → endless login screen.
-  if (!spec.api_token && !spec.skipTokenAutofill) {
-    try {
-      const host = new URL(baseUrl).hostname;
-      if (host === "127.0.0.1" || host === "localhost" || host === "::1") {
-        const gLocal = readGlobal();
-        if (gLocal?.api_token) {
-          spec = { ...spec, api_token: String(gLocal.api_token) };
-          log.info(`[local-teams] addTeam: auto-filled api_token from global.json for ${baseUrl}`);
-        }
-      }
-    } catch {}
-  }
+  // 本地团队的 token **不存进 teams.json**(主人): localhost/127.0.0.1/::1 的 cicy-code 与
+  // cicy-desktop 共用同一份 ~/cicy-ai/global.json,openTeam 打开时**实时读 global.json**(token
+  // 轮换即时跟上)。存一份快照只会陈旧 → ?token= 旧值 → :8008 拒 → 卡登录。所以本地一律存 ""
+  // (与 :8009 docker 的 skipTokenAutofill 同理),不再自动回填。
+  let isLocalUrl = false;
+  try { const h = new URL(baseUrl).hostname; isLocalUrl = h === "127.0.0.1" || h === "localhost" || h === "::1"; } catch {}
 
   // base_url is the dedupe key: if a team with the same URL already exists
   // we upsert it (refresh token + install meta), never create a duplicate.
@@ -558,6 +550,9 @@ async function addTeam(spec) {
   for (const [k, v] of Object.entries(existing)) {
     if (normaliseUrl(v?.base_url || "") === baseUrlKey) { existingId = k; break; }
   }
+  // failIfExists(自定义 modal 用):地址已存在就**拒绝**,不静默 upsert(否则用户从「自定义」
+  // 加一个已有地址会悄悄合并/重复)。deeplink/安装器不传这个 flag,保持原 upsert 行为。
+  if (spec.failIfExists && existingId) return { ok: false, error: "exists", id: existingId };
 
   // Derive the id from the host:port key so it CAN'T collide: two different
   // nodes never share an id (different host:port → different slug), and the
@@ -586,8 +581,8 @@ async function addTeam(spec) {
   const patch = {
     name:           spec.name           !== undefined ? String(spec.name || unnamedName()) : undefined,
     base_url:       baseUrl,
-    // skipTokenAutofill → force-clear any stored token (Docker :8009 reads live).
-    api_token:      spec.skipTokenAutofill ? "" : (spec.api_token !== undefined ? String(spec.api_token || "") : undefined),
+    // 本地团队 / Docker :8009 → 一律存 ""(token 实时从 global.json / 容器读,绝不存快照)。
+    api_token:      (spec.skipTokenAutofill || isLocalUrl) ? "" : (spec.api_token !== undefined ? String(spec.api_token || "") : undefined),
     install_source: spec.install_source ?? undefined,
     install_os:     spec.install_os     ?? undefined,
     install_arch:   spec.install_arch   ?? undefined,
@@ -645,7 +640,10 @@ async function updateTeam(id, patch) {
     if (k === "base_url") {
       if (!v) return { ok: false, error: "base_url cannot be empty" };
       try { new URL(String(v)); } catch { return { ok: false, error: "bad base_url" }; }
-      filtered[k] = String(v).replace(/\/$/, "");
+      // 和 addTeam 一致:剥掉 ?token= / #hash,base_url 只存干净 origin。
+      let bu = String(v).replace(/\/$/, "");
+      try { const u = new URL(bu); u.search = ""; u.hash = ""; bu = u.toString().replace(/\/$/, ""); } catch {}
+      filtered[k] = bu;
     } else if (k === "api_token") {
       filtered[k] = String(v || "");
     } else {

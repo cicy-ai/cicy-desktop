@@ -2,7 +2,8 @@
 // (b) every authorization decision (including the TEMPORARY ones — "本次允许" /
 // "允许一次" / "本页面内允许" — which otherwise live only in memory and leave no
 // trace), plus trusted-origin allowlist add/remove. Written as JSONL to
-// ~/cicy-ai/db/rpc-audit.log (mode 0600), rotated at 5 MB.
+// ~/logs/rpc-audit.log (mode 0600), rotated at 5 MB. (db/ holds data + config
+// only — logs live under ~/logs, same as the cicy-code sidecar/keepalive logs.)
 //
 // Security intent: the RPC bridge can run host code / read-write files, so who
 // authorized what, when, and which calls actually ran must be reviewable after
@@ -11,7 +12,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-const LOG = path.join(os.homedir(), "cicy-ai", "db", "rpc-audit.log");
+const LOG = path.join(os.homedir(), "logs", "rpc-audit.log");
 const MAX_BYTES = 5 * 1024 * 1024; // rotate to .1 past this
 
 function rotateIfNeeded() {

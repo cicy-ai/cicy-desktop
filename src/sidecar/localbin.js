@@ -33,6 +33,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { execFile, execFileSync } = require("child_process");
+const { t } = require("../i18n"); // 安装/升级日志走 i18n
 
 const IS_WIN = process.platform === "win32";
 const NPMMIRROR = "https://registry.npmmirror.com"; // CN-fast
@@ -197,7 +198,16 @@ function placeBinary(name, srcBin, ver) {
   fs.mkdirSync(LOCAL_BIN, { recursive: true });
   const dst = versionedFor(name, ver);
   fs.copyFileSync(srcBin, dst);
-  if (!IS_WIN) fs.chmodSync(dst, 0o755);
+  if (!IS_WIN) {
+    fs.chmodSync(dst, 0o755);
+    // mac: npm 包里的二进制完全未签名(codesign: "not signed at all")。Apple Silicon
+    // 会直接 SIGKILL 未签名可执行文件(Killed: 9)。落地后 ad-hoc 自签(`-s -`,无需证书)
+    // + 去掉可能的 quarantine,Intel/arm64 都能跑。失败不致命(Intel 未签名也能跑)。
+    if (process.platform === "darwin") {
+      try { execFileSync("codesign", ["-s", "-", "--force", dst], { stdio: "ignore", timeout: 30000 }); } catch {}
+      try { execFileSync("xattr", ["-d", "com.apple.quarantine", dst], { stdio: "ignore" }); } catch {}
+    }
+  }
   linkTo(name, dst, ver);
   return { exe: linkFor(name), target: dst, version: ver };
 }
@@ -245,7 +255,7 @@ async function fetchToLocalBin(ver, { emit, name = DEFAULT } = {}) {
   const label = comp(name).base;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cicy-lb-"));
   try {
-    e({ phase: "download", status: "running", message: `下载 ${label} ${ver}…` });
+    e({ phase: "download", status: "running", message: t("sidecar.downloading", { label, ver }) });
     let out, lastErr;
     for (const reg of await registries()) {
       try { out = await npmExec(["pack", `${pkgFor(name)}@${ver}`, `--registry=${reg}`, "--pack-destination", tmp]); break; }
@@ -256,7 +266,7 @@ async function fetchToLocalBin(ver, { emit, name = DEFAULT } = {}) {
     await new Promise((resolve, reject) =>
       execFile("tar", ["-xzf", tgz, "-C", tmp], { windowsHide: true, timeout: 120000 }, (err) => (err ? reject(err) : resolve())));
     const res = placeBinary(name, path.join(tmp, "package", binFor(name)), ver);
-    e({ phase: "download", status: "done", message: `${label} ${ver} 就绪` });
+    e({ phase: "download", status: "done", message: t("sidecar.ready", { label, ver }) });
     return res;
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -310,7 +320,7 @@ async function update({ name = DEFAULT, emit } = {}) {
   const latest = await latestVersion(name);
   if (!latest) throw new Error("无法获取最新版本号");
   if (cur && cmpVer(latest, cur) <= 0) {
-    e({ phase: "done", status: "done", message: `已是最新 ${cur}` });
+    e({ phase: "done", status: "done", message: t("sidecar.upToDateVer", { ver: cur }) });
     return { exe: linkFor(name), version: cur, updated: false };
   }
   const res = await fetchToLocalBin(latest, { emit, name });

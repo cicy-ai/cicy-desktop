@@ -94,7 +94,12 @@
     "saved": "已保存",
     "kindLocal": "本地",
     "kindCustom": "自定义",
-    "defaultName": "本地团队"
+    "defaultName": "本地团队",
+    "deleteTitle": "删除团队",
+    "deleteMsg": "确定删除「{{name}}」?此操作不可撤销。",
+    "removing": "删除中…",
+    "removed": "已删除",
+    "removeFailed": "删除失败"
   },
   "cli": {
     "controllerTitle": "cicy - CiCy Desktop 控制器",
@@ -212,7 +217,11 @@
     "cancel": "取消",
     "cloud": "云端",
     "on": "开",
-    "off": "关"
+    "off": "关",
+    "confirm": "确认",
+    "delete": "删除",
+    "saving": "保存中…",
+    "noAuth": "未登录"
   },
   "auth": {
     "restoring": "正在恢复登录…",
@@ -258,7 +267,8 @@
     "urlRequired": "请输入地址 URL",
     "badUrl": "URL 无效(需含 http(s)://)",
     "adding": "添加中…",
-    "addAction": "添加"
+    "addAction": "添加",
+    "urlExists": "该地址已存在"
   },
   "trustedSites": {
     "addFailed": "添加失败",
@@ -313,13 +323,54 @@
     "lanEnabling": "开启局域网访问,重启中…",
     "lanDisabling": "关闭局域网访问,重启中…",
     "lanFailed": "设置失败",
-    "lanHint": "开启后同局域网设备可用本机 IP 访问(api_token 仍校验);切换会自动重启 cicy-code"
+    "lanHint": "开启后同局域网设备可用本机 IP 访问(api_token 仍校验);切换会自动重启 cicy-code",
+    "binPrepFail": "准备 cicy-code 失败:{{err}}",
+    "binMissing": "没有可用的 cicy-code 二进制",
+    "starting": "启动 cicy-code{{lan}}…",
+    "lanSuffix": "(局域网访问)",
+    "nodeInstalling": "未检测到可用 Node(系统无 node 或版本 <20),正在安装 Node {{ver}}(约 50MB)…",
+    "nodeDone": "Node {{ver}} 安装完成 → {{dir}}",
+    "nodeExtractRetry": "解压后没找到 node/npx,换下一个源…",
+    "nodeDownloadFail": "Node 下载失败({{src}}):{{err}} — 换源重试…",
+    "nodeFailed": "❌ Node 自动安装失败(两个源都没成)—— 请打开 https://nodejs.org 下载安装 Node(选 LTS),装好后点「重试」",
+    "linkFail": "软链 {{link}} 失败:{{err}}",
+    "linked": "已软链 {{names}} → ~/.local/bin",
+    "brewSpawnFail": "brew install {{dep}} 起不来: {{err}}",
+    "netChecking": "检查网络是否为 CN…",
+    "netResult": "网络:{{net}} → registry={{registry}}{{mirror}}",
+    "netCN": "CN",
+    "netNonCN": "非 CN",
+    "netMirror": " + 镜像加速",
+    "brewMissing": "❌ 未检测到 Homebrew(装 tmux 等依赖要用)。请在「终端」执行后点「重试」:",
+    "depInstalled": "✓ {{dep}} 已安装",
+    "depInstalling": "安装依赖 {{dep}}(可能要几分钟)…",
+    "depFail": "❌ brew install {{dep}} 失败(见上方日志),点「重试」",
+    "depDone": "✓ {{dep}} 安装完成",
+    "mihomoInstalling": "安装 mihomo 二进制(node24 → npm pack cicy-mihomo)…",
+    "mihomoReady": "✓ mihomo 就绪 → {{bin}}",
+    "mihomoSkip": "mihomo 预装跳过(不挡启动):{{err}}",
+    "checkingLatest": "检查最新版本…",
+    "swapping": "切换到 {{ver}},重启 cicy-code…",
+    "startingAgents": "启动 cicy-code…(正在恢复 agent 面板,稍候)",
+    "notUpInTime": "cicy-code 未在 {{secs}}s 内启动",
+    "upToDateVer": "已是最新 {{ver}}",
+    "updatedTo": "已更新到 {{ver}}",
+    "startedUnknownVer": "已启动(版本未知,期望 {{ver}})",
+    "updateFail": "更新失败:{{err}}",
+    "downloading": "下载 {{label}} {{ver}}…",
+    "ready": "{{label}} {{ver}} 就绪"
   },
   "teamCard": {
     "noHost": "未填访问地址",
     "noUrl": "无 URL",
     "editUrl": "更改访问地址",
-    "setUrl": "填写访问地址"
+    "setUrl": "填写访问地址",
+    "delete": "删除",
+    "deleteTitle": "删除团队",
+    "deleteMsg": "删除后该私有云团队将从云端移除,影响所有设备。确定删除「{{name}}」?",
+    "deleted": "团队已删除",
+    "deleteFailed": "删除失败",
+    "editAddr": "更改地址"
   },
   "updateDrawer": {
     "done": "更新完成",

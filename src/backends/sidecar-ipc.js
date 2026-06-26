@@ -318,7 +318,7 @@ function register({ sidecarLogPath } = {}) {
   // image → start :8009 container → health. Streams phase/progress on
   // 'docker:app-progress'. Idempotent + resumable → the modal's 重试 just re-runs.
   ipcMain.handle("docker:app-bootstrap", async (e) => {
-    if (!APP_DOCKER_SUPPORTED) return { ok: false, error: "Docker cicy-code 仅支持 Windows / macOS" };
+    if (!APP_DOCKER_SUPPORTED) return { ok: false, error: "Docker cicy-code 仅支持 Windows" };
     try {
       await ensureDockerTeam(); // 启动前先确保独立云端 team + 拿到它的网关 key(appOpts 用)
       const result = await appDocker.bootstrap({
@@ -373,7 +373,7 @@ function register({ sidecarLogPath } = {}) {
   // (127.0.0.1:2000N)。配置从容器里 cp 出来(含云端下发的真实节点),DNS 关掉、控制口错开。
   // 容器不再 publish 20001-32(那条路在 colima/WSL 下根本不通)。开关存 docker-teams.json[volume]。
   ipcMain.handle("docker:app-chrome-proxy", async (e, on) => {
-    if (!APP_DOCKER_SUPPORTED) return { ok: false, error: "Chrome 代理仅支持 Windows / macOS" };
+    if (!APP_DOCKER_SUPPORTED) return { ok: false, error: "Chrome 代理仅支持 Windows" };
     try {
       const store = readDockerTeams();
       store[APP_VOLUME] = { ...(store[APP_VOLUME] || {}), chromeProxy: !!on };
@@ -392,7 +392,7 @@ function register({ sidecarLogPath } = {}) {
   // ⋯ menu → 更新 cicy-code: pull the latest cicy-code into the container +
   // restart it (no container recreate). Streams progress to the drawer.
   ipcMain.handle("docker:app-update", async (e) => {
-    if (!APP_DOCKER_SUPPORTED) return { ok: false, error: "Docker cicy-code 仅支持 Windows / macOS" };
+    if (!APP_DOCKER_SUPPORTED) return { ok: false, error: "Docker cicy-code 仅支持 Windows" };
     try {
       return await appDocker.update({
         container: APP_CONTAINER, port: APP_PORT,
@@ -409,7 +409,7 @@ function register({ sidecarLogPath } = {}) {
 
   // ⋯ menu → 升级: re-pull the latest R2 image, re-create the :8009 container.
   ipcMain.handle("docker:app-upgrade", async (e) => {
-    if (!APP_DOCKER_SUPPORTED) return { ok: false, error: "Docker cicy-code 仅支持 Windows / macOS" };
+    if (!APP_DOCKER_SUPPORTED) return { ok: false, error: "Docker cicy-code 仅支持 Windows" };
     try {
       await ensureDockerTeam();
       const result = await appDocker.upgrade({

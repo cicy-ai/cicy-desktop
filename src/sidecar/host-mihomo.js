@@ -35,7 +35,9 @@ function assetUrl() { return process.env.CICY_MIHOMO_RELEASE_URL || `${OSS_BASE}
 const RT_DIR = path.join(os.homedir(), "cicy-ai", "runtime", "mihomo", VER.replace(/^v/, ""));
 function binPath() { return path.join(RT_DIR, "mihomo" + EXT); }
 const HOST_CONFIG = path.join(os.homedir(), "cicy-ai", "db", "mihomo-host.yaml");
-const HOST_LOG = path.join(os.homedir(), "cicy-ai", "db", "mihomo-host.log");
+// Log lives under ~/logs, NOT db/ — db/ holds data + config only (config below
+// stays in db/ as mihomo-host.yaml; this is just the runtime log).
+const HOST_LOG = path.join(os.homedir(), "logs", "mihomo-host.log");
 const PID_FILE = path.join(os.homedir(), "cicy-ai", "db", "mihomo-host.pid");
 
 // Host instance's own control/mixed ports — kept OFF the container's (9001/19001)
@@ -123,6 +125,7 @@ function start({ force = false } = {}) {
   stop();
   if (!binPresent()) throw new Error("mihomo 二进制不存在(先 ensureBinary)");
   if (!fs.existsSync(HOST_CONFIG)) throw new Error("host 配置不存在(先 writeConfig)");
+  fs.mkdirSync(path.dirname(HOST_LOG), { recursive: true }); // ~/logs may not exist yet
   const out = fs.openSync(HOST_LOG, "a");
   const child = spawn(binPath(), ["-f", HOST_CONFIG], {
     detached: true, stdio: ["ignore", out, out], windowsHide: true,

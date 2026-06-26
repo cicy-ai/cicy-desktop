@@ -826,7 +826,10 @@ function startSidecarWatchdog({ intervalMs = 30_000 } = {}) {
       // and starts the new one itself — DON'T let the watchdog respawn the OLD
       // binary into that gap (it would race the swap and the update would "finish"
       // still on the old version). Pause until the update releases the flag.
-      if (cicyCodeSidecar.isUpdating && cicyCodeSidecar.isUpdating()) { consecutiveFailures = 0; return; }
+      // 任一主动生命周期操作(update / restart,含启用 LAN 的重启)进行中都暂停 —— 否则
+      // watchdog 会在 stop→start 的空窗里自己再拉一个默认实例,双开抢 :8008。
+      const busy = cicyCodeSidecar.isBusy ? cicyCodeSidecar.isBusy() : (cicyCodeSidecar.isUpdating && cicyCodeSidecar.isUpdating());
+      if (busy) { consecutiveFailures = 0; return; }
       const ok = await cicyCodeSidecar.probeExisting();
       if (ok) { consecutiveFailures = 0; return; }
       consecutiveFailures++;

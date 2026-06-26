@@ -19,6 +19,8 @@ const http = require("http");
 const net = require("net");
 const path = require("path");
 const { spawn, execFileSync, execFile } = require("child_process");
+const localbin = require("./localbin");
+const { t } = require("../i18n"); // 安装/升级日志走 i18n(main 进程按 app 语言初始化)
 
 // ── Node runtime bootstrap ───────────────────────────────────────────────────
 // 主人(2026-06): native cicy-code 走 `npx cicy-code`,需要一个**可用**的 Node。但用户
@@ -63,7 +65,7 @@ async function ensureNode({ emit } = {}) {
     `https://cdn.npmmirror.com/binaries/node/${NODE_VER}/${fname}`, // CN-fast
     `https://nodejs.org/dist/${NODE_VER}/${fname}`,                 // 官方兜底
   ];
-  e({ phase: "node", status: "running", message: `未检测到可用 Node(系统无 node 或版本 <20),正在安装 Node ${NODE_VER}(约 50MB)…` });
+  e({ phase: "node", status: "running", message: t("sidecar.nodeInstalling", { ver: NODE_VER }) });
   fs.mkdirSync(NODE_HOME, { recursive: true });
   const tmp = path.join(os.tmpdir(), `cicy-${fname}`);
   for (const url of urls) {
@@ -74,17 +76,17 @@ async function ensureNode({ emit } = {}) {
       await pexec("tar", ["-xzf", tmp, "-C", NODE_HOME, "--strip-components", "1"], 120000);
       if (fs.existsSync(path.join(NODE_HOME, "bin", "node")) && fs.existsSync(path.join(NODE_HOME, "bin", "npx"))) {
         try { fs.unlinkSync(tmp); } catch {}
-        e({ phase: "node", status: "done", message: `Node ${NODE_VER} 安装完成 → ${path.join(NODE_HOME, "bin")}` });
+        e({ phase: "node", status: "done", message: t("sidecar.nodeDone", { ver: NODE_VER, dir: path.join(NODE_HOME, "bin") }) });
         return adopt(path.join(NODE_HOME, "bin"));
       }
-      e({ phase: "node", status: "running", message: `解压后没找到 node/npx,换下一个源…` });
+      e({ phase: "node", status: "running", message: t("sidecar.nodeExtractRetry") });
     } catch (err) {
       console.warn(`[cicy-code-sidecar] node install failed (${url}): ${err.message}`);
-      e({ phase: "node", status: "running", message: `Node 下载失败(${url.includes("npmmirror") ? "npmmirror" : "nodejs.org"}):${String(err.message).slice(0, 160)} — 换源重试…` });
+      e({ phase: "node", status: "running", message: t("sidecar.nodeDownloadFail", { src: url.includes("npmmirror") ? "npmmirror" : "nodejs.org", err: String(err.message).slice(0, 160) }) });
     }
   }
   try { fs.unlinkSync(tmp); } catch {}
-  e({ phase: "node", status: "error", message: "❌ Node 自动安装失败(两个源都没成)—— 请打开 https://nodejs.org 下载安装 Node(选 LTS),装好后点「重试」" });
+  e({ phase: "node", status: "error", message: t("sidecar.nodeFailed") });
   return null;
 }
 
@@ -120,9 +122,9 @@ function linkBinsToDefaultPath(srcDir, names, e) {
       if (!fs.existsSync(target)) continue;
       const link = path.join(LOCAL_BIN, x);
       try { fs.unlinkSync(link); } catch {}
-      try { fs.symlinkSync(target, link); } catch (err) { e && e({ phase: "deps", status: "running", message: `软链 ${link} 失败:${err.message}` }); }
+      try { fs.symlinkSync(target, link); } catch (err) { e && e({ phase: "deps", status: "running", message: t("sidecar.linkFail", { link, err: err.message }) }); }
     }
-    e && e({ phase: "deps", status: "running", message: `已软链 ${names.join("/")} → ~/.local/bin` });
+    e && e({ phase: "deps", status: "running", message: t("sidecar.linked", { names: names.join("/") }) });
   } catch {}
 }
 function cmdExists(name, pathEnv) {
@@ -137,7 +139,7 @@ function brewInstallStream(brew, dep, env, e) {
     const pump = (b) => { buf += b.toString("utf8"); let nl; while ((nl = buf.indexOf("\n")) >= 0) { const line = buf.slice(0, nl).replace(/\r$/, "").trim(); buf = buf.slice(nl + 1); if (line) e({ phase: "deps", status: "running", message: line.slice(0, 200) }); } };
     ch.stdout.on("data", pump); ch.stderr.on("data", pump);
     ch.on("close", (code) => resolve(code === 0));
-    ch.on("error", (err) => { e({ phase: "deps", status: "running", message: `brew install ${dep} 起不来: ${err.message}` }); resolve(false); });
+    ch.on("error", (err) => { e({ phase: "deps", status: "running", message: t("sidecar.brewSpawnFail", { dep, err: err.message }) }); resolve(false); });
   });
 }
 
@@ -146,10 +148,10 @@ function brewInstallStream(brew, dep, env, e) {
 async function ensureEnv({ emit } = {}) {
   const e = emit || (() => {});
   // 1) 检查网络是否为 CN → 选 registry + bottle 镜像
-  e({ phase: "net", status: "running", message: `检查网络是否为 CN…` });
+  e({ phase: "net", status: "running", message: t("sidecar.netChecking") });
   const cn = process.env.CICY_NPM_REGISTRY ? true : await probeIsCN();
   const registry = process.env.CICY_NPM_REGISTRY || (cn ? "https://registry.npmmirror.com" : "https://registry.npmjs.org");
-  e({ phase: "net", status: "running", message: `网络:${cn ? "CN" : "非 CN"} → registry=${registry.replace(/^https?:\/\//, "")}${cn ? " + 镜像加速" : ""}` });
+  e({ phase: "net", status: "running", message: t("sidecar.netResult", { net: cn ? t("sidecar.netCN") : t("sidecar.netNonCN"), registry: registry.replace(/^https?:\/\//, ""), mirror: cn ? t("sidecar.netMirror") : "" }) });
 
   // 2) Node(系统 ≥20 用,否则装 Node 24)—— ensureNode 内部已把 node bin 放进 process.env.PATH 首位。
   const nodeBinDir = await ensureNode({ emit });
@@ -160,16 +162,16 @@ async function ensureEnv({ emit } = {}) {
   const pathEnv = `${nodeBinDir}:${BREW_DIRS.join(":")}:${NODE_SEARCH.join(":")}:/usr/bin:/bin:${process.env.PATH || ""}`;
   const brew = findBrew();
   if (!brew) {
-    e({ phase: "deps", status: "error", message: "❌ 未检测到 Homebrew(装 tmux 等依赖要用)。请在「终端」执行后点「重试」:\n/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"" });
+    e({ phase: "deps", status: "error", message: t("sidecar.brewMissing") + "\n/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"" });
     return null;
   }
   const brewEnv = { ...process.env, PATH: pathEnv, HOMEBREW_NO_AUTO_UPDATE: "1", ...(cn ? { HOMEBREW_BOTTLE_DOMAIN: process.env.HOMEBREW_BOTTLE_DOMAIN || "https://mirrors.ustc.edu.cn/homebrew-bottles" } : {}) };
   for (const dep of ["tmux", "jq"]) {
-    if (cmdExists(dep, pathEnv)) { e({ phase: "deps", status: "running", message: `✓ ${dep} 已安装` }); continue; }
-    e({ phase: "deps", status: "running", message: `安装依赖 ${dep}(可能要几分钟)…` });
+    if (cmdExists(dep, pathEnv)) { e({ phase: "deps", status: "running", message: t("sidecar.depInstalled", { dep }) }); continue; }
+    e({ phase: "deps", status: "running", message: t("sidecar.depInstalling", { dep }) });
     const ok = await brewInstallStream(brew, dep, brewEnv, e);
-    if (!ok) { e({ phase: "deps", status: "error", message: `❌ brew install ${dep} 失败(见上方日志),点「重试」` }); return null; }
-    e({ phase: "deps", status: "running", message: `✓ ${dep} 安装完成` });
+    if (!ok) { e({ phase: "deps", status: "error", message: t("sidecar.depFail", { dep }) }); return null; }
+    e({ phase: "deps", status: "running", message: t("sidecar.depDone", { dep }) });
   }
 
   // mihomo 二进制 —— desktop 用自己装的 node24 预装(主人诊断的根因 + 修法):
@@ -187,7 +189,7 @@ async function ensureEnv({ emit } = {}) {
       const prevPath = process.env.PATH;
       process.env.PATH = `${nodeBinDir}:${BREW_DIRS.join(":")}:${process.env.PATH || ""}`; // 让 runtime 的 execFile("npm") 命中 node24
       try {
-        e({ phase: "deps", status: "running", message: "安装 mihomo 二进制(node24 → npm pack cicy-mihomo)…" });
+        e({ phase: "deps", status: "running", message: t("sidecar.mihomoInstalling") });
         const { latest } = await runtime.checkUpdate("mihomo");
         if (latest) {
           await runtime.fetchVersion("mihomo", latest, { emit: e });
@@ -198,10 +200,10 @@ async function ensureEnv({ emit } = {}) {
     }
     if (mihomoBin) {
       linkBinsToDefaultPath(path.dirname(mihomoBin), ["mihomo"], e); // ~/.local/bin/mihomo → runtime
-      e({ phase: "deps", status: "done", message: `✓ mihomo 就绪 → ${mihomoBin}` });
+      e({ phase: "deps", status: "done", message: t("sidecar.mihomoReady", { bin: mihomoBin }) });
     }
   } catch (err) {
-    e({ phase: "deps", status: "running", message: `mihomo 预装跳过(不挡启动):${String(err.message).slice(0, 160)}` });
+    e({ phase: "deps", status: "running", message: t("sidecar.mihomoSkip", { err: String(err.message).slice(0, 160) }) });
   }
 
   return { nodeBinDir, registry, mihomoBin };
@@ -240,54 +242,6 @@ function setPublicFlag(on) {
   return f.public;
 }
 
-// Runtime Bundle v1 (主人指令): prefer the versioned runtime store on EVERY
-// platform — first run seeds it from the bundled optionalDependency (zero
-// network, zero npx), upgrades come through runtime.upgrade(). Returns the
-// spawn child or null when the store has no usable binary (legacy fallbacks
-// below take over).
-async function startFromRuntime({ logPath, port }) {
-  let runtime;
-  try { runtime = require("./runtime"); } catch { return null; }
-  let exe = null;
-  try { exe = runtime.binPath("cicy-code") || runtime.ensureFromBundle("cicy-code"); } catch (e) {
-    console.warn(`[cicy-code-sidecar] runtime store unusable: ${e.message}`);
-  }
-  // Bundle absent or empty (npm optionalDependencies are best-effort — a flaky
-  // mirror/network can leave the dep recorded but unpopulated). Don't strand
-  // the user: pull the pinned/latest version from npm into the runtime store.
-  // This is the network fallback to the zero-network bundle seed.
-  if (!exe) {
-    try {
-      const { latest } = await runtime.checkUpdate("cicy-code");
-      if (latest) {
-        console.log(`[cicy-code-sidecar] bundle missing — npm-pulling cicy-code@${latest} into runtime store`);
-        await runtime.fetchVersion("cicy-code", latest);
-        runtime.switchCurrent("cicy-code", latest);
-        exe = runtime.binPath("cicy-code");
-      }
-    } catch (e) { console.warn(`[cicy-code-sidecar] runtime npm-pull failed: ${e.message}`); }
-  }
-  if (!exe) return null;
-
-  let stdio = ["ignore", "ignore", "ignore"];
-  if (logPath) {
-    fs.mkdirSync(path.dirname(logPath), { recursive: true });
-    const fd = fs.openSync(logPath, "a");
-    stdio = ["ignore", fd, fd];
-  }
-  const env = {
-    ...process.env,
-    CICY_CODE_PORT: String(port),
-    PORT: String(port),
-  };
-  const c = spawn(exe, ["--desktop"], { stdio, detached: false, windowsHide: true, env });
-  console.log(`[cicy-code-sidecar] spawned runtime ${exe} --desktop (v${runtime.currentVersion("cicy-code")}) pid=${c.pid} port=${port}`);
-  c.on("exit", (code, signal) => {
-    console.log(`[cicy-code-sidecar] exited code=${code} signal=${signal}`);
-    child = null;
-  });
-  return c;
-}
 
 async function start({ logPath, port = DEFAULT_PORT, force = false, version = null, emit = null } = {}) {
   // **永不重复 spawn 活着的实例**(主人 bug 修复): cicy-code 首次启动要 `brew install tmux`
@@ -315,37 +269,49 @@ async function start({ logPath, port = DEFAULT_PORT, force = false, version = nu
   if (!env0) { console.warn("[cicy-code-sidecar] ensureEnv failed — cannot start"); return null; }
   const { nodeBinDir, registry, mihomoBin } = env0;
 
-  // 2) `npx cicy-code` —— npm 按本机真实架构拉 cicy-code-<plat>,文件用户自己拥有(无跨架构/
-  //    权限坑)。用上面那个 Node 的 npx,并把它的 bin + brew 放 PATH 首位让 cicy-code 找到 tmux/jq。
+  // 2) localbin 模型(主人):`npm pack cicy-code-<plat>` → ~/.local/bin/cicy-code-<ver>-<plat>
+  //    → ad-hoc 签名(arm64 必需) → symlink ~/.local/bin/cicy-code。**直接跑这个 symlink**:
+  //    spawn 出来的就是监听 :8008 的进程本身(不再 npx→node→孙进程),child.pid 一杀就净,
+  //    版本单一可信。npm 只当下载渠道(ensureEnv 已把 node/npm 放进 process.env.PATH)。
   let stdio = ["ignore", "ignore", "ignore"];
   if (logPath) {
     fs.mkdirSync(path.dirname(logPath), { recursive: true });
     const fd = fs.openSync(logPath, "a");
     stdio = ["ignore", fd, fd];
   }
-  const npxAbs = path.join(nodeBinDir, "npx");
+  let exe = null;
+  try {
+    const r = await localbin.ensure({ version: version || process.env.CICY_CODE_VERSION || null, emit });
+    exe = r && r.exe;
+  } catch (err) {
+    console.warn(`[cicy-code-sidecar] localbin.ensure failed: ${err.message}`);
+    emit && emit({ phase: "cicy-code", status: "error", message: t("sidecar.binPrepFail", { err: String(err.message).slice(0, 160) }) });
+    return null;
+  }
+  if (!exe || !fs.existsSync(exe)) {
+    console.warn("[cicy-code-sidecar] no cicy-code binary after ensure");
+    emit && emit({ phase: "cicy-code", status: "error", message: t("sidecar.binMissing") });
+    return null;
+  }
   const childPath = `${nodeBinDir}:${BREW_DIRS.join(":")}:${NODE_SEARCH.join(":")}:/usr/bin:/bin:${process.env.PATH || ""}`;
   const env = {
     ...process.env,
     CICY_CODE_PORT: String(port),
     PORT: String(port),
     npm_config_registry: registry,
-    PATH: childPath, // 给 npx 自己找 node/npm
+    PATH: childPath, // cicy-code 运行时找 tmux/jq(brew)+ node
     // mihomo 二进制 desktop 已用 node24 预装到 runtime store(避开 node13 的 npm6 装不上的坑)→
     // 注入 MIHOMO_BIN,cicy-code 的 cicy-mihomo 包装器直接用,不再自己 npm pack。
     ...(mihomoBin ? { MIHOMO_BIN: mihomoBin } : {}),
   };
-  const spec = version ? `cicy-code@${version}`
-    : (process.env.CICY_CODE_VERSION ? `cicy-code@${process.env.CICY_CODE_VERSION}` : "cicy-code");
   // 「局域网访问」开关(主人): 开 → 加 --public,cicy-code 绑 0.0.0.0(同局域网设备可访问,
   // api_token 仍把关);关 → 默认只绑 127.0.0.1。flag 存 runtime/desktop-flags.json。
-  const args = ["-y", spec];
-  if (isPublic()) args.push("--public");
-  emit && emit({ phase: "cicy-code", status: "running", message: `启动 cicy-code${isPublic() ? "(局域网访问)" : ""}(首次会下载 + 装依赖,请稍候)…` });
+  const args = isPublic() ? ["--public"] : [];
+  emit && emit({ phase: "cicy-code", status: "running", message: t("sidecar.starting", { lan: isPublic() ? t("sidecar.lanSuffix") : "" }) });
   // 退出保活(主人):detached + unref → 关 App 不带走 daemon(及其 tmux agent),下次 adopt。
   const detached = process.platform !== "win32";
-  child = spawn(npxAbs, args, { stdio, detached, windowsHide: true, env });
-  console.log(`[cicy-code-sidecar] spawned ${npxAbs} ${args.join(" ")} pid=${child.pid} port=${port} registry=${registry} public=${isPublic()} detached=${detached} log=${logPath || "(none)"}`);
+  child = spawn(exe, args, { stdio, detached, windowsHide: true, env });
+  console.log(`[cicy-code-sidecar] spawned ${exe} ${args.join(" ")} pid=${child.pid} port=${port} registry=${registry} public=${isPublic()} detached=${detached} log=${logPath || "(none)"}`);
   if (detached) { try { child.unref(); } catch {} }
 
   child.on("exit", (code, signal) => {
@@ -465,10 +431,20 @@ function clearNpxCache() {
 
 // Restart: stop the running daemon, let :8008 free, then force a fresh spawn
 // (reusing the same cached version — no registry round-trip).
+// 全程标记 busy 暂停 watchdog,且**等 :8008 真正起来才释放** —— 否则 stop→start 的空窗里
+// watchdog 会自己再 start 一个(默认无 --public)→ 双开抢端口(启用 LAN 时就是这个 bug)。
 async function restart({ logPath, port = DEFAULT_PORT } = {}) {
-  await stop({ port });
-  await new Promise(r => setTimeout(r, 300));
-  return start({ logPath, port, force: true });
+  _busyDepth++;
+  try {
+    await stop({ port });
+    await new Promise(r => setTimeout(r, 300));
+    const c = await start({ logPath, port, force: true });
+    // 等新实例 bind :8008 再放开 watchdog(deps 已装好,通常几秒;给足上限防卡死)
+    for (let i = 0; i < 120 && !(await probeExisting(port)); i++) await new Promise(r => setTimeout(r, 500));
+    return c;
+  } finally {
+    _busyDepth--;
+  }
 }
 
 // Update (UNIFIED, all platforms): npm is ONLY the download channel — `npm pack`
@@ -477,83 +453,65 @@ async function restart({ logPath, port = DEFAULT_PORT } = {}) {
 // that stable path and health-verify.
 let _updating = false;
 function isUpdating() { return _updating; }
+// 「维护中」=update 或 restart 进行中。watchdog 查这个,任一主动生命周期操作期间都不抢着
+// 自己 start,避免双开。_busyDepth 计数式(restart 内部还会 stop),嵌套安全。
+let _busyDepth = 0;
+function isBusy() { return _updating || _busyDepth > 0; }
 
 async function update({ logPath, port = DEFAULT_PORT, emit } = {}) {
   const e = emit || (() => {});
-  const localbin = require("./localbin");
-  // Suspend the health watchdog for the duration: update() stops cicy-code, then
-  // downloads (~30s) before starting the new one — during that gap the watchdog
-  // would see the daemon "unreachable" and RESPAWN the OLD binary, racing the
-  // swap (holding the port / locking the .exe) so the new version never takes.
-  // main.js's watchdog tick checks isUpdating() and skips while this is true.
+  // Suspend the health watchdog for the duration (watchdog tick checks isBusy()).
+  // update = 下载新版到 ~/.local/bin(版本化 + ad-hoc 签名 + 重指 symlink)→ 杀旧 → 跑新 symlink。
+  // 全部走 localbin,不再碰 npx 缓存。
   _updating = true;
   try {
-    // 主人令:更新 = 杀干净 cicy-code.exe → 起 cicy-code.exe → 探活 → 拿运行中真实
-    // version → 再判定"已是最新"。绝不凭磁盘 manifest 直接喊"已是最新"——manifest
-    // 可能比运行中的进程超前,甚至 daemon 根本没起。唯一可信的是运行中 /api/health
-    // 报的版本。所以这个流程对"已是最新"和"要升级"两种情况一视同仁:总是重启 + 验证。
-    e({ phase: "download", status: "running", message: "检查最新版本…" });
-    const latest = await localbin.latestVersion();
-    if (!latest) throw new Error("无法获取最新版本号");
+    // 1) 拉最新版到 ~/.local/bin(npm pack cicy-code-<plat> → 版本化 → 签名 → 重指 symlink;
+    //    已是最新 localbin.update 自己返回 updated:false,不重复下载)。
+    e({ phase: "download", status: "running", message: t("sidecar.checkingLatest") });
+    const up = await localbin.update({ emit: e }); // { version, updated }
 
-    // 1) 杀干净
-    e({ phase: "swap", status: "running", message: "停止 cicy-code…" });
+    // 2) 杀干净在跑的旧进程(killPortListeners 兜底,不管 child 准不准)
+    e({ phase: "swap", status: "running", message: t("sidecar.swapping", { ver: up.version }) });
     await stop({ port });
-    await new Promise(r => setTimeout(r, 400));
+    await new Promise(r => setTimeout(r, 300));
 
-    // 2) 清 npx 缓存(主人 bug 修复): daemon 是 `npx cicy-code` 跑的、走 ~/.npm/_npx 缓存,
-    //    根本不看 localbin 下载的 ~/.local/bin。之前 update 往 localbin 下载 + start 复用 npx
-    //    缓存 → 永远还是旧版(2.3.24 发了但 homepage 一直 2.3.23)。改成:清掉 npx 对 cicy-code
-    //    的缓存,下面再用 `cicy-code@<latest>` 重启,npx 就会重新从 registry 拉新版。
-    // 一律清(不被 localbin manifest 门控): npx 缓存才是锁住旧版的真凶,manifest 在 npx 路径下不可信。
-    e({ phase: "download", status: "running", message: `准备更新到 ${latest}（清 npx 缓存,重启时重新拉取）…` });
-    try { clearNpxCache(); } catch (err) { console.warn(`[cicy-code-sidecar] update clearNpxCache: ${err.message}`); }
+    // 3) 跑新 symlink(start→localbin.ensure 此时已是新版,直接复用)
+    const c = await start({ logPath, port, force: true, emit: e });
 
-    // 3) 起:钉死 cicy-code@<latest>,绕开 npx 对裸 `cicy-code` 的缓存,确保拉到新版
-    e({ phase: "swap", status: "running", message: `启动 cicy-code@${latest}…` });
-    // 传 emit: 让 start→ensureEnv 的「检查网络是否为 CN → 选 registry(CN=npmmirror)」+ npx
-    // 下载进度都显示在更新抽屉里(主人: 更新没探测 CN 网络 → 其实探了,但没 emit 出来,看不见)。
-    const c = await start({ logPath, port, force: true, version: latest, emit: e });
-
-    // 4) 探活:等 TCP 监听起来。注意:cicy-code 启动会先恢复团队的 agent 面板
-    //    (w-1xx,可能十几个),:8008 在这些 REPL 拉起之后才 bind —— 繁忙团队这一步
-    //    可能要 1~2 分钟。所以探活窗口放到 180s(原 60s 太短,会把"还在恢复 agent"
-    //    误判成"启动失败",抽屉卡在「启动 cicy-code…」)。子进程一旦真退出(崩了)
-    //    立即停手,不空等满 180s。
+    // 4) 探活:等 TCP 监听起来。cicy-code 启动会先恢复 agent 面板,繁忙团队 :8008 可能 1~2min
+    //    才 bind。子进程一旦真退出(崩了)立即停手,不空等。
     const PROBE_TRIES = 360; // 360 * 500ms = 180s
-    let up = false;
+    let alive = false;
     for (let i = 0; i < PROBE_TRIES; i++) {
-      if (await probeExisting(port)) { up = true; break; }
-      if (c && c.exitCode != null) break;     // 进程已退出 = 真失败,别空等
-      if (i === 30) e({ phase: "swap", status: "running", message: "启动 cicy-code…(正在恢复 agent 面板,稍候)" });
+      if (await probeExisting(port)) { alive = true; break; }
+      if (c && c.exitCode != null) break;
+      if (i === 30) e({ phase: "swap", status: "running", message: t("sidecar.startingAgents") });
       await new Promise(r => setTimeout(r, 500));
     }
-    if (!up) { e({ phase: "done", status: "error", message: `cicy-code 未在 ${PROBE_TRIES / 2}s 内启动` }); return c; }
+    if (!alive) { e({ phase: "done", status: "error", message: t("sidecar.notUpInTime", { secs: PROBE_TRIES / 2 }) }); return c; }
 
-    // 5) 拿运行中真实 version(唯一来源 version.running();可能略慢于 TCP,重试几次)
+    // 5) 拿运行中真实 version 报告(唯一可信来源)
     const version = require("./version");
     let running = "";
     for (let i = 0; i < 20 && !running; i++) {
       running = await version.running(port);
       if (!running) await new Promise(r => setTimeout(r, 500));
     }
-
-    // 6) 以运行中真实版本判定——不撒谎
-    if (running && localbin.cmpVer(running, latest) >= 0) {
-      e({ phase: "done", status: "done", message: `已是最新 ${running}` });
+    if (running && localbin.cmpVer(running, up.version) >= 0) {
+      e({ phase: "done", status: "done", message: t("sidecar.upToDateVer", { ver: running }) });
     } else if (running) {
-      e({ phase: "done", status: "done", message: `已更新到 ${running}` });
+      e({ phase: "done", status: "done", message: t("sidecar.updatedTo", { ver: running }) });
     } else {
-      e({ phase: "done", status: "done", message: `已启动(版本未知,期望 ${latest})` });
+      e({ phase: "done", status: "done", message: t("sidecar.startedUnknownVer", { ver: up.version }) });
     }
     return c;
   } catch (err) {
     console.warn(`[cicy-code-sidecar] update failed: ${err.message}`);
-    e({ phase: "done", status: "error", message: `更新失败：${err.message}` });
+    e({ phase: "done", status: "error", message: t("sidecar.updateFail", { err: err.message }) });
     return null;
   } finally {
     _updating = false;
   }
 }
 
-module.exports = { start, stop, restart, update, probeExisting, clearNpxCache, isUpdating, ensureEnv, ensureNode, isPublic, setPublicFlag };
+module.exports = { start, stop, restart, update, probeExisting, clearNpxCache, isUpdating, isBusy, ensureEnv, ensureNode, isPublic, setPublicFlag };

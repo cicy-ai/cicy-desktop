@@ -7,9 +7,15 @@ import { mdToHtml } from "./mdLite";
 // i18n bridge exposed by homepage-preload (window.cicyI18n.t, locale from
 // app.getLocale()). Returns the localized string, or `fallback` when the key
 // is missing or we're running outside Electron.
-const tr = (key, fallback) => {
-  try { const v = window.cicyI18n?.t?.(key); return v && v !== key ? v : fallback; }
-  catch { return fallback; }
+const tr = (key, fallback, params) => {
+  // 支持 {{name}} 插值:第三参是 { name: ... }。i18n 没命中时也对 fallback 插值。
+  const interp = (s) => (params && typeof s === "string"
+    ? s.replace(/\{\{\s*(\w+)\s*\}\}/g, (m, k) => (params[k] != null ? String(params[k]) : m))
+    : s);
+  try {
+    const v = window.cicyI18n?.t?.(key, params);
+    return interp(v && v !== key ? v : fallback);
+  } catch { return interp(fallback); }
 };
 
 const TOKEN_KEY = "cicy_token";
@@ -295,7 +301,6 @@ export default function App() {
   const [customOpen, setCustomOpen] = useState(false);
   const [customTitle, setCustomTitle] = useState("");
   const [customUrl, setCustomUrl] = useState("");
-  const [customToken, setCustomToken] = useState("");
   const [customBusy, setCustomBusy] = useState(false);
   const [customErr, setCustomErr] = useState("");
   // Tab state for the team grid: "all" | "local" | "cloud".
@@ -416,6 +421,23 @@ export default function App() {
     } catch (e) { return { ok: false, error: e.message }; }
   }, [refreshCloudTeams]);
 
+  // 删除私有云团队(主人):确认后走云端 DELETE /api/teams/{id},成功后重拉云端列表 + toast。
+  const deleteCloudTeam = useCallback(async (team) => {
+    const at = bearerRef.current;
+    if (!at || !window.cicy?.cloud?.fetch) { toast.show({ message: tr("common.noAuth", "未登录"), status: "error", ttl: 5000 }); return; }
+    try {
+      const r = await window.cicy.cloud.fetch(`${CLOUD_BASE}/api/teams/${team.id}`, {
+        method: "DELETE", headers: { Authorization: `Bearer ${at}` },
+      });
+      if (r?.ok || r?.status === 200 || r?.status === 204) {
+        toast.show({ message: tr("teamCard.deleted", "团队已删除"), status: "done", ttl: 3000 });
+        await refreshCloudTeams();
+      } else {
+        toast.show({ message: `${tr("teamCard.deleteFailed", "删除失败")}: ${r?.status || "?"} ${r?.error || ""}`, status: "error", ttl: 7000 });
+      }
+    } catch (e) { toast.show({ message: `${tr("teamCard.deleteFailed", "删除失败")}: ${e.message}`, status: "error", ttl: 7000 }); }
+  }, [refreshCloudTeams]);
+
   // First profile fetch on mount. The cloud console endpoints (/api/user/self,
   // /api/teams) authenticate the owner-bound LOGIN token (the sk-xxx from the
   // /cb callback) — NOT the console access_token (the cloud never mints one;
@@ -452,10 +474,10 @@ export default function App() {
     try { new URL(url); } catch { setCustomErr(tr("teams.badUrl", "URL 无效(需含 http(s)://)")); return; }
     setCustomErr(""); setCustomBusy(true);
     try {
-      const r = await window.cicy.localTeams.add({ base_url: url, name: customTitle.trim(), api_token: customToken.trim() });
-      if (!r || r.ok === false) { setCustomErr(humanError(r?.error || "add failed")); return; }
-      setCustomOpen(false); setCustomTitle(""); setCustomUrl(""); setCustomToken("");
-      await fetchLocalTeams(); setTab("custom");
+      const r = await window.cicy.localTeams.add({ base_url: url, name: customTitle.trim(), failIfExists: true });
+      if (!r || r.ok === false) { setCustomErr(r?.error === "exists" ? tr("teams.urlExists", "该地址已存在") : humanError(r?.error || "add failed")); return; }
+      setCustomOpen(false); setCustomTitle(""); setCustomUrl("");
+      await fetchLocalTeams();
     } catch (e) {
       setCustomErr(humanError(e?.message || String(e)));
     } finally {
@@ -898,7 +920,7 @@ export default function App() {
         {/* 自定义团队 modal:输 名称 + 地址 URL + 可选 token → localTeams.add */}
         {customOpen && (
           <div data-id="CustomTeamModal" style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.5)" }}
-            onClick={() => { if (!customBusy) setCustomOpen(false); }}>
+            onMouseDown={(e) => { if (!customBusy && e.target === e.currentTarget) setCustomOpen(false); }}>
             <div onClick={(e) => e.stopPropagation()} style={{ width: 400, maxWidth: "92vw", background: "var(--card, #1b1d22)", border: "1px solid var(--border, #2c2f36)", borderRadius: 14, padding: 22, boxShadow: "0 20px 60px rgba(0,0,0,.5)" }}>
               <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{tr("teams.customTitle", "添加自定义团队")}</div>
               <div style={{ fontSize: 12, opacity: .6, marginBottom: 16 }}>{tr("teams.customSub", "连接到一个已有的 cicy-code 地址")}</div>
@@ -908,13 +930,8 @@ export default function App() {
                 value={customTitle} onChange={(e) => setCustomTitle(e.target.value)} placeholder={tr("teams.customNamePlaceholder", "我的团队")} spellCheck={false} autoFocus />
 
               <label style={{ display: "block", fontSize: 12, opacity: .75, marginBottom: 6 }}>{tr("teams.customUrlLabel", "地址 URL")}</label>
-              <input data-id="CustomTeamModal-url" className="login-email-input" style={{ width: "100%", marginBottom: 14 }}
+              <input data-id="CustomTeamModal-url" className="login-email-input" style={{ width: "100%", marginBottom: 6 }}
                 value={customUrl} onChange={(e) => setCustomUrl(e.target.value)} placeholder="https://example.com:8008" spellCheck={false}
-                onKeyDown={(e) => { if (e.key === "Enter") submitCustom(); }} />
-
-              <label style={{ display: "block", fontSize: 12, opacity: .75, marginBottom: 6 }}>{tr("teams.customTokenLabel", "Token(可选)")}</label>
-              <input data-id="CustomTeamModal-token" className="login-email-input" style={{ width: "100%", marginBottom: 6 }}
-                value={customToken} onChange={(e) => setCustomToken(e.target.value)} placeholder="api_token" spellCheck={false}
                 onKeyDown={(e) => { if (e.key === "Enter") submitCustom(); }} />
 
               {customErr && <div className="error" style={{ marginTop: 10 }}>{customErr}</div>}
@@ -980,6 +997,7 @@ export default function App() {
               }}
               onRename={renameCloudTeam}
               onEditUrl={updateCloudTeamUrl}
+              onDelete={deleteCloudTeam}
             />
           ))}
         </div>
@@ -2384,6 +2402,11 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
 
   // Two-click delete guard, reset whenever the menu closes.
   const [confirmDel, setConfirmDel] = useState(false);
+  // 自定义团队改 URL modal
+  const [editingUrl, setEditingUrl] = useState(false);
+  const [urlDraft, setUrlDraft] = useState("");
+  const [urlBusy, setUrlBusy] = useState(false);
+  const [urlErr, setUrlErr] = useState("");
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -2398,16 +2421,31 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
     return () => document.removeEventListener("mousedown", onDoc);
   }, [menuOpen]);
 
-  useEffect(() => { if (!menuOpen) setConfirmDel(false); }, [menuOpen]);
-
+  // 自定义团队改 URL:调用 localTeams.update 改 base_url。
+  const commitUrl = async () => {
+    if (urlBusy) return;
+    const next = String(urlDraft || "").trim();
+    if (!next || next === (team.base_url || "")) { setEditingUrl(false); return; }
+    try { new URL(next); } catch { setUrlErr(tr("teams.badUrl", "URL 无效(需含 http(s)://)")); return; }
+    setUrlErr(""); setUrlBusy(true);
+    try {
+      const r = await (window.cicy?.localTeams?.update?.(team.id, { base_url: next }));
+      if (r?.ok) { setEditingUrl(false); onRefresh?.(); }
+      else setUrlErr(humanError(r?.error || "update failed"));
+    } catch (e) { setUrlErr(humanError(e?.message || String(e))); }
+    setUrlBusy(false);
+  };
   const handleRemove = async () => {
-    if (!confirmDel) { setConfirmDel(true); return; } // first click arms it
-    setMenuOpen(false); setConfirmDel(false);
     if (busy) return;
-    setBusy("remove");
-    try { await window.cicy?.localTeams?.remove?.(team.id); } catch {}
-    setBusy("");
-    onRefresh?.();
+    setConfirmDel(false); setBusy("remove");
+    const toastId = "op-" + Date.now();
+    toast.show({ id: toastId, message: tr("localTeams.removing", "删除中…"), status: "running" });
+    try {
+      const r = await window.cicy?.localTeams?.remove?.(team.id);
+      if (r?.ok) toast.show({ id: toastId, message: tr("localTeams.removed", "已删除"), status: "done", ttl: 3000 });
+      else toast.show({ id: toastId, message: tr("localTeams.removeFailed", "删除失败") + (r?.error ? ": " + r.error : ""), status: "error", ttl: 7000 });
+    } catch (e) { toast.show({ id: toastId, message: tr("localTeams.removeFailed", "删除失败") + ": " + (e?.message || e), status: "error", ttl: 7000 }); }
+    setBusy(""); onRefresh?.();
   };
 
   // One toast per card-op, keyed by team — progress streams into it, the final
@@ -2498,6 +2536,7 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
       ? tr("localTeams.startOpen", "启动并打开") // only the local sidecar can be started from here
       : tr("localTeams.open", "打开");           // custom/remote: 探活-only, just open
   return (
+    <>
     <div data-id="LocalTeamCard" className={`bcard ${local ? "bcard--local" : "bcard--custom"}${tone === "ok" ? " bcard--online" : ""}`}>
       <div className="bcard__accent" />
       <div className="bcard__top">
@@ -2616,25 +2655,18 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
                   </button>
                 )}
                 {isCustom && (
-                  <button
-                    type="button"
-                    data-id="LocalTeamCard-remove"
-                    className="bcard__menu-item is-danger"
-                    onClick={handleRemove}
-                  >
-                    {confirmDel ? tr("localTeams.removeConfirm", "确认删除？") : tr("localTeams.remove", "删除")}
-                  </button>
+                  <>
+                    <button type="button" data-id="LocalTeamCard-edit-url" className="bcard__menu-item"
+                      onClick={(e) => { e.stopPropagation(); setMenuOpen(false); setEditingUrl(true); setUrlDraft(team.base_url || ""); }}>
+                      {tr("teamCard.editUrl", "更改访问地址")}
+                    </button>
+                    <button type="button" data-id="LocalTeamCard-remove"
+                      className="bcard__menu-item is-danger"
+                      onClick={() => { setMenuOpen(false); setConfirmDel(true); }}>
+                      {tr("localTeams.remove", "删除")}
+                    </button>
+                  </>
                 )}
-                <button
-                  type="button"
-                  data-id="LocalTeamCard-addr"
-                  className="bcard__menu-item"
-                  title={tr("localTeams.copyAddr", "点击复制地址")}
-                  style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-                  onClick={(e) => { e.stopPropagation(); setMenuOpen(false); try { navigator.clipboard.writeText(team.base_url || ""); } catch {} }}
-                >
-                  {team.base_url || "—"}
-                </button>
                 {(runningVer || team.version) && (
                   <div data-id="LocalTeamCard-version" className="bcard__menu-item" style={{ cursor: "default", color: "#8b949e", fontSize: 12 }}>
                     {tr("localTeams.version", "版本")} v{runningVer || team.version}
@@ -2702,6 +2734,36 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
         <span>{busy ? (BUSY_LABEL[busy] || openLabel) : openLabel}</span>
       </button>
     </div>
+    {editingUrl && createPortal(
+      <div data-id="LocalTeamCard-url-modal"
+        style={{ position: "fixed", inset: 0, zIndex: 65, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.5)" }}
+        onMouseDown={(e) => { if (!urlBusy && e.target === e.currentTarget) setEditingUrl(false); }}>
+        <div onClick={(e) => e.stopPropagation()}
+          style={{ width: 400, maxWidth: "92vw", background: "var(--card, #1b1d22)", border: "1px solid var(--border, #2c2f36)", borderRadius: 14, padding: 22, boxShadow: "0 20px 60px rgba(0,0,0,.5)" }}>
+          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{tr("teamCard.editUrl", "更改访问地址")}</div>
+          <div style={{ fontSize: 12, opacity: .6, marginBottom: 16 }}>{team.name}</div>
+          <input data-id="LocalTeamCard-url-input" autoFocus className="login-email-input" style={{ width: "100%" }}
+            value={urlDraft} placeholder="https://example.com:8008" spellCheck={false}
+            disabled={urlBusy}
+            onChange={(e) => setUrlDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.nativeEvent.isComposing || e.keyCode === 229) return; if (e.key === "Enter") commitUrl(); else if (e.key === "Escape") setEditingUrl(false); }} />
+          {urlErr && <div className="error" style={{ marginTop: 8, fontSize: 12 }}>{urlErr}</div>}
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 18 }}>
+            <button type="button" className="btn-ghost" disabled={urlBusy} onClick={() => setEditingUrl(false)}>{tr("common.cancel", "取消")}</button>
+            <button type="button" className="btn-primary" data-id="LocalTeamCard-url-save" disabled={urlBusy} onClick={commitUrl}>{urlBusy ? tr("common.saving", "保存中…") : tr("common.save", "保存")}</button>
+          </div>
+        </div>
+      </div>,
+      document.body,
+    )}
+    <ConfirmModal open={confirmDel}
+      title={tr("localTeams.deleteTitle", "删除团队")}
+      message={tr("localTeams.deleteMsg", "确定删除「{{name}}」?此操作不可撤销。", { name: team.name })}
+      confirmLabel={tr("common.delete", "删除")} danger
+      onConfirm={handleRemove}
+      onCancel={() => setConfirmDel(false)}
+    />
+    </>
   );
 }
 
@@ -2743,10 +2805,33 @@ const LOCAL_STATUS = {
   error:         { tone: "err",  label: "error",      cta: tr("localStatus.error", "异常") },
 };
 
+// 共享确认弹窗(主人):所有删除统一走这里,不再内联两段式。createPortal 到 body,不受卡片层叠限制。
+function ConfirmModal({ open, title, message, confirmLabel, danger, onConfirm, onCancel }) {
+  if (!open) return null;
+  return createPortal(
+    <div data-id="ConfirmModal"
+      style={{ position: "fixed", inset: 0, zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.5)" }}
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel?.(); }}>
+      <div onClick={(e) => e.stopPropagation()}
+        style={{ width: 360, maxWidth: "92vw", background: "var(--card, #1b1d22)", border: "1px solid var(--border, #2c2f36)", borderRadius: 14, padding: 22, boxShadow: "0 20px 60px rgba(0,0,0,.5)" }}>
+        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>{title}</div>
+        {message && <div style={{ fontSize: 13, opacity: .7, marginBottom: 16 }}>{message}</div>}
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 18 }}>
+          <button type="button" className="btn-ghost" onClick={onCancel}>{tr("common.cancel", "取消")}</button>
+          <button type="button" className="btn-primary" data-id="ConfirmModal-ok"
+            style={danger ? { background: "#dc2626", borderColor: "#dc2626" } : {}}
+            onClick={onConfirm}>{confirmLabel || tr("common.confirm", "确认")}</button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 // 私有云 / (历史)云端团队卡片。产品方向变更(w-10032):公有云不做了,主打 private
 // (用户自托管,数据不出企业)。private 字段:{name,kind:"private",status,apiKey,
 // gatewayUrl,host_url,titleVersion,deviceId:""}。卡片展示名字+host_url,点开可看/复制 apiKey。
-function TeamCard({ team, onOpen, onRename, onEditUrl }) {
+function TeamCard({ team, onOpen, onRename, onEditUrl, onDelete }) {
   const isPrivate = team.kind === "private";
   const statusOk = team.status === "active";
   const serverName = team.name || team.title || "—";
@@ -2807,6 +2892,8 @@ function TeamCard({ team, onOpen, onRename, onEditUrl }) {
   // 刷新窗口:三卡完全同一逻辑——tabs.reloadIfOpen 按 URL 找开着的 tab 就 reload,
   // 没开就不操作(不偷偷开新窗)。
   const doReload = (e) => { e?.stopPropagation?.(); if (!hasUrl) return; setMenuOpen(false); window.cicy?.tabs?.reloadIfOpen?.(openUrl, name); };
+  // 删除确认弹窗(主人):私有云 team 删除必须确认,走 ConfirmModal。
+  const [confirmDel, setConfirmDel] = useState(false);
   const startEditUrl = () => { setUrlDraft(hostUrl); setEditingUrl(true); setMenuOpen(false); };
   const commitUrl = async () => {
     setEditingUrl(false);
@@ -2817,6 +2904,7 @@ function TeamCard({ team, onOpen, onRename, onEditUrl }) {
   };
   // 主人令:私有云卡片不展示 api key(安全)。key 只在云端 dash / 注入 global.json 用。
   return (
+    <>
     <div data-id="TeamCard" className={`bcard bcard--cloud${statusOk ? " bcard--online" : ""}`}>
       <div className="bcard__accent" />
       <div className="bcard__top">
@@ -2855,18 +2943,16 @@ function TeamCard({ team, onOpen, onRename, onEditUrl }) {
                       {tr("localTeams.billing", "账单")}
                     </button>
                   )}
-                  {hasUrl && (
-                    <button type="button" data-id="TeamCard-addr" className="bcard__menu-item"
-                      title={tr("localTeams.copyAddr", "点击复制地址")}
-                      style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-                      onClick={(e) => { e.stopPropagation(); setMenuOpen(false); try { navigator.clipboard.writeText(openUrl || hostUrl || ""); } catch {} }}>
-                      {isPrivate ? (displayHostUrl || openUrl) : (openUrl || team.runtime_region || team.region || "—")}
-                    </button>
-                  )}
                   {isPrivate && onEditUrl && (
                     <button type="button" data-id="TeamCard-edit-url" className="bcard__menu-item"
                       onClick={(e) => { e.stopPropagation(); startEditUrl(); }}>
                       {hostUrl ? tr("teamCard.editUrl", "更改访问地址") : tr("teamCard.setUrl", "填写访问地址")}
+                    </button>
+                  )}
+                  {isPrivate && onDelete && (
+                    <button type="button" data-id="TeamCard-delete" className="bcard__menu-item is-danger"
+                      onClick={(e) => { e.stopPropagation(); setMenuOpen(false); setConfirmDel(true); }}>
+                      {tr("teamCard.delete", "删除")}
                     </button>
                   )}
                 </div>,
@@ -2900,20 +2986,6 @@ function TeamCard({ team, onOpen, onRename, onEditUrl }) {
           </h3>
         )}
         </div>
-        {editingUrl && (
-          <input
-            data-id="TeamCard-url-input"
-            autoFocus
-            value={urlDraft}
-            placeholder="https://你的私有云地址:端口"
-            onChange={(e) => setUrlDraft(e.target.value)}
-            onFocus={(e) => e.target.select()}
-            onClick={(e) => e.stopPropagation()}
-            onBlur={commitUrl}
-            onKeyDown={(e) => { if (e.nativeEvent.isComposing || e.keyCode === 229) return; if (e.key === "Enter") commitUrl(); else if (e.key === "Escape") setEditingUrl(false); }}
-            style={{ width: "100%", font: "inherit", fontSize: 12, padding: "3px 6px", margin: "2px 0 4px", border: "1px solid #3b82f6", borderRadius: 6, background: "#0d1117", color: "#e6edf3", boxSizing: "border-box" }}
-          />
-        )}
         <div className="bcard__meta">
           <span className="bcard__chip">{kindLabel}</span>
           {!isPrivate && team.membership_status && team.membership_status !== "active" && (
@@ -2931,6 +3003,34 @@ function TeamCard({ team, onOpen, onRename, onEditUrl }) {
         <span>{hasUrl ? tr("localTeams.open", "打开") : (isPrivate ? tr("teamCard.noHost", "未填访问地址") : tr("teamCard.noUrl", "无 URL"))}</span>
       </button>
     </div>
+    {editingUrl && createPortal(
+      <div data-id="TeamCard-url-modal"
+        style={{ position: "fixed", inset: 0, zIndex: 65, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.5)" }}
+        onMouseDown={(e) => { if (e.target === e.currentTarget) setEditingUrl(false); }}>
+        <div onClick={(e) => e.stopPropagation()}
+          style={{ width: 400, maxWidth: "92vw", background: "var(--card, #1b1d22)", border: "1px solid var(--border, #2c2f36)", borderRadius: 14, padding: 22, boxShadow: "0 20px 60px rgba(0,0,0,.5)" }}>
+          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{hostUrl ? tr("teamCard.editUrl", "更改访问地址") : tr("teamCard.setUrl", "填写访问地址")}</div>
+          <div style={{ fontSize: 12, opacity: .6, marginBottom: 16 }}>{name}</div>
+          <input data-id="TeamCard-url-input" autoFocus className="login-email-input" style={{ width: "100%" }}
+            value={urlDraft} placeholder="https://你的私有云地址:端口" spellCheck={false}
+            onChange={(e) => setUrlDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.nativeEvent.isComposing || e.keyCode === 229) return; if (e.key === "Enter") commitUrl(); else if (e.key === "Escape") setEditingUrl(false); }} />
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 18 }}>
+            <button type="button" className="btn-ghost" onClick={() => setEditingUrl(false)}>{tr("common.cancel", "取消")}</button>
+            <button type="button" className="btn-primary" data-id="TeamCard-url-save" onClick={commitUrl}>{tr("common.save", "保存")}</button>
+          </div>
+        </div>
+      </div>,
+      document.body,
+    )}
+    <ConfirmModal open={confirmDel}
+      title={tr("localTeams.deleteTitle", "删除团队")}
+      message={tr("localTeams.deleteMsg", "确定删除「{{name}}」?此操作不可撤销。", { name })}
+      confirmLabel={tr("common.delete", "删除")} danger
+      onConfirm={async () => { setConfirmDel(false); if (onDelete) await onDelete(team); }}
+      onCancel={() => setConfirmDel(false)}
+    />
+    </>
   );
 }
 

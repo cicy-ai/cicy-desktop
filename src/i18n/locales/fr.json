@@ -94,7 +94,12 @@
     "saved": "Saved",
     "kindLocal": "Local",
     "kindCustom": "Custom",
-    "defaultName": "Local team"
+    "defaultName": "Local team",
+    "deleteTitle": "Supprimer l'équipe",
+    "deleteMsg": "Supprimer «{{name}}»? Cette action est irréversible.",
+    "removing": "Suppression…",
+    "removed": "Supprimé",
+    "removeFailed": "Échec de suppression"
   },
   "cli": {
     "controllerTitle": "cicy - CiCy Desktop Controller",
@@ -212,7 +217,11 @@
     "cancel": "Cancel",
     "cloud": "Cloud",
     "on": "On",
-    "off": "Off"
+    "off": "Off",
+    "confirm": "Confirmer",
+    "delete": "Supprimer",
+    "saving": "Sauvegarde…",
+    "noAuth": "Non connecté"
   },
   "auth": {
     "restoring": "Restauration de la connexion…",
@@ -258,7 +267,8 @@
     "urlRequired": "Veuillez saisir l'URL",
     "badUrl": "URL invalide (http(s):// requis)",
     "adding": "Ajout…",
-    "addAction": "Ajouter"
+    "addAction": "Ajouter",
+    "urlExists": "Cette adresse existe déjà"
   },
   "trustedSites": {
     "addFailed": "Add failed",
@@ -313,13 +323,54 @@
     "lanEnabling": "Activation accès LAN, redémarrage…",
     "lanDisabling": "Désactivation accès LAN, redémarrage…",
     "lanFailed": "Échec",
-    "lanHint": "Activé : les appareils du LAN accèdent via l'IP de cette machine (api_token requis) ; le basculement redémarre cicy-code"
+    "lanHint": "Activé : les appareils du LAN accèdent via l'IP de cette machine (api_token requis) ; le basculement redémarre cicy-code",
+    "binPrepFail": "Échec de préparation de cicy-code : {{err}}",
+    "binMissing": "Aucun binaire cicy-code utilisable",
+    "starting": "Démarrage de cicy-code{{lan}}…",
+    "lanSuffix": " (accès LAN)",
+    "nodeInstalling": "Aucun Node utilisable (absent ou <20), installation de Node {{ver}} (~50 Mo)…",
+    "nodeDone": "Node {{ver}} installé → {{dir}}",
+    "nodeExtractRetry": "node/npx introuvable après extraction, source suivante…",
+    "nodeDownloadFail": "Échec téléchargement Node ({{src}}) : {{err}} — nouvelle source…",
+    "nodeFailed": "❌ Échec de l'installation auto de Node (les deux sources). Installez Node (LTS) depuis https://nodejs.org puis cliquez Réessayer",
+    "linkFail": "lien symbolique {{link}} échoué : {{err}}",
+    "linked": "{{names}} liés → ~/.local/bin",
+    "brewSpawnFail": "brew install {{dep}} n'a pas démarré : {{err}}",
+    "netChecking": "Vérification si le réseau est CN…",
+    "netResult": "Réseau : {{net}} → registry={{registry}}{{mirror}}",
+    "netCN": "CN",
+    "netNonCN": "non-CN",
+    "netMirror": " + miroir",
+    "brewMissing": "❌ Homebrew introuvable (requis pour tmux etc.). Exécutez dans le Terminal puis Réessayer :",
+    "depInstalled": "✓ {{dep}} déjà installé",
+    "depInstalling": "Installation de {{dep}} (quelques minutes)…",
+    "depFail": "❌ brew install {{dep}} a échoué (voir log), Réessayer",
+    "depDone": "✓ {{dep}} installé",
+    "mihomoInstalling": "Installation du binaire mihomo (node24 → npm pack cicy-mihomo)…",
+    "mihomoReady": "✓ mihomo prêt → {{bin}}",
+    "mihomoSkip": "Pré-installation mihomo ignorée (non bloquant) : {{err}}",
+    "checkingLatest": "Vérification de la dernière version…",
+    "swapping": "Passage à {{ver}}, redémarrage de cicy-code…",
+    "startingAgents": "Démarrage de cicy-code… (restauration des panneaux agent)",
+    "notUpInTime": "cicy-code n'a pas démarré en {{secs}}s",
+    "upToDateVer": "Déjà à jour {{ver}}",
+    "updatedTo": "Mis à jour vers {{ver}}",
+    "startedUnknownVer": "Démarré (version inconnue, attendu {{ver}})",
+    "updateFail": "Échec de la mise à jour : {{err}}",
+    "downloading": "Téléchargement {{label}} {{ver}}…",
+    "ready": "{{label}} {{ver}} prêt"
   },
   "teamCard": {
     "noHost": "No address set",
     "noUrl": "No URL",
     "editUrl": "Modifier l'URL d'accès",
-    "setUrl": "Définir l'URL d'accès"
+    "setUrl": "Définir l'URL d'accès",
+    "delete": "Supprimer",
+    "deleteTitle": "Supprimer l'équipe",
+    "deleteMsg": "Cela supprimera l'équipe cloud privée du cloud, affectant tous les appareils. Supprimer «{{name}}»?",
+    "deleted": "Équipe supprimée",
+    "deleteFailed": "Échec de suppression",
+    "editAddr": "Modifier l'adresse"
   },
   "updateDrawer": {
     "done": "Update complete",
