@@ -210,7 +210,9 @@
     "done": "Done",
     "minimize": "Minimize",
     "cancel": "Cancel",
-    "cloud": "Cloud"
+    "cloud": "Cloud",
+    "on": "On",
+    "off": "Off"
   },
   "auth": {
     "restoring": "Restoring login…",
@@ -235,7 +237,9 @@
     "emailWaiting": "Waiting for confirmation…",
     "sessionExpired": "Session expired, signing in again…",
     "welcomeBack": "Restored your previous session",
-    "loginSuccess": "Signed in"
+    "loginSuccess": "Signed in",
+    "sending": "Sending…",
+    "opening": "Opening…"
   },
   "teams": {
     "addHint": "Create a new private cloud team",
@@ -288,7 +292,14 @@
     "restarted": "Restarted",
     "restart": "Restart",
     "stoppedDone": "Stopped",
-    "stop": "Stop"
+    "stop": "Stop",
+    "lanAccess": "LAN access",
+    "lanOn": "LAN access enabled",
+    "lanOff": "LAN access disabled",
+    "lanEnabling": "Enabling LAN access, restarting…",
+    "lanDisabling": "Disabling LAN access, restarting…",
+    "lanFailed": "Failed",
+    "lanHint": "When on, other devices on your LAN can reach this machine's IP (api_token still required); toggling auto-restarts cicy-code"
   },
   "teamCard": {
     "noHost": "No address set",

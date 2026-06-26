@@ -210,7 +210,9 @@
     "done": "完成",
     "minimize": "最小化",
     "cancel": "取消",
-    "cloud": "云端"
+    "cloud": "云端",
+    "on": "开",
+    "off": "关"
   },
   "auth": {
     "restoring": "正在恢复登录…",
@@ -235,7 +237,9 @@
     "emailWaiting": "等待确认…",
     "sessionExpired": "会话已过期,正在重新登录…",
     "welcomeBack": "已恢复你之前的登录",
-    "loginSuccess": "登录成功"
+    "loginSuccess": "登录成功",
+    "sending": "发送中…",
+    "opening": "打开中…"
   },
   "teams": {
     "addHint": "在云端新建私有云团队",
@@ -288,7 +292,14 @@
     "restarted": "已重启",
     "restart": "重启",
     "stoppedDone": "已停止",
-    "stop": "停止"
+    "stop": "停止",
+    "lanAccess": "局域网访问",
+    "lanOn": "已开启局域网访问",
+    "lanOff": "已关闭局域网访问",
+    "lanEnabling": "开启局域网访问,重启中…",
+    "lanDisabling": "关闭局域网访问,重启中…",
+    "lanFailed": "设置失败",
+    "lanHint": "开启后同局域网设备可用本机 IP 访问(api_token 仍校验);切换会自动重启 cicy-code"
   },
   "teamCard": {
     "noHost": "未填访问地址",

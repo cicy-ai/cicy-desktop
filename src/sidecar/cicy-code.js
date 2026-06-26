@@ -229,6 +229,17 @@ function probeExisting(port = DEFAULT_PORT, timeoutMs = 500) {
 
 let child = null;
 
+// 「局域网访问」开关持久化(主人): 存 ~/cicy-ai/runtime/desktop-flags.json 的 public 字段。
+// start() 读它决定 npx cicy-code 加不加 --public。renderer 通过 sidecar:getPublic/setPublic 读写。
+const FLAGS_FILE = path.join(os.homedir(), "cicy-ai", "runtime", "desktop-flags.json");
+function readFlags() { try { return JSON.parse(fs.readFileSync(FLAGS_FILE, "utf8")) || {}; } catch { return {}; } }
+function isPublic() { return !!readFlags().public; }
+function setPublicFlag(on) {
+  const f = readFlags(); f.public = !!on;
+  try { fs.mkdirSync(path.dirname(FLAGS_FILE), { recursive: true }); fs.writeFileSync(FLAGS_FILE, JSON.stringify(f, null, 2)); } catch (e) { console.warn(`[cicy-code-sidecar] setPublicFlag write failed: ${e.message}`); }
+  return f.public;
+}
+
 // Runtime Bundle v1 (主人指令): prefer the versioned runtime store on EVERY
 // platform — first run seeds it from the bundled optionalDependency (zero
 // network, zero npx), upgrades come through runtime.upgrade(). Returns the
@@ -326,11 +337,15 @@ async function start({ logPath, port = DEFAULT_PORT, force = false, version = nu
   };
   const spec = version ? `cicy-code@${version}`
     : (process.env.CICY_CODE_VERSION ? `cicy-code@${process.env.CICY_CODE_VERSION}` : "cicy-code");
-  emit && emit({ phase: "cicy-code", status: "running", message: "启动 cicy-code(首次会下载 + 装依赖,请稍候)…" });
+  // 「局域网访问」开关(主人): 开 → 加 --public,cicy-code 绑 0.0.0.0(同局域网设备可访问,
+  // api_token 仍把关);关 → 默认只绑 127.0.0.1。flag 存 runtime/desktop-flags.json。
+  const args = ["-y", spec];
+  if (isPublic()) args.push("--public");
+  emit && emit({ phase: "cicy-code", status: "running", message: `启动 cicy-code${isPublic() ? "(局域网访问)" : ""}(首次会下载 + 装依赖,请稍候)…` });
   // 退出保活(主人):detached + unref → 关 App 不带走 daemon(及其 tmux agent),下次 adopt。
   const detached = process.platform !== "win32";
-  child = spawn(npxAbs, ["-y", spec], { stdio, detached, windowsHide: true, env });
-  console.log(`[cicy-code-sidecar] spawned ${npxAbs} -y ${spec} pid=${child.pid} port=${port} registry=${registry} detached=${detached} log=${logPath || "(none)"}`);
+  child = spawn(npxAbs, args, { stdio, detached, windowsHide: true, env });
+  console.log(`[cicy-code-sidecar] spawned ${npxAbs} ${args.join(" ")} pid=${child.pid} port=${port} registry=${registry} public=${isPublic()} detached=${detached} log=${logPath || "(none)"}`);
   if (detached) { try { child.unref(); } catch {} }
 
   child.on("exit", (code, signal) => {
@@ -541,4 +556,4 @@ async function update({ logPath, port = DEFAULT_PORT, emit } = {}) {
   }
 }
 
-module.exports = { start, stop, restart, update, probeExisting, clearNpxCache, isUpdating, ensureEnv, ensureNode };
+module.exports = { start, stop, restart, update, probeExisting, clearNpxCache, isUpdating, ensureEnv, ensureNode, isPublic, setPublicFlag };

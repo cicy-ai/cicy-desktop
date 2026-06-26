@@ -266,6 +266,7 @@ export default function App() {
   // Prevents the login card from flashing on every launch before restore.
   const [authRestoring, setAuthRestoring] = useState(() => !safeGet(TOKEN_KEY));
   const [loggingIn, setLoggingIn] = useState(false);
+  const [loginBusy, setLoginBusy] = useState(false); // login 请求在途:按钮 disable+loading,防重复点击,出错恢复
   const [loginUrl, setLoginUrl] = useState(""); // shown as a manual fallback when the browser doesn't auto-open
   // Email magic-link device-poll login (cross-device: the link works on a phone).
   const [email, setEmail] = useState("");
@@ -595,25 +596,30 @@ export default function App() {
   }, []);
 
   async function handleLogin() {
+    if (loginBusy || loggingIn) return; // 防重复点击
     if (!window.cicy?.auth?.loginStart) {
       setError("auth bridge missing");
       return;
     }
     setError("");
-    setLoggingIn(true);
-    const r = await window.cicy.auth.loginStart();
-    if (!r?.ok) {
-      setLoggingIn(false);
-      setError(humanError(r?.error || "login start failed"));
-      return;
+    setLoginBusy(true); // 按钮 disable + loading
+    try {
+      const r = await window.cicy.auth.loginStart();
+      if (!r?.ok) { setError(humanError(r?.error || "login start failed")); return; } // 出错:loginBusy 在 finally 恢复
+      setLoginUrl(r.url || "");
+      setLoggingIn(true); // 成功才切到"等待浏览器"视图
+    } catch (e) {
+      setError(humanError(e?.message || String(e)));
+    } finally {
+      setLoginBusy(false); // 无论成败都恢复(成功后视图已切走;失败/异常则按钮可再点)
     }
-    setLoginUrl(r.url || "");
   }
 
   // Email magic-link device-poll login. Sends the link, then waits for the user
   // to click it on ANY device (the desktop polls the cloud) — fixes the loopback's
   // "clicked on my phone → desktop hangs" problem.
   async function handleEmailLogin() {
+    if (loginBusy) return; // 防重复点击(连点会发多封邮件)
     if (!window.cicy?.auth?.emailLoginStart) {
       setError("auth bridge missing");
       return;
@@ -624,12 +630,16 @@ export default function App() {
       return;
     }
     setError("");
-    const r = await window.cicy.auth.emailLoginStart(addr);
-    if (!r?.ok) {
-      setError(humanError(r?.error || "email login failed"));
-      return;
+    setLoginBusy(true); // 按钮 disable + loading
+    try {
+      const r = await window.cicy.auth.emailLoginStart(addr);
+      if (!r?.ok) { setError(humanError(r?.error || "email login failed")); return; }
+      setEmailSent(true);
+    } catch (e) {
+      setError(humanError(e?.message || String(e)));
+    } finally {
+      setLoginBusy(false); // 出错恢复,可重试
     }
-    setEmailSent(true);
   }
 
   function handleLogout() {
@@ -708,14 +718,15 @@ export default function App() {
                 spellCheck={false}
                 autoFocus
               />
-              <button className="btn-primary" data-id="EmailLoginSubmit" onClick={handleEmailLogin}>
-                <span>{tr("auth.emailLogin", "发送登录链接")}</span>
-                <ArrowIcon />
+              <button className="btn-primary" data-id="EmailLoginSubmit" onClick={handleEmailLogin} disabled={loginBusy}>
+                {loginBusy
+                  ? <><Spinner /><span>{tr("auth.sending", "发送中…")}</span></>
+                  : <><span>{tr("auth.emailLogin", "发送登录链接")}</span><ArrowIcon /></>}
               </button>
               <p className="hint">{tr("auth.emailHint", "手机上点邮件里的链接,也能登录这台电脑")}</p>
               <div className="login-divider" data-id="LoginDivider"><span>{tr("auth.or", "或")}</span></div>
-              <button className="btn-ghost" data-id="BrowserLoginBtn" onClick={handleLogin}>
-                {tr("auth.browserLogin", "用浏览器登录(Google / SSO,仅同一台电脑)")}
+              <button className="btn-ghost" data-id="BrowserLoginBtn" onClick={handleLogin} disabled={loginBusy}>
+                {loginBusy ? tr("auth.opening", "打开中…") : tr("auth.browserLogin", "用浏览器登录(Google / SSO,仅同一台电脑)")}
               </button>
             </>
           )}
@@ -2216,8 +2227,14 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
   const hasBridge = !!window.cicy?.sidecar?.restart;
   const local = hasBridge && isLocalSidecar(team.base_url);
   const running = team.status === "running";
-  const [busy, setBusy] = useState("");   // "" | start | restart | update | stop
+  const [busy, setBusy] = useState("");   // "" | start | restart | update | stop | lan
   const [menuOpen, setMenuOpen] = useState(false);
+  // 局域网访问开关(主人): cicy-code --public 状态。仅本地团队;初始从 sidecar.getPublic() 读。
+  const [lanOn, setLanOn] = useState(false);
+  useEffect(() => {
+    if (!local || !window.cicy?.sidecar?.getPublic) return;
+    window.cicy.sidecar.getPublic().then((r) => setLanOn(!!r?.public)).catch(() => {});
+  }, [local]);
   // cicy-code 版本统一从 sidecar.versions() 一处拿(主人令:"拿版本就一个方法")。
   // running===undefined = 还没查到(用于区分"加载中" vs "停了/拿不到");区别于
   // running===null(查过了但 daemon 没报版本)。latest/installed 同源。
@@ -2467,6 +2484,28 @@ function LocalTeamCard({ team, onOpen, onRename, onRefresh }) {
                       onClick={() => runOp("restart", () => window.cicy.sidecar.restart(), tr("sidecar.restarted", "已重启"))}
                     >
                       {tr("sidecar.restart", "重启")}
+                    </button>
+                    <button
+                      type="button"
+                      data-id="LocalTeamCard-lan"
+                      className="bcard__menu-item"
+                      title={tr("sidecar.lanHint", "开启后同局域网设备可用本机 IP 访问(api_token 仍校验);切换会自动重启 cicy-code")}
+                      disabled={busy === "lan"}
+                      onClick={async () => {
+                        if (busy) return;
+                        const next = !lanOn;
+                        setMenuOpen(false); setBusy("lan"); setLanOn(next);
+                        toast.show({ id: opToastId, message: next ? tr("sidecar.lanEnabling", "开启局域网访问,重启中…") : tr("sidecar.lanDisabling", "关闭局域网访问,重启中…"), status: "running", progress: undefined });
+                        try {
+                          const r = await window.cicy.sidecar.setPublic(next);
+                          if (r?.ok) toast.show({ id: opToastId, message: next ? tr("sidecar.lanOn", "已开启局域网访问") : tr("sidecar.lanOff", "已关闭局域网访问"), status: "done", ttl: 3000 });
+                          else toast.show({ id: opToastId, message: tr("sidecar.lanFailed", "设置失败") + (r?.error ? `: ${r.error}` : ""), status: "error", ttl: 7000 });
+                        } catch (e) { toast.show({ id: opToastId, message: tr("sidecar.lanFailed", "设置失败") + `: ${e?.message || e}`, status: "error", ttl: 7000 }); }
+                        try { const g = await window.cicy.sidecar.getPublic(); setLanOn(!!g?.public); } catch {}
+                        setBusy(""); onRefresh?.();
+                      }}
+                    >
+                      {tr("sidecar.lanAccess", "局域网访问")} · {lanOn ? tr("common.on", "开") : tr("common.off", "关")}
                     </button>
                     <button
                       type="button"

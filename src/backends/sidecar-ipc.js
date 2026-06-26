@@ -501,6 +501,27 @@ function register({ sidecarLogPath } = {}) {
     }
   });
 
+  // 「局域网访问」开关(主人): 读/写 --public flag。set 后自动重启 cicy-code 让它生效,
+  // 全程把进度推到抽屉(op:restart)。
+  ipcMain.handle("sidecar:get-public", () => {
+    try { return { ok: true, public: sidecar.isPublic() }; } catch (e) { return { ok: false, public: false, error: e.message }; }
+  });
+  ipcMain.handle("sidecar:set-public", async (e, on) => {
+    const emit = (ev) => { try { e.sender.send("sidecar:op-progress", { op: "restart", ...ev }); } catch {} };
+    try {
+      sidecar.setPublicFlag(!!on);
+      emit({ phase: "swap", status: "running", message: `局域网访问已${on ? "开启" : "关闭"},正在重启 cicy-code…` });
+      await sidecar.restart({ logPath: sidecarLogPath });
+      let up = false;
+      for (let i = 0; i < 240; i++) { if (await sidecar.probeExisting(PORT)) { up = true; break; } await new Promise((r) => setTimeout(r, 500)); }
+      emit({ phase: "done", status: up ? "done" : "error", message: up ? `cicy-code 已重启(局域网访问${on ? "开" : "关"})` : "重启后 :8008 未就绪——稍等或重试" });
+      return { ok: up, public: !!on };
+    } catch (err) {
+      emit({ phase: "done", status: "error", message: `设置失败:${err.message}` });
+      return { ok: false, error: err.message };
+    }
+  });
+
   // Update: stop + spawn cicy-code@latest (or reload the Docker image on
   // win32). The npx re-resolve / image pull can take a while on a cold cache,
   // so allow a longer window for :8008 to come back.

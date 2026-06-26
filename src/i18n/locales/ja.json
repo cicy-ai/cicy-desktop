@@ -210,7 +210,9 @@
     "done": "Done",
     "minimize": "最小化",
     "cancel": "Cancel",
-    "cloud": "Cloud"
+    "cloud": "Cloud",
+    "on": "オン",
+    "off": "オフ"
   },
   "auth": {
     "restoring": "ログインを復元中…",
@@ -235,7 +237,9 @@
     "emailWaiting": "Waiting for confirmation…",
     "sessionExpired": "Session expired, signing in again…",
     "welcomeBack": "Restored your previous session",
-    "loginSuccess": "Signed in"
+    "loginSuccess": "Signed in",
+    "sending": "送信中…",
+    "opening": "起動中…"
   },
   "teams": {
     "addHint": "Create a new private cloud team",
@@ -288,7 +292,14 @@
     "restarted": "Restarted",
     "restart": "Restart",
     "stoppedDone": "Stopped",
-    "stop": "Stop"
+    "stop": "Stop",
+    "lanAccess": "LAN アクセス",
+    "lanOn": "LAN アクセスを有効化",
+    "lanOff": "LAN アクセスを無効化",
+    "lanEnabling": "LAN アクセスを有効化、再起動中…",
+    "lanDisabling": "LAN アクセスを無効化、再起動中…",
+    "lanFailed": "失敗",
+    "lanHint": "有効にすると同一 LAN の端末から本機 IP でアクセス可(api_token は必須);切替で cicy-code 自動再起動"
   },
   "teamCard": {
     "noHost": "No address set",

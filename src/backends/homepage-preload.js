@@ -128,6 +128,8 @@ contextBridge.exposeInMainWorld("cicy", {
     stop:        ()  => logInvoke("sidecar:stop"),
     restart:     ()  => logInvoke("sidecar:restart"),
     update:      ()  => logInvoke("sidecar:update"),
+    getPublic:   ()  => logInvoke("sidecar:get-public"),       // 局域网访问开关状态
+    setPublic:   (on) => logInvoke("sidecar:set-public", on),  // 设开关 + 自动重启 cicy-code
     // live {op, phase, status, message, progress?} events during update —
     // returns an unsubscribe fn.
     onOpProgress: (cb) => {
