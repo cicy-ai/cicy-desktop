@@ -611,14 +611,30 @@ async function status(port = 8009) {
 // two concurrent runs would race on the same download file + apt lock → corrupt
 // downloads and exit-100. A second caller just attaches to the in-flight run.
 let _bootstrapInFlight = null;
+let _bootstrapBeat = 0; // 上次进度事件时间 —— 心跳,用于判定 in-flight 是否卡死
+// 没有任何进度事件超过这个时长 = wedged(`wsl --import` 静默最久 ~1-4 分钟,留足余量)。
+const BOOTSTRAP_STALL_MS = 6 * 60 * 1000;
 
 // Full bootstrap. Honest progress + honest terminal (ok only when :port healthy).
 async function bootstrap(opts = {}) {
   if (_bootstrapInFlight) {
-    try { opts.onProgress && opts.onProgress({ phase: "install-docker", status: "running", message: "安装已在进行中,正在跟随同一进度…" }); } catch {}
-    return _bootstrapInFlight;
+    // 卡死自愈(主人 bug:WSL wedge → in-flight 的 promise 永不 resolve → _bootstrapInFlight
+    // 永不清 → 「重试」永远只返回"正在进行中",彻底锁死)。心跳超过 STALL 阈值就判定僵死,
+    // 丢弃它、重起一次;否则正常并发跟随同一进度。
+    const stalled = Date.now() - _bootstrapBeat > BOOTSTRAP_STALL_MS;
+    if (!stalled) {
+      try { opts.onProgress && opts.onProgress({ phase: "install-docker", status: "running", message: "安装已在进行中,正在跟随同一进度…" }); } catch {}
+      return _bootstrapInFlight;
+    }
+    log.warn(`[bootstrap] in-flight 卡死(${Math.round((Date.now() - _bootstrapBeat) / 1000)}s 无进度)→ 丢弃僵死的,重起一次`);
+    try { opts.onProgress && opts.onProgress({ phase: "install-docker", status: "running", message: "上次安装卡死了,正在重新开始…" }); } catch {}
+    _bootstrapInFlight = null;
   }
-  _bootstrapInFlight = _bootstrap(opts).finally(() => { _bootstrapInFlight = null; });
+  // 包一层 onProgress:每来一个事件就刷新心跳,卡死检测才准。
+  _bootstrapBeat = Date.now();
+  const userOnProgress = opts.onProgress;
+  const wrapped = { ...opts, onProgress: (ev) => { _bootstrapBeat = Date.now(); try { userOnProgress && userOnProgress(ev); } catch {} } };
+  _bootstrapInFlight = _bootstrap(wrapped).finally(() => { _bootstrapInFlight = null; });
   return _bootstrapInFlight;
 }
 
