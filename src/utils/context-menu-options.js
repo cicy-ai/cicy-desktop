@@ -37,8 +37,13 @@ const OPTIONS = {
   prepend: (_defaultActions, _params, win) => {
     const wc = wcOf(win);
     const wcId = wc && wc.id != null ? wc.id : "?";
-    // 给 agent 用的一句话指令:带上当前 webContents id,让它用 agent-electron 操作这个 webview。
-    const skillPrompt = t("ctxMenu.skillPrompt", { id: wcId });
+    const url = (() => { try { return wc && wc.getURL ? wc.getURL() : ""; } catch (e) { return ""; } })();
+    const title = (() => { try { return wc && wc.getTitle ? wc.getTitle() : ""; } catch (e) { return ""; } })();
+    // profile id = 它所在 session 的 accountIdx:partition `persist:sandbox-<N>` → N,否则 0(系统槽)。
+    const part = (() => { try { return wc && wc.session ? (wc.session.partition || "") : ""; } catch (e) { return ""; } })();
+    const profile = part.startsWith("persist:sandbox-") ? (parseInt(part.replace("persist:sandbox-", ""), 10) || 0) : 0;
+    // 给 agent 用的一句话指令:带 webContents id + profile id + url + title,让它用 agent-electron 操作。
+    const skillPrompt = t("ctxMenu.skillPrompt", { id: wcId, profile, url, title });
     return [
       { label: t("ctxMenu.webviewId", { id: wcId }), enabled: false },
       { label: t("ctxMenu.copySkillCmd"), click: () => { try { require("electron").clipboard.writeText(skillPrompt); } catch (e) {} } },
