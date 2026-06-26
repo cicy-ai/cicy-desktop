@@ -34,7 +34,13 @@ const OPTIONS = {
   // see attachContextMenu.
   prepend: (_defaultActions, _params, win) => {
     const wc = wcOf(win);
+    const wcId = wc && wc.id != null ? wc.id : "?";
+    // 给 agent 用的一句话指令:带上当前 webContents id,让它用 agent-electron 操作这个 webview。
+    const skillPrompt = `请用当前的 webContent id:${wcId},请用 agent-electron 来帮我来操作这个 webview`;
     return [
+      { label: `WebviewId: ${wcId}`, enabled: false },
+      { label: "复制 Skill 指令", click: () => { try { require("electron").clipboard.writeText(skillPrompt); } catch (e) {} } },
+      { type: "separator" },
       { label: "重新加载", click: () => { try { if (wc) wc.reload(); } catch (e) {} } },
       { type: "separator" },
     ];
