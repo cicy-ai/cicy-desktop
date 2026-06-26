@@ -261,6 +261,27 @@ export default function App() {
     return () => { try { off && off(); } catch {} };
   }, []);
 
+  // 全局兜底:任何 bootstrap/安装/修复进度(docker:app-progress)都让 drawer 可见 —— 不管是
+  // 卡片按钮、程序触发、还是 renderer 重连后主进程还在跑。主人原则:后台不出日志 = 耍流氓。
+  // 只接管「没人开 drawer」的情况(source==="auto"):某个 run*() 自己开的(source==="op")由它
+  // 自己 push,这里不插手避免重复。"open" phase 是打开失败报告流,自管,跳过。
+  useEffect(() => {
+    if (!window.cicy?.docker?.onAppProgress) return;
+    const unsub = window.cicy.docker.onAppProgress((ev) => {
+      if (!ev || ev.phase === "open") return;
+      if (!dockerDrawerState) dockerDrawer.open({ source: "auto" });
+      if (dockerDrawerState?.source !== "auto") return; // 某 run*() 拥有 → 它 push,别重复
+      if (ev.phase === "done" && (ev.status === "done" || ev.status === "reboot")) {
+        dockerDrawer.finish({ ok: ev.status === "done", status: ev.status === "reboot" ? "reboot" : undefined, message: ev.message });
+      } else if (ev.status === "error") {
+        dockerDrawer.finish({ ok: false, message: ev.message });
+      } else {
+        dockerDrawer.push(ev);
+      }
+    });
+    return () => { try { unsub && unsub(); } catch {} };
+  }, []);
+
   // sk-xxx (LLM API). Used by /v1/chat/completions etc.
   const [token, setToken] = useState(() => safeGet(TOKEN_KEY));
   // Console-API bearer. Used by /api/user/self, /api/teams, etc.
@@ -1695,9 +1716,11 @@ let dockerDrawerLogSeq = 0;
 let dockerDrawerState = null; // null = closed
 function emitDockerDrawer() { dockerDrawerListeners.forEach((l) => l(dockerDrawerState)); }
 const dockerDrawer = {
-  open({ onRetry, kind } = {}) {
+  open({ onRetry, kind, source } = {}) {
     // kind: "install"(默认,安装/升级,带 4 段 stepper)| "open"(打开失败报告,纯日志+hint,无 stepper)
-    dockerDrawerState = { status: "running", phase: "install-docker", kind: kind || "install", logs: [], bars: {}, minimized: false, onRetry: onRetry || null, lastAt: Date.now() };
+    // source: "op"(默认,某个 run* 函数开的,它自己订阅 push)| "auto"(全局兜底监听开的,
+    //   用于程序触发/renderer 重连后还在跑的 bootstrap —— 全局监听负责 push,保证后台不静默)
+    dockerDrawerState = { status: "running", phase: "install-docker", kind: kind || "install", source: source || "op", logs: [], bars: {}, minimized: false, onRetry: onRetry || null, lastAt: Date.now() };
     emitDockerDrawer();
   },
   minimize() { if (dockerDrawerState) { dockerDrawerState = { ...dockerDrawerState, minimized: true }; emitDockerDrawer(); } },
