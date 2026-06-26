@@ -29,7 +29,7 @@ const EXTRA_PORTS = process.env.CICY_EXTRA_PORTS || "18000-19999";
 // /var/lib/docker, with dockerd auto-start via /etc/wsl.conf. We just download
 // it (Aliyun OSS, CN-fast ~2.7MB/s) and `wsl --import` it — so the bootstrap's
 // apt-install + image download/load steps are already done inside the tarball
-// (their checks see docker present + image present and SKIP). ~444MB.
+// (their checks see docker present + image present and SKIP). ~122MB.
 const ROOTFS_URL = process.env.CICY_WSL_ROOTFS_URL ||
   "https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/rootfs/cicy-wsl-latest.tar.gz";
 
@@ -131,7 +131,7 @@ async function distroInstalled(distro = DISTRO) {
 // Raw `wsl --import` of the rootfs as an ISOLATED v2 distro.
 function importTarball(dest, installDir) {
   return new Promise((resolve, reject) => {
-    // 240s, NOT 600s: a 444MB import finishes in well under 4min on a healthy WSL.
+    // 240s, NOT 600s: a 122MB import finishes in well under 4min on a healthy WSL.
     // If it runs longer it has WEDGED (the whole WSL subsystem hangs — every later
     // `wsl` call then blocks and the app goes 未响应). Bound it short so we FAIL FAST
     // and the caller can `wsl --shutdown` + retry instead of hanging 10 minutes.
@@ -177,7 +177,7 @@ function wslTerminate() {
 }
 
 async function installDistro({ emit } = {}) {
-  // 1) Download the PRE-BAKED rootfs (Ubuntu+Docker+image baked in, ~444MB) with
+  // 1) Download the PRE-BAKED rootfs (Ubuntu+Docker+image baked in, ~122MB) with
   //    a real progress bar. curl is ~10× faster than node's downloader on OSS.
   const dest = rootfsPath();
   // REUSE a complete rootfs already on disk (pre-staged into ~/Downloads, or left by
@@ -206,7 +206,7 @@ async function installDistro({ emit } = {}) {
   //    import actually fails for lack of it (never downgrade an existing kernel).
   const installDir = path.join(process.env["LOCALAPPDATA"] || path.join(os.homedir(), "AppData", "Local"), "cicy-code-wsl");
   try { fs.mkdirSync(installDir, { recursive: true }); } catch {}
-  emit && emit({ phase: "container", status: "running", message: `$ wsl --import ${DISTRO} "${installDir}" "${dest}" --version 2（约 444MB,1-4 分钟,无实时进度,请耐心)` });
+  emit && emit({ phase: "container", status: "running", message: `$ wsl --import ${DISTRO} "${installDir}" "${dest}" --version 2（1-4 分钟,无实时进度,请耐心）` });
   try {
     await importTarball(dest, installDir);
   } catch (e) {
