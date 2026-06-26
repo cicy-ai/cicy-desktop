@@ -18,7 +18,7 @@ function wcOf(win) {
 
 const OPTIONS = {
   showLookUpSelection: true,
-  showSearchWithGoogle: true,
+  showSearchWithGoogle: false, // 「用 Google 搜索」点了无效(沙箱里打不开外部搜索)→ 移除
   showCopyImage: true,
   showCopyImageAddress: true,
   showSaveImageAs: true,
