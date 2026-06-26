@@ -301,17 +301,46 @@ function register({ sidecarLogPath } = {}) {
   // then open the tab with THAT token. Never a stored/host token (主人: 打开前去
   // docker 里实时拿 token 再 open tab). Refuse to open if it can't be read —
   // opening tokenless / with the host token just strands the user at login.
-  ipcMain.handle("docker:app-open", async () => {
-    if (!APP_DOCKER_SUPPORTED) return { ok: false, error: "unsupported_platform" };
+  // 主人原则:打开走的每条命令/输出/错误都要可见(收进 log[] 同时实时 push 到 drawer),
+  // 失败给可排查的 hint + 可重试。健壮:全程 try/catch,任何一步都不抛到 ipc 外。
+  ipcMain.handle("docker:app-open", async (e) => {
+    if (!APP_DOCKER_SUPPORTED) return { ok: false, error: "unsupported_platform", hint: "Docker cicy-code 仅支持 Windows" };
+    const log = [];
+    const onLog = (ev = {}) => {
+      const line = { phase: "container", status: ev.status || "running", message: ev.message || "" };
+      log.push(line);
+      try { e.sender.send("docker:app-progress", line); } catch (e2) {}
+    };
+    const tt = (k, o) => i18n.t(`dockerOpen.${k}`, o);
     try {
-      const tok = await appDocker.readContainerToken(APP_PORT, APP_CONTAINER, APP_VOLUME);
-      if (!tok) return { ok: false, error: "no_token" };
+      onLog({ message: tt("readToken", { container: APP_CONTAINER, volume: APP_VOLUME }) });
+      const tok = await appDocker.readContainerToken(APP_PORT, APP_CONTAINER, APP_VOLUME, { onLog });
+      if (!tok) {
+        // 给出能排查的原因,而不是甩个 no_token。
+        let hint = tt("hintNoToken");
+        try {
+          const s = await refreshDockerStatus();
+          if (s && s.wslUnmanaged) hint = tt("hintWslUnmanaged", { port: APP_PORT });
+          else if (s && !s.running) hint = tt("hintNotRunning");
+        } catch (e2) {}
+        onLog({ status: "error", message: hint });
+        return { ok: false, error: "no_token", hint, log };
+      }
+      onLog({ message: tt("registering") });
       const reg = await registerAppTeam();
-      if (!reg.id) return { ok: false, error: "register_failed" };
+      if (!reg.id) { const hint = tt("hintRegisterFailed"); onLog({ status: "error", message: hint }); return { ok: false, error: "register_failed", hint, log }; }
+      onLog({ message: tt("opening", { url: `http://127.0.0.1:${APP_PORT}` }) });
       const lt = require("./local-teams");
       const r = await lt.openTeam(reg.id, { token: tok }); // open with the LIVE token
-      return r && r.ok ? { ok: true } : { ok: false, error: (r && r.error) || "open_failed" };
-    } catch (e) { return { ok: false, error: e.message }; }
+      if (r && r.ok) { onLog({ status: "done", message: tt("opened") }); return { ok: true }; }
+      const hint = tt("hintOpenFailed", { err: (r && r.error) || "open_failed" });
+      onLog({ status: "error", message: hint });
+      return { ok: false, error: (r && r.error) || "open_failed", hint, log };
+    } catch (err) {
+      const hint = tt("hintException", { err: err.message });
+      onLog({ status: "error", message: hint });
+      return { ok: false, error: err.message, hint, log };
+    }
   });
 
   // One-click bootstrap (方案 A): ensure WSL2 → Ubuntu → Docker Engine → load

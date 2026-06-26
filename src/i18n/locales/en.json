@@ -207,7 +207,8 @@
     "recreateConfirm": "This deletes and recreates the current container (volume data kept) to switch to the dedicated team's gateway key. Recreate?",
     "recreated": "Docker container recreated",
     "recreateOk": "Recreate",
-    "runningWslBroken": "Running · ⚠ WSL unmanaged (open works; update/restart needs WSL repair)"
+    "runningWslBroken": "Running · ⚠ WSL unmanaged (open works; update/restart needs WSL repair)",
+    "openFailed": "Open failed"
   },
   "common": {
     "close": "Close",
@@ -438,5 +439,25 @@
     "saveVideoAs": "Save Video As…",
     "copyLink": "Copy Link",
     "saveLinkAs": "Save Link As…"
+  },
+  "dockerOpen": {
+    "tokVolHit": "✓ Got token from volume (attempt {{n}})",
+    "tokVolMiss": "No api_token in volume yet (container may not have written global.json)",
+    "tokVolErr": "Volume read failed: {{err}}",
+    "tokExecHit": "✓ Got token via container exec (attempt {{n}})",
+    "tokExecMiss": "docker exec returned no api_token",
+    "tokExecErr": "docker exec failed: {{err}}",
+    "tokRetry": "Attempt {{n}}/5 got nothing, retrying in 2s…",
+    "tokFail": "Failed to read container token after 5 attempts",
+    "readToken": "Reading container token (container {{container}} / volume {{volume}})…",
+    "hintNoToken": "Cannot read container token. The container may not be running, or just started and hasn't written global.json — wait a few seconds and click Retry.",
+    "hintWslUnmanaged": "WSL is unmanaged: the container is on :{{port}} but wsl can't see the distro, so docker exec can't read the token. Try the card menu 'Restart Docker', or reboot Windows then Retry.",
+    "hintNotRunning": "Container isn't running. Click 'Start' on the card first, then Open.",
+    "registering": "Registering cloud team…",
+    "hintRegisterFailed": "Cloud team registration failed (check login / network).",
+    "opening": "Opening {{url}} …",
+    "opened": "Opened",
+    "hintOpenFailed": "Got the token but failed to open the window: {{err}}",
+    "hintException": "Open failed with an exception: {{err}}"
   }
 }

@@ -2108,9 +2108,21 @@ function DockerCard({ dockerTeam, cloudTitle, onOpen, onRename, onRefresh }) {
         const r = await window.cicy?.tabs?.activateIfOpen?.("http://127.0.0.1:8009");
         if (r?.active) return;
       } catch {}
-      // 没开过 → 显示 loading(打开中…),走慢路径:拿容器 token 再开 tab。
+      // 没开过 → 走慢路径(读容器 token 最多 ~50s)。开 drawer 实时流式显示每条命令/
+      // 输出/错误(主人三原则:可见);成功静默收起;失败留住 + 可排查 hint + 重试。
       setBusy("open");
-      try { await onOpen?.(dockerTeam?.id); } finally { setBusy(""); }
+      dockerDrawer.open({ onRetry: onCta });
+      const unsub = window.cicy?.docker?.onAppProgress?.((ev) => dockerDrawer.push(ev));
+      try {
+        const r = await window.cicy?.docker?.appOpen?.();
+        if (r && r.ok) dockerDrawer.close();
+        else dockerDrawer.finish({ ok: false, message: r?.hint || r?.error || tr("docker.openFailed", "打开失败") });
+      } catch (e) {
+        dockerDrawer.finish({ ok: false, message: e?.message || tr("docker.openFailed", "打开失败") });
+      } finally {
+        try { unsub && unsub(); } catch {}
+        setBusy("");
+      }
       return;
     }
     // 「重试检测」: FORCE a fresh WSL probe (checkStatus only re-read the cache, so

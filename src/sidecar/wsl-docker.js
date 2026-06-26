@@ -17,6 +17,7 @@ const os = require("os");
 const fs = require("fs");
 const docker = require("./docker"); // shared: downloads, waitUntil, probeHealth, launchElevated, ensureWsl…
 const log = require("electron-log"); // persisted main.log — bootstrap timing/failures land here
+const { t } = require("../i18n"); // 打开/读 token 的可见日志走 i18n
 
 // Dedicated distro name — NEVER reuse/clobber a user's own "Ubuntu" distro.
 const DISTRO   = process.env.CICY_WSL_DISTRO || "cicy-code-wsl";
@@ -480,25 +481,37 @@ async function runContainer({ port = 8009, container = "cicy-code-docker", volum
 // 8009 rejects it. Retries because right after start the entrypoint may not have
 // written global.json yet; returns "" only if it truly can't be read (callers
 // must then NOT open with a wrong/host token — that strands the user at login).
-async function readContainerToken(port = 8009, container = "cicy-code-docker", volume = "cicy-team-8009") {
+// 主人原则:执行什么命令、输出什么、报什么错,全都要可见(onLog),且每一步可重试。
+// onLog({ status, message }) —— 上层把它接进 drawer。不传也安全(默认静默 + 写 log 文件)。
+async function readContainerToken(port = 8009, container = "cicy-code-docker", volume = "cicy-team-8009", { onLog } = {}) {
+  const say = (status, message) => {
+    try { (status === "error" ? log.warn : log.info)(`[readContainerToken] ${message}`); } catch (e) {}
+    try { onLog && onLog({ status, message }); } catch (e) {}
+  };
+  const volCmd = `cat /var/lib/docker/volumes/${volume}/_data/cicy-ai/global.json`;
+  const execCmd = `docker exec ${container} cat /home/cicy/cicy-ai/global.json`;
   for (let attempt = 1; attempt <= 5; attempt++) {
     // 1) Fast + reliable: read the volume-backed global.json straight from the
     //    distro fs. `docker exec` into a just-loaded/busy container is slow and
-    //    frequently times out — and a timeout here was returning "" → callers
-    //    fell back to the stale host token. The bind volume read never does that.
+    //    frequently times out. The bind volume read never does that.
+    say("running", `$ wsl -d ${DISTRO} -- ${volCmd}`);
     try {
-      const { stdout } = await wslRun(`cat /var/lib/docker/volumes/${volume}/_data/cicy-ai/global.json 2>/dev/null`, { timeout: 8000 });
+      const { stdout } = await wslRun(`${volCmd} 2>/dev/null`, { timeout: 8000 });
       const m = String(stdout).match(/"api_token"\s*:\s*"(cicy_[A-Za-z0-9]+)"/);
-      if (m) return m[1];
-    } catch { /* not ready yet — retry */ }
+      if (m) { say("done", t("dockerOpen.tokVolHit", { n: attempt })); return m[1]; }
+      say("running", t("dockerOpen.tokVolMiss"));
+    } catch (e) { say("running", t("dockerOpen.tokVolErr", { err: e.message })); }
     // 2) Fallback: exec into the container.
+    say("running", `$ wsl -d ${DISTRO} -- ${execCmd}`);
     try {
-      const { stdout } = await wslRun(`docker exec ${container} cat /home/cicy/cicy-ai/global.json`, { timeout: 10000 });
+      const { stdout } = await wslRun(execCmd, { timeout: 10000 });
       const tok = JSON.parse(stdout).api_token || "";
-      if (tok) return tok;
-    } catch { /* retry */ }
-    await new Promise((r) => setTimeout(r, 2000));
+      if (tok) { say("done", t("dockerOpen.tokExecHit", { n: attempt })); return tok; }
+      say("running", t("dockerOpen.tokExecMiss"));
+    } catch (e) { say("running", t("dockerOpen.tokExecErr", { err: e.message })); }
+    if (attempt < 5) { say("running", t("dockerOpen.tokRetry", { n: attempt })); await new Promise((r) => setTimeout(r, 2000)); }
   }
+  say("error", t("dockerOpen.tokFail"));
   return "";
 }
 

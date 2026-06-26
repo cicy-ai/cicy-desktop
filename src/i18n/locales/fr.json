@@ -207,7 +207,8 @@
     "recreateConfirm": "This deletes and recreates the current container (volume data kept) to switch to the dedicated team's gateway key. Recreate?",
     "recreated": "Docker container recreated",
     "recreateOk": "Recreate",
-    "runningWslBroken": "En marche · ⚠ WSL non géré (ouverture OK ; mise à jour/redémarrage = réparer WSL)"
+    "runningWslBroken": "En marche · ⚠ WSL non géré (ouverture OK ; mise à jour/redémarrage = réparer WSL)",
+    "openFailed": "Échec d'ouverture"
   },
   "common": {
     "close": "Close",
@@ -438,5 +439,25 @@
     "saveVideoAs": "Enregistrer la vidéo sous…",
     "copyLink": "Copier le lien",
     "saveLinkAs": "Enregistrer le lien sous…"
+  },
+  "dockerOpen": {
+    "tokVolHit": "✓ Token obtenu depuis le volume (tentative {{n}})",
+    "tokVolMiss": "Pas encore d'api_token dans le volume (le conteneur n'a pas écrit global.json)",
+    "tokVolErr": "Échec de lecture du volume : {{err}}",
+    "tokExecHit": "✓ Token obtenu via exec conteneur (tentative {{n}})",
+    "tokExecMiss": "docker exec n'a renvoyé aucun api_token",
+    "tokExecErr": "Échec docker exec : {{err}}",
+    "tokRetry": "Tentative {{n}}/5 sans résultat, nouvel essai dans 2s…",
+    "tokFail": "Échec de lecture du token après 5 tentatives",
+    "readToken": "Lecture du token conteneur (conteneur {{container}} / volume {{volume}})…",
+    "hintNoToken": "Impossible de lire le token du conteneur. Le conteneur n'est peut-être pas démarré, ou vient de démarrer sans avoir écrit global.json — attendez puis cliquez Réessayer.",
+    "hintWslUnmanaged": "WSL non géré : le conteneur est sur :{{port}} mais wsl ne voit pas la distro, docker exec ne peut pas lire le token. Essayez « Redémarrer Docker » dans le menu, ou redémarrez Windows puis Réessayer.",
+    "hintNotRunning": "Le conteneur ne tourne pas. Cliquez « Démarrer » sur la carte d'abord, puis Ouvrir.",
+    "registering": "Enregistrement de l'équipe cloud…",
+    "hintRegisterFailed": "Échec d'enregistrement de l'équipe cloud (vérifiez connexion / réseau).",
+    "opening": "Ouverture de {{url}} …",
+    "opened": "Ouvert",
+    "hintOpenFailed": "Token obtenu mais échec d'ouverture de la fenêtre : {{err}}",
+    "hintException": "Exception lors de l'ouverture : {{err}}"
   }
 }

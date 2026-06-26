@@ -207,7 +207,8 @@
     "recreateConfirm": "This deletes and recreates the current container (volume data kept) to switch to the dedicated team's gateway key. Recreate?",
     "recreated": "Docker container recreated",
     "recreateOk": "Recreate",
-    "runningWslBroken": "実行中 · ⚠ WSL 管理異常(開けます;更新/再起動は WSL 修復が必要)"
+    "runningWslBroken": "実行中 · ⚠ WSL 管理異常(開けます;更新/再起動は WSL 修復が必要)",
+    "openFailed": "オープン失敗"
   },
   "common": {
     "close": "Close",
@@ -438,5 +439,25 @@
     "saveVideoAs": "動画を別名で保存…",
     "copyLink": "リンクをコピー",
     "saveLinkAs": "リンクを別名で保存…"
+  },
+  "dockerOpen": {
+    "tokVolHit": "✓ volume から token 取得(試行 {{n}})",
+    "tokVolMiss": "volume にまだ api_token がありません(コンテナが global.json を未出力)",
+    "tokVolErr": "volume 読み取り失敗:{{err}}",
+    "tokExecHit": "✓ コンテナ exec で token 取得(試行 {{n}})",
+    "tokExecMiss": "docker exec に api_token がありません",
+    "tokExecErr": "docker exec 失敗:{{err}}",
+    "tokRetry": "試行 {{n}}/5 取得できず、2秒後に再試行…",
+    "tokFail": "5回試しても token を取得できませんでした",
+    "readToken": "コンテナ token を読み取り中(コンテナ {{container}} / ボリューム {{volume}})…",
+    "hintNoToken": "コンテナ token を読めません。コンテナが未起動か、起動直後で global.json 未出力かも —— 数秒待って「再試行」。",
+    "hintWslUnmanaged": "WSL 管理異常:コンテナは :{{port}} にありますが wsl がディストロを認識できず、docker exec で token を読めません。カードメニューの「Docker 再起動」、または Windows 再起動後に「再試行」。",
+    "hintNotRunning": "コンテナが起動していません。先にカードの「起動」を押してから開いてください。",
+    "registering": "クラウド team を登録中…",
+    "hintRegisterFailed": "クラウド team の登録に失敗(ログイン / ネットワークを確認)。",
+    "opening": "{{url}} を開いています…",
+    "opened": "開きました",
+    "hintOpenFailed": "token は取得しましたがウィンドウを開けませんでした:{{err}}",
+    "hintException": "オープン中に例外:{{err}}"
   }
 }
