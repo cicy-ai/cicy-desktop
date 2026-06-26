@@ -415,5 +415,28 @@
     "private": "Private cloud",
     "personal": "Personal",
     "shared": "Shared"
+  },
+  "ctxMenu": {
+    "reload": "Recharger",
+    "webviewId": "WebviewId: {{id}}",
+    "copySkillCmd": "Copier la commande Skill",
+    "skillPrompt": "Utilise le webContent id:{{id}} actuel et opère ce webview pour moi via agent-electron",
+    "cut": "Couper",
+    "copy": "Copier",
+    "paste": "Coller",
+    "selectAll": "Tout sélectionner",
+    "inspect": "Inspecter l'élément",
+    "services": "Services",
+    "lookUpSelection": "Rechercher la sélection",
+    "searchWithGoogle": "Rechercher avec Google",
+    "copyImage": "Copier l'image",
+    "copyImageAddress": "Copier l'adresse de l'image",
+    "saveImage": "Enregistrer l'image",
+    "saveImageAs": "Enregistrer l'image sous…",
+    "copyVideoAddress": "Copier l'adresse de la vidéo",
+    "saveVideo": "Enregistrer la vidéo",
+    "saveVideoAs": "Enregistrer la vidéo sous…",
+    "copyLink": "Copier le lien",
+    "saveLinkAs": "Enregistrer le lien sous…"
   }
 }

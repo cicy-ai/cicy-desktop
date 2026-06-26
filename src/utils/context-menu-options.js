@@ -7,6 +7,7 @@
 // 'web-contents-created' in main.js) closes that gap, guarded so nothing
 // double-pops.
 const { default: contextMenu } = require("electron-context-menu");
+const { t } = require("../i18n"); // 右键菜单走 i18n(主进程同一份 locale)
 
 // ecm hands prepend/append the same `win` it was attached with — a BrowserWindow
 // in auto-attach mode, or the raw webContents when we pass `{ window: wc }`.
@@ -32,37 +33,49 @@ const OPTIONS = {
   // ecm has no built-in Reload item — add ONLY 重新加载 at the top. NO 切换开发者工具
   // anywhere (removed per master). <webview> guests keep their own custom menu —
   // see attachContextMenu.
+  // prepend 是函数,每次弹出时调用 → t() 拿到的是当前 locale(动态)。
   prepend: (_defaultActions, _params, win) => {
     const wc = wcOf(win);
     const wcId = wc && wc.id != null ? wc.id : "?";
     // 给 agent 用的一句话指令:带上当前 webContents id,让它用 agent-electron 操作这个 webview。
-    const skillPrompt = `请用当前的 webContent id:${wcId},请用 agent-electron 来帮我来操作这个 webview`;
+    const skillPrompt = t("ctxMenu.skillPrompt", { id: wcId });
     return [
-      { label: `WebviewId: ${wcId}`, enabled: false },
-      { label: "复制 Skill 指令", click: () => { try { require("electron").clipboard.writeText(skillPrompt); } catch (e) {} } },
+      { label: t("ctxMenu.webviewId", { id: wcId }), enabled: false },
+      { label: t("ctxMenu.copySkillCmd"), click: () => { try { require("electron").clipboard.writeText(skillPrompt); } catch (e) {} } },
       { type: "separator" },
-      { label: "重新加载", click: () => { try { if (wc) wc.reload(); } catch (e) {} } },
+      { label: t("ctxMenu.reload"), click: () => { try { if (wc) wc.reload(); } catch (e) {} } },
       { type: "separator" },
     ];
   },
-  labels: {
-    cut: "剪切",
-    copy: "复制",
-    paste: "粘贴",
-    selectAll: "全选",
-    inspectElement: "检查元素",
-    services: "服务",
-    lookUpSelection: "查找选中内容",
-    searchWithGoogle: "用 Google 搜索",
-    copyImage: "复制图片",
-    copyImageAddress: "复制图片地址",
-    saveImage: "保存图片",
-    copyVideoAddress: "复制视频地址",
-    saveVideo: "保存视频",
-    copyLink: "复制链接",
-    saveLinkAs: "链接另存为...",
-  },
 };
+
+// labels 用 getter:ecm 按 menuItem.id 取 options.labels[id],所以 KEY 必须 = ecm 的
+// item id(inspect 不是 inspectElement!saveImageAs/saveVideoAs 也得各自给)。getter 让
+// 每次 spread({...OPTIONS}) 都按当前 locale 现取,locale 切换也跟得上。
+Object.defineProperty(OPTIONS, "labels", {
+  enumerable: true,
+  get() {
+    return {
+      cut: t("ctxMenu.cut"),
+      copy: t("ctxMenu.copy"),
+      paste: t("ctxMenu.paste"),
+      selectAll: t("ctxMenu.selectAll"),
+      inspect: t("ctxMenu.inspect"),                 // FIX: ecm 的 id 是 inspect,不是 inspectElement
+      services: t("ctxMenu.services"),
+      lookUpSelection: t("ctxMenu.lookUpSelection"),
+      searchWithGoogle: t("ctxMenu.searchWithGoogle"),
+      copyImage: t("ctxMenu.copyImage"),
+      copyImageAddress: t("ctxMenu.copyImageAddress"),
+      saveImage: t("ctxMenu.saveImage"),
+      saveImageAs: t("ctxMenu.saveImageAs"),         // 之前缺 → 显示英文
+      copyVideoAddress: t("ctxMenu.copyVideoAddress"),
+      saveVideo: t("ctxMenu.saveVideo"),
+      saveVideoAs: t("ctxMenu.saveVideoAs"),         // 之前缺 → 显示英文
+      copyLink: t("ctxMenu.copyLink"),
+      saveLinkAs: t("ctxMenu.saveLinkAs"),
+    };
+  },
+});
 
 // Attach the menu to the host window, BrowserView tabs AND <webview> guests, so
 // right-click → 复制/粘贴 works on EVERY surface. Webviews used to be excluded on

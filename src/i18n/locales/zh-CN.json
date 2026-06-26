@@ -415,5 +415,28 @@
     "private": "私有云",
     "personal": "个人",
     "shared": "共享"
+  },
+  "ctxMenu": {
+    "reload": "重新加载",
+    "webviewId": "WebviewId: {{id}}",
+    "copySkillCmd": "复制 Skill 指令",
+    "skillPrompt": "请用当前的 webContent id:{{id}},请用 agent-electron 来帮我来操作这个 webview",
+    "cut": "剪切",
+    "copy": "复制",
+    "paste": "粘贴",
+    "selectAll": "全选",
+    "inspect": "检查元素",
+    "services": "服务",
+    "lookUpSelection": "查找选中内容",
+    "searchWithGoogle": "用 Google 搜索",
+    "copyImage": "复制图片",
+    "copyImageAddress": "复制图片地址",
+    "saveImage": "保存图片",
+    "saveImageAs": "图片另存为…",
+    "copyVideoAddress": "复制视频地址",
+    "saveVideo": "保存视频",
+    "saveVideoAs": "视频另存为…",
+    "copyLink": "复制链接",
+    "saveLinkAs": "链接另存为…"
   }
 }

@@ -415,5 +415,28 @@
     "private": "Private cloud",
     "personal": "Personal",
     "shared": "Shared"
+  },
+  "ctxMenu": {
+    "reload": "Reload",
+    "webviewId": "WebviewId: {{id}}",
+    "copySkillCmd": "Copy Skill Command",
+    "skillPrompt": "Use the current webContent id:{{id}} and operate this webview for me via agent-electron",
+    "cut": "Cut",
+    "copy": "Copy",
+    "paste": "Paste",
+    "selectAll": "Select All",
+    "inspect": "Inspect Element",
+    "services": "Services",
+    "lookUpSelection": "Look Up Selection",
+    "searchWithGoogle": "Search with Google",
+    "copyImage": "Copy Image",
+    "copyImageAddress": "Copy Image Address",
+    "saveImage": "Save Image",
+    "saveImageAs": "Save Image As…",
+    "copyVideoAddress": "Copy Video Address",
+    "saveVideo": "Save Video",
+    "saveVideoAs": "Save Video As…",
+    "copyLink": "Copy Link",
+    "saveLinkAs": "Save Link As…"
   }
 }
