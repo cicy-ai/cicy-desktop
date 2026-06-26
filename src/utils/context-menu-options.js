@@ -16,6 +16,25 @@ function wcOf(win) {
   try { return win && win.webContents ? win.webContents : win; } catch (e) { return win; }
 }
 
+// 在被右键的 webContents 里弹一个自包含的浮层 toast(覆盖 homepage / tab / <webview>
+// 所有 surface —— 渲染层的 toast 系统只在 homepage,够不到 webview)。纯 .style 设置,
+// CSP 友好;1.6s 后淡出移除。best-effort,失败不影响复制本身。
+function injectToast(wc, msg) {
+  try {
+    if (!wc || !wc.executeJavaScript) return;
+    const js = `(function(){try{
+      var d=document.createElement('div');d.textContent=${JSON.stringify(String(msg || ""))};
+      var s=d.style;s.position='fixed';s.left='50%';s.bottom='32px';s.transform='translateX(-50%)';
+      s.zIndex='2147483647';s.background='rgba(20,22,28,.96)';s.color='#e6edf3';s.padding='10px 16px';
+      s.borderRadius='10px';s.fontSize='13px';s.fontFamily='-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif';
+      s.boxShadow='0 8px 30px rgba(0,0,0,.5)';s.opacity='0';s.transition='opacity .18s';s.pointerEvents='none';
+      document.body.appendChild(d);requestAnimationFrame(function(){d.style.opacity='1';});
+      setTimeout(function(){d.style.opacity='0';setTimeout(function(){try{d.remove();}catch(e){}},240);},1600);
+    }catch(e){}})();`;
+    wc.executeJavaScript(js, true).catch(() => {});
+  } catch (e) {}
+}
+
 const OPTIONS = {
   showLookUpSelection: true,
   showSearchWithGoogle: false, // 「用 Google 搜索」点了无效(沙箱里打不开外部搜索)→ 移除
@@ -46,7 +65,10 @@ const OPTIONS = {
     const skillPrompt = t("ctxMenu.skillPrompt", { id: wcId, profile, url, title });
     return [
       { label: t("ctxMenu.webviewId", { id: wcId }), enabled: false },
-      { label: t("ctxMenu.copySkillCmd"), click: () => { try { require("electron").clipboard.writeText(skillPrompt); } catch (e) {} } },
+      { label: t("ctxMenu.copySkillCmd"), click: () => {
+        try { require("electron").clipboard.writeText(skillPrompt); } catch (e) {}
+        injectToast(wc, t("ctxMenu.copied"));
+      } },
       { type: "separator" },
       { label: t("ctxMenu.reload"), click: () => { try { if (wc) wc.reload(); } catch (e) {} } },
       { type: "separator" },

@@ -438,7 +438,8 @@
     "saveVideo": "Save Video",
     "saveVideoAs": "Save Video As…",
     "copyLink": "Copy Link",
-    "saveLinkAs": "Save Link As…"
+    "saveLinkAs": "Save Link As…",
+    "copied": "Skill command copied"
   },
   "dockerOpen": {
     "tokVolHit": "✓ Got token from volume (attempt {{n}})",

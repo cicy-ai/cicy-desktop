@@ -438,7 +438,8 @@
     "saveVideo": "動画を保存",
     "saveVideoAs": "動画を別名で保存…",
     "copyLink": "リンクをコピー",
-    "saveLinkAs": "リンクを別名で保存…"
+    "saveLinkAs": "リンクを別名で保存…",
+    "copied": "Skill コマンドをコピーしました"
   },
   "dockerOpen": {
     "tokVolHit": "✓ volume から token 取得(試行 {{n}})",

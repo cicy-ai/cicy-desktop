@@ -438,7 +438,8 @@
     "saveVideo": "保存视频",
     "saveVideoAs": "视频另存为…",
     "copyLink": "复制链接",
-    "saveLinkAs": "链接另存为…"
+    "saveLinkAs": "链接另存为…",
+    "copied": "已复制 Skill 指令"
   },
   "dockerOpen": {
     "tokVolHit": "✓ 从 volume 读到 token(第 {{n}} 次)",
