@@ -191,6 +191,9 @@ body {
    Removed in fullscreen where the buttons hide. */
 [data-platform="darwin"][data-fullscreen="0"] .topbar { padding-top: 34px; }
 .brand-mini { display: inline-flex; align-items: center; gap: 10px; }
+/* brand-mini 已移除(logo 在 tab-shell 的「我的团队」标签):topbar 只剩 user-chip,
+   推到右侧(space-between 单子元素会贴左)。 */
+.topbar .user-chip { margin-left: auto; }
 .brand-mini .brand-name { font-size: 14px; }
 
 .user-chip {

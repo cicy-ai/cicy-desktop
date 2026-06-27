@@ -1333,10 +1333,7 @@ function Header({ me, welcome, onLogout, mitmTeam }) {
   return (
     <>
     <header className="topbar">
-      <div className="brand-mini">
-        <div className="brand-mark sm"><BrandGlyph /></div>
-        <span className="brand-name">CiCy Desktop</span>
-      </div>
+      {/* logo 移到 tab-shell 的「我的团队」标签(CICY_LOGO),topbar 不再重复显示品牌 */}
       <div className="user-chip" data-id="UserChip" ref={wrap}>
         {welcome && <span className="welcome">{welcome}</span>}
         <button
