@@ -148,7 +148,7 @@
     "title": "Docker cicy-code",
     "install": "一键安装",
     "start": "启动",
-    "running": "运行中 · :8009",
+    "running": "运行中 · :8008",
     "notRunning": "未启动 · 点「启动」",
     "notInstalled": "未安装 · 点安装",
     "working": "处理中…",

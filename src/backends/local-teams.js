@@ -228,7 +228,7 @@ async function openTeam(id, opts = {}) {
   if (!baseUrl) return { ok: false, error: "no base_url" };
   // ?token= 实时拿: 本地团队的 token 就是 ~/cicy-ai/global.json 的 api_token(和 cicy-code
   // 共用同一份)—— 打开时**实时读 global.json**,cicy-code 轮换 token 也立刻跟得上,绝不吃 teams.json
-  // 里可能已陈旧的快照(陈旧 → ?token= 旧值 → :8008 拒 → 卡登录/白屏)。opts.token(如 :8009 容器
+  // 里可能已陈旧的快照(陈旧 → ?token= 旧值 → :8008 拒 → 卡登录/白屏)。opts.token(如 :8008 容器
   // 自己实时拿的)优先级最高;非本地团队仍用存的 node.api_token。
   let isLocalUrl = false;
   try { const h = new URL(baseUrl).hostname; isLocalUrl = h === "127.0.0.1" || h === "localhost" || h === "::1"; } catch {}
@@ -450,9 +450,11 @@ async function syncNameToCloud(id) {
     // cloud_team_id 被覆盖、又和 8008 串名。按 is_docker 标记 OR 端口(docker app port)
     // 跳过(端口判断不依赖标记的写入时机,更稳)。
     {
-      const DOCKER_PORT = String(process.env.CICY_DOCKER_APP_PORT || 8009);
+      // 端口判定仅在 Windows 生效:Windows 没有 native(8008 即 docker);mac/linux 的
+      // native 就是 8008,绝不能按端口把 native 误判成 docker(否则跳过 device-register)。
+      const DOCKER_PORT = String(process.env.CICY_DOCKER_APP_PORT || 8008);
       let isDockerNode = !!node.is_docker;
-      try { if (new URL(node.base_url).port === DOCKER_PORT) isDockerNode = true; } catch {}
+      try { if (process.platform === "win32" && new URL(node.base_url).port === DOCKER_PORT) isDockerNode = true; } catch {}
       if (isDockerNode) return;
     }
     let reg = await cc.registerTeam({ teamId: node.cloud_team_id || null, title: node.name || "", titleVersion: node.titleVersion || 0 });
@@ -536,7 +538,7 @@ async function addTeam(spec) {
   // 本地团队的 token **不存进 teams.json**: localhost/127.0.0.1/::1 的 cicy-code 与
   // cicy-desktop 共用同一份 ~/cicy-ai/global.json,openTeam 打开时**实时读 global.json**(token
   // 轮换即时跟上)。存一份快照只会陈旧 → ?token= 旧值 → :8008 拒 → 卡登录。所以本地一律存 ""
-  // (与 :8009 docker 的 skipTokenAutofill 同理),不再自动回填。
+  // (与 :8008 docker 的 skipTokenAutofill 同理),不再自动回填。
   let isLocalUrl = false;
   try { const h = new URL(baseUrl).hostname; isLocalUrl = h === "127.0.0.1" || h === "localhost" || h === "::1"; } catch {}
 
@@ -569,19 +571,20 @@ async function addTeam(spec) {
   // addTeam fires syncNameToCloud(id) below (fire-and-forget). If is_docker isn't
   // already on the node, that first sync sees a plain local team, device-registers
   // it, and the cloud hands back THIS DEVICE's shared team (= the 8008 team) — so
-  // :8009 and :8008 end up on one cloud_team_id and renaming one renames both
+  // :8008 and :8008 end up on one cloud_team_id and renaming one renames both
   // ("串名"). Marking is_docker here (explicit spec OR by the docker app port, which
   // doesn't depend on the caller setting a flag) closes that window for ALL creation
   // paths (sidecar registerAppTeam, a cloud deeplink, a manual add). cloud_team_id
   // (the node's OWN independent team) is written the same atomic way when known.
-  const DOCKER_PORT = String(process.env.CICY_DOCKER_APP_PORT || 8009);
-  const isDockerNode = !!spec.is_docker || (port != null && String(port) === DOCKER_PORT);
+  // 端口判定仅 Windows 生效(见上:mac/linux native 也是 8008,不能按端口误判)。
+  const DOCKER_PORT = String(process.env.CICY_DOCKER_APP_PORT || 8008);
+  const isDockerNode = !!spec.is_docker || (process.platform === "win32" && port != null && String(port) === DOCKER_PORT);
 
   const now = new Date().toISOString();
   const patch = {
     name:           spec.name           !== undefined ? String(spec.name || unnamedName()) : undefined,
     base_url:       baseUrl,
-    // 本地团队 / Docker :8009 → 一律存 ""(token 实时从 global.json / 容器读,绝不存快照)。
+    // 本地团队 / Docker :8008 → 一律存 ""(token 实时从 global.json / 容器读,绝不存快照)。
     api_token:      (spec.skipTokenAutofill || isLocalUrl) ? "" : (spec.api_token !== undefined ? String(spec.api_token || "") : undefined),
     install_source: spec.install_source ?? undefined,
     install_os:     spec.install_os     ?? undefined,

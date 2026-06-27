@@ -38,19 +38,19 @@ const APP_DOCKER_SUPPORTED = process.platform === "win32";
 const PORT = Number(process.env.CICY_CODE_PORT || 8008);
 
 // Docker-版 cicy-code: a SECOND, optional instance that runs inside Docker on
-// :8009 (its own container + volume), alongside the native local daemon on
+// :8008 (its own container + volume), alongside the native local daemon on
 // :8008. The homepage "Docker cicy-code" card owns its lifecycle; if Docker
 // Desktop is missing the card installs it first (installer downloads to the
 // user's Desktop). The whole cicy home is persisted to a named volume so the
 // entire container state survives recreation ("把整个 docker 挂出来").
-const APP_PORT = Number(process.env.CICY_DOCKER_APP_PORT || 8009);
+const APP_PORT = Number(process.env.CICY_DOCKER_APP_PORT || 8008);
 // container / volume 名都带上 port —— 一台机可以跑多个 docker(不同端口),各自
 // 独立容器 + 独立 volume(数据隔离)+ 独立云端 team。docker-teams.json 也按 volume
 // (含 port)区分。
 const APP_CONTAINER = process.env.CICY_DOCKER_APP_CONTAINER || `cicy-code-docker-${APP_PORT}`;
 const APP_VOLUME = process.env.CICY_DOCKER_APP_VOLUME || `cicy-team-${APP_PORT}`;
 const APP_MOUNT = process.env.CICY_DOCKER_APP_MOUNT || "/home/cicy";
-// :8009 docker 的网关 endpoint。key 不再从 :8008 借(native 已退役)—— 容器只用它
+// :8008 docker 的网关 endpoint。key 不再从 :8008 借(native 已退役)—— 容器只用它
 // 自己独立云端 team 的 key(见 ensureDockerTeam / appOpts)。
 const GATEWAY_ENDPOINT = process.env.CICY_AI_GATEWAY_LLM_ENDPOINT || "https://gateway.cicy-ai.com";
 
@@ -113,7 +113,7 @@ function register({ sidecarLogPath } = {}) {
       // 容器里 cicy-code 的版本(DockerCard 底部显示):running 时读 :APP_PORT/api/health。
       let ver = null;
       if (s.running) { try { ver = await require("../sidecar/version").running(APP_PORT); } catch {} }
-      // installed: distro 装了 OR :8009 健康(WSL 抽风查不到 distro 但容器在跑 → 也算装了,
+      // installed: distro 装了 OR :8008 健康(WSL 抽风查不到 distro 但容器在跑 → 也算装了,
       // 否则卡片误显「下载安装」)。wslUnmanaged: 服务在跑但 WSL 管不到 → 卡片显式提示异常。
       _dockerStatusCache = { installed: !!s.distro || !!s.healthy, dockerRunning: !!s.engineUp || !!s.healthy, running: !!s.running, unknown: !!s.unknown, wslUnmanaged: !!s.wslUnmanaged, version: ver, port: APP_PORT, platform: process.platform, chromeProxy: chromeProxyEnabled(), chromeProxyRunning: hostMihomo.running(), ts: Date.now() };
     } catch (e) {
@@ -127,17 +127,17 @@ function register({ sidecarLogPath } = {}) {
     _dockerDaemonBusy = true;
     try {
       const s = await refreshDockerStatus();
-      // 没启动的给我启动: distro installed but :8009 not healthy (and WSL not unknown)
+      // 没启动的给我启动: distro installed but :8008 not healthy (and WSL not unknown)
       // → bring it up. bootstrap is idempotent: it skips done steps and just runs
       // startEngine + the container. Skip when not installed (would silently pull
       // the 444MB rootfs) or unknown (WSL not answering — let the next tick retry).
       if (s.installed && !s.running && !s.unknown) {
-        log.info("[docker-daemon] installed but :8009 down → auto-starting (bootstrap idempotent)");
+        log.info("[docker-daemon] installed but :8008 down → auto-starting (bootstrap idempotent)");
         try { await appDocker.bootstrap(await appOpts()); } catch (e) { log.warn(`[docker-daemon] auto-start failed: ${e.message}`); }
         await refreshDockerStatus();
       } else if (s.running) {
         // 自愈:容器在跑,但很可能是「首次启动时还没登录 / key 还没就位就建好了」的没 key 容器
-        // —— runContainer 见到 :8009 健康就直接 adopt 不重建,key 永远进不去(Windows 实测的
+        // —— runContainer 见到 :8008 健康就直接 adopt 不重建,key 永远进不去(Windows 实测的
         // 'llm key 没拿到')。这里:已能拿到 key + 容器里确实没 key → 带 key 重建一次(volume
         // 数据保留)。mac/win 同一套(hasGatewayKey 两个 docker 模块都实现了)。
         try {
@@ -231,8 +231,8 @@ function register({ sidecarLogPath } = {}) {
     }
   });
 
-  // ---- Docker-版 cicy-code on :8009 — WSL2 + Ubuntu + Docker Engine (方案 A) ----
-  // Card states (状态分清楚): running(:8009 healthy)→打开 / dockerRunning
+  // ---- Docker-版 cicy-code on :8008 — WSL2 + Ubuntu + Docker Engine (方案 A) ----
+  // Card states (状态分清楚): running(:8008 healthy)→打开 / dockerRunning
   // (engine up)→启动 / installed(Ubuntu present)→启动 Docker / else→下载安装.
   ipcMain.handle("docker:app-status", () => {
     // NON-BLOCKING: return what the background daemon already computed (memory →
@@ -254,8 +254,8 @@ function register({ sidecarLogPath } = {}) {
     return s;
   });
 
-  // Common run options for the :8009 instance: its own container/volume + the LLM
-  // gateway env. :8009 必须用「它自己独立云端 team」的 key —— ensureDockerTeam
+  // Common run options for the :8008 instance: its own container/volume + the LLM
+  // gateway env. :8008 必须用「它自己独立云端 team」的 key —— ensureDockerTeam
   // 没建就建(createTeam),用那个 teamId 的 key。绝不借别人的(native :8008 已退役,
   // 没得借,也不许借)。所以 appOpts 是 async:先 await ensureDockerTeam,确保容器启动
   // 前自己的 key 已就位;拿不到(未登录)就先不带 key,登录后「重建 Docker」再带上。
@@ -265,24 +265,24 @@ function register({ sidecarLogPath } = {}) {
     if (dockerTeamReg && dockerTeamReg.apiKey) env.CICY_AI_GATEWAY_LLM_API_KEY = dockerTeamReg.apiKey;
     return { port: APP_PORT, container: APP_CONTAINER, volume: APP_VOLUME, env };
   };
-  // Register the running :8009 instance as a (custom) team so the card's "打开"
+  // Register the running :8008 instance as a (custom) team so the card's "打开"
   // reuses the token-injected open/reload flow. addTeam dedups by host:port.
-  // Upsert the :8009 team with the CONTAINER's OWN live token. Critical: never
+  // Upsert the :8008 team with the CONTAINER's OWN live token. Critical: never
   // fall back to the host 8008 token (addTeam auto-fills global.json on an empty
-  // api_token — that's the host credential, which 8009 rejects → login screen).
+  // api_token — that's the host credential, which 8008 rejects → login screen).
   // Returns the team id, or {ok:false} when the container token can't be read.
-  // Register the :8009 team WITHOUT a token. teams.json 不存 8009 的 token;
+  // Register the :8008 team WITHOUT a token. teams.json 不存 8008 的 token;
   // docker 的 token 是实时拿的. skipTokenAutofill stops addTeam from back-filling
-  // the HOST 8008 token (the bug that made 8009 verify with 8008's token → login).
+  // the HOST 8008 token (the bug that made 8008 verify with 8008's token → login).
   const registerAppTeam = async () => {
     const lt = require("./local-teams");
     await ensureDockerTeam(); // 确保独立云端 team 存在 + 拿到 teamId/title
     const title = (dockerTeamReg && dockerTeamReg.title) || "Docker 团队";
     // is_docker + cloud_team_id are passed INTO addTeam so they land in the SAME
     // writeNodes as the node — before addTeam's fire-and-forget syncNameToCloud
-    // runs. That's what stops the freshly-created :8009 node from device-registering
+    // runs. That's what stops the freshly-created :8008 node from device-registering
     // into THIS device's shared (8008) team and 串名. (addTeam also self-detects
-    // is_docker by the :8009 port, so this is belt-and-suspenders.)
+    // is_docker by the :8008 port, so this is belt-and-suspenders.)
     const r = await lt.addTeam({
       base_url: `http://127.0.0.1:${APP_PORT}`,
       name: title,
@@ -360,7 +360,7 @@ function register({ sidecarLogPath } = {}) {
   });
 
   // One-click bootstrap (方案 A): ensure WSL2 → Ubuntu → Docker Engine → load
-  // image → start :8009 container → health. Streams phase/progress on
+  // image → start :8008 container → health. Streams phase/progress on
   // 'docker:app-progress'. Idempotent + resumable → the modal's 重试 just re-runs.
   ipcMain.handle("docker:app-bootstrap", async (e) => {
     if (!APP_DOCKER_SUPPORTED) return { ok: false, error: "Docker cicy-code 仅支持 Windows" };
@@ -441,7 +441,7 @@ function register({ sidecarLogPath } = {}) {
     catch (e) { return { ok: false, error: e.message }; }
   });
 
-  // ⋯ menu → 升级: re-pull the latest R2 image, re-create the :8009 container.
+  // ⋯ menu → 升级: re-pull the latest R2 image, re-create the :8008 container.
   ipcMain.handle("docker:app-upgrade", async (e) => {
     if (!APP_DOCKER_SUPPORTED) return { ok: false, error: "Docker cicy-code 仅支持 Windows" };
     try {

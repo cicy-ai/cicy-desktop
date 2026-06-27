@@ -157,9 +157,9 @@ contextBridge.exposeInMainWorld("cicy", {
       ipcRenderer.on("docker:bootstrap-progress", handler);
       return () => ipcRenderer.removeListener("docker:bootstrap-progress", handler);
     },
-    // Docker-版 cicy-code on :8009 (the homepage "Docker cicy-code" card).
+    // Docker-版 cicy-code on :8008 (the homepage "Docker cicy-code" card).
     // appStatus → { installed, running, port, platform }; appBootstrap installs
-    // Docker (if missing, installer → Desktop) + starts the :8009 container,
+    // Docker (if missing, installer → Desktop) + starts the :8008 container,
     // streaming phase/progress on 'docker:app-progress'.
     appStatus:    ()  => logInvoke("docker:app-status"),
     appRedetect:  ()  => logInvoke("docker:app-redetect"),   // 「重试检测」: FORCE a fresh probe (appStatus only reads cache)
@@ -171,7 +171,7 @@ contextBridge.exposeInMainWorld("cicy", {
     appUpdate:    ()  => logInvoke("docker:app-update"),
     appStop:      ()  => logInvoke("docker:app-stop"),
     appUpgrade:   ()  => logInvoke("docker:app-upgrade"),
-    // Open :8009 with the live container token (refuses if it can't read it).
+    // Open :8008 with the live container token (refuses if it can't read it).
     appOpen:      ()  => logInvoke("docker:app-open"),
     openDir:      (which) => logInvoke("docker:open-dir", which), // "projects"→C:\projects, 否则 WSL 卷
 

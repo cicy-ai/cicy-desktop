@@ -881,7 +881,7 @@ electronApp.whenReady().then(async () => {
   ensureDesktopLauncher();
   ensureAutoLaunch();
   // (2026-06 方向回调): mac/linux 改回 native cicy-code(:8008,本机直接跑二进制)——
-  // colima VM 在 16G mac 上把内存压垮被 jetsam SIGKILL。Windows 仍走 docker(WSL :8009,
+  // colima VM 在 16G mac 上把内存压垮被 jetsam SIGKILL。Windows 仍走 docker(WSL :8008,
   // 由 sidecar-ipc 管),不在这里起 native。
   if (process.platform !== "win32") {
     const sidecarPort = Number(process.env.CICY_CODE_PORT || 8008);
@@ -1401,7 +1401,7 @@ function cleanup() {
   // Reap only leftover legacy host helpers (ttyd / gotty / code-server) — never the
   // cicy-code daemon, never tmux, never the Docker engine. quitting CiCy Desktop
   // must NOT touch the cicy-code daemon (native :8008 keep-alive) NOR Docker (colima VM /
-  // WSL distro — separate background services; the :8009 container is --restart unless-stopped).
+  // WSL distro — separate background services; the :8008 container is --restart unless-stopped).
   try {
     const { execSync } = require("child_process");
 

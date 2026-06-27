@@ -359,7 +359,7 @@ async function createTeam({ title = "", kind = "cloud" } = {}) {
 }
 
 // Docker 团队的权威来源(w-10122 #197):POST /api/team/docker/register —— cloud 按
-// (deviceId, port) get-or-create。一机一 port 一 team(8009/8010…),幂等:同 (device,port)
+// (deviceId, port) get-or-create。一机一 port 一 team(8008/8010…),幂等:同 (device,port)
 // 返同一 key;不同 port 不同 team;kind='docker';软删后同 (device,port) 可重建。title 传了
 // 就用桌面的,没传云端缺省 'Docker :<port>'(不回退 owner 名)。替代 createTeam + 本机缓存。
 async function registerDockerTeam({ port, title = "" } = {}) {

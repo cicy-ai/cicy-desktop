@@ -4,7 +4,7 @@
 // Docker 引擎」的方案,在 Mac 上就是 Colima:一个 Apache-2.0、纯 CLI、无 GUI、
 // 无授权、无 root 的轻量 Linux VM(基于 Lima),里面跑标准 Docker 引擎。Lima 会
 // 把 VM 内监听 127.0.0.1 的端口自动转发到宿主 127.0.0.1,所以 VM 里发布在
-// :8009 的容器,Mac 上 127.0.0.1:8009 直接可达——和 WSL2 的 localhost 转发等价。
+// :8008 的容器,Mac 上 127.0.0.1:8008 直接可达——和 WSL2 的 localhost 转发等价。
 //
 // 与 wsl-docker.js 完全同接口(bootstrap/status/restart/stop/dockerRestart/
 // recreate/update/upgrade/runContainer/readContainerToken),由 sidecar-ipc.js
@@ -303,7 +303,7 @@ const probeHealth = docker.probeHealth;
 //   • Apple Silicon 加 --platform linux/amd64(rosetta 跑 x86 容器);
 //   • /home/cicy 必须用 docker **named volume**,不能用 host bind-mount!真机实测:
 //     bind-mount 会用空的宿主目录**遮住镜像里预装的 /home/cicy**(cicy-code 装在那),
-//     entrypoint 找不到就试图全局 npm 重装 → EACCES 崩溃,:8009 起不来。named volume
+//     entrypoint 找不到就试图全局 npm 重装 → EACCES 崩溃,:8008 起不来。named volume
 //     首次挂载会**从镜像内容预填充**,容器才看得到预装的 cicy-code(和 WSL 一致)。
 // 把宿主 ~/projects 挂进容器 /home/cicy/projects(~ 用 os.homedir() 展开,绝不写死)。
 // Colima 把宿主 $HOME 挂进 VM,所以直接路径就能用(不像 WSL 要 /mnt 转换)。
@@ -343,7 +343,7 @@ function projectsMountArg() {
   } catch { return ""; }
 }
 
-async function runContainer({ port = 8009, container = "cicy-code-docker-8009", volume = "cicy-team-8009", env = {} } = {}) {
+async function runContainer({ port = 8008, container = "cicy-code-docker-8008", volume = "cicy-team-8008", env = {} } = {}) {
   if (await probeHealth(port)) return { adopted: true };
   try { await dk(`rm -f ${container}`, { timeout: 20000 }); } catch {} // 替换同名残留容器
   const envArgs = Object.entries(env || {})
@@ -352,7 +352,7 @@ async function runContainer({ port = 8009, container = "cicy-code-docker-8009", 
     .join(" ");
   // 方案: Chrome 的 per-profile 代理(127.0.0.1:2000N)改由「宿主 mihomo」(host-mihomo.js)
   // 服务,不再从容器 publish 20001-32 —— colima/Lima 转发那个端口段始终到不了容器里只绑
-  // 127.0.0.1 的监听(Chrome 一直 ERR_EMPTY_RESPONSE)。容器只暴露 cicy-code 的 :8009。
+  // 127.0.0.1 的监听(Chrome 一直 ERR_EMPTY_RESPONSE)。容器只暴露 cicy-code 的 :8008。
   const mk = (s) => `run -d --name ${container} --restart unless-stopped ${PLATFORM_FLAG} ` +
     `-p 127.0.0.1:${port}:8008 -p 127.0.0.1:${EXTRA_PORTS}:${EXTRA_PORTS} ` +
     `-e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${s} ${envArgs} ${IMAGE}`;
@@ -375,7 +375,7 @@ async function runContainer({ port = 8009, container = "cicy-code-docker-8009", 
 // 该卷的 _data/cicy-ai/global.json(最稳,避开 busy 容器的慢 exec);② 退回 docker
 // exec。重试到 entrypoint 把 global.json 写出来为止;真读不到返回 ""(调用方不得拿
 // 错/宿主 token 去开,会卡登录)。
-async function readContainerToken(port = 8009, container = "cicy-code-docker-8009", volume = "cicy-team-8009") {
+async function readContainerToken(port = 8008, container = "cicy-code-docker-8008", volume = "cicy-team-8008") {
   for (let attempt = 1; attempt <= 5; attempt++) {
     try { const { stdout } = await sh(`colima ssh -p ${PROFILE} -- sudo cat /var/lib/docker/volumes/${volume}/_data/cicy-ai/global.json 2>/dev/null`, { timeout: 10000 });
       const m = String(stdout).match(/"api_token"\s*:\s*"(cicy_[A-Za-z0-9]+)"/);
@@ -426,7 +426,7 @@ async function ensureDesktopShortcut(_volume, _port) { /* no-op on darwin: named
 // 与 wsl status 同形 { wsl, distro, engineUp, running },供 sidecar-ipc 复用:
 //   wsl    → 平台/依赖就绪(brew+colima+docker CLI 都在)
 //   distro → VM(profile)已创建
-async function status(port = 8009) {
+async function status(port = 8008) {
   const deps   = (await colimaInstalled()) && (await dockerCliInstalled());
   const vm     = deps && (await vmExists());
   const up     = vm && (await engineUp());
@@ -446,7 +446,7 @@ async function bootstrap(opts = {}) {
   return _bootstrapInFlight;
 }
 
-async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-docker-8009", volume = "cicy-team-8009", env = {} } = {}) {
+async function _bootstrap({ onProgress, port = 8008, container = "cicy-code-docker-8008", volume = "cicy-team-8008", env = {} } = {}) {
   const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
 
   // 0) 快路径:已健康 → 秒返回(幂等)。
@@ -496,7 +496,7 @@ async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-dock
 // ---- 生命周期(卡片 ⋯ 菜单)--------------------------------------------
 
 // 仅重启容器内的 cicy-code 进程(supervisor),cron/sshd 等不动;退回整容器重启。
-async function restart({ container = "cicy-code-docker-8009", port = 8009, volume = "cicy-team-8009" } = {}) {
+async function restart({ container = "cicy-code-docker-8008", port = 8008, volume = "cicy-team-8008" } = {}) {
   await startVM({});
   try { await dk(`exec ${container} supervisorctl -c /etc/supervisor/supervisord.conf restart cicy-code`, { timeout: 30000 }); }
   catch { try { await dk(`restart ${container}`, { timeout: 60000 }); } catch {} }
@@ -506,7 +506,7 @@ async function restart({ container = "cicy-code-docker-8009", port = 8009, volum
 }
 
 // 原地更新 cicy-code(镜像内的 cicy-code-update.sh,不重建容器)。
-async function update({ onProgress, container = "cicy-code-docker-8009", port = 8009 } = {}) {
+async function update({ onProgress, container = "cicy-code-docker-8008", port = 8008 } = {}) {
   const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
   await startVM({});
   emit({ phase: "image", status: "running", message: "更新 cicy-code(拉取最新版)…" });
@@ -515,23 +515,23 @@ async function update({ onProgress, container = "cicy-code-docker-8009", port = 
       { emit, phase: "image", timeout: 300000 });
   } catch (e) { emit({ phase: "done", status: "error", message: `更新失败:${e.message}(试试「升级」重装)` }); return { ok: false, reason: "update_failed" }; }
   const healthy = await docker.waitUntil(() => probeHealth(port), { totalMs: 120000, everyMs: 3000 });
-  emit({ phase: "done", status: healthy ? "done" : "error", message: healthy ? "cicy-code 已更新到最新 🎉" : "更新了但 :8009 还没响应——稍等或点重试" });
+  emit({ phase: "done", status: healthy ? "done" : "error", message: healthy ? "cicy-code 已更新到最新 🎉" : "更新了但 :8008 还没响应——稍等或点重试" });
   return { ok: healthy };
 }
 
-async function stop({ container = "cicy-code-docker-8009" } = {}) {
+async function stop({ container = "cicy-code-docker-8008" } = {}) {
   try { await dk(`stop ${container}`, { timeout: 30000 }); } catch {}
 }
 
 // docker restart 整个容器(entrypoint 重跑、重读 volume global.json)。
-async function dockerRestart({ container = "cicy-code-docker-8009" } = {}) {
+async function dockerRestart({ container = "cicy-code-docker-8008" } = {}) {
   await dk(`restart ${container}`, { timeout: 45000 });
   return true;
 }
 
 // 重建:强删占该端口的任何容器 + 目标容器,再 docker run(用新 env,如新 docker team
 // 网关 key)。保留 bind-mount 宿主目录(数据/api_token 不丢)。破坏性 → 调用方要 confirm。
-async function recreate({ onProgress, port = 8009, container = "cicy-code-docker-8009", volume = "cicy-team-8009", env = {} } = {}) {
+async function recreate({ onProgress, port = 8008, container = "cicy-code-docker-8008", volume = "cicy-team-8008", env = {} } = {}) {
   const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
   // 重建 = 用最新镜像重建。OSS 有更新版先刷新(非破坏性,不删 VM/volume),再 rm + run。
   try { await ensureFreshImage({ emit }); } catch (e) { emit({ phase: "image", status: "running", message: `镜像刷新跳过(${e.message}),用现有镜像重建` }); }
@@ -542,7 +542,7 @@ async function recreate({ onProgress, port = 8009, container = "cicy-code-docker
 }
 
 // 升级 = 删 VM 重装(重置;cicy-team 数据随之重置,实例重新 seed 出新 token)。
-async function upgrade({ onProgress, port = 8009, container = "cicy-code-docker-8009", volume = "cicy-team-8009", env = {} } = {}) {
+async function upgrade({ onProgress, port = 8008, container = "cicy-code-docker-8008", volume = "cicy-team-8008", env = {} } = {}) {
   const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
   emit({ phase: "install-docker", status: "running", message: "升级 = 重装运行环境(会重置容器数据)…" });
   try { await sh(`colima delete -f -p ${PROFILE} 2>/dev/null; true`, { timeout: 120000 }); } catch {}
@@ -550,7 +550,7 @@ async function upgrade({ onProgress, port = 8009, container = "cicy-code-docker-
 }
 
 // 容器里有没有注入网关 key(reconcile 自愈用):printenv 看 CICY_AI_GATEWAY_LLM_API_KEY。
-async function hasGatewayKey(container = "cicy-code-docker-8009") {
+async function hasGatewayKey(container = "cicy-code-docker-8008") {
   try { const { stdout } = await dk(`exec ${container} printenv CICY_AI_GATEWAY_LLM_API_KEY`, { timeout: 8000 }); return /sk-/.test(String(stdout || "")); }
   catch { return false; }
 }
@@ -560,7 +560,7 @@ async function hasGatewayKey(container = "cicy-code-docker-8009") {
 // 并在容器里写 ~/.ssh/config 加 `mac` 别名(→ host.docker.internal)→ 容器内 `ssh mac` 即可
 // 上 Mac 主机跑命令。Electron 主进程就以 Mac 用户跑,直接 fs 写 authorized_keys;容器侧走
 // docker exec。比挂 docker.sock 更通用,且不碰 socket 的 GID 权限那摊事。
-async function authorizeHostSsh({ container = "cicy-code-docker-8009" } = {}) {
+async function authorizeHostSsh({ container = "cicy-code-docker-8008" } = {}) {
   const user = os.userInfo().username; // Electron 跑在哪个 Mac 用户下 → 容器要 ssh 的目标用户
   // 1) 容器里确保有 keypair(都没有就生成 ed25519)
   await dk(`exec ${container} sh -c 'mkdir -p $HOME/.ssh && chmod 700 $HOME/.ssh; { [ -f $HOME/.ssh/id_ed25519 ] || [ -f $HOME/.ssh/id_rsa ]; } || ssh-keygen -t ed25519 -N "" -f $HOME/.ssh/id_ed25519 -q'`, { timeout: 30000 });
@@ -593,7 +593,7 @@ async function authorizeHostSsh({ container = "cicy-code-docker-8009" } = {}) {
 
 // 读容器里 cicy-code 生成的 mihomo.yaml —— host-mihomo 用它在宿主重建 Chrome 代理配置
 // (含云端下发的真实上游节点)。
-async function readMihomoConfig(container = "cicy-code-docker-8009") {
+async function readMihomoConfig(container = "cicy-code-docker-8008") {
   const { stdout } = await dk(`exec ${container} cat /home/cicy/cicy-ai/db/mihomo.yaml`, { timeout: 15000 });
   return String(stdout || "");
 }

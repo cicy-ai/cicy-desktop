@@ -855,7 +855,7 @@ export default function App() {
 
   // Logged in: unified tabs + cards grid on the left, full-height webview
   // drawer on the right.
-  // The Docker-版 cicy-code on :8009 has its own dedicated <DockerCard> (right of
+  // The Docker-版 cicy-code on :8008 has its own dedicated <DockerCard> (right of
   // the local card), so pull it out of the generic node list — else it'd ALSO
   // render as a 自定义 card (the bootstrap registers it as a team for the
   // token-injected 打开/刷新 flow).
@@ -996,7 +996,7 @@ export default function App() {
             <LocalTeamCard key={"local:" + t.id} team={t} cloudCode={cloudCodeFor(t.cloud_team_id)} onOpen={() => openLocalTeam(t.id)} onRename={renameLocalTeam} onRefresh={fetchLocalTeams} />
           ))}
           {/* native :8008 退役 —— 不再有"本地团队 正在启动"占位卡(native 已删,
-              :8008 永远不会起来,占位会一直转)。cicy-code 用下面的 Docker 卡(:8009)。 */}
+              :8008 永远不会起来,占位会一直转)。cicy-code 用下面的 Docker 卡(:8008)。 */}
           {showLocal && (
             <DockerCard
               dockerTeam={dockerTeam}
@@ -1839,7 +1839,7 @@ function DockerInstallDrawerHost() {
             </span>
             <div>
               <div className="drawer__h">{drawerTitle}</div>
-              <div className="drawer__sub">127.0.0.1:8009</div>
+              <div className="drawer__sub">127.0.0.1:8008</div>
             </div>
           </div>
           <div className="drawer__headbtns">
@@ -1918,7 +1918,7 @@ function DockerInstallDrawerHost() {
 }
 
 // Docker-版 cicy-code card (Windows only): a SECOND cicy-code instance running
-// in Docker on :8009, alongside the native local daemon (:8008). If Docker
+// in Docker on :8008, alongside the native local daemon (:8008). If Docker
 // Desktop is missing, the install flow downloads its installer to the user's
 // Desktop and runs it, streaming progress through the drawer above.
 function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRefresh }) {
@@ -2089,12 +2089,12 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
   if (platform !== "win32") return null;
 
   // Distinct states (状态分清楚):
-  //   running       — :8009 container healthy → 打开
+  //   running       — :8008 container healthy → 打开
   //   dockerRunning — engine up, no container → 启动 (build/start container)
   //   installed     — Docker on disk but engine down → 启动 Docker
   //   else          — not installed → 下载安装
   // 有 live status 就信它;status 还没加载到(null)才用 dockerTeam 快照兜底。
-  // 否则 teams.json 里陈旧的 status:"running" 会盖过「容器其实已停/:8009 down」的真实
+  // 否则 teams.json 里陈旧的 status:"running" 会盖过「容器其实已停/:8008 down」的真实
   // 状态 → 卡片显示死「打开」(点了必失败)。真相单一,以 live 探测为准。
   const running = status ? !!status.running : (dockerTeam?.status === "running");
   const dockerRunning = !!status?.dockerRunning;
@@ -2103,7 +2103,7 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
   // reboot). Do NOT fall through to 「下载安装」— that lies (it IS installed, WSL
   // just didn't answer). Show a retry state so the user re-probes, not reinstalls.
   const unknown = !!status?.unknown && !running && !dockerRunning && !installed;
-  // WSL 被孤儿化::8009 看着健康(可能只是 wslhost 僵尸攥着端口),但 distro 已从 WSL
+  // WSL 被孤儿化::8008 看着健康(可能只是 wslhost 僵尸攥着端口),但 distro 已从 WSL
   // 消失 → token 读不到、打不开。所以 wslUnmanaged 不再是「可打开」,而是「需修复」:
   // CTA 走「修复 WSL」自动重装(bootstrap 会杀僵尸端口 + wsl --shutdown + 重新 import)。
   const wslUnmanaged = !!status?.wslUnmanaged;
@@ -2145,10 +2145,10 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
     // WSL 孤儿化 → 走「修复」(bootstrap 杀僵尸端口 + wsl --shutdown + 重新 import),不进打开。
     if (wslUnmanaged) { runBootstrap(); return; }
     if (realRunning) {
-      // 打开很慢 → 先探这个 :8009 tab 开过没。开过(openedWc 里有它的
+      // 打开很慢 → 先探这个 :8008 tab 开过没。开过(openedWc 里有它的
       // webContentsId)就**直接 active 秒切**,不再拿 token / 注册 team(那是慢的根)。
       try {
-        const r = await window.cicy?.tabs?.activateIfOpen?.("http://127.0.0.1:8009");
+        const r = await window.cicy?.tabs?.activateIfOpen?.("http://127.0.0.1:8008");
         if (r?.active) return;
       } catch {}
       // 没开过 → 走慢路径(读容器 token 最多 ~50s)。进行中只显示 CTA 的「打开中…」spinner
@@ -2227,7 +2227,7 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
                 </button>
                 {/* 常用 */}
                 <button type="button" data-id="DockerCard-reload" className="bcard__menu-item"
-                  onClick={(e) => { e.stopPropagation(); setMenuOpen(false); window.cicy?.tabs?.reloadIfOpen?.("http://127.0.0.1:8009", "Docker 团队"); }}>
+                  onClick={(e) => { e.stopPropagation(); setMenuOpen(false); window.cicy?.tabs?.reloadIfOpen?.("http://127.0.0.1:8008", "Docker 团队"); }}>
                   {tr("docker.reloadWindow", "刷新窗口")}
                 </button>
                 <button type="button" data-id="DockerCard-open-dir" className="bcard__menu-item"
@@ -2268,7 +2268,7 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
         )}
       </div>
       <div className="bcard__body">
-        {/* 8009 现在有独立云端 team(cloud_team_id 是它自己的,不再和 8008 串),所以
+        {/* 8008 现在有独立云端 team(cloud_team_id 是它自己的,不再和 8008 串),所以
             标题可改名:本地节点名 + 云端 PATCH 双写(onRename 在父组件处理)。 */}
         <div style={{ height: 28, display: "flex", alignItems: "center" }}>
           {editing ? (
@@ -2830,13 +2830,13 @@ function isLocalSidecar(baseUrl) {
   } catch { return false; }
 }
 
-// The Docker-版 cicy-code instance — localhost:8009. Owned by <DockerCard>, so
+// The Docker-版 cicy-code instance — localhost:8008. Owned by <DockerCard>, so
 // it's filtered out of the generic node lists.
 function isDockerApp(baseUrl) {
   try {
     const p = new URL(baseUrl);
     const local = p.hostname === "127.0.0.1" || p.hostname === "localhost" || p.hostname === "::1";
-    return local && p.port === "8009";
+    return local && p.port === "8008";
   } catch { return false; }
 }
 

@@ -148,7 +148,7 @@
     "title": "Docker cicy-code",
     "install": "Installer",
     "start": "Démarrer",
-    "running": "En cours · :8009",
+    "running": "En cours · :8008",
     "notRunning": "Arrêté · cliquez sur Démarrer",
     "notInstalled": "Non installé · cliquez pour installer",
     "working": "En cours…",
