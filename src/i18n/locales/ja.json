@@ -473,5 +473,14 @@
     "health": "起動",
     "done": "完了",
     "open": "開く"
+  },
+  "chromeProxy": {
+    "downloading": "mihomo をダウンロード中(Chrome プロキシ、OSS から)…",
+    "ready": "Chrome プロキシ(host mihomo)準備完了",
+    "verifyFailed": "mihomo のダウンロード後の検証に失敗(ファイルが小さすぎます)",
+    "containerConfigParseFailed": "コンテナの mihomo 設定の解析に失敗: {{err}}",
+    "noContainerConfig": "コンテナの mihomo 設定を取得できませんでした",
+    "binMissing": "mihomo バイナリがありません(先に ensureBinary)",
+    "configMissing": "host 設定がありません(先に writeConfig)"
   }
 }

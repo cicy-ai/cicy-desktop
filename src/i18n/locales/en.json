@@ -473,5 +473,14 @@
     "health": "Start",
     "done": "Done",
     "open": "Open"
+  },
+  "chromeProxy": {
+    "downloading": "Downloading mihomo (Chrome proxy, from OSS)…",
+    "ready": "Chrome proxy (host mihomo) ready",
+    "verifyFailed": "mihomo verification failed after download (file too small)",
+    "containerConfigParseFailed": "Failed to parse container mihomo config: {{err}}",
+    "noContainerConfig": "Could not read container mihomo config",
+    "binMissing": "mihomo binary missing (run ensureBinary first)",
+    "configMissing": "host config missing (run writeConfig first)"
   }
 }

@@ -473,5 +473,14 @@
     "health": "Démarr.",
     "done": "Terminé",
     "open": "Ouvrir"
+  },
+  "chromeProxy": {
+    "downloading": "Téléchargement de mihomo (proxy Chrome, depuis OSS)…",
+    "ready": "Proxy Chrome (host mihomo) prêt",
+    "verifyFailed": "Échec de la vérification de mihomo après téléchargement (fichier trop petit)",
+    "containerConfigParseFailed": "Échec de l’analyse de la config mihomo du conteneur : {{err}}",
+    "noContainerConfig": "Impossible de lire la config mihomo du conteneur",
+    "binMissing": "Binaire mihomo manquant (exécutez dabord ensureBinary)",
+    "configMissing": "Config host manquante (exécutez dabord writeConfig)"
   }
 }

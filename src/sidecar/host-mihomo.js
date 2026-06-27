@@ -21,6 +21,8 @@ const os = require("os");
 const path = require("path");
 const https = require("https");
 const yaml = require("js-yaml");
+const { t } = require("../i18n"); // 进度/错误文案 i18n(drawer 里显示)
+const tt = (k, o) => t(`chromeProxy.${k}`, o);
 
 const VER = (process.env.CICY_MIHOMO_VERSION || "v1.10.4").replace(/^v?/, "v");
 const OSS_BASE = process.env.CICY_OSS_BASE || "https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com";
@@ -69,10 +71,10 @@ function download(url, dest, redirects = 0) {
 async function ensureBinary({ emit } = {}) {
   if (binPresent()) return binPath();
   fs.mkdirSync(RT_DIR, { recursive: true });
-  emit && emit({ phase: "chrome-proxy", status: "running", message: "下载 mihomo(Chrome 代理,从 OSS)…" });
+  emit && emit({ phase: "chrome-proxy", status: "running", message: tt("downloading") });
   await download(assetUrl(), binPath());
   if (!IS_WIN) { try { fs.chmodSync(binPath(), 0o755); } catch {} }
-  if (!binPresent()) throw new Error("mihomo 下载后校验失败(文件过小)");
+  if (!binPresent()) throw new Error(tt("verifyFailed"));
   return binPath();
 }
 
@@ -82,7 +84,7 @@ async function ensureBinary({ emit } = {}) {
 // listeners already bind 127.0.0.1, exactly what host Chrome connects to.
 function buildHostConfig(containerYaml) {
   let c = {};
-  try { c = yaml.load(containerYaml) || {}; } catch (e) { throw new Error(`容器 mihomo 配置解析失败: ${e.message}`); }
+  try { c = yaml.load(containerYaml) || {}; } catch (e) { throw new Error(tt("containerConfigParseFailed", { err: e.message })); }
   const host = {
     "mixed-port": HOST_MIXED,
     "allow-lan": false,
@@ -123,8 +125,8 @@ function stop() {
 function start({ force = false } = {}) {
   if (!force && running()) return { started: false, adopted: true };
   stop();
-  if (!binPresent()) throw new Error("mihomo 二进制不存在(先 ensureBinary)");
-  if (!fs.existsSync(HOST_CONFIG)) throw new Error("host 配置不存在(先 writeConfig)");
+  if (!binPresent()) throw new Error(tt("binMissing"));
+  if (!fs.existsSync(HOST_CONFIG)) throw new Error(tt("configMissing"));
   fs.mkdirSync(path.dirname(HOST_LOG), { recursive: true }); // ~/logs may not exist yet
   const out = fs.openSync(HOST_LOG, "a");
   const child = spawn(binPath(), ["-f", HOST_CONFIG], {
@@ -139,10 +141,10 @@ function start({ force = false } = {}) {
 // containerYaml is fetched by the caller (sidecar-ipc) via appDocker.
 async function enable({ containerYaml, emit } = {}) {
   await ensureBinary({ emit });
-  if (!containerYaml) throw new Error("没有拿到容器 mihomo 配置");
+  if (!containerYaml) throw new Error(tt("noContainerConfig"));
   const changed = writeConfig(containerYaml);
   const res = start({ force: changed });
-  emit && emit({ phase: "chrome-proxy", status: "running", message: "Chrome 代理(host mihomo)已就绪" });
+  emit && emit({ phase: "chrome-proxy", status: "running", message: tt("ready") });
   return { ok: true, ...res };
 }
 

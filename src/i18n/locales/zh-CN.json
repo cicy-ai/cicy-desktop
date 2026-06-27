@@ -473,5 +473,14 @@
     "health": "启动",
     "done": "完成",
     "open": "打开"
+  },
+  "chromeProxy": {
+    "downloading": "下载 mihomo(Chrome 代理,从 OSS)…",
+    "ready": "Chrome 代理(host mihomo)已就绪",
+    "verifyFailed": "mihomo 下载后校验失败(文件过小)",
+    "containerConfigParseFailed": "容器 mihomo 配置解析失败:{{err}}",
+    "noContainerConfig": "没有拿到容器 mihomo 配置",
+    "binMissing": "mihomo 二进制不存在(先 ensureBinary)",
+    "configMissing": "host 配置不存在(先 writeConfig)"
   }
 }

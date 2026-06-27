@@ -2076,18 +2076,7 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
     } finally { setBusy(""); checkStatus(); }
   }, [checkStatus]);
 
-  // 「Chrome 代理」开关:在宿主起一个 mihomo 给系统 Chrome 的 per-profile 代理(从容器 cp 配置)。
-  const toggleChromeProxy = useCallback(async (on) => {
-    setMenuOpen(false); setBusy("chromeproxy");
-    toast.show({ id: "docker-op", message: on ? tr("docker.chromeProxyOn", "启用 Chrome 代理(宿主 mihomo)…") : tr("docker.chromeProxyOff", "关闭 Chrome 代理…"), status: "running" });
-    try {
-      const r = await window.cicy.docker.appChromeProxy(on);
-      if (r?.ok) toast.show({ id: "docker-op", message: on ? tr("docker.chromeProxyDone", "Chrome 代理已启用 ✅") : tr("docker.chromeProxyUndone", "Chrome 代理已关闭"), status: "done", ttl: 3000 });
-      else toast.show({ id: "docker-op", message: (r?.error || tr("docker.opFailed", "操作失败")), status: "error", ttl: 6000 });
-    } catch (e) {
-      toast.show({ id: "docker-op", message: e.message, status: "error", ttl: 6000 });
-    } finally { setBusy(""); checkStatus(); }
-  }, [checkStatus]);
+  // Chrome 代理已无开关:docker 装好后宿主 mihomo 自动起(后端始终开启、bootstrap 预下载二进制)。
 
   // Render on Windows (WSL2) only. 主人(2026-06 回调): macOS 改回 native cicy-code(:8008),
   // 不再有 Docker 卡 —— mac 的本地团队走 LocalTeamCard。window.cicy.platform is sync.
@@ -2258,15 +2247,7 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
                     {tr("docker.authorizeHost", "授权容器访问 Mac")}
                   </button>
                 )}
-                {/* Chrome 代理:宿主 mihomo 服务系统 Chrome 的 per-profile 代理(mac/win 都有 host Chrome）*/}
-                <button type="button" data-id="DockerCard-chrome-proxy"
-                  className="bcard__menu-item bcard__menu-item--switch"
-                  role="menuitemcheckbox" aria-checked={!!status?.chromeProxy}
-                  title={tr("docker.chromeProxyHint", "在本机起一个 mihomo,给系统 Chrome 的分身代理(127.0.0.1:2000N)。配置从容器同步")}
-                  onClick={() => toggleChromeProxy(!status?.chromeProxy)}>
-                  <span>{tr("docker.chromeProxy", "Chrome 代理")}</span>
-                  <span className={`bcard__switch${status?.chromeProxy ? " is-on" : ""}`} data-id="DockerCard-chrome-proxy-switch" aria-hidden />
-                </button>
+                {/* Chrome 代理已无开关:docker 装好后宿主 mihomo 自动起(始终开启),不再手动切换 */}
                 <button type="button" data-id="DockerCard-docker-restart" className="bcard__menu-item"
                   onClick={() => runOp("restart", () => window.cicy.docker.appDockerRestart(), tr("docker.dockerRestarted", "已重启 Docker 容器"))}>
                   {tr("docker.dockerRestart", "重启 Docker")}

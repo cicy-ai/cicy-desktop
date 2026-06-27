@@ -65,9 +65,10 @@ const cc = (() => { try { return require("../cloud/cloud-client"); } catch { ret
 const DOCKER_TEAMS_FILE = path.join(os.homedir(), "cicy-ai", "db", "docker-teams.json");
 function readDockerTeams() { try { return JSON.parse(fs.readFileSync(DOCKER_TEAMS_FILE, "utf8")) || {}; } catch { return {}; } }
 function writeDockerTeams(obj) { try { fs.mkdirSync(path.dirname(DOCKER_TEAMS_FILE), { recursive: true }); fs.writeFileSync(DOCKER_TEAMS_FILE, JSON.stringify(obj, null, 2)); } catch {} }
-// 「Chrome 代理」开关:在宿主起一个 mihomo(host-mihomo)服务系统 Chrome 的 per-profile 代理,
-// 配置从容器里 cp 出来。按 volume 存 docker-teams.json[volume].chromeProxy。
-function chromeProxyEnabled() { try { return !!(readDockerTeams()[APP_VOLUME] || {}).chromeProxy; } catch { return false; } }
+// 「Chrome 代理」始终开启(主人令:docker 装好就有,不要 Chrome 代理 switch)。docker 装好后
+// 宿主自动起一个 mihomo(host-mihomo)服务系统 Chrome 的 per-profile 代理,配置从容器 cp 出来。
+// 二进制在 bootstrap 时就预下载好;Windows 才有(APP_DOCKER_SUPPORTED)。
+function chromeProxyEnabled() { return APP_DOCKER_SUPPORTED; }
 let dockerTeamReg = null; // { teamId, title, apiKey } — 缓存,appOpts 读它
 
 // docker 团队的权威来源 = cloud(w-10122 #197):POST /api/team/docker/register 按
@@ -161,10 +162,10 @@ function register({ sidecarLogPath } = {}) {
     setInterval(() => { reconcileDocker().catch(() => {}); }, 60000);   // keep fresh + self-heal
   }
 
-  // 宿主 Chrome 代理:开关开着才做。从容器 cp 出 mihomo 配置 → host-mihomo 在宿主起/续。
-  // 已在跑也同步一次配置(容器侧节点可能被云端更新),变了才重启。幂等。
+  // 宿主 Chrome 代理(始终开启):从容器 cp 出 mihomo 配置 → host-mihomo 在宿主起/续。
+  // 已在跑也同步一次配置(容器侧节点可能被云端更新),变了才重启。幂等。二进制不在会自动下。
   async function maybeStartChromeProxy() {
-    if (!chromeProxyEnabled() || !APP_DOCKER_SUPPORTED) return;
+    if (!APP_DOCKER_SUPPORTED) return;
     const yaml = await appDocker.readMihomoConfig(APP_CONTAINER);
     if (hostMihomo.binPresent() && hostMihomo.running()) {
       if (hostMihomo.writeConfig(yaml)) hostMihomo.start({ force: true });
@@ -365,11 +366,17 @@ function register({ sidecarLogPath } = {}) {
     if (!APP_DOCKER_SUPPORTED) return { ok: false, error: "Docker cicy-code 仅支持 Windows" };
     try {
       await ensureDockerTeam(); // 启动前先确保独立云端 team + 拿到它的网关 key(appOpts 用)
-      const result = await appDocker.bootstrap({
-        ...(await appOpts()),
-        onProgress: (ev) => { try { e.sender.send("docker:app-progress", ev); } catch {} },
-      });
-      if (result && result.ok) await registerAppTeam();
+      const emit = (ev) => { try { e.sender.send("docker:app-progress", ev); } catch {} };
+      // docker 起来之前就把宿主 mihomo 二进制下载安装好(给系统 Chrome 代理用,始终开启)。
+      // 纯宿主侧、不依赖容器,和 docker 装机并行;OSS 下载,失败不挡 docker(reconcile 会重试)。
+      try { await hostMihomo.ensureBinary({ emit }); } catch (err) { log.warn(`[chrome-proxy] ensureBinary failed: ${err.message}`); }
+      const result = await appDocker.bootstrap({ ...(await appOpts()), onProgress: emit });
+      if (result && result.ok) {
+        await registerAppTeam();
+        // 容器起来了 → 立刻从容器同步配置并拉起 host mihomo(不必等 60s reconcile)。
+        try { await maybeStartChromeProxy(); } catch (err) { log.warn(`[chrome-proxy] start after bootstrap failed: ${err.message}`); }
+        await refreshDockerStatus().catch(() => {});
+      }
       return result;
     } catch (err) {
       return { ok: false, error: err.message };
@@ -413,25 +420,8 @@ function register({ sidecarLogPath } = {}) {
     } catch (err) { return { ok: false, error: err.message }; }
   });
 
-  // ⋯ menu 开关 → 「Chrome 代理」:在宿主起一个 mihomo 服务系统 Chrome 的 per-profile 代理
-  // (127.0.0.1:2000N)。配置从容器里 cp 出来(含云端下发的真实节点),DNS 关掉、控制口错开。
-  // 容器不再 publish 20001-32(那条路在 colima/WSL 下根本不通)。开关存 docker-teams.json[volume]。
-  ipcMain.handle("docker:app-chrome-proxy", async (e, on) => {
-    if (!APP_DOCKER_SUPPORTED) return { ok: false, error: "Chrome 代理仅支持 Windows" };
-    try {
-      const store = readDockerTeams();
-      store[APP_VOLUME] = { ...(store[APP_VOLUME] || {}), chromeProxy: !!on };
-      writeDockerTeams(store);
-      if (on) {
-        const containerYaml = await appDocker.readMihomoConfig(APP_CONTAINER);
-        await hostMihomo.enable({ containerYaml, emit: (ev) => { try { e.sender.send("docker:app-progress", ev); } catch {} } });
-      } else {
-        hostMihomo.stop();
-      }
-      await refreshDockerStatus().catch(() => {});
-      return { ok: true, chromeProxy: !!on, running: hostMihomo.running() };
-    } catch (err) { return { ok: false, error: err.message }; }
-  });
+  // Chrome 代理已无开关:始终开启(chromeProxyEnabled 恒真),二进制在 bootstrap 预下载,
+  // 容器装好后自动起 host mihomo,reconcile 自愈。docker:app-chrome-proxy 已移除。
 
   // ⋯ menu → 更新 cicy-code: pull the latest cicy-code into the container +
   // restart it (no container recreate). Streams progress to the drawer.
