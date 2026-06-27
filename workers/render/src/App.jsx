@@ -23,13 +23,18 @@ const ACCESS_TOKEN_KEY = "cicy_access_token";
 const USER_ID_KEY = "cicy_user_id";
 const CLOUD_BASE = "https://cicy-ai.com";
 
-// Open a cloud dash page with a CLEAN URL — no token of any kind in the address
-// (主人: 钱包/账单/团队账单 URL 不要带 token,连一次性票据 ?t 也不要). The dash
-// authenticates via the browser's own cicy-ai.com session; if not logged in it
-// bounces through /login and returns. `query` is the part after /dash,
-// e.g. "?view=wallet" or "?team=14".
+// cicy-ai 云端页面(我的钱包/我的帐单/团队帐单/新加团队)统一开在 **profile 1** 的
+// app 内标签里(profile 1 走 proxy),不再用系统外部浏览器。URL 保持 CLEAN —— 不带任何
+// token(主人:钱包/账单/团队账单 URL 不要带 token,连一次性票据 ?t 也不要)。dash 用
+// profile 1 自己的 cicy-ai.com 会话鉴权;没登录会跳 /login 再回来。`query` 是 /dash 之后
+// 的部分,如 "?view=wallet" / "?team=14"。
+const CLOUD_PROFILE = 1; // cicy-ai 云端页面用的 profile(走 proxy)
 async function openCloudPage(query) {
-  try { window.cicy?.shell?.openExternal?.(`${CLOUD_BASE}/dash${query}`); } catch {}
+  const url = `${CLOUD_BASE}/dash${query}`;
+  try {
+    if (window.cicy?.tabs?.openIn) { await window.cicy.tabs.openIn(CLOUD_PROFILE, url, "cicy-ai"); return; }
+    window.cicy?.shell?.openExternal?.(url); // 兜底:旧 preload 没有 openIn 时仍走系统浏览器
+  } catch { try { window.cicy?.shell?.openExternal?.(url); } catch {} }
 }
 
 // ── Toast: lightweight global notifications (bottom-right). Pub/sub store so

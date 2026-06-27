@@ -247,6 +247,17 @@ function register(opts = {}) {
       return { ok: true, winId: r.winId, tabId: r.tabId };
     } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
   });
+  // Open a URL as a tab in a SPECIFIC profile (accountIdx → persist:sandbox-N),
+  // not just profile 0. cicy-ai 云端页面(我的钱包/帐单/团队帐单/新加团队)开在
+  // profile 1(走 proxy),不再用系统浏览器。profile≠0 会开它自己的标签窗口。
+  ipcMain.handle("tabs:openIn", async (_e, input) => {
+    try {
+      const tb = require("../tools/tab-browser-tools");
+      const idx = Number((input && input.accountIdx) || 0) || 0;
+      const r = await tb.openTab(idx, String((input && input.url) || ""), { systemOpen: true, trusted: false, title: (input && input.title) || "" });
+      return { ok: true, winId: r.winId, tabId: r.tabId };
+    } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+  });
   ipcMain.handle("tabs:reload", async (_e, input) => {
     try {
       const tb = require("../tools/tab-browser-tools");

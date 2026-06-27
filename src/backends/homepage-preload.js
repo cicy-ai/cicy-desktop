@@ -213,6 +213,9 @@ contextBridge.exposeInMainWorld("cicy", {
     reload: (url, title) => logInvoke("tabs:reload", { url, title }),
     reloadIfOpen: (url, title) => logInvoke("tabs:reloadIfOpen", { url, title }),
     activateIfOpen: (url) => logInvoke("tabs:activateIfOpen", { url }),
+    // 开在指定 profile(accountIdx → persist:sandbox-N)的 tab 里。cicy-ai 云端页面
+    // 开在 profile 1(走 proxy),不再用系统浏览器。
+    openIn: (accountIdx, url, title) => logInvoke("tabs:openIn", { accountIdx, url, title }),
   },
 
   // ------- new bridges (last rebuild!) -------
