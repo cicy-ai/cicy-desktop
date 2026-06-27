@@ -2822,18 +2822,24 @@ function LocalTeamCard({ team, cloudCode, onOpen, onRename, onRefresh }) {
 
 // True only for the daemon the desktop actually owns — localhost on the
 // sidecar port (8008). Remote nodes / other ports can't be started from here.
+// native cicy-code 本机 sidecar = localhost:8008,**只在 mac/linux**(main.js 里 native
+// 仅非 Windows 启动)。Windows 上没有 native、8008 被 Docker-版占用(见 isDockerApp),所以
+// Windows 上 8008 不算 native —— 否则同一个 8008 docker team 会既进 localList 又进 DockerCard,
+// 渲染出两张卡(且 local 那张不带 live token,打开卡登录页)。两个判定按平台互斥。
 function isLocalSidecar(baseUrl) {
   try {
+    if (window.cicy?.platform === "win32") return false; // Windows 无 native:8008 归 docker
     const p = new URL(baseUrl);
     const local = p.hostname === "127.0.0.1" || p.hostname === "localhost" || p.hostname === "::1";
     return local && (p.port === "8008" || p.port === "");
   } catch { return false; }
 }
 
-// The Docker-版 cicy-code instance — localhost:8008. Owned by <DockerCard>, so
-// it's filtered out of the generic node lists.
+// The Docker-版 cicy-code instance — localhost:8008, **只在 Windows**。Owned by
+// <DockerCard>, so it's filtered out of the generic node lists.
 function isDockerApp(baseUrl) {
   try {
+    if (window.cicy?.platform !== "win32") return false; // docker-版只在 Windows
     const p = new URL(baseUrl);
     const local = p.hostname === "127.0.0.1" || p.hostname === "localhost" || p.hostname === "::1";
     return local && p.port === "8008";
