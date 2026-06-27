@@ -254,7 +254,8 @@ function register(opts = {}) {
     try {
       const tb = require("../tools/tab-browser-tools");
       const idx = Number((input && input.accountIdx) || 0) || 0;
-      const r = await tb.openTab(idx, String((input && input.url) || ""), { systemOpen: true, trusted: false, title: (input && input.title) || "" });
+      // navigate:true → 已有同 /dash tab 时导航到新 query(钱包/帐单/团队帐单切视图)。
+      const r = await tb.openTab(idx, String((input && input.url) || ""), { systemOpen: true, trusted: false, title: (input && input.title) || "", navigate: true });
       return { ok: true, winId: r.winId, tabId: r.tabId };
     } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
   });

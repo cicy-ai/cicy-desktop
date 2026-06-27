@@ -177,7 +177,16 @@ class TabManager {
     const key = url ? stripVol(target) : null;
     if (key) {
       const ex = this.tabs.find((t) => stripVol(t.url) === key);
-      if (ex) { this.activate(ex.id); return ex.id; }
+      if (ex) {
+        // navigate-on-reuse:同 origin+pathname 但完整 URL(含 query)不同时,把已有 tab
+        // 导航过去。cicy-ai 的 我的钱包/我的帐单/团队帐单 都在 /dash、只差 query —— 不导航
+        // 就会命中同一个 /dash tab 却不切视图(点了帐单还显示钱包)。仅 navigate 选项启用,
+        // 团队 tab(stripVol 防 token 漂移、不重载)行为不变。
+        if (opts.navigate && ex.url !== target) {
+          try { ex.view.webContents.loadURL(target); ex.url = target; } catch (e) {}
+        }
+        this.activate(ex.id); return ex.id;
+      }
     }
     // Privilege gate: only the system profile (accountIdx 0) may get a Node-capable
     // preload / <webview>; all other profiles are forced to the sandbox baseline.
@@ -334,7 +343,7 @@ function findManagerByTab(webContentsId) {
 // button / electron_tab_open / the panel can add tabs to profile 0 too.
 async function openTab(accountIdx, url, opts = {}) {
   const m = ensureManager(accountIdx);
-  const id = m.addTab(url, { trusted: !!opts.trusted, home: !!opts.home, title: opts.title || "" });
+  const id = m.addTab(url, { trusted: !!opts.trusted, home: !!opts.home, title: opts.title || "", navigate: !!opts.navigate });
   try { m.win.show(); m.win.focus(); } catch (e) {}
   // 记下这个团队 tab 的 webContentsId(打开 → set;关闭/销毁 → delete)。
   try {
