@@ -463,7 +463,9 @@ directory is where your work actually lives.
 // Windows 路径 C:\Users\<user>\projects → WSL 视图 /mnt/c/Users/<user>/projects。
 function projectsMountArg() {
   try {
-    const winProjects = path.join(os.homedir(), "projects");
+    // 主人令:固定挂 C:\projects(跟当前用户无关,新用户/多用户都一样、路径短好找),
+    // 映射到容器 /home/cicy/projects。WSL 视图 = /mnt/c/projects。
+    const winProjects = "C:\\projects";
     fs.mkdirSync(winProjects, { recursive: true });
     const readme = path.join(winProjects, "README.md");
     if (!fs.existsSync(readme)) { try { fs.writeFileSync(readme, PROJECTS_README); } catch {} }

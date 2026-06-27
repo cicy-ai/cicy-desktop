@@ -211,7 +211,9 @@
     "openFailed": "Open failed",
     "openTitle": "Open Docker team",
     "repairWsl": "Repair WSL",
-    "wslBrokenRepair": "WSL unmanaged · click Repair WSL to reinstall"
+    "wslBrokenRepair": "WSL unmanaged · click Repair WSL to reinstall",
+    "openWslDir": "Open WSL folder",
+    "openProjectsDir": "Open projects folder"
   },
   "common": {
     "close": "Close",

@@ -211,7 +211,9 @@
     "openFailed": "Échec d'ouverture",
     "openTitle": "Ouvrir l'équipe Docker",
     "repairWsl": "Réparer WSL",
-    "wslBrokenRepair": "WSL non géré · cliquez Réparer WSL pour réinstaller"
+    "wslBrokenRepair": "WSL non géré · cliquez Réparer WSL pour réinstaller",
+    "openWslDir": "Ouvrir le dossier WSL",
+    "openProjectsDir": "Ouvrir le dossier projets"
   },
   "common": {
     "close": "Close",

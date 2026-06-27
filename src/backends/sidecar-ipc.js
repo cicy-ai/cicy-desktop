@@ -303,6 +303,25 @@ function register({ sidecarLogPath } = {}) {
   // opening tokenless / with the host token just strands the user at login.
   // 主人原则:打开走的每条命令/输出/错误都要可见(收进 log[] 同时实时 push 到 drawer),
   // 失败给可排查的 hint + 可重试。健壮:全程 try/catch,任何一步都不抛到 ipc 外。
+  // 在资源管理器打开目录。which="projects" → C:\projects(bind 挂载,容器 ~/projects);
+  // 否则 → WSL 卷 \\wsl$\<distro>\…\volumes\<vol>\_data(= 容器 /home/cicy)。
+  ipcMain.handle("docker:open-dir", async (_e, which) => {
+    if (!APP_DOCKER_SUPPORTED) return { ok: false, error: "unsupported" };
+    try {
+      const { shell } = require("electron");
+      let p;
+      if (which === "projects") {
+        p = "C:\\projects";
+        try { fs.mkdirSync(p, { recursive: true }); } catch (e2) {}
+      } else {
+        const distro = process.env.CICY_WSL_DISTRO || "cicy-code-wsl";
+        p = `\\\\wsl$\\${distro}\\var\\lib\\docker\\volumes\\${APP_VOLUME}\\_data`;
+      }
+      const err = await shell.openPath(p); // "" on success, error string on fail
+      return err ? { ok: false, error: err } : { ok: true };
+    } catch (e) { return { ok: false, error: e.message }; }
+  });
+
   ipcMain.handle("docker:app-open", async (e) => {
     if (!APP_DOCKER_SUPPORTED) return { ok: false, error: "unsupported_platform", hint: "Docker cicy-code 仅支持 Windows" };
     const log = [];

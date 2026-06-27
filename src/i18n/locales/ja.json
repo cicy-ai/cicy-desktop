@@ -211,7 +211,9 @@
     "openFailed": "オープン失敗",
     "openTitle": "Docker チームを開く",
     "repairWsl": "WSL を修復",
-    "wslBrokenRepair": "WSL 管理異常 · 「WSL を修復」で再インストール"
+    "wslBrokenRepair": "WSL 管理異常 · 「WSL を修復」で再インストール",
+    "openWslDir": "WSL フォルダを開く",
+    "openProjectsDir": "プロジェクトフォルダを開く"
   },
   "common": {
     "close": "Close",

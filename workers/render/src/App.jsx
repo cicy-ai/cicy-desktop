@@ -2236,6 +2236,14 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
                   onClick={(e) => { e.stopPropagation(); setMenuOpen(false); window.cicy?.tabs?.reloadIfOpen?.("http://127.0.0.1:8009", "Docker 团队"); }}>
                   {tr("docker.reloadWindow", "刷新窗口")}
                 </button>
+                <button type="button" data-id="DockerCard-open-dir" className="bcard__menu-item"
+                  onClick={(e) => { e.stopPropagation(); setMenuOpen(false); window.cicy?.docker?.openDir?.(); }}>
+                  {tr("docker.openWslDir", "打开 WSL 目录")}
+                </button>
+                <button type="button" data-id="DockerCard-open-projects" className="bcard__menu-item"
+                  onClick={(e) => { e.stopPropagation(); setMenuOpen(false); window.cicy?.docker?.openDir?.("projects"); }}>
+                  {tr("docker.openProjectsDir", "打开项目目录")}
+                </button>
                 <button type="button" data-id="DockerCard-billing" className="bcard__menu-item"
                   onClick={() => { setMenuOpen(false); openCloudPage((cloudCode || dockerTeam?.cloud_team_id) ? `?team=${encodeURIComponent(cloudCode || dockerTeam.cloud_team_id)}` : "?view=usage"); }}>
                   {tr("docker.billing", "帐单")}

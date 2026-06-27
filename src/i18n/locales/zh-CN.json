@@ -211,7 +211,9 @@
     "openFailed": "打开失败",
     "openTitle": "打开 Docker 团队",
     "repairWsl": "修复 WSL",
-    "wslBrokenRepair": "WSL 管理异常 · 点「修复 WSL」重装"
+    "wslBrokenRepair": "WSL 管理异常 · 点「修复 WSL」重装",
+    "openWslDir": "打开 WSL 目录",
+    "openProjectsDir": "打开项目目录"
   },
   "common": {
     "close": "关闭",
