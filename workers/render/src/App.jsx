@@ -1758,6 +1758,9 @@ const dockerDrawer = {
   },
   finish({ ok, message, status } = {}) {
     if (!dockerDrawerState) return;
+    // 幂等:已经进了终态就别再 finish(否则 bootstrap emit / runBootstrap 收尾 /
+    // checkStatus 自愈 三条路径各写一遍「已就绪」→ 重复日志)。只第一个终态生效。
+    if (dockerDrawerState.status !== "running") return;
     // status can be forced (e.g. "reboot" — not a failure, just needs a restart).
     const st = status || (ok ? "done" : "error");
     // On FAILURE keep the phase where it actually broke, so the "!" lands on the
