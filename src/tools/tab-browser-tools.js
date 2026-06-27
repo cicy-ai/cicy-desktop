@@ -222,6 +222,21 @@ class TabManager {
       } catch (e) {}
       return { action: "deny" };
     }); } catch (e) {}
+    // 同上的安全考虑,but for 原地导航(will-navigate):profile 0 的特权 tab 若被(页面
+    // 自身 location 跳转 / 重定向 / 点链接)导航到**跨源**地址,preventDefault 并踢到
+    // profile 1 沙箱打开,绝不让带桥的 profile 0 tab 落到外部/localhost 站点。同源导航
+    // (应用自身路由,如团队 app /login→/dash)放行;about: 等放行;解析失败不拦。
+    // will-navigate 只管主框架顶层导航,不影响 SPA in-page(pushState)或子资源/iframe。
+    if (this.accountIdx === 0) {
+      wc.on("will-navigate", (e, u) => {
+        try {
+          let tgt; try { tgt = new URL(u); } catch { return; }
+          if (tgt.protocol === "about:") return;
+          let curOrigin = ""; try { curOrigin = new URL(wc.getURL()).origin; } catch {}
+          if (tgt.origin !== curOrigin) { e.preventDefault(); openTab(1, u); }
+        } catch (err) {}
+      });
+    }
     wc.loadURL(target);
     this.activate(id);
     return id;
