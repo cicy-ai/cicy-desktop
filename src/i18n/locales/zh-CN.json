@@ -444,7 +444,7 @@
     "saveVideoAs": "视频另存为…",
     "copyLink": "复制链接",
     "saveLinkAs": "链接另存为…",
-    "copied": "已复制 Skill 指令",
+    "copied": "已复制 Skill 指令,请粘贴发给 Agent",
     "goBack": "后退",
     "goForward": "前进"
   },
