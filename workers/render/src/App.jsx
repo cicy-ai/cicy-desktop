@@ -2053,7 +2053,14 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
     try {
       const r = await window.cicy?.docker?.appUpdate?.();
       dockerDrawer.finish({ ok: !!r?.ok, message: r?.ok ? tr("docker.updated", "cicy-code 已更新到最新") : (r?.error || tr("docker.updateFailed", "更新失败")) });
-      if (r?.ok) onRefresh?.();
+      if (r?.ok) {
+        onRefresh?.();
+        // update() 返回时 :8008 已健康(waitUntil probeHealth)。立刻:① reload 已打开的
+        // docker tab(reloadIgnoringCache,拿新版 SPA)② 强制重探,卡片版本马上更新(不等
+        // 60s reconcile / 缓存)。
+        try { window.cicy?.tabs?.reloadIfOpen?.("http://127.0.0.1:8008", tr("docker.teamTab", "Docker 团队")); } catch {}
+        try { const s = await window.cicy?.docker?.appRedetect?.(); if (s) setStatus(s); } catch {}
+      }
     } catch (e) {
       dockerDrawer.finish({ ok: false, message: e.message });
     } finally {
