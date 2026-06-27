@@ -567,6 +567,9 @@ function ensureAutostart() {
 function psSingle(s) { return "'" + String(s).replace(/'/g, "''") + "'"; }
 
 function ensureDesktopShortcut(volume = "cicy-team-8009", port = 8009) {
+  // 主人令:不在桌面建 cicy-<port>.lnk 目录快捷方式(别污染桌面)。整体 no-op。
+  return Promise.resolve();
+  // eslint-disable-next-line no-unreachable
   if (process.platform !== "win32") return Promise.resolve();
   return new Promise((res) => {
     // 快捷方式名带 port —— 多个 docker(不同端口)各自一个桌面文件夹快捷方式。
