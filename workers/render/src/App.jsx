@@ -891,6 +891,8 @@ export default function App() {
   const showLocal = tab === "all" || tab === "local";
   const showCustom = tab === "all" || tab === "custom";
   const showCloud = tab === "all" || tab === "cloud";
+  // 首次打开:本地团队与云端团队都还没拉到(都为 null)→ grid 显示 skeleton 占位卡。
+  const firstLoading = localTeams === null && teams === null;
 
   return (
     <div className="shell shell--app">
@@ -992,12 +994,13 @@ export default function App() {
         )}
 
         <div className="app__grid">
-          {showLocal && localList.map((t) => (
+          {firstLoading && [0, 1, 2].map((i) => <SkeletonCard key={"skc" + i} />)}
+          {!firstLoading && showLocal && localList.map((t) => (
             <LocalTeamCard key={"local:" + t.id} team={t} cloudCode={cloudCodeFor(t.cloud_team_id)} onOpen={() => openLocalTeam(t.id)} onRename={renameLocalTeam} onRefresh={fetchLocalTeams} />
           ))}
           {/* native :8008 退役 —— 不再有"本地团队 正在启动"占位卡(native 已删,
               :8008 永远不会起来,占位会一直转)。cicy-code 用下面的 Docker 卡(:8008)。 */}
-          {showLocal && (
+          {!firstLoading && showLocal && (
             <DockerCard
               dockerTeam={dockerTeam}
               onOpen={async () => {
@@ -1336,6 +1339,13 @@ function Header({ me, welcome, onLogout, mitmTeam }) {
       {/* logo 移到 tab-shell 的「我的团队」标签(CICY_LOGO),topbar 不再重复显示品牌 */}
       <div className="user-chip" data-id="UserChip" ref={wrap}>
         {welcome && <span className="welcome">{welcome}</span>}
+        {!me ? (
+          // 首次打开:profile 还没拉到 → avatar/名字用 skeleton 占位
+          <div className="user-chip__trigger user-chip__trigger--skel" data-id="UserChip-skeleton" aria-hidden>
+            <div className="skel skel--avatar" />
+            <div className="skel skel--name" />
+          </div>
+        ) : (
         <button
           type="button"
           data-id="UserChip-trigger"
@@ -1346,6 +1356,7 @@ function Header({ me, welcome, onLogout, mitmTeam }) {
           <span className="user-name">{name}</span>
           <span className="user-chip__caret" aria-hidden>▾</span>
         </button>
+        )}
         {open && (
           <div className="user-chip__menu" data-id="UserChip-menu" role="menu">
             <button type="button" data-id="UserChip-wallet" className="user-chip__menu-item" onClick={() => goDash("?view=wallet")}>
@@ -3110,6 +3121,21 @@ function Brand() {
   );
 }
 
+// 首次加载的团队卡占位骨架(与 .bcard 大致同形:头像圈 + 两行标题 + CTA 条)。
+function SkeletonCard() {
+  return (
+    <div className="bcard bcard--skeleton" data-id="SkeletonCard" aria-hidden>
+      <div className="bcard--skeleton__head">
+        <div className="skel skel--avatar" />
+        <div className="bcard--skeleton__lines">
+          <div className="skel skel--line" style={{ width: "58%" }} />
+          <div className="skel skel--line" style={{ width: "34%", height: 10, marginTop: 8 }} />
+        </div>
+      </div>
+      <div className="skel skel--cta" />
+    </div>
+  );
+}
 function BrandGlyph() {
   // New CiCy mark (六芒星). Rendered white here because it sits on the brand
   // chip's blue→violet gradient square; the full-color gradient version is the

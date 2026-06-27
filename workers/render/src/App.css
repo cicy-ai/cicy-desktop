@@ -327,6 +327,44 @@ body {
 }
 .main::-webkit-scrollbar-thumb:hover { background-color: rgba(125,135,150,.55); }
 
+/* ── 全局自定义滚动条 ──────────────────────────────────────────────────────────
+   Windows 默认滚动条又宽又丑(灰色方块),homepage 里所有滚动区(菜单/弹窗/抽屉/
+   审计日志/列表…)统一成细圆角半透明滚动条。Electron=Chromium,::-webkit-scrollbar
+   生效;scrollbar-* 是兜底。 */
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: rgba(125,135,150,.30);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover { background: rgba(125,135,150,.55); background-clip: padding-box; }
+*::-webkit-scrollbar-corner { background: transparent; }
+* { scrollbar-width: thin; scrollbar-color: rgba(125,135,150,.35) transparent; }
+
+/* ── Skeleton(首次加载占位)──────────────────────────────────────────────────── */
+@keyframes cicy-shimmer {
+  0%   { background-position: -240px 0; }
+  100% { background-position: calc(240px + 100%) 0; }
+}
+.skel {
+  background-color: rgba(255,255,255,.05);
+  background-image: linear-gradient(90deg, rgba(255,255,255,0) 0, rgba(255,255,255,.08) 50%, rgba(255,255,255,0) 100%);
+  background-size: 240px 100%;
+  background-repeat: no-repeat;
+  animation: cicy-shimmer 1.25s ease-in-out infinite;
+  border-radius: 8px;
+}
+.skel--avatar { width: 30px; height: 30px; border-radius: 50%; flex: 0 0 auto; }
+.skel--name { width: 72px; height: 12px; border-radius: 6px; }
+.skel--line { height: 12px; border-radius: 6px; }
+.skel--cta { height: 34px; border-radius: 9px; margin-top: 16px; }
+.user-chip__trigger--skel { display: inline-flex; align-items: center; gap: 10px; cursor: default; }
+.bcard--skeleton { pointer-events: none; }
+.bcard--skeleton__head { display: flex; align-items: center; gap: 12px; }
+.bcard--skeleton__lines { flex: 1; min-width: 0; }
+
 /* ── Tabs row ── */
 .app__tabs {
   display: inline-flex;
