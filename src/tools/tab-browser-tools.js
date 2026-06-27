@@ -208,12 +208,18 @@ class TabManager {
     wc.on("did-finish-load", () => { try { wc.send("window:fullscreen", !!this.win.isFullScreen()); } catch (e) {} });
     wc.on("did-navigate", (_e, u) => { tab.url = u; tab.favicon = ""; this.pushState(); });
     wc.on("did-navigate-in-page", (_e, u) => { tab.url = u; this.pushState(); });
-    // popups / window.open → open as a new tab. In profile 0 the new tab carries
-    // the (inert) electronRPC bridge like any other profile-0 tab; its origin is
-    // still gated by the rpc:guarded consent modal before any tool runs. Sandbox
-    // profiles (accountIdx ≥ 1) never get the bridge, popup or not.
+    // popups / window.open → open as a tab. 安全(防"点链接 = 静默 RCE"):在 profile 0
+    // (系统/特权 profile,tab 带 electronRPC 桥)里被点开的链接 —— 典型是 agent gotty
+    // 打印的网址 —— 一律改到 profile 1 打开。profile 1 是硬沙箱(contextIsolation on /
+    // nodeIntegration off / sandbox on / 无 preload),永远拿不到桥,外部站点零桌面 RPC 面。
+    // 这点尤其关键:localhost/127.0.0.1 在内置白名单里(isTrustedUrl=true → origin gate 免
+    // 弹窗),若落在带桥的 profile 0,攻击者本地端口页可静默调用所有非 exec/file 工具。
+    // 沙箱 profile(accountIdx ≥ 1)自身的 window.open 本就没有桥,仍开成本 profile 的 tab。
     try { wc.setWindowOpenHandler(({ url: u }) => {
-      try { this.addTab(u); } catch (e) {}
+      try {
+        if (this.accountIdx === 0) openTab(1, u); // 特权 profile 的链接 → 沙箱 profile 1
+        else this.addTab(u);                      // 沙箱 profile → 本 profile 内开 tab
+      } catch (e) {}
       return { action: "deny" };
     }); } catch (e) {}
     wc.loadURL(target);
