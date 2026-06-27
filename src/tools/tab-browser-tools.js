@@ -104,6 +104,19 @@ class TabManager {
       webPreferences: { preload: SHELL_PRELOAD, contextIsolation: true, nodeIntegration: false },
     };
     try { winOpts.icon = require("../utils/app-icon").appIconPath(); } catch (e) {}
+    // 新开的非 0 profile 窗口相对原 profile(优先 profile 0)做级联偏移,避免完全压在
+    // 原窗口上(cicy-ai / 点开的链接都开在 profile 1,叠在 profile 0 上会看不出是新窗口)。
+    if (accountIdx !== 0) {
+      try {
+        const ref = managers.get(0) || [...managers.values()].find((m) => m && m.win && !m.win.isDestroyed());
+        if (ref && ref.win && !ref.win.isDestroyed()) {
+          const [rx, ry] = ref.win.getPosition();
+          const OFF = 48 * accountIdx;
+          winOpts.x = rx + OFF;
+          winOpts.y = ry + OFF;
+        }
+      } catch (e) {}
+    }
     this.win = new BrowserWindow(winOpts);
     // profile 0 is the system tab window (teams only) — no manual "+" new tab.
     this.win.loadFile(SHELL_HTML, { query: { p: String(accountIdx), noNew: accountIdx === 0 ? "1" : "0", plat: process.platform } });
