@@ -444,7 +444,9 @@
     "saveVideoAs": "動画を別名で保存…",
     "copyLink": "リンクをコピー",
     "saveLinkAs": "リンクを別名で保存…",
-    "copied": "Skill コマンドをコピーしました"
+    "copied": "Skill コマンドをコピーしました",
+    "goBack": "戻る",
+    "goForward": "進む"
   },
   "dockerOpen": {
     "tokVolHit": "✓ volume から token 取得(試行 {{n}})",

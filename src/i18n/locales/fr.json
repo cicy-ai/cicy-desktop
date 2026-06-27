@@ -444,7 +444,9 @@
     "saveVideoAs": "Enregistrer la vidéo sous…",
     "copyLink": "Copier le lien",
     "saveLinkAs": "Enregistrer le lien sous…",
-    "copied": "Commande Skill copiée"
+    "copied": "Commande Skill copiée",
+    "goBack": "Précédent",
+    "goForward": "Suivant"
   },
   "dockerOpen": {
     "tokVolHit": "✓ Token obtenu depuis le volume (tentative {{n}})",

@@ -63,6 +63,12 @@ const OPTIONS = {
     const profile = part.startsWith("persist:sandbox-") ? (parseInt(part.replace("persist:sandbox-", ""), 10) || 0) : 0;
     // 给 agent 用的一句话指令:带 webContents id + profile id + url + title,让它用 agent-electron 操作。
     const skillPrompt = t("ctxMenu.skillPrompt", { id: wcId, profile, url, title });
+    // 导航:优先用 Electron 新 navigationHistory API,旧版兜底 wc.canGoBack/goBack。
+    const nav = (wc && wc.navigationHistory) || null;
+    const canBack = (() => { try { return nav ? nav.canGoBack() : (wc && wc.canGoBack && wc.canGoBack()); } catch (e) { return false; } })();
+    const canFwd = (() => { try { return nav ? nav.canGoForward() : (wc && wc.canGoForward && wc.canGoForward()); } catch (e) { return false; } })();
+    const goBack = () => { try { nav ? nav.goBack() : (wc && wc.goBack && wc.goBack()); } catch (e) {} };
+    const goForward = () => { try { nav ? nav.goForward() : (wc && wc.goForward && wc.goForward()); } catch (e) {} };
     return [
       { label: t("ctxMenu.webviewId", { id: wcId }), enabled: false },
       { label: t("ctxMenu.copySkillCmd"), click: () => {
@@ -70,6 +76,8 @@ const OPTIONS = {
         injectToast(wc, t("ctxMenu.copied"));
       } },
       { type: "separator" },
+      { label: t("ctxMenu.goBack"), enabled: !!canBack, click: goBack },
+      { label: t("ctxMenu.goForward"), enabled: !!canFwd, click: goForward },
       { label: t("ctxMenu.reload"), click: () => { try { if (wc) wc.reload(); } catch (e) {} } },
       { type: "separator" },
     ];

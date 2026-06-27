@@ -444,7 +444,9 @@
     "saveVideoAs": "Save Video As…",
     "copyLink": "Copy Link",
     "saveLinkAs": "Save Link As…",
-    "copied": "Skill command copied"
+    "copied": "Skill command copied",
+    "goBack": "Back",
+    "goForward": "Forward"
   },
   "dockerOpen": {
     "tokVolHit": "✓ Got token from volume (attempt {{n}})",
