@@ -166,7 +166,7 @@ async function probeLiveness(baseUrl, token) {
     const port = Number(parsed.port) || (parsed.protocol === "https:" ? 443 : 80);
     const open = await probePort(parsed.hostname, port);
     if (!open) return { status: "stopped", version: null, error: "port_closed" };
-    // 探活不用 token(主人): 死活完全由裸 TCP 端口判定。/api/health 仅用来补版本号,**不带 token**
+    // 探活不用 token: 死活完全由裸 TCP 端口判定。/api/health 仅用来补版本号,**不带 token**
     // —— 本地团队真正用的 token 是 ~/cicy-ai/global.json 的 api_token,在 openTeam 时实时拿;若这里
     // 带上 teams.json 里可能已陈旧的快照,旧 token → 401 → 会把活着的守护进程误标成 auth_error。
     // 端口开着就是 running,health 401/超时都不降级。
@@ -226,7 +226,7 @@ async function openTeam(id, opts = {}) {
   if (!node) return { ok: false, error: "team not found" };
   const baseUrl = (node.base_url || "").replace(/\/$/, "");
   if (!baseUrl) return { ok: false, error: "no base_url" };
-  // ?token= 实时拿(主人): 本地团队的 token 就是 ~/cicy-ai/global.json 的 api_token(和 cicy-code
+  // ?token= 实时拿: 本地团队的 token 就是 ~/cicy-ai/global.json 的 api_token(和 cicy-code
   // 共用同一份)—— 打开时**实时读 global.json**,cicy-code 轮换 token 也立刻跟得上,绝不吃 teams.json
   // 里可能已陈旧的快照(陈旧 → ?token= 旧值 → :8008 拒 → 卡登录/白屏)。opts.token(如 :8009 容器
   // 自己实时拿的)优先级最高;非本地团队仍用存的 node.api_token。
@@ -270,7 +270,7 @@ async function openTeam(id, opts = {}) {
 
   // No window yet. Before opening one against a LOCAL sidecar, make sure the
   // daemon is REALLY up (TCP 探活) — opening a window at a not-yet-ready :8008
-  // loads a blank page the user has to manually reload (主人 bug). Start it if
+  // loads a blank page the user has to manually reload (bug). Start it if
   // it isn't running, then poll until it answers; bail (no blank window) if it
   // never comes up. Remote/custom (non-localhost) teams skip this — their page
   // shows its own connecting/login UI.
@@ -381,7 +381,7 @@ function reloadTeam(id, opts = {}) {
 // Close any open window served by the local sidecar (origin
 // http://127.0.0.1:<port> or http://localhost:<port>). Called when the sidecar
 // is STOPPED so a now-dead :8008 team window doesn't linger showing a broken
-// page (主人 bug report: stop 后应关掉 localhost 的 window).
+// page (bug report: stop 后应关掉 localhost 的 window).
 function closeLocalWindows(port = 8008) {
   const origins = new Set([`http://127.0.0.1:${port}`, `http://localhost:${port}`]);
   let closed = 0;
@@ -433,7 +433,7 @@ function normaliseUrl(u) {
 }
 
 // Sync THIS device's local team title to the cloud (desktop→cloud, one-way;
-// 主人 + w-10032 spec). Best-effort: a cloud failure NEVER blocks the local
+// + w-10032 spec). Best-effort: a cloud failure NEVER blocks the local
 // create/rename. Persists the cloud-assigned teamId so later renames UPDATE the
 // same row (POST /api/team/register with teamId) instead of creating dupes.
 // Only local-origin teams sync — a custom remote team isn't "this device's
@@ -467,7 +467,7 @@ async function syncNameToCloud(id) {
       reg = await cc.registerTeam({ teamId: null, title: node.name || "", titleVersion: node.titleVersion || 0 });
     }
     // The cloud assigns this team a sk-cicy- gateway apiKey on register — wire
-    // it (full provider items + CLI routing, 主人 spec) into this machine's
+    // it (full provider items + CLI routing, spec) into this machine's
     // global.json so cicy-code has an LLM key from the moment it starts.
     // Idempotent: injectGatewayKey no-ops when everything is already in place.
     if (reg && reg.ok && reg.apiKey) {
@@ -533,7 +533,7 @@ async function addTeam(spec) {
   let port = null;
   try { port = parseInt(new URL(baseUrl).port, 10) || null; } catch {}
 
-  // 本地团队的 token **不存进 teams.json**(主人): localhost/127.0.0.1/::1 的 cicy-code 与
+  // 本地团队的 token **不存进 teams.json**: localhost/127.0.0.1/::1 的 cicy-code 与
   // cicy-desktop 共用同一份 ~/cicy-ai/global.json,openTeam 打开时**实时读 global.json**(token
   // 轮换即时跟上)。存一份快照只会陈旧 → ?token= 旧值 → :8008 拒 → 卡登录。所以本地一律存 ""
   // (与 :8009 docker 的 skipTokenAutofill 同理),不再自动回填。

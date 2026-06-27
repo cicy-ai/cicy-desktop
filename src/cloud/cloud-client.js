@@ -6,7 +6,7 @@
 //   ② POST /api/team/register     — before a local team starts, get its gateway key
 //   ③ GET  /api/teams             — list the user's cloud + local teams
 //
-// Data model (主人定): user → many devices (win/mac distinguished by a stable
+// Data model (定): user → many devices (win/mac distinguished by a stable
 // per-machine deviceId) → many local teams per device → one gateway key per team.
 //
 // Auth: every call carries `Authorization: Bearer <desktop login token>` — the
@@ -29,7 +29,7 @@ const GATEWAY_URL = process.env.CICY_GATEWAY_URL || "https://gateway.cicy-ai.com
 const GLOBAL_JSON = path.join(os.homedir(), "cicy-ai", "global.json");
 
 // The two provider slots the gateway key must land in, per the contract.
-// Full item templates (主人 spec): cicy-code needs the complete provider
+// Full item templates (spec): cicy-code needs the complete provider
 // entries — protocol, model list, defaultModel — not just a bare key, or the
 // CLIs can't pick a model. apiKey/url are filled in at injection time.
 const GATEWAY_PROVIDER_TEMPLATES = {
@@ -134,7 +134,7 @@ function getDeviceId() {
 
 // Detect egress public IP + that IP's geo region. Runs in the Electron MAIN
 // process where global `fetch` goes DIRECT — it does NOT use the Electron
-// session proxy (主人令: 出口 IP 探测不能走 proxy). Each request has its own
+// session proxy (出口 IP 探测不能走 proxy). Each request has its own
 // timeout via AbortController; never throws (returns empty/partial on failure).
 async function detectIpGeo({ timeoutMs = 4000 } = {}) {
   const tryFetch = async (url) => {

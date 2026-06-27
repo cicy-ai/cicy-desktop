@@ -167,7 +167,7 @@ async function openWindowForBackend(backend, opts = {}) {
   }
 
   registry.markUsed(backend.id);
-  const acct = 0; // all teams open as tabs in profile 0's tab window (主人令)
+  const acct = 0; // all teams open as tabs in profile 0's tab window
   // Open as a TAB in profile 0's tab window (不弹新窗口). trusted=true so the
   // cicy-code SPA gets its electronRPC bridge. Fallback to a real window on any
   // failure so opening a backend is never blocked.

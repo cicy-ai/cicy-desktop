@@ -55,7 +55,7 @@ jobs:
 
       - name: Build WSL rootfs (Ubuntu + Docker, image NOT baked)
         run: |
-          # 主人: image NO LONGER baked into the rootfs. wsl-docker.bootstrap downloads +
+          # image NO LONGER baked into the rootfs. wsl-docker.bootstrap downloads +
           # docker-loads cicy-code-latest.tar.gz at setup (像 mac/colima 那样) → WSL 也拿最新
           # 烤制镜像,且镜像更新不必重下整个 rootfs(rootfs=Ubuntu+Docker 很少变,瘦了 ~169MB)。
           docker pull "${{ inputs.image }}"

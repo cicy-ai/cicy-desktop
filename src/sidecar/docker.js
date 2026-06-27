@@ -204,7 +204,7 @@ function headETag(url, hops = 5) {
 // Marker recording the OSS fingerprint of the image tarball we last `docker load`ed.
 // Lets recreate/bootstrap detect a refreshed OSS image (same `:latest` tag, new
 // content) and re-pull — without it, `imagePresent()` stays true forever and the
-// machine is pinned to a stale image (主人 bug: "为什么没用最新的docker").
+// machine is pinned to a stale image (bug: "为什么没用最新的docker").
 function imageEtagPath() { return path.join(downloadsDir(), "cicy-code-latest.etag"); }
 function readLoadedImageEtag() { try { return fs.readFileSync(imageEtagPath(), "utf8").trim(); } catch { return ""; } }
 function writeLoadedImageEtag(v) { try { fs.writeFileSync(imageEtagPath(), String(v || "")); } catch {} }
@@ -219,7 +219,7 @@ function clearImageTarball() { try { fs.unlinkSync(imageTarballPath()); } catch 
 async function ensureDownloaded(url, dest, mirror, { emit, phase, label, freshOnIncomplete = false } = {}) {
   const expected = (await headSize(url)) || (mirror ? await headSize(mirror) : 0);
   let have = 0; try { have = fs.statSync(dest).size; } catch {}
-  // Complete file already on disk → skip (主人: 完整的 exe/镜像包就别重下了；用户
+  // Complete file already on disk → skip (完整的 exe/镜像包就别重下了；用户
   // 自己下到 ~/Downloads 同名文件也走这条直接复用).
   if (expected > 0 && have === expected) {
     emit && emit({ phase, status: "skip", message: `${label}：已下载，跳过`, progress: 100, received: have, total: expected, url, dest });
@@ -227,7 +227,7 @@ async function ensureDownloaded(url, dest, mirror, { emit, phase, label, freshOn
   }
   // A partial left by a PREVIOUS, interrupted/restarted session can be corrupt;
   // when freshOnIncomplete, delete it and start clean rather than range-resuming
-  // onto a possibly-bad file (主人: 下载被重启打断的残包要删掉重下). Within THIS
+  // onto a possibly-bad file (下载被重启打断的残包要删掉重下). Within THIS
   // session, retries still resume the part we wrote ourselves.
   if (freshOnIncomplete && have > 0 && expected > 0 && have !== expected) {
     try { fs.unlinkSync(dest); } catch {}
@@ -238,7 +238,7 @@ async function ensureDownloaded(url, dest, mirror, { emit, phase, label, freshOn
   let lastPct = -1; // throttle: chunks arrive dozens/s — only emit on whole-percent change
   const attempted = withRetry(async (attempt) => {
     const src = sources[Math.min(attempt - 1, sources.length - 1)];
-    // 断点续传 (主人): resume the partial via a Range request instead of
+    // 断点续传 : resume the partial via a Range request instead of
     // restarting from 0 — efficient on a flaky network. The post-download size
     // check below + loadImage's load-failure cleanup guard against a bad partial.
     await download(src, dest, {
@@ -247,7 +247,7 @@ async function ensureDownloaded(url, dest, mirror, { emit, phase, label, freshOn
         const pct = total ? Math.round((received / total) * 100) : 0;
         if (pct === lastPct) return;
         lastPct = pct;
-        // `url` = source, `dest` = local target path (主人: UI 显示下载目录; lets the
+        // `url` = source, `dest` = local target path (UI 显示下载目录; lets the
         // user drop a manual download at the same path and have it reused).
         emit && emit({ phase, status: "running", message: label, progress: pct, received, total, url: src, dest });
       },
@@ -301,11 +301,11 @@ function probeHealth(port = 8008, timeoutMs = 2500) {
   });
 }
 
-// The R2 image tarball downloads to ~/Downloads (主人: docker image 下到
+// The R2 image tarball downloads to ~/Downloads (docker image 下到
 // ~/Downloads — visible, like the Docker installer on the Desktop). STABLE name
 // (no pid) so a re-run reuses an existing partial/complete file (resume-friendly
 // on a flaky network).
-// Both the Docker installer AND the image tarball download here (主人: 都下到
+// Both the Docker installer AND the image tarball download here (都下到
 // ~/Downloads). If the user manually downloads either file to this folder with
 // the SAME name, ensureDownloaded sees a complete file and skips the download.
 function downloadsDir() {
@@ -317,7 +317,7 @@ function imageTarballPath() {
   return path.join(downloadsDir(), "cicy-code-latest.tar.gz");
 }
 
-// Reuse a Docker Desktop installer the user already dropped in ~/Downloads (主人:
+// Reuse a Docker Desktop installer the user already dropped in ~/Downloads (
 // 我已把 exe 放进 Downloads 了) — skip the (slow) download entirely. Accepts the
 // canonical "Docker Desktop Installer.exe" plus common variants. Returns the
 // path to the largest matching .exe (the real ~600MB installer, not a stub).
@@ -388,7 +388,7 @@ function curlDownload(url, dest, { emit, phase = "image", label = "下载镜像"
 
 // Download the R2 base-env image tarball (no docker needed yet). Split out of
 // loadImage so bootstrap can run this IN PARALLEL with the Docker install
-// (主人: 装 Docker 的同时下载 R2 镜像). Returns the tarball path. Prefers curl
+// (装 Docker 的同时下载 R2 镜像). Returns the tarball path. Prefers curl
 // (much faster here); falls back to the node downloader if curl is unavailable.
 async function downloadImageTarball({ emit } = {}) {
   const dest = imageTarballPath();
@@ -413,11 +413,11 @@ async function downloadImageTarball({ emit } = {}) {
 }
 
 // `docker load` an already-downloaded tarball + re-tag to IMAGE. Needs the
-// daemon up, so this runs AFTER Docker is ready (主人: 再导入 docker).
+// daemon up, so this runs AFTER Docker is ready (再导入 docker).
 async function loadImageFromTarball(tmp, { emit } = {}) {
   // NO progress:100 here — `docker load` is a separate, no-byte-progress step.
   // Emitting 100% made the bar look "done" while the (slow) load was still
-  // running, so the user saw 100% but it wasn't finished (主人 bug). The drawer
+  // running, so the user saw 100% but it wasn't finished (bug). The drawer
   // shows this as the active "导入镜像" step with a spinner instead.
   emit && emit({ phase: "image", status: "loading", message: "正在导入镜像到 Docker（较大，约 1-3 分钟，请稍候）…" });
   console.log(`[docker-sidecar] docker load…`);
@@ -439,7 +439,7 @@ async function loadImageFromTarball(tmp, { emit } = {}) {
     try { await run(["tag", m[1], IMAGE]); console.log(`[docker-sidecar] tagged ${m[1]} -> ${IMAGE}`); }
     catch (e) { console.warn(`[docker-sidecar] re-tag failed: ${e.message}`); }
   }
-  // Keep the tarball in ~/Downloads (主人: 下到 Downloads) — it's a visible,
+  // Keep the tarball in ~/Downloads (下到 Downloads) — it's a visible,
   // resume-friendly cache; imagePresent() gates re-entry so we don't re-load it.
 }
 
@@ -463,7 +463,7 @@ async function checkStatus() {
   return { installed, imagePresent: installed ? await imagePresent() : false };
 }
 
-// Resolve the user's Desktop folder (主人指令: docker-desktop.exe 下到 Desktop).
+// Resolve the user's Desktop folder (docker-desktop.exe 下到 Desktop).
 // %USERPROFILE%\Desktop is the canonical location; OneDrive redirection is rare
 // on the target machines and the file is only a transient installer anyway.
 function desktopDir() {
@@ -495,7 +495,7 @@ async function start({ port = 8008, container = CONTAINER, volume = VOLUME, moun
   try { await run(["rm", "-f", container]); } catch {}
 
   // mountTarget defaults to /home/cicy/cicy-ai (legacy local-team layout); the
-  // Docker-版 instance passes /home/cicy to persist the WHOLE cicy home (主人:
+  // Docker-版 instance passes /home/cicy to persist the WHOLE cicy home (
   // "把整个 docker 挂出来" — everything mutable lives under /home/cicy: global.json,
   // db, agents, files, the npm-installed cicy-code itself).
   const args = [
@@ -527,7 +527,7 @@ async function stop({ container = CONTAINER } = {}) {
 // admin → Windows shows a UAC prompt the user accepts; first run may want a
 // reboot. We download (skip/resume aware) then launch silent and return.
 // `dest` defaults to tmp (the legacy local-team path); the Docker-版 card passes
-// the Desktop folder so the user can see/keep the installer (主人指令).
+// the Desktop folder so the user can see/keep the installer.
 async function installDocker({ emit, dest } = {}) {
   const e = emit || (() => {});
   const target = dest || path.join(os.tmpdir(), "DockerDesktopInstaller.exe");
@@ -683,14 +683,14 @@ async function bootstrap({ onProgress, port = 8008, container = CONTAINER, volum
 
   // 1) Docker running? If not, hand off to Docker's OWN installer / app — it
   // installs the WSL2 backend and handles the reboot far better than we can
-  // (主人: 下载完直接弹官方安装程序，让用户自己装，别搞那么复杂). We don't silent-
+  // (下载完直接弹官方安装程序，让用户自己装，别搞那么复杂). We don't silent-
   // install / auto-WSL / poll for 15 min; we open it, tell the user, and stop.
   // They click 重试 once Docker's whale icon is green.
   if (await dockerOk()) {
     emit({ phase: "install-docker", status: "skip", message: "Docker 已安装，跳过" });
   } else if (!dockerDesktopExe()) {
     // Not installed → use the installer the user already put in ~/Downloads if
-    // present (主人: 我已把 exe 放进 Downloads 了), else download it; then OPEN it.
+    // present (我已把 exe 放进 Downloads 了), else download it; then OPEN it.
     let dest = findExistingInstaller();
     if (dest) {
       emit({ phase: "install-docker", status: "skip", message: `使用 ~/Downloads 里已有的安装包：${path.basename(dest)}`, progress: 100, dest });
@@ -767,6 +767,6 @@ module.exports = {
   launchElevated, wslMissing, ensureWsl,
   // platform-agnostic download/retry primitives, reused by native.js
   ensureDownloaded, curlDownload, withRetry, waitUntil, run, headSize,
-  // image freshness (主人: 修「重建仍用旧镜像」—— 校验 OSS ETag 变了才重下重载)
+  // image freshness (修「重建仍用旧镜像」—— 校验 OSS ETag 变了才重下重载)
   headETag, remoteImageEtag, readLoadedImageEtag, writeLoadedImageEtag, clearImageTarball,
 };

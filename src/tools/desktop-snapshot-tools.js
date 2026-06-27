@@ -6,7 +6,7 @@ const path = require("path");
 // cloud (cicy-code). It returns a base64 JPEG of the whole screen so cicy-code can
 // preview a device's desktop WITHOUT going through exec_shell / file_read.
 //
-// Why a dedicated tool (主人令 + w-10135):
+// Why a dedicated tool (+ w-10135):
 //   exec_*/file_* are in rpc-guard's DANGEROUS_TOOLS, so each call pops the
 //   "敏感操作请求" consent dialog, and on macOS the live `screencapture` shell also
 //   trips the OS Screen-Recording prompt. This tool is NOT dangerous (deliberately

@@ -45,7 +45,7 @@ xattr -cr "$DEST_APP" 2>/dev/null || true
 codesign --force --deep --sign - "$DEST_APP" 2>/dev/null || \
   echo "    (codesign 警告可忽略,quarantine 已清即可打开)"
 
-# 桌面快捷方式(主人: 要快捷方式)+ 启动台/Spotlight 已自动收录(在 /Applications 里)
+# 桌面快捷方式(要快捷方式)+ 启动台/Spotlight 已自动收录(在 /Applications 里)
 ln -sfn "$DEST_APP" "$HOME/Desktop/$APP_NAME.app" 2>/dev/null && echo "==> 桌面快捷方式已建" || true
 
 # ── 3) (可选)预暂存 docker 包 —— 仅当 bundle 里带了 docker/ 时(全离线包)。

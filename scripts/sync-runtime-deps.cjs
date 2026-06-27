@@ -3,7 +3,7 @@
 // cicy-mihomo subpackages, so every cicy-desktop build/publish bundles the
 // newest binaries. Run in CI before install/build (and before `npm publish`).
 //
-// 主人指令 (2026-06-08): Windows no longer ships msys2/tmux — the win sidecar
+// (2026-06-08): Windows no longer ships msys2/tmux — the win sidecar
 // runs the single headless 团队助手 (--helper), so cicy-msys2-* is DROPPED here.
 //
 // Usage: node scripts/sync-runtime-deps.cjs   (writes package.json in place)

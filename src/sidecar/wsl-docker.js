@@ -1,4 +1,4 @@
-// Docker-版 cicy-code via WSL2 + Ubuntu + Docker Engine (主人选定方案 A).
+// Docker-版 cicy-code via WSL2 + Ubuntu + Docker Engine (选定方案 A).
 //
 // Instead of the heavy/fragile Docker Desktop GUI install, we run Docker Engine
 // (Apache-2.0, no licensing) INSIDE a WSL2 Ubuntu distro and drive it with
@@ -22,7 +22,7 @@ const { t } = require("../i18n"); // 打开/读 token 的可见日志走 i18n
 // Dedicated distro name — NEVER reuse/clobber a user's own "Ubuntu" distro.
 const DISTRO   = process.env.CICY_WSL_DISTRO || "cicy-code-wsl";
 const IMAGE    = process.env.CICY_DOCKER_IMAGE || "cicybot/cicy-code:latest";
-// 主人: 容器额外暴露的端口段(给容器内 agent 跑服务用),宿主 127.0.0.1 直达。
+// 容器额外暴露的端口段(给容器内 agent 跑服务用),宿主 127.0.0.1 直达。
 const EXTRA_PORTS = process.env.CICY_EXTRA_PORTS || "18000-19999";
 // PRE-BAKED WSL rootfs (built in CI, .github/workflows/build-wsl-package.yml):
 // Ubuntu 22.04 + Docker Engine + the cicy-code image already loaded into
@@ -75,7 +75,7 @@ function wslRun(cmd, { timeout = 60000, distro = DISTRO } = {}) {
 // rapid output doesn't flood the log; resolves { stdout } with the full tail.
 function wslRunStream(cmd, { emit, phase = "install-docker", timeout = 900000, distro = DISTRO } = {}) {
   return new Promise((resolve, reject) => {
-    // 主人标准: 每步先把「执行的命令是什么」打到 drawer(和 mac 的 `$ brew install …` 一致)。
+    // 标准: 每步先把「执行的命令是什么」打到 drawer(和 mac 的 `$ brew install …` 一致)。
     if (emit) emit({ phase, status: "running", message: `$ ${cmd.length > 200 ? cmd.slice(0, 200) + " …" : cmd}` });
     const child = spawn("wsl", ["-d", distro, "-u", "root", "--", "bash", "-lc", cmd], { windowsHide: true });
     let buf = "", tail = "", last = 0;
@@ -99,7 +99,7 @@ function wslRunStream(cmd, { emit, phase = "install-docker", timeout = 900000, d
   });
 }
 
-// 把失败的真 stderr/stdout 尾巴拼出来(主人标准: "报错是什么" —— 不能只显示 "exit 100")。
+// 把失败的真 stderr/stdout 尾巴拼出来(标准: "报错是什么" —— 不能只显示 "exit 100")。
 // wslRun reject 时把 err.stdout/err.stderr 挂上;这里取最后 ~600 字符贴进 drawer。
 function errTail(e) {
   const s = String((e && (e.stderr || e.stdout)) || "").trim();
@@ -235,7 +235,7 @@ async function installDistro({ emit } = {}) {
   emit && emit({ phase: "container", status: "running", message: "重置运行环境(冷启动)…" });
   try { await wslTerminate(); } catch {}
 
-  // 4) KEEP the rootfs (deletion removed per 主人). Deleting it forced a fresh
+  // 4) KEEP the rootfs (deletion removed per). Deleting it forced a fresh
   //    447MB re-download on every reinstall / new user / clean retry — the main
   //    「怎么这么慢」 pain. We keep it so reinstall reuses it (curlDownload skips a
   //    complete file). Users who want the disk back can delete the tarball manually.
@@ -395,7 +395,7 @@ async function loadImage(winTarballPath, { emit } = {}) {
   if (m && m[1] !== IMAGE) { try { await wslRun(`docker tag ${m[1]} ${IMAGE}`, { timeout: 15000 }); } catch {} }
 }
 
-// 主人修复「卡在旧镜像」: imagePresent() 只看本地有没有 `:latest`,旧镜像在就永远跳过下载。
+// 修复「卡在旧镜像」: imagePresent() 只看本地有没有 `:latest`,旧镜像在就永远跳过下载。
 // 改成校验 OSS tarball ETag:缺镜像、或 ETag 跟上次 load 不一致 → 重下重载(删旧缓存包)。
 // 非破坏性:不删发行版/不删 volume。返回是否真刷新了。与 colima 端逻辑一致。
 async function ensureFreshImage({ emit } = {}) {
@@ -459,11 +459,11 @@ their changes show up live on your machine. The container is disposable — this
 directory is where your work actually lives.
 `;
 
-// 主人: 把宿主 ~/projects 挂进容器 /home/cicy/projects(~ 用 os.homedir() 展开,绝不写死)。
+// 把宿主 ~/projects 挂进容器 /home/cicy/projects(~ 用 os.homedir() 展开,绝不写死)。
 // Windows 路径 C:\Users\<user>\projects → WSL 视图 /mnt/c/Users/<user>/projects。
 function projectsMountArg() {
   try {
-    // 主人令:固定挂 C:\projects(跟当前用户无关,新用户/多用户都一样、路径短好找),
+    // 固定挂 C:\projects(跟当前用户无关,新用户/多用户都一样、路径短好找),
     // 映射到容器 /home/cicy/projects。WSL 视图 = /mnt/c/projects。
     const winProjects = "C:\\projects";
     fs.mkdirSync(winProjects, { recursive: true });
@@ -488,11 +488,11 @@ async function runContainer({ port = 8009, container = "cicy-code-docker", volum
   // bridge container → every lookup is EAI_AGAIN and cicy-code's startup `npm i`
   // crash-loops the container (:8009 never comes up). Pin public resolvers: Aliyun
   // 223.5.5.5 (CN-fast) first, Google 8.8.8.8 as the overseas fallback.
-  // 主人方案: Chrome 的 per-profile 代理改由「宿主 mihomo」(host-mihomo.js)服务,不再从容器
+  // 方案: Chrome 的 per-profile 代理改由「宿主 mihomo」(host-mihomo.js)服务,不再从容器
   // publish 20001-32(WSL/colima 转发那段口到不了容器里只绑 127.0.0.1 的监听)。容器只暴露 :8009。
   // 只发布 :8009(单端口,1 个 docker-proxy)。EXTRA_PORTS 那段 18000-19999(2000 个端口)
   // 已删——docker 默认每端口起一个 userland-proxy 进程 → 2000 进程,docker run 卡死/吃内存/
-  // 偶发失败(主人实测)。容器内 agent 服务需要从 Windows 直达时再按需单独暴露。
+  // 偶发失败(实测)。容器内 agent 服务需要从 Windows 直达时再按需单独暴露。
   const cmd = `docker run -d --name ${container} --restart unless-stopped --dns 223.5.5.5 --dns 8.8.8.8 -p 127.0.0.1:${port}:8008 -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${projectsMountArg()} ${envArgs} ${IMAGE}`;
   emit && emit({ phase: "container", status: "running", message: `$ ${cmd.length > 220 ? cmd.slice(0, 220) + " …" : cmd}` });
   await wslRun(cmd, { timeout: 60000 }); // 失败时 err.stderr 带 docker 真错误 → _bootstrap 的 errTail 显示
@@ -505,7 +505,7 @@ async function runContainer({ port = 8009, container = "cicy-code-docker", volum
 // 8009 rejects it. Retries because right after start the entrypoint may not have
 // written global.json yet; returns "" only if it truly can't be read (callers
 // must then NOT open with a wrong/host token — that strands the user at login).
-// 主人原则:执行什么命令、输出什么、报什么错,全都要可见(onLog),且每一步可重试。
+// 原则:执行什么命令、输出什么、报什么错,全都要可见(onLog),且每一步可重试。
 // onLog({ status, message }) —— 上层把它接进 drawer。不传也安全(默认静默 + 写 log 文件)。
 async function readContainerToken(port = 8009, container = "cicy-code-docker", volume = "cicy-team-8009", { onLog } = {}) {
   const say = (status, message) => {
@@ -569,7 +569,7 @@ function ensureAutostart() {
 function psSingle(s) { return "'" + String(s).replace(/'/g, "''") + "'"; }
 
 function ensureDesktopShortcut(volume = "cicy-team-8009", port = 8009) {
-  // 主人令:不在桌面建 cicy-<port>.lnk 目录快捷方式(别污染桌面)。整体 no-op。
+  // 不在桌面建 cicy-<port>.lnk 目录快捷方式(别污染桌面)。整体 no-op。
   return Promise.resolve();
   // eslint-disable-next-line no-unreachable
   if (process.platform !== "win32") return Promise.resolve();
@@ -596,7 +596,7 @@ function ensureDesktopShortcut(volume = "cicy-team-8009", port = 8009) {
 
 // Composite status for the card.
 async function status(port = 8009) {
-  // **:8009 健康优先,且永不静默**(主人: 出了问题要看得到、能排查):
+  // **:8009 健康优先,且永不静默**(出了问题要看得到、能排查):
   // 先独立 HTTP 探活 —— 哪怕 `wsl --list` 抽风查不到发行版(实测:WSL/Windows 更新会把
   // 正在跑的发行版孤儿化,管理命令报「没有已安装的分发版」,但容器还在后台服务 :8009),
   // 只要 :8009 真健康,就是 running、卡片就给「打开」。同时把这种「服务在跑但 WSL 管不到」
@@ -629,7 +629,7 @@ const BOOTSTRAP_STALL_MS = 6 * 60 * 1000;
 // Full bootstrap. Honest progress + honest terminal (ok only when :port healthy).
 async function bootstrap(opts = {}) {
   if (_bootstrapInFlight) {
-    // 卡死自愈(主人 bug:WSL wedge → in-flight 的 promise 永不 resolve → _bootstrapInFlight
+    // 卡死自愈(bug:WSL wedge → in-flight 的 promise 永不 resolve → _bootstrapInFlight
     // 永不清 → 「重试」永远只返回"正在进行中",彻底锁死)。心跳超过 STALL 阈值就判定僵死,
     // 丢弃它、重起一次;否则正常并发跟随同一进度。
     const stalled = Date.now() - _bootstrapBeat > BOOTSTRAP_STALL_MS;
@@ -649,7 +649,7 @@ async function bootstrap(opts = {}) {
   return _bootstrapInFlight;
 }
 
-// 注意: 默认容器/卷名保持 cicy-team / cicy-code-docker(回退主人实测"现在不行了"的改动)。
+// 注意: 默认容器/卷名保持 cicy-team / cicy-code-docker(回退实测"现在不行了"的改动)。
 // live 路径(docker:app-bootstrap)始终传显式 APP_*(cicy-team-8009)名,不靠这里的默认;
 // 改默认会让既有 cicy-team 卷的装机对不上 → 退回原值。
 async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-docker", volume = "cicy-team", env = {} } = {}) {
@@ -740,7 +740,7 @@ async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-dock
   } else done(true);
 
   // 5) Base image — pre-baked into the package, normally just confirms; but if the
-  //    OSS tarball has a newer build (ETag changed) it refreshes (主人:别卡旧镜像)。
+  // OSS tarball has a newer build (ETag changed) it refreshes (别卡旧镜像)。
   begin("ensure-image");
   try { await ensureFreshImage({ emit }); done(); }
   catch (e) {

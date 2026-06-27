@@ -23,7 +23,7 @@ jobs:
           node-version: "20"
           cache: "npm"
 
-      # cicy-code is NOT built-from-source here anymore (主人 2026-06): bundled
+      # cicy-code is NOT built-from-source here anymore (2026-06): bundled
       # sidecar = the per-platform optionalDependency, seeded by localbin at runtime.
       # The .cicy-code-ref source-build → vendor/cicy-code path was stale + never
       # packaged, so it's removed. Sync just pins optionalDeps to latest.
@@ -36,7 +36,7 @@ jobs:
       - name: Install Electron build dependencies
         run: npm install --save-dev --no-audit electron@41.0.2 electron-builder@26.7.0
 
-      # 主人(2026-06 关键修复): runner 是 x64,npm 只装 linux-x64 的 cicy-code/mihomo →
+      # (2026-06 关键修复): runner 是 x64,npm 只装 linux-x64 的 cicy-code/mihomo →
       # linux-arm64 用户的包里塞的是 x64 二进制。强制把两个 linux 架构都装进 node_modules,
       # electron-builder 两架构都打包,localbin 按用户机器选。必须在所有 npm install 之后。
       - name: Bundle BOTH linux arches of cicy-code/mihomo (runner is single-arch)

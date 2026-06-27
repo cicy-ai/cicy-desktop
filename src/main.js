@@ -297,7 +297,7 @@ const {
 const automationEnabled =
   process.env.CICY_DESKTOP_HTTP === "1" || enableMcp || !!process.env.CICY_MASTER_URL;
 
-// CDP 调试口(9221)默认开(主人令),只绑 127.0.0.1 回环、不暴露到网络。与上面的
+// CDP 调试口(9221)默认开,只绑 127.0.0.1 回环、不暴露到网络。与上面的
 // HTTP/MCP server 解耦:HTTP server 仍按 automationEnabled 控制(避免对外 0.0.0.0
 // 暴露 / 防火墙弹窗),CDP 单独默认开。要关 CDP:显式设 CICY_DESKTOP_CDP=0。
 const cdpEnabled = process.env.CICY_DESKTOP_CDP !== "0";
@@ -638,7 +638,7 @@ const MAC_LAUNCHER_TARGET = path.join(DESKTOP_DIR, "cicy-dektop.command");
 const WINDOWS_LAUNCHER_TARGET = path.join(DESKTOP_DIR, "cicy-desktop.cmd");
 
 function ensureDesktopLauncher() {
-  // Disabled (主人: bug — 桌面别再放快捷方式): this used to drop a dev "npm start"
+  // Disabled (bug — 桌面别再放快捷方式): this used to drop a dev "npm start"
   // launcher on the Desktop EVERY launch — cicy-desktop.cmd on Windows,
   // cicy-dektop.command on macOS. That's unwanted clutter: the app is opened via
   // its installer / Start-menu / Dock shortcut, not this .cmd. No desktop
@@ -880,21 +880,21 @@ electronApp.whenReady().then(async () => {
   setupAppIcons();
   ensureDesktopLauncher();
   ensureAutoLaunch();
-  // 主人(2026-06 方向回调): mac/linux 改回 native cicy-code(:8008,本机直接跑二进制)——
+  // (2026-06 方向回调): mac/linux 改回 native cicy-code(:8008,本机直接跑二进制)——
   // colima VM 在 16G mac 上把内存压垮被 jetsam SIGKILL。Windows 仍走 docker(WSL :8009,
   // 由 sidecar-ipc 管),不在这里起 native。
   if (process.platform !== "win32") {
     const sidecarPort = Number(process.env.CICY_CODE_PORT || 8008);
     const lt = require("./backends/local-teams");
 
-    // 占位卡(主人: "先有一个 :8008 占位"): 开机**立刻无条件**注册本地团队,homepage 永远有
+    // 占位卡("先有一个 :8008 占位"): 开机**立刻无条件**注册本地团队,homepage 永远有
     // 这张卡 —— :8008 没起来时显示「未运行」+ 启动/安装入口(不会再空首页);起来后下面的
     // probe 循环 upsert 一次,状态翻 running + 触发 gateway key/teamId 注入。addTeam 幂等。
     lt.addTeam({ base_url: `http://127.0.0.1:${sidecarPort}`, name: i18n.t("localTeams.defaultName") })
       .then((r) => { if (r && r.id) log.info(`[Sidecar] local team placeholder registered (${r.id})`); })
       .catch((e) => log.warn(`[Sidecar] placeholder register failed: ${e.message}`));
 
-    // **不在 boot 静默 start**(主人 bug 修复): 首次启动要装 Node/brew/tmux 等依赖,必须让
+    // **不在 boot 静默 start**(bug 修复): 首次启动要装 Node/brew/tmux 等依赖,必须让
     // 用户在点「启动并打开」时**看着 drawer 装**(命令/进度/错误/重试)。boot 静默装会:① 用户
     // 看不到卡在哪 ② 和用户点击重复 spawn 抢锁。所以这里只:① 注册占位卡 ② 若 cicy-code 已在
     // 跑(上次保活留下的)就 adopt 刷新状态 + 拿 key/teamId。真正的启动/安装由 sidecar:start
@@ -1394,12 +1394,12 @@ electronApp.on("window-all-closed", () => {
 
 function cleanup() {
   log.info("[Cleanup] shutting down child services");
-  // 退出保活(主人): macOS/Linux 的 native cicy-code(:8008)+ 它的 tmux agent 退出 App 时
+  // 退出保活: macOS/Linux 的 native cicy-code(:8008)+ 它的 tmux agent 退出 App 时
   // 不杀 —— daemon spawn 成 detached,关窗口不打断正在跑的 agent,下次启动 probeExisting
   // adopt 即可。所以这里 **不** cicyCodeSidecar.stop()、**不** pkill cicy-code/tmux。
 
   // Reap only leftover legacy host helpers (ttyd / gotty / code-server) — never the
-  // cicy-code daemon, never tmux, never the Docker engine. 主人: quitting CiCy Desktop
+  // cicy-code daemon, never tmux, never the Docker engine. quitting CiCy Desktop
   // must NOT touch the cicy-code daemon (native :8008 keep-alive) NOR Docker (colima VM /
   // WSL distro — separate background services; the :8009 container is --restart unless-stopped).
   try {

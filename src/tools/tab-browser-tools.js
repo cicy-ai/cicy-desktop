@@ -166,7 +166,7 @@ class TabManager {
     const [w, h] = this.win.getContentSize();
     // Hide the toolbar (address bar) ONLY on the homepage tab — its full-page UI
     // covers y=40 down. Every other tab, INCLUDING profile 0's team tabs, keeps
-    // the address bar (主人令: profile 0 的地址栏不再隐藏 / 不限制).
+    // the address bar (profile 0 的地址栏不再隐藏 / 不限制).
     const top = t.home ? STRIP_H : CHROME_H;
     try { t.view.setBounds({ x: 0, y: top, width: w, height: Math.max(0, h - top) }); } catch (e) {}
   }
@@ -576,7 +576,7 @@ function reloadTabIfOpen(accountIdx, url, opts = {}) {
 }
 
 // 只「激活(置前)」已打开的 tab,不 reload、不拿 token、不开新 tab —— 专给「打开很慢」
-// 用:tab 已经开过就秒切过去(主人:打开了直接 active 那个 tab 就行)。返回是否命中。
+// 用:tab 已经开过就秒切过去(打开了直接 active 那个 tab 就行)。返回是否命中。
 function activateTabIfOpen(accountIdx, url) {
   const key = stripVol(url);
   const wcId = openedWc.get(key);

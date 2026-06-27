@@ -23,7 +23,7 @@ const localbin = require("./localbin");
 const { t } = require("../i18n"); // 安装/升级日志走 i18n(main 进程按 app 语言初始化)
 
 // ── Node runtime bootstrap ───────────────────────────────────────────────────
-// 主人(2026-06): native cicy-code 走 `npx cicy-code`,需要一个**可用**的 Node。但用户
+// (2026-06): native cicy-code 走 `npx cicy-code`,需要一个**可用**的 Node。但用户
 // 机器可能没 node,或 node 太老(实测 josephs 是 node v13/npx6,老 npx 跑不动)。所以:
 // 系统有 node≥20 就用;没有/太老 → 下载 Node 24 到 ~/cicy-ai/runtime/node(免 sudo,
 // 用户自己拥有);下载也失败 → 提示用户去 nodejs.org 自己装。
@@ -44,7 +44,7 @@ const pexec = (cmd, args, timeout) => new Promise((res, rej) => execFile(cmd, ar
 // Returns a bin dir with node+npx (node≥20), or null. emit streams progress to a drawer.
 async function ensureNode({ emit } = {}) {
   const e = emit || (() => {});
-  // 找到/装完 node 就**立刻把它的 bin 放进本进程 PATH 首位**(主人指出的 bug): 否则后续任何不显式
+  // 找到/装完 node 就**立刻把它的 bin 放进本进程 PATH 首位**(指出的 bug): 否则后续任何不显式
   // 传 PATH 的 execFile("npm"/"npx"/"tar"...) 还会命中系统老 node(如 josephs 的 node13)。放在 ensureNode
   // 里 → 所有调用方、所有 return 分支都覆盖,不会漏。
   const adopt = (dir) => {
@@ -91,7 +91,7 @@ async function ensureNode({ emit } = {}) {
 }
 
 // ── 网络环境探测(CN 用 npmmirror,海外用 npmjs)──────────────────────────────
-// 主人(npx 执行前要看本机网络,CN 用 CN mirror): 探 generate_204,能 204(够到 Google/有代理)
+// (npx 执行前要看本机网络,CN 用 CN mirror): 探 generate_204,能 204(够到 Google/有代理)
 // = 海外;超时/失败(GFW)= CN。探一次缓存。CICY_NPM_REGISTRY 覆盖时不探。
 let _cnCache = null;
 function probeIsCN() {
@@ -174,7 +174,7 @@ async function ensureEnv({ emit } = {}) {
     e({ phase: "deps", status: "running", message: t("sidecar.depDone", { dep }) });
   }
 
-  // mihomo 二进制 —— desktop 用自己装的 node24 预装(主人诊断的根因 + 修法):
+  // mihomo 二进制 —— desktop 用自己装的 node24 预装(诊断的根因 + 修法):
   //   cicy-code 装 mihomo 二进制走 `npm pack cicy-mihomo-<os>-<arch>`;josephs 之前是系统 node13
   //   (自带 npm6 太老)→ pack 不下来 → 二进制装不上(cicy-mihomo skill 包装器本身不需要 npm 能装,
   //   但**二进制**需要)。所以这里用 ensureNode 装好的 **node24** 把二进制 `npm pack` 进 runtime store
@@ -231,7 +231,7 @@ function probeExisting(port = DEFAULT_PORT, timeoutMs = 500) {
 
 let child = null;
 
-// 「局域网访问」开关持久化(主人): 存 ~/cicy-ai/runtime/desktop-flags.json 的 public 字段。
+// 「局域网访问」开关持久化: 存 ~/cicy-ai/runtime/desktop-flags.json 的 public 字段。
 // start() 读它决定 npx cicy-code 加不加 --public。renderer 通过 sidecar:getPublic/setPublic 读写。
 const FLAGS_FILE = path.join(os.homedir(), "cicy-ai", "runtime", "desktop-flags.json");
 function readFlags() { try { return JSON.parse(fs.readFileSync(FLAGS_FILE, "utf8")) || {}; } catch { return {}; } }
@@ -244,7 +244,7 @@ function setPublicFlag(on) {
 
 
 async function start({ logPath, port = DEFAULT_PORT, force = false, version = null, emit = null } = {}) {
-  // **永不重复 spawn 活着的实例**(主人 bug 修复): cicy-code 首次启动要 `brew install tmux`
+  // **永不重复 spawn 活着的实例**(bug 修复): cicy-code 首次启动要 `brew install tmux`
   // 等依赖,要几分钟,这期间 :8008 还没 bind。watchdog(:8008 探不到)和用户点「启动」都会
   // 再调 start() —— 如果再 spawn 一个,多个实例抢 brew tmux 的锁 → 全部「环境初始化失败」→
   // :8008 永远起不来。所以:只要我们 spawn 的 child 进程还活着(没 exit),一律复用,绝不再
@@ -254,7 +254,7 @@ async function start({ logPath, port = DEFAULT_PORT, force = false, version = nu
     return child;
   }
 
-  // 主人(2026-06 方向回调): mac 资源吃不消 docker(colima VM 压垮内存被 jetsam 杀)→
+  // (2026-06 方向回调): mac 资源吃不消 docker(colima VM 压垮内存被 jetsam 杀)→
   // macOS/Linux 改回 native cicy-code(:8008,走 `npx cicy-code`)。Windows 仍走 docker。
   if (process.platform === "win32") return null;
 
@@ -269,7 +269,7 @@ async function start({ logPath, port = DEFAULT_PORT, force = false, version = nu
   if (!env0) { console.warn("[cicy-code-sidecar] ensureEnv failed — cannot start"); return null; }
   const { nodeBinDir, registry, mihomoBin } = env0;
 
-  // 2) localbin 模型(主人):`npm pack cicy-code-<plat>` → ~/.local/bin/cicy-code-<ver>-<plat>
+  // 2) localbin 模型:`npm pack cicy-code-<plat>` → ~/.local/bin/cicy-code-<ver>-<plat>
   //    → ad-hoc 签名(arm64 必需) → symlink ~/.local/bin/cicy-code。**直接跑这个 symlink**:
   //    spawn 出来的就是监听 :8008 的进程本身(不再 npx→node→孙进程),child.pid 一杀就净,
   //    版本单一可信。npm 只当下载渠道(ensureEnv 已把 node/npm 放进 process.env.PATH)。
@@ -304,11 +304,11 @@ async function start({ logPath, port = DEFAULT_PORT, force = false, version = nu
     // 注入 MIHOMO_BIN,cicy-code 的 cicy-mihomo 包装器直接用,不再自己 npm pack。
     ...(mihomoBin ? { MIHOMO_BIN: mihomoBin } : {}),
   };
-  // 「局域网访问」开关(主人): 开 → 加 --public,cicy-code 绑 0.0.0.0(同局域网设备可访问,
+  // 「局域网访问」开关: 开 → 加 --public,cicy-code 绑 0.0.0.0(同局域网设备可访问,
   // api_token 仍把关);关 → 默认只绑 127.0.0.1。flag 存 runtime/desktop-flags.json。
   const args = isPublic() ? ["--public"] : [];
   emit && emit({ phase: "cicy-code", status: "running", message: t("sidecar.starting", { lan: isPublic() ? t("sidecar.lanSuffix") : "" }) });
-  // 退出保活(主人):detached + unref → 关 App 不带走 daemon(及其 tmux agent),下次 adopt。
+  // 退出保活:detached + unref → 关 App 不带走 daemon(及其 tmux agent),下次 adopt。
   const detached = process.platform !== "win32";
   child = spawn(exe, args, { stdio, detached, windowsHide: true, env });
   console.log(`[cicy-code-sidecar] spawned ${exe} ${args.join(" ")} pid=${child.pid} port=${port} registry=${registry} public=${isPublic()} detached=${detached} log=${logPath || "(none)"}`);

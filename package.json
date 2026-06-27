@@ -137,7 +137,7 @@
     "zod": "3.25",
     "electron-updater": "6.6.2"
   },
-  "//optionalDependencies": "主人(2026-06 回调): mac/linux 改回 native cicy-code(:8008,colima 在 16G mac 上压垮内存)→ 重新内置 cicy-code-<plat> / cicy-mihomo-<plat>,localbin.fromBundle 零网络 seed(npm 仅作更新通道,带 npmmirror→npmjs 回退)。这些由 scripts/sync-runtime-deps.cjs 在 tag-push 时同步到最新版。npm 的 os/cpu 字段保证每个平台只装自己那份。Windows 仍走 docker(WSL :8009),它那份 cicy-code-windows 用不到但 bundle 着无害。",
+  "//optionalDependencies": "(2026-06 回调): mac/linux 改回 native cicy-code(:8008,colima 在 16G mac 上压垮内存)→ 重新内置 cicy-code-<plat> / cicy-mihomo-<plat>,localbin.fromBundle 零网络 seed(npm 仅作更新通道,带 npmmirror→npmjs 回退)。这些由 scripts/sync-runtime-deps.cjs 在 tag-push 时同步到最新版。npm 的 os/cpu 字段保证每个平台只装自己那份。Windows 仍走 docker(WSL :8009),它那份 cicy-code-windows 用不到但 bundle 着无害。",
   "optionalDependencies": {
     "electron": "41.0.3",
     "cicy-code-darwin-x64": "2.3.22",

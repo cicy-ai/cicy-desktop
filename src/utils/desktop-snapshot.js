@@ -16,7 +16,7 @@
 //            child electron: an RDP session has no DXGI desktop-duplication, so
 //            the in-process (GPU) capturer fails ("Duplication failed"); the GDI
 //            path needs --disable-gpu. We isolate that to a child daemon so the
-//            MAIN app keeps hardware acceleration. (主人令: 不禁用主 app 的 GPU。)
+// MAIN app keeps hardware acceleration. (不禁用主 app 的 GPU。)
 
 const fs = require("fs");
 const path = require("path");
@@ -24,7 +24,7 @@ const os = require("os");
 const { execFileSync, spawn } = require("child_process");
 const electron = require("electron");
 
-const MAX_W = 600; // 主人令: 压到 600 以下宽度
+const MAX_W = 600; // 压到 600 以下宽度
 const QUALITY = 60;
 const DEFAULT_INTERVAL_MS = 8000;
 

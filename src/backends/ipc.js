@@ -175,7 +175,7 @@ function register(opts = {}) {
   ipcMain.handle("app:install-update",  () => { appUpdater.installNow(); return true; });
 
   // Static version info: cicy-desktop's own version + the cicy-code version we
-  // actually ship. 主人(2026-06): the real bundled cicy-code = the per-platform
+  // actually ship. (2026-06): the real bundled cicy-code = the per-platform
   // optionalDependency (localbin.bundledVersion), not the retired `.cicy-code-ref`
   // source-build pin (which was stale + never packaged). Used by the homepage
   // footer to show "CiCy Desktop vX.Y · cicy-code vA.B".
@@ -266,7 +266,7 @@ function register(opts = {}) {
   });
 
   // Like tabs:reload but NEVER opens a new tab — reloads only if a matching tab
-  // is already open, else { ok:false, error:"no_open_window" }. 主人令:刷新窗口
+  // is already open, else { ok:false, error:"no_open_window" }. 刷新窗口
   // 不替用户开窗。所有团队卡(含私有云/共享 TeamCard)的"刷新窗口"走这个。
   ipcMain.handle("tabs:reloadIfOpen", async (_e, input) => {
     try {

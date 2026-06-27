@@ -11,7 +11,7 @@ const path = require("path");
 const { BrowserWindow } = require("electron");
 const log = require("electron-log");
 
-// Fixed homepage window size (主人令: 写死 930*640, 不能 resize).
+// Fixed homepage window size (写死 930*640, 不能 resize).
 const FIXED_WIDTH = 930;
 const FIXED_HEIGHT = 640;
 
@@ -25,7 +25,7 @@ let homepage = null;    // standalone fallback window (only if the tab engine fa
 let homeTabWc = null;   // the homepage's resident-tab webContents (primary path)
 
 // Primary entry: the homepage is the RESIDENT first tab of profile 0's tab
-// browser window (主人令: homepage = profile 0 的起始页). Clicking a team there
+// browser window (homepage = profile 0 的起始页). Clicking a team there
 // opens the team as another tab in the same window. Falls back to a standalone
 // window only if the tab engine throws, so the homepage is never unreachable.
 async function openHomepage() {

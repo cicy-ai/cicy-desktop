@@ -1,7 +1,7 @@
 // Resolve the bundled app icon for BrowserWindow({ icon }).
 //
 // When cicy-desktop runs UNPACKAGED (npx / npm i -g — the mac/win/linux default,
-// 主人令), there is no electron-builder .exe to embed the icon, so every window
+//), there is no electron-builder .exe to embed the icon, so every window
 // falls back to the stock Electron icon unless we point BrowserWindow at our own
 // icon file explicitly. The icons ship in build/ (published — no files[]/​.npmignore
 // excludes it). Windows wants a .ico; linux a .png; macOS takes the dock icon

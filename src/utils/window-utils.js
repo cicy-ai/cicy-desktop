@@ -56,7 +56,7 @@ function setupWindowHandlers(win) {
   initWindowMonitoring(win);
 
   // Non-homepage windows (team / backend windows) close DIRECTLY — a close
-  // actually destroys the window, it does NOT hide it (主人令). Only the
+  // actually destroys the window, it does NOT hide it. Only the
   // homepage is a persistent window; everything created here is disposable and
   // re-openable from the homepage. (Previously these preventDefault()+hide()'d,
   // so "closed" windows lingered hidden forever.)
@@ -317,7 +317,7 @@ function createWindow(options = {}, accountIdx = 1, forceNew = false) {
     proxyRules = config.proxy;
     proxySource = "global";
   }
-  // account 0 = 本地团队共享会话(连 localhost 的 cicy-code)→ **绝不走代理**(主人确认 + 实测白板根因):
+  // account 0 = 本地团队共享会话(连 localhost 的 cicy-code)→ **绝不走代理**(确认 + 实测白板根因):
   // 否则 gotty 终端 ws `ws://127.0.0.1:8008/ttyd/<pane>/ws` 被路由进 chrome 代理(mihomo:20001)→
   // ERR_CONNECTION_REFUSED → webtty slave closed → 终端白板。强制 direct,顺便清掉该持久会话上
   // 可能残留的旧代理(profile-store 之前给 account 0 存过)。

@@ -138,7 +138,7 @@ function provisionElectronFromMirror(bundledDir) {
   const { zip, exe } = electronArtifact();
   const { url, src } = electronZipUrl();
   const curl = isWindows ? "curl.exe" : "curl";
-  // 缓存到 ~/Downloads(主人:下到 Downloads,下过就别再下,最好断点续传):
+  // 缓存到 ~/Downloads(下到 Downloads,下过就别再下,最好断点续传):
   //   • 已完整(大小==远端)→ 直接复用,不再下;
   //   • 没下全(部分)→ curl -C - 断点续传;
   //   • 没有 → 全新下载。下完保留 zip,不删,下次免下。
@@ -170,7 +170,7 @@ function provisionElectronFromMirror(bundledDir) {
     try { fs.chmodSync(path.join(distDir, exe), 0o755); } catch {}
   }
   fs.writeFileSync(path.join(bundledDir, "path.txt"), exe);
-  // 不删 dest:留在 ~/Downloads 缓存,下次免下(主人:下过就别再下)。
+  // 不删 dest:留在 ~/Downloads 缓存,下次免下(下过就别再下)。
 }
 
 // Make sure a USABLE electron exists before spawning the worker. A pre-existing

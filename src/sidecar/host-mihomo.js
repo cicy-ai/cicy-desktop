@@ -5,7 +5,7 @@
 // 127.0.0.1:2000N — which a container CANNOT reliably serve through colima/WSL
 // port-forwarding (the per-profile listeners bind 127.0.0.1 inside the container;
 // publishing the 20001-32 range through colima/Lima never reached them → Chrome
-// got ERR_EMPTY_RESPONSE / connection-closed). 主人方案: run a SECOND mihomo on
+// got ERR_EMPTY_RESPONSE / connection-closed). 方案: run a SECOND mihomo on
 // the HOST, reusing the SAME proxy nodes/rules — we copy the container's
 // mihomo.yaml out (the cloud provisions it with the real upstream nodes), strip
 // it down to just what Chrome needs (listeners + proxies + groups + rules), and

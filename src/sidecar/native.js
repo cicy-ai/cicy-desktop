@@ -17,7 +17,7 @@ const path = require("path");
 
 const docker = require("./docker"); // ensureDownloaded/withRetry/waitUntil/probeHealth/run
 
-// Exe acquisition (主人指令 2026-06-07): the PRODUCT path is npm — the
+// Exe acquisition (2026-06-07): the PRODUCT path is npm — the
 // cicy-code-win32-x64 subpackage (optionalDependency of cicy-code, os/cpu
 // pinned) carries cicy-code.exe, installed via npmmirror with npm's own
 // caching/resume/version management. NO R2 download in product. The R2
@@ -138,7 +138,7 @@ async function start({ port = 8008, logPath = null, emit, version = null } = {})
     PORT: String(port),
     CICY_CODE_PORT: String(port),
   };
-  // --helper removed (主人指令): boot cicy-code in normal mode (full tmux-based
+  // --helper removed : boot cicy-code in normal mode (full tmux-based
   // multi-agent), not the single headless 团队助手.
   const child = spawn(exe, ["--desktop"], { stdio, detached: true, windowsHide: true, env });
   child.unref();

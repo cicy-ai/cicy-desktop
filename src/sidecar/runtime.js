@@ -11,7 +11,7 @@
 //   1. first run: copy out of cicy-desktop's own node_modules — the platform
 //      subpackages are optionalDependencies, so `npm i -g cicy-desktop`
 //      already delivered the right binaries. First start = ZERO network,
-//      ZERO npx (主人指令).
+// ZERO npx.
 //   2. upgrades: `npm pack <pkg>@<ver>` (npmmirror default) → extract into
 //      runtime/<comp>/<ver>/ → caller verifies health → switchCurrent().
 //      The previous version stays on disk for instant rollback.

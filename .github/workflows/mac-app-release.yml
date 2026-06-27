@@ -23,7 +23,7 @@ jobs:
           node-version: "20"
           cache: "npm"
 
-      # cicy-code is NOT built-from-source here anymore. 主人(2026-06): the bundled
+      # cicy-code is NOT built-from-source here anymore. (2026-06): the bundled
       # sidecar = the per-platform optionalDependency (cicy-code-<plat>, prebuilt +
       # arm64 linker-adhoc-signed), seeded at runtime by localbin.fromBundle. The old
       # .cicy-code-ref source-build → vendor/cicy-code path was stale + never packaged
@@ -38,7 +38,7 @@ jobs:
       - name: Install Electron build dependencies in project directory
         run: npm install --save-dev --no-audit electron@41.0.2 electron-builder@26.7.0
 
-      # 主人(2026-06 关键修复): macos-latest runner 是 arm64,`npm install` 的 os/cpu
+      # (2026-06 关键修复): macos-latest runner 是 arm64,`npm install` 的 os/cpu
       # 过滤只装 arm64 的 cicy-code/mihomo 子包 → x64(Intel)的 .pkg 里塞的也是 arm64
       # 二进制 → Intel fresh 装没 :8008(实测 josephs)。这里强制把 BOTH darwin 架构都
       # 装进 node_modules(--force 绕过 EBADPLATFORM),让 electron-builder 两架构都打包,

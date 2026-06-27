@@ -3,7 +3,7 @@
 // Finder, and dock — instead of the stock "Electron".
 //
 // Why this is needed: cicy-desktop runs UNPACKAGED (npx / npm i -g — the
-// mac/win/linux default, 主人令). An unpackaged app borrows the shared
+// mac/win/linux default). An unpackaged app borrows the shared
 // node_modules/electron bundle for its OS identity, so the menu-bar name and
 // the app-switcher icon come from that bundle's Info.plist + electron.icns,
 // NOT from app code. `app.dock.setIcon()` (see tray.js) only repaints the dock

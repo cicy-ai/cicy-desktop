@@ -25,7 +25,7 @@ const CLOUD_BASE = "https://cicy-ai.com";
 
 // cicy-ai 云端页面(我的钱包/我的帐单/团队帐单/新加团队)统一开在 **profile 1** 的
 // app 内标签里(profile 1 走 proxy),不再用系统外部浏览器。URL 保持 CLEAN —— 不带任何
-// token(主人:钱包/账单/团队账单 URL 不要带 token,连一次性票据 ?t 也不要)。dash 用
+// token(钱包/账单/团队账单 URL 不要带 token,连一次性票据 ?t 也不要)。dash 用
 // profile 1 自己的 cicy-ai.com 会话鉴权;没登录会跳 /login 再回来。`query` 是 /dash 之后
 // 的部分,如 "?view=wallet" / "?team=14"。
 const CLOUD_PROFILE = 1; // cicy-ai 云端页面用的 profile(走 proxy)
@@ -267,7 +267,7 @@ export default function App() {
   }, []);
 
   // 全局兜底:任何 bootstrap/安装/修复进度(docker:app-progress)都让 drawer 可见 —— 不管是
-  // 卡片按钮、程序触发、还是 renderer 重连后主进程还在跑。主人原则:后台不出日志 = 耍流氓。
+  // 卡片按钮、程序触发、还是 renderer 重连后主进程还在跑。原则:后台不出日志 = 耍流氓。
   // 只接管「没人开 drawer」的情况(source==="auto"):某个 run*() 自己开的(source==="op")由它
   // 自己 push,这里不插手避免重复。"open" phase 是打开失败报告流,自管,跳过。
   useEffect(() => {
@@ -321,7 +321,7 @@ export default function App() {
   // Used to distinguish "not yet probed" (unknown) from "probed and empty"
   // (cloud-only) in localHelperState below.
   const [localTeamsFetched, setLocalTeamsFetched] = useState(false);
-  // 「新加团队」下拉 + 自定义团队 modal(主人): 点按钮出两个选项——自定义(本 modal 输 url/title)
+  // 「新加团队」下拉 + 自定义团队 modal: 点按钮出两个选项——自定义(本 modal 输 url/title)
   // 或私有云(跳云端团队中心)。自定义走 localTeams.add({base_url,name,api_token})。
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [customOpen, setCustomOpen] = useState(false);
@@ -368,7 +368,7 @@ export default function App() {
       }
       // /api/teams drives the cloud team grid. On a transient failure (network /
       // 5xx) degrade SILENTLY: keep whatever teams we already have and let the
-      // background sync retry — do NOT throw. 主人: 不把报错显示给用户,后台重试。
+      // background sync retry — do NOT throw. 不把报错显示给用户,后台重试。
       // (Throwing here painted the homepage with a red "/api/teams …" error.)
       if (teamsRes?.ok) {
         const teamsBody = JSON.parse(teamsRes.body || "{}"); // bare: { teams: [...] }
@@ -428,7 +428,7 @@ export default function App() {
   }, [refreshCloudTeams]);
 
   // 改私有云的访问地址(host_url)—— 和改名同源,走云端 PATCH /api/teams/<id> {host_url}。
-  // 成功后重拉云端团队,卡片地址即时更新(主人: 私有云可以改 url)。
+  // 成功后重拉云端团队,卡片地址即时更新(私有云可以改 url)。
   const updateCloudTeamUrl = useCallback(async (id, hostUrl) => {
     const at = bearerRef.current;
     const next = String(hostUrl || "").trim();
@@ -447,7 +447,7 @@ export default function App() {
     } catch (e) { return { ok: false, error: e.message }; }
   }, [refreshCloudTeams]);
 
-  // 删除私有云团队(主人):确认后走云端 DELETE /api/teams/{id},成功后重拉云端列表 + toast。
+  // 删除私有云团队:确认后走云端 DELETE /api/teams/{id},成功后重拉云端列表 + toast。
   const deleteCloudTeam = useCallback(async (team) => {
     const at = bearerRef.current;
     if (!at || !window.cicy?.cloud?.fetch) { toast.show({ message: tr("common.noAuth", "未登录"), status: "error", ttl: 5000 }); return; }
@@ -884,7 +884,7 @@ export default function App() {
   // (this device's AND other devices'). On the desktop the 云端 tab must show
   // ONLY cloud teams; local teams come from the local store (localList) and
   // cross-device local aggregation belongs to the web dash, not here.
-  // 主人令:不展示「共享」团队(共享 = 非私有云 且 非个人)。只留 私有云 / 个人。
+  // 不展示「共享」团队(共享 = 非私有云 且 非个人)。只留 私有云 / 个人。
   const cloudList = (teams || []).filter((t) => !t.is_local && t.kind !== "local"
     && (t.kind === "private" || t.team_kind === "personal"));
   const cloudCount = cloudList.length;
@@ -979,7 +979,7 @@ export default function App() {
           </div>
         )}
 
-        {/* Docker 安装卡已下线 (主人令): Windows 走原生 cicy-code.exe --helper,不再用 Docker。 */}
+        {/* Docker 安装卡已下线 : Windows 走原生 cicy-code.exe --helper,不再用 Docker。 */}
         {/* HTTPS 审计 tip(MitmConsentCard)已移入右上角用户菜单(user-chip 下拉)。 */}
 
         {profileError && (
@@ -995,7 +995,7 @@ export default function App() {
           {showLocal && localList.map((t) => (
             <LocalTeamCard key={"local:" + t.id} team={t} cloudCode={cloudCodeFor(t.cloud_team_id)} onOpen={() => openLocalTeam(t.id)} onRename={renameLocalTeam} onRefresh={fetchLocalTeams} />
           ))}
-          {/* 主人: native :8008 退役 —— 不再有"本地团队 正在启动"占位卡(native 已删,
+          {/* native :8008 退役 —— 不再有"本地团队 正在启动"占位卡(native 已删,
               :8008 永远不会起来,占位会一直转)。cicy-code 用下面的 Docker 卡(:8009)。 */}
           {showLocal && (
             <DockerCard
@@ -1003,7 +1003,7 @@ export default function App() {
               onOpen={async () => {
                 // Always open via the live-token path: re-reads the container's
                 // own api_token and refuses to open a tokenless/host-token page
-                // (主人: 必须拿到 token 才能打开,否则被卡在登录页).
+                // (必须拿到 token 才能打开,否则被卡在登录页).
                 try {
                   const r = await window.cicy?.docker?.appOpen?.();
                   if (!r?.ok) toast.show({ id: "docker-open", status: "error", ttl: 6000, message: tr("docker.openNoToken", "服务还没就绪,稍等几秒再点「打开」(或用卡片菜单「重启」)。") });
@@ -1309,7 +1309,7 @@ function Header({ me, welcome, onLogout, mitmTeam }) {
   const [termsOpen, setTermsOpen] = useState(false);
   const [appVer, setAppVer] = useState("");
   const wrap = useRef(null);
-  // cicy-desktop's own version, shown at the very bottom of this menu (主人).
+  // cicy-desktop's own version, shown at the very bottom of this menu.
   // app.getVersion() returns { desktop, cicyCodeRef, electron, node } — pick the
   // desktop version string (was rendering as [object Object]).
   useEffect(() => {
@@ -1566,7 +1566,7 @@ function MitmConsentCard({ team, variant }) {
 
   // Menu variant: a single flat row matching the user-chip dropdown items —
   // label + state dot on the left, a quiet on/off toggle on the right. No big
-  // card, no portal pill. Used inside the user menu (主人: tip 要和 menu 风格统一).
+  // card, no portal pill. Used inside the user menu (tip 要和 menu 风格统一).
   if (variant === "menu") {
     const toggle = (e) => {
       e?.stopPropagation?.();
@@ -1746,7 +1746,7 @@ const dockerDrawer = {
     const isDl = phase === "install-docker" || phase === "image";
     // Any download-related event (running %, skip, done — they carry url/dest)
     // drives a per-phase PROGRESS BAR, not a log line, so the log doesn't
-    // scroll-spam (主人: 下载不要输出滚动/日志太多).
+    // scroll-spam (下载不要输出滚动/日志太多).
     if (isDl && (hasPct || ev.dest || ev.url)) {
       const prev = dockerDrawerState.bars?.[phase] || {};
       const progress = hasPct ? ev.progress : (ev.status === "skip" || ev.status === "done") ? 100 : prev.progress;
@@ -1771,7 +1771,7 @@ const dockerDrawer = {
     // On FAILURE keep the phase where it actually broke, so the "!" lands on the
     // failing step (e.g. 启动服务) and earlier steps stay ✓. Only success/reboot
     // advance to the 完成 step — a step literally named "完成" showing 安装失败 is
-    // nonsense (主人 bug: "为什么安装失败了,还完成").
+    // nonsense (bug: "为什么安装失败了,还完成").
     const phase = st === "error" ? dockerDrawerState.phase : "done";
     const line = { id: ++dockerDrawerLogSeq, t: clockHHMMSS(), phase, status: st, message: message || (ok ? "完成" : "失败") };
     // Pop back open on finish so the user sees the result even if minimized.
@@ -1791,7 +1791,7 @@ function fmtBytes(n) {
   return (n / 1073741824).toFixed(2) + " GB";
 }
 // One fixed (non-scrolling) progress bar per download (Docker Desktop / image),
-// showing the source URL + % + bytes (主人: 下载做进度条、显示地址、不要滚动).
+// showing the source URL + % + bytes (下载做进度条、显示地址、不要滚动).
 function DownloadBar({ phaseKey, bar }) {
   const pct = Number.isFinite(bar?.progress) ? Math.max(0, Math.min(100, bar.progress)) : 0;
   const done = pct >= 100;
@@ -1869,7 +1869,7 @@ function DockerInstallDrawerHost() {
         )}
 
         {/* Prominent "what's happening NOW" line — so a download bar at 100% is
-            never mistaken for the whole flow being done (主人 bug). */}
+            never mistaken for the whole flow being done (bug). */}
         {running && st.logs.length > 0 && (
           <div className="drawer__now" data-id="DockerDrawer-now">
             <Spinner /><span>{st.logs[st.logs.length - 1].message}</span>
@@ -1920,7 +1920,7 @@ function DockerInstallDrawerHost() {
 // Docker-版 cicy-code card (Windows only): a SECOND cicy-code instance running
 // in Docker on :8009, alongside the native local daemon (:8008). If Docker
 // Desktop is missing, the install flow downloads its installer to the user's
-// Desktop and runs it (主人指令), streaming progress through the drawer above.
+// Desktop and runs it, streaming progress through the drawer above.
 function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRefresh }) {
   const [status, setStatus] = useState(null);
   const [busy, setBusy] = useState("");   // "" | bootstrap | restart | stop | upgrade | probe
@@ -2015,7 +2015,7 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
   }, [checkStatus, onRefresh]);
 
   // Upgrade: re-pull the R2 image + recreate the container — also through the
-  // drawer so the user sees the pull/import/restart log (主人: 升级要能看日志).
+  // drawer so the user sees the pull/import/restart log (升级要能看日志).
   const runUpgrade = useCallback(async () => {
     setMenuOpen(false); setBusy("upgrade");
     dockerDrawer.open({ onRetry: runUpgrade });
@@ -2083,19 +2083,19 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
 
   // Chrome 代理已无开关:docker 装好后宿主 mihomo 自动起(后端始终开启、bootstrap 预下载二进制)。
 
-  // Render on Windows (WSL2) only. 主人(2026-06 回调): macOS 改回 native cicy-code(:8008),
+  // Render on Windows (WSL2) only. (2026-06 回调): macOS 改回 native cicy-code(:8008),
   // 不再有 Docker 卡 —— mac 的本地团队走 LocalTeamCard。window.cicy.platform is sync.
   const platform = window.cicy?.platform || status?.platform;
   if (platform !== "win32") return null;
 
-  // Distinct states (主人: 状态分清楚):
+  // Distinct states (状态分清楚):
   //   running       — :8009 container healthy → 打开
   //   dockerRunning — engine up, no container → 启动 (build/start container)
   //   installed     — Docker on disk but engine down → 启动 Docker
   //   else          — not installed → 下载安装
   // 有 live status 就信它;status 还没加载到(null)才用 dockerTeam 快照兜底。
   // 否则 teams.json 里陈旧的 status:"running" 会盖过「容器其实已停/:8009 down」的真实
-  // 状态 → 卡片显示死「打开」(点了必失败)。主人: 真相单一,以 live 探测为准。
+  // 状态 → 卡片显示死「打开」(点了必失败)。真相单一,以 live 探测为准。
   const running = status ? !!status.running : (dockerTeam?.status === "running");
   const dockerRunning = !!status?.dockerRunning;
   const installed = !!status?.installed;
@@ -2145,7 +2145,7 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
     // WSL 孤儿化 → 走「修复」(bootstrap 杀僵尸端口 + wsl --shutdown + 重新 import),不进打开。
     if (wslUnmanaged) { runBootstrap(); return; }
     if (realRunning) {
-      // 主人令:打开很慢 → 先探这个 :8009 tab 开过没。开过(openedWc 里有它的
+      // 打开很慢 → 先探这个 :8009 tab 开过没。开过(openedWc 里有它的
       // webContentsId)就**直接 active 秒切**,不再拿 token / 注册 team(那是慢的根)。
       try {
         const r = await window.cicy?.tabs?.activateIfOpen?.("http://127.0.0.1:8009");
@@ -2381,13 +2381,13 @@ function LocalTeamCard({ team, cloudCode, onOpen, onRename, onRefresh }) {
   const running = team.status === "running";
   const [busy, setBusy] = useState("");   // "" | start | restart | update | stop | lan
   const [menuOpen, setMenuOpen] = useState(false);
-  // 局域网访问开关(主人): cicy-code --public 状态。仅本地团队;初始从 sidecar.getPublic() 读。
+  // 局域网访问开关: cicy-code --public 状态。仅本地团队;初始从 sidecar.getPublic() 读。
   const [lanOn, setLanOn] = useState(false);
   useEffect(() => {
     if (!local || !window.cicy?.sidecar?.getPublic) return;
     window.cicy.sidecar.getPublic().then((r) => setLanOn(!!r?.public)).catch(() => {});
   }, [local]);
-  // cicy-code 版本统一从 sidecar.versions() 一处拿(主人令:"拿版本就一个方法")。
+  // cicy-code 版本统一从 sidecar.versions() 一处拿("拿版本就一个方法")。
   // running===undefined = 还没查到(用于区分"加载中" vs "停了/拿不到");区别于
   // running===null(查过了但 daemon 没报版本)。latest/installed 同源。
   const [versions, setVersions] = useState({ running: undefined, latest: null, installed: null });
@@ -2549,14 +2549,14 @@ function LocalTeamCard({ team, cloudCode, onOpen, onRename, onRefresh }) {
   };
   const BUSY_LABEL = { start: tr("busy.start", "启动中…"), restart: tr("busy.restart", "重启中…"), update: tr("busy.update", "更新中…"), stop: tr("busy.stop", "停止中…") };
 
-  // 打开 flow (主人 spec): start the LOCAL daemon if it's down (with a 启动中…
+  // 打开 flow (spec): start the LOCAL daemon if it's down (with a 启动中…
   // toast), then open. The window itself is opened by openTeam() in main, which
   // (1) reuses an already-open window for this team (list_windows check first),
   // and (2) for a local team, TCP-探活 until :8008 actually answers before
   // creating the window — so we never pop a blank page that needs a manual
   // reload. (/api/health is NOT used — it's unreliable mid-boot; the gate is a
   // raw TCP probe.) Remote/custom teams just open and show their own UI.
-  // 启动本地 cicy-code,带**安装进度抽屉**(主人: 首次要装 Node + cicy-code 自己 brew 装
+  // 启动本地 cicy-code,带**安装进度抽屉**(首次要装 Node + cicy-code 自己 brew 装
   // tmux 依赖,几分钟,必须让用户看见执行什么命令/卡在哪/出什么错,且能重试)。
   // sidecar:start 会流式 emit:Node 下载命令 + npx cicy-code + brew 装依赖的日志逐行推过来。
   const runStartFlow = async () => {
@@ -2858,7 +2858,7 @@ const LOCAL_STATUS = {
   error:         { tone: "err",  label: "error",      cta: tr("localStatus.error", "异常") },
 };
 
-// 共享确认弹窗(主人):所有删除统一走这里,不再内联两段式。createPortal 到 body,不受卡片层叠限制。
+// 共享确认弹窗:所有删除统一走这里,不再内联两段式。createPortal 到 body,不受卡片层叠限制。
 function ConfirmModal({ open, title, message, confirmLabel, danger, onConfirm, onCancel }) {
   if (!open) return null;
   return createPortal(
@@ -2945,7 +2945,7 @@ function TeamCard({ team, onOpen, onRename, onEditUrl, onDelete }) {
   // 刷新窗口:三卡完全同一逻辑——tabs.reloadIfOpen 按 URL 找开着的 tab 就 reload,
   // 没开就不操作(不偷偷开新窗)。
   const doReload = (e) => { e?.stopPropagation?.(); if (!hasUrl) return; setMenuOpen(false); window.cicy?.tabs?.reloadIfOpen?.(openUrl, name); };
-  // 删除确认弹窗(主人):私有云 team 删除必须确认,走 ConfirmModal。
+  // 删除确认弹窗:私有云 team 删除必须确认,走 ConfirmModal。
   const [confirmDel, setConfirmDel] = useState(false);
   const startEditUrl = () => { setUrlDraft(hostUrl); setEditingUrl(true); setMenuOpen(false); };
   const commitUrl = async () => {
@@ -2955,7 +2955,7 @@ function TeamCard({ team, onOpen, onRename, onEditUrl, onDelete }) {
     setPendingUrl(next);
     try { const r = await onEditUrl(team.id, next); if (!r?.ok) setPendingUrl(null); } catch { setPendingUrl(null); }
   };
-  // 主人令:私有云卡片不展示 api key(安全)。key 只在云端 dash / 注入 global.json 用。
+  // 私有云卡片不展示 api key(安全)。key 只在云端 dash / 注入 global.json 用。
   return (
     <>
     <div data-id="TeamCard" className={`bcard bcard--cloud${statusOk ? " bcard--online" : ""}`}>

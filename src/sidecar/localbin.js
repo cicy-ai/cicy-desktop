@@ -1,6 +1,6 @@
 // ~/.local/bin install model for the binaries cicy-desktop OWNS.
 //
-// 主人指令 (2026-06): cicy-desktop OWNS its runtime binaries and distributes
+// (2026-06): cicy-desktop OWNS its runtime binaries and distributes
 // them THROUGH npm — one channel for everything. Today that's two components:
 //
 //   cicy-code  ← npm  cicy-code-<plat>     → ~/.local/bin/cicy-code
@@ -14,7 +14,7 @@
 // — never `npx`, which would reuse a stale globally-installed copy and shadow
 // updates.
 //
-// Semantics (主人指令): 有就不装、没有就装、版本高了就更新、不重复下载/更新.
+// Semantics : 有就不装、没有就装、版本高了就更新、不重复下载/更新.
 //   - present & current     → reuse, no work, no network
 //   - absent                → seed from the bundle (zero network)
 //   - bundle newer than link → re-seed from the bundle (zero network upgrade,
@@ -39,7 +39,7 @@ const IS_WIN = process.platform === "win32";
 const NPMMIRROR = "https://registry.npmmirror.com"; // CN-fast
 const NPMJS = "https://registry.npmjs.org";         // 官方,新版本/新子包先到这
 
-// 主人(2026-06): 按网络环境选 registry 顺序,两边都用各自最快的源(对方做回退)。
+// (2026-06): 按网络环境选 registry 顺序,两边都用各自最快的源(对方做回退)。
 //   CN(GFW 内):npmmirror 优先 → npmjs 兜底
 //   非CN:        npmjs 优先     → npmmirror 兜底(npmmirror 海外慢,别让它当首选)
 // 判断:探 generate_204 —— 能 204(够到 Google/有代理)= 非CN;超时/失败 = CN。探一次缓存。

@@ -1,5 +1,5 @@
 // cicy-code 版本的唯一读法。三个概念一个模块,别处不准再自己解析 /api/health、
-// 也不准再直连 npm 拿版本(主人令:"拿版本就一个方法")。
+// 也不准再直连 npm 拿版本("拿版本就一个方法")。
 //   running(port) → 活着的 daemon 在 /api/health 报的版本(“正在跑什么”的唯一真相)
 //   latest()      → npm 上最新版(和 update() 升级到的同一个号)
 //   installed()   → 磁盘 binary 版本(localbin manifest,诊断用)

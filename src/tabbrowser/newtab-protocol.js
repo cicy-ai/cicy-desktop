@@ -1,6 +1,6 @@
 // cicy://newtab — the tab browser's start page, served via a custom scheme so a
 // new tab's URL is a clean "cicy://newtab" instead of a giant inline data: URL
-// (主人令: url 不要那串 data: 天书). Chrome's chrome://newtab analog.
+// (url 不要那串 data: 天书). Chrome's chrome://newtab analog.
 const { protocol, session } = require("electron");
 const _handled = new WeakSet(); // sessions that already have the cicyui handler
 

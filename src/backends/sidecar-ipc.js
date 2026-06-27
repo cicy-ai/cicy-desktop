@@ -30,7 +30,7 @@ const hostMihomo = require("../sidecar/host-mihomo"); // 宿主侧 mihomo ——
 // (bootstrap/status/restart/stop/dockerRestart/recreate/update/upgrade/runContainer/
 // readContainerToken),所以下面的 handler 共用一份逻辑,只换底层模块。
 const appDocker = process.platform === "darwin" ? colimaDocker : wslDocker;
-// Docker-版 cicy-code 只剩 Windows(WSL2)。主人(2026-06 回调): macOS 改回 native cicy-code
+// Docker-版 cicy-code 只剩 Windows(WSL2)。(2026-06 回调): macOS 改回 native cicy-code
 // (:8008,colima 在 16G mac 上压垮内存被 jetsam 杀)→ darwin 不再走 docker,这里不放行,
 // 所有 docker:app-* handler / reconcile / chrome-proxy 在 mac 上全部 no-op,DockerCard 不显示。
 const APP_DOCKER_SUPPORTED = process.platform === "win32";
@@ -42,7 +42,7 @@ const PORT = Number(process.env.CICY_CODE_PORT || 8008);
 // :8008. The homepage "Docker cicy-code" card owns its lifecycle; if Docker
 // Desktop is missing the card installs it first (installer downloads to the
 // user's Desktop). The whole cicy home is persisted to a named volume so the
-// entire container state survives recreation (主人: "把整个 docker 挂出来").
+// entire container state survives recreation ("把整个 docker 挂出来").
 const APP_PORT = Number(process.env.CICY_DOCKER_APP_PORT || 8009);
 // container / volume 名都带上 port —— 一台机可以跑多个 docker(不同端口),各自
 // 独立容器 + 独立 volume(数据隔离)+ 独立云端 team。docker-teams.json 也按 volume
@@ -55,7 +55,7 @@ const APP_MOUNT = process.env.CICY_DOCKER_APP_MOUNT || "/home/cicy";
 const GATEWAY_ENDPOINT = process.env.CICY_AI_GATEWAY_LLM_ENDPOINT || "https://gateway.cicy-ai.com";
 
 // ── Docker 独立云端 team ──────────────────────────────────────────────────────
-// 主人令(2026-06-21):每个 Docker 容器要有自己独立的云端 team(8008 那个本机
+// (2026-06-21):每个 Docker 容器要有自己独立的云端 team(8008 那个本机
 // local team 不动)。云端是「一 deviceId 一 local team」,装不下一机多 docker,所以
 // docker 走 POST /api/teams 建**独立 team**(不按 device)。首次建一次、把 teamId 存
 // 本机(~/cicy-ai/db/docker-teams.json,按 volume 区分多个 docker);之后用 teamId 现
@@ -65,7 +65,7 @@ const cc = (() => { try { return require("../cloud/cloud-client"); } catch { ret
 const DOCKER_TEAMS_FILE = path.join(os.homedir(), "cicy-ai", "db", "docker-teams.json");
 function readDockerTeams() { try { return JSON.parse(fs.readFileSync(DOCKER_TEAMS_FILE, "utf8")) || {}; } catch { return {}; } }
 function writeDockerTeams(obj) { try { fs.mkdirSync(path.dirname(DOCKER_TEAMS_FILE), { recursive: true }); fs.writeFileSync(DOCKER_TEAMS_FILE, JSON.stringify(obj, null, 2)); } catch {} }
-// 「Chrome 代理」始终开启(主人令:docker 装好就有,不要 Chrome 代理 switch)。docker 装好后
+// 「Chrome 代理」始终开启(docker 装好就有,不要 Chrome 代理 switch)。docker 装好后
 // 宿主自动起一个 mihomo(host-mihomo)服务系统 Chrome 的 per-profile 代理,配置从容器 cp 出来。
 // 二进制在 bootstrap 时就预下载好;Windows 才有(APP_DOCKER_SUPPORTED)。
 function chromeProxyEnabled() { return APP_DOCKER_SUPPORTED; }
@@ -179,7 +179,7 @@ function register({ sidecarLogPath } = {}) {
     return { running };
   });
 
-  // The ONE place the homepage gets cicy-code versions (主人令:"拿版本就一个方法").
+  // The ONE place the homepage gets cicy-code versions ("拿版本就一个方法").
   //   running   → the live daemon's /api/health version ("正在跑什么"的唯一真相)
   //   latest    → newest on npm (same number 更新 upgrades to)
   //   installed → on-disk binary (manifest)
@@ -232,7 +232,7 @@ function register({ sidecarLogPath } = {}) {
   });
 
   // ---- Docker-版 cicy-code on :8009 — WSL2 + Ubuntu + Docker Engine (方案 A) ----
-  // Card states (主人: 状态分清楚): running(:8009 healthy)→打开 / dockerRunning
+  // Card states (状态分清楚): running(:8009 healthy)→打开 / dockerRunning
   // (engine up)→启动 / installed(Ubuntu present)→启动 Docker / else→下载安装.
   ipcMain.handle("docker:app-status", () => {
     // NON-BLOCKING: return what the background daemon already computed (memory →
@@ -255,7 +255,7 @@ function register({ sidecarLogPath } = {}) {
   });
 
   // Common run options for the :8009 instance: its own container/volume + the LLM
-  // gateway env. 主人: :8009 必须用「它自己独立云端 team」的 key —— ensureDockerTeam
+  // gateway env. :8009 必须用「它自己独立云端 team」的 key —— ensureDockerTeam
   // 没建就建(createTeam),用那个 teamId 的 key。绝不借别人的(native :8008 已退役,
   // 没得借,也不许借)。所以 appOpts 是 async:先 await ensureDockerTeam,确保容器启动
   // 前自己的 key 已就位;拿不到(未登录)就先不带 key,登录后「重建 Docker」再带上。
@@ -271,7 +271,7 @@ function register({ sidecarLogPath } = {}) {
   // fall back to the host 8008 token (addTeam auto-fills global.json on an empty
   // api_token — that's the host credential, which 8009 rejects → login screen).
   // Returns the team id, or {ok:false} when the container token can't be read.
-  // Register the :8009 team WITHOUT a token. 主人: teams.json 不存 8009 的 token;
+  // Register the :8009 team WITHOUT a token. teams.json 不存 8009 的 token;
   // docker 的 token 是实时拿的. skipTokenAutofill stops addTeam from back-filling
   // the HOST 8008 token (the bug that made 8009 verify with 8008's token → login).
   const registerAppTeam = async () => {
@@ -299,10 +299,10 @@ function register({ sidecarLogPath } = {}) {
   };
 
   // Card「打开」→ read the container's OWN token LIVE from its volume right now,
-  // then open the tab with THAT token. Never a stored/host token (主人: 打开前去
+  // then open the tab with THAT token. Never a stored/host token (打开前去
   // docker 里实时拿 token 再 open tab). Refuse to open if it can't be read —
   // opening tokenless / with the host token just strands the user at login.
-  // 主人原则:打开走的每条命令/输出/错误都要可见(收进 log[] 同时实时 push 到 drawer),
+  // 原则:打开走的每条命令/输出/错误都要可见(收进 log[] 同时实时 push 到 drawer),
   // 失败给可排查的 hint + 可重试。健壮:全程 try/catch,任何一步都不抛到 ipc 外。
   // 在资源管理器打开目录。which="projects" → C:\projects(bind 挂载,容器 ~/projects);
   // 否则 → WSL 卷 \\wsl$\<distro>\…\volumes\<vol>\_data(= 容器 /home/cicy)。
@@ -460,7 +460,7 @@ function register({ sidecarLogPath } = {}) {
   // Start (or reuse) the cicy-code daemon. probeExisting inside start() reuses
   // a healthy :8008; otherwise it spawns `npx cicy-code` / the Docker container.
   ipcMain.handle("sidecar:start", async (e) => {
-    // 流式把安装进度推给抽屉(主人: "为什么不弹 drawer 显示安装日志,卡在哪我怎么知道"):
+    // 流式把安装进度推给抽屉("为什么不弹 drawer 显示安装日志,卡在哪我怎么知道"):
     //  - ensureNode 的 Node 下载进度 → 走 start({emit})
     //  - npx cicy-code + cicy-code 首次 `brew install tmux` 装依赖的输出 → 都写在 sidecarLogPath,
     //    这里 tail 这个文件、逐行 emit,用户就能看见在装啥、卡在哪。
@@ -482,7 +482,7 @@ function register({ sidecarLogPath } = {}) {
       const child = await sidecar.start({ logPath: sidecarLogPath, force: false, emit });
       // start() 返回 null = ensureEnv 失败(node/brew/tmux 没装成,emit 已说原因)或没 spawn 成。
       // **立刻报错返回**,别进 6 分钟干等(否则 child 一直是 null、break 条件永不成立,drawer 卡在
-      // 「进行中」、不翻 error、不出重试按钮 —— 主人实测的 bug)。
+      // 「进行中」、不翻 error、不出重试按钮 —— 实测的 bug)。
       if (!child) {
         clearInterval(tail);
         if (await sidecar.probeExisting(PORT)) { emit({ phase: "done", status: "done", message: "cicy-code 已就绪 :8008" }); return { ok: true }; }
@@ -512,7 +512,7 @@ function register({ sidecarLogPath } = {}) {
     try {
       await sidecar.stop();
       // The daemon is gone — close any open team window pointing at it so the
-      // user isn't left staring at a dead :8008 page (主人 bug report).
+      // user isn't left staring at a dead :8008 page (bug report).
       try { require("./local-teams").closeLocalWindows(PORT); } catch {}
       return { ok: true };
     } catch (e) {
@@ -535,7 +535,7 @@ function register({ sidecarLogPath } = {}) {
     }
   });
 
-  // 「局域网访问」开关(主人): 读/写 --public flag。set 后自动重启 cicy-code 让它生效,
+  // 「局域网访问」开关: 读/写 --public flag。set 后自动重启 cicy-code 让它生效,
   // 全程把进度推到抽屉(op:restart)。
   ipcMain.handle("sidecar:get-public", () => {
     try { return { ok: true, public: sidecar.isPublic() }; } catch (e) { return { ok: false, public: false, error: e.message }; }

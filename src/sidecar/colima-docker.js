@@ -37,9 +37,9 @@ const IMAGE   = process.env.CICY_DOCKER_IMAGE || "cicybot/cicy-code:latest";
 const IS_ARM  = process.arch === "arm64";
 const ARCH_TAG = IS_ARM ? "arm64" : "amd64";
 const PLATFORM_FLAG = IS_ARM ? "--platform linux/amd64" : "";
-// 主人: 容器额外暴露的端口段(给容器内 agent 跑服务用),宿主 127.0.0.1 直达。
+// 容器额外暴露的端口段(给容器内 agent 跑服务用),宿主 127.0.0.1 直达。
 const EXTRA_PORTS = process.env.CICY_EXTRA_PORTS || "18000-19999";
-// 主人: Colima VM 资源,4C8G 起步(可用 env 覆盖,不写死)。
+// Colima VM 资源,4C8G 起步(可用 env 覆盖,不写死)。
 const VM_CPUS   = process.env.CICY_COLIMA_CPUS   || "4";
 const VM_MEMORY = process.env.CICY_COLIMA_MEMORY || "8";
 const VM_DISK   = process.env.CICY_COLIMA_DISK   || "30";
@@ -207,7 +207,7 @@ async function ensureBaseImage({ emit } = {}) {
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   // 用共享的 curlDownload(和 Windows 下载 rootfs/镜像同一个),它每秒 emit
   // { progress, received, total } → 抽屉渲染**进度条**(之前我用裸 curl 没进度,
-  // 主人看到的就是没进度条)。续传 + 重试都在里头。
+  // 看到的就是没进度条)。续传 + 重试都在里头。
   await docker.curlDownload(BASE_IMAGE_URL, dest, { emit, phase: "image", label: "下载运行环境基础镜像(约 340MB,从 OSS)" });
   return dest;
 }
@@ -269,7 +269,7 @@ async function loadImage(tarball, { emit } = {}) {
   if (m && m[1] !== IMAGE) { try { await dk(`tag ${m[1]} ${IMAGE}`, { timeout: 15000 }); } catch {} }
 }
 
-// 主人修复「为什么没用最新的 docker」: imagePresent() 只看本地有没有 `:latest` 标签,
+// 修复「为什么没用最新的 docker」: imagePresent() 只看本地有没有 `:latest` 标签,
 // 旧镜像在就永远跳过下载 → 卡在过期镜像。这里改成校验 OSS tarball 的 ETag:本地缺镜像、
 // 或 OSS 的 ETag 跟上次 load 的不一致 → 重下重载(删旧缓存包,避免同尺寸被误跳过)。
 // 非破坏性:不删 VM、不删 volume(数据/token 不丢)。返回是否真的刷新了。
@@ -305,7 +305,7 @@ const probeHealth = docker.probeHealth;
 //     bind-mount 会用空的宿主目录**遮住镜像里预装的 /home/cicy**(cicy-code 装在那),
 //     entrypoint 找不到就试图全局 npm 重装 → EACCES 崩溃,:8009 起不来。named volume
 //     首次挂载会**从镜像内容预填充**,容器才看得到预装的 cicy-code(和 WSL 一致)。
-// 主人: 把宿主 ~/projects 挂进容器 /home/cicy/projects(~ 用 os.homedir() 展开,绝不写死)。
+// 把宿主 ~/projects 挂进容器 /home/cicy/projects(~ 用 os.homedir() 展开,绝不写死)。
 // Colima 把宿主 $HOME 挂进 VM,所以直接路径就能用(不像 WSL 要 /mnt 转换)。
 // 源目录不存在先建出来,否则 docker 建挂载点会报错挡住容器启动。
 const PROJECTS_README = `# CiCy 持久工作区 / Persistent Workspace
@@ -350,7 +350,7 @@ async function runContainer({ port = 8009, container = "cicy-code-docker-8009", 
     .filter(([, v]) => v != null && v !== "")
     .map(([k, v]) => `-e ${k}='${String(v).replace(/'/g, "'\\''")}'`)
     .join(" ");
-  // 主人方案: Chrome 的 per-profile 代理(127.0.0.1:2000N)改由「宿主 mihomo」(host-mihomo.js)
+  // 方案: Chrome 的 per-profile 代理(127.0.0.1:2000N)改由「宿主 mihomo」(host-mihomo.js)
   // 服务,不再从容器 publish 20001-32 —— colima/Lima 转发那个端口段始终到不了容器里只绑
   // 127.0.0.1 的监听(Chrome 一直 ERR_EMPTY_RESPONSE)。容器只暴露 cicy-code 的 :8009。
   const mk = (s) => `run -d --name ${container} --restart unless-stopped ${PLATFORM_FLAG} ` +
@@ -362,7 +362,7 @@ async function runContainer({ port = 8009, container = "cicy-code-docker-8009", 
   } catch (e) {
     if (!mounts) throw e;
     // 兜底: 带挂载启动失败(如 colima 访问挂载源出错)→ 去掉附加挂载重试,保证容器
-    // 一定能起(projects 只是附加共享目录,不该挡住整个服务). 主人: '容器起不来' 的修复.
+    // 一定能起(projects 只是附加共享目录,不该挡住整个服务). '容器起不来' 的修复.
     console.warn(`[colima] 带挂载启动失败,去掉附加挂载重试: ${e.message}`);
     try { await dk(`rm -f ${container}`, { timeout: 20000 }); } catch {}
     await dk(mk(""), { timeout: 90000 });
@@ -471,7 +471,7 @@ async function _bootstrap({ onProgress, port = 8009, container = "cicy-code-dock
     }
   }
 
-  // 4) 镜像(docker load R2 包)—— 缺镜像就下,镜像在但 OSS 有更新版也刷新(主人:别卡旧镜像)
+  // 4) 镜像(docker load R2 包)—— 缺镜像就下,镜像在但 OSS 有更新版也刷新(别卡旧镜像)
   try { await ensureFreshImage({ emit }); }
   catch (e) {
     if (!(await imagePresent())) { emit({ phase: "image", status: "error", message: `镜像下载失败:${e.message}(点重试续传)` }); return { ok: false, reason: "image_download_failed" }; }
