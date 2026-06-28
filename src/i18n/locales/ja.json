@@ -484,5 +484,13 @@
     "noContainerConfig": "コンテナの mihomo 設定を取得できませんでした",
     "binMissing": "mihomo バイナリがありません(先に ensureBinary)",
     "configMissing": "host 設定がありません(先に writeConfig)"
+  },
+  "updateBanner": {
+    "available": "新しいバージョン v{{v}} が利用可能",
+    "downloading": "アップデートをダウンロード中",
+    "ready": "ダウンロード完了 — 再起動でインストール",
+    "error": "アップデート失敗",
+    "downloadBtn": "ダウンロード",
+    "installBtn": "今すぐインストール"
   }
 }

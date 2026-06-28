@@ -172,6 +172,7 @@ function register(opts = {}) {
   const appUpdater = require("../app-updater");
   ipcMain.handle("app:update-state",    () => appUpdater.getState());
   ipcMain.handle("app:check-update",    async () => { await appUpdater.check(); return appUpdater.getState(); });
+  ipcMain.handle("app:download-update", async () => { await appUpdater.downloadUpdate(); return appUpdater.getState(); }); // 用户点「下载」→ 按平台/网络下安装包(带进度,可重试)
   ipcMain.handle("app:install-update",  () => { appUpdater.installNow(); return true; });
 
   // Static version info: cicy-desktop's own version + the cicy-code version we

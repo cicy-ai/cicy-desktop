@@ -484,5 +484,13 @@
     "noContainerConfig": "Could not read container mihomo config",
     "binMissing": "mihomo binary missing (run ensureBinary first)",
     "configMissing": "host config missing (run writeConfig first)"
+  },
+  "updateBanner": {
+    "available": "New version v{{v}} available",
+    "downloading": "Downloading update",
+    "ready": "Update downloaded — restart to install",
+    "error": "Update failed",
+    "downloadBtn": "Download",
+    "installBtn": "Install now"
   }
 }

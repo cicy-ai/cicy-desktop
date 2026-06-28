@@ -900,6 +900,7 @@ export default function App() {
       <div className="shell__left">
       <Header me={me} welcome={welcome} onLogout={handleLogout}
         mitmTeam={localList.length > 0 ? localList[0] : null} />
+      <UpdateBanner />
       <main className="main">
         {/* 整行:左边 tab 药丸,右边「新加团队」顶到行尾 */}
         <div className="app__tabsrow">
@@ -3128,6 +3129,54 @@ function Brand() {
   );
 }
 
+// app 自更新 banner(产品级):顶部细条,跟随 app:update-state。
+//   available  → 「发现新版本 vX [下载]」(可关闭)
+//   downloading→ 进度条 + 「45% · 32.1/72.4 MB」(不可关,可后台)
+//   ready      → 「已下载,重启安装 [立即安装] [稍后]」
+//   error      → 「更新失败:… [重试]」(可关闭)
+function UpdateBanner() {
+  const [st, setSt] = useState(null);
+  const [dismissed, setDismissed] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    window.cicy?.app?.updateState?.().then((s) => { if (alive) setSt(s); }).catch(() => {});
+    const unsub = window.cicy?.app?.onUpdateState?.((s) => setSt(s));
+    return () => { alive = false; try { unsub && unsub(); } catch {} };
+  }, []);
+  const status = st?.status;
+  // 每次状态变化都重置「已关闭」——新状态(如下载完成)要重新出现。
+  useEffect(() => { setDismissed(false); }, [status]);
+  const IMPORTANT = ["available", "downloading", "ready", "error"];
+  if (!IMPORTANT.includes(status) || dismissed) return null;
+  const p = st?.progress || {};
+  const mb = (b) => (b ? (b / 1048576).toFixed(1) : "0");
+  const download = () => { window.cicy?.app?.downloadUpdate?.(); };
+  const install = () => { window.cicy?.app?.installUpdate?.(); };
+  return (
+    <div className={`update-banner update-banner--${status}`} data-id="UpdateBanner" data-status={status}>
+      <div className="update-banner__row">
+        <span className="update-banner__icon" aria-hidden>
+          {status === "downloading" ? <Spinner /> : status === "ready" ? "✓" : status === "error" ? "!" : "↑"}
+        </span>
+        <span className="update-banner__text" data-id="UpdateBanner-text">
+          {status === "available" && tr("updateBanner.available", "发现新版本 v{{v}}", { v: st.version })}
+          {status === "downloading" && `${tr("updateBanner.downloading", "正在下载更新")} ${p.percent || 0}%${p.total ? ` · ${mb(p.transferred)}/${mb(p.total)} MB` : ""}`}
+          {status === "ready" && tr("updateBanner.ready", "新版本已下载,重启即可安装")}
+          {status === "error" && `${tr("updateBanner.error", "更新失败")}${st.error ? `:${st.error}` : ""}`}
+        </span>
+        <div className="update-banner__actions">
+          {status === "available" && <button type="button" className="update-banner__btn is-accent" data-id="UpdateBanner-download" onClick={download}>{tr("updateBanner.downloadBtn", "下载")}</button>}
+          {status === "ready" && <button type="button" className="update-banner__btn is-accent" data-id="UpdateBanner-install" onClick={install}>{tr("updateBanner.installBtn", "立即安装")}</button>}
+          {status === "error" && <button type="button" className="update-banner__btn is-accent" data-id="UpdateBanner-retry" onClick={download}>{tr("common.retry", "重试")}</button>}
+          {status !== "downloading" && <button type="button" className="update-banner__x" data-id="UpdateBanner-dismiss" onClick={() => setDismissed(true)} aria-label="dismiss">×</button>}
+        </div>
+      </div>
+      {status === "downloading" && (
+        <div className="update-banner__bar" data-id="UpdateBanner-bar"><span style={{ width: `${p.percent || 0}%` }} /></div>
+      )}
+    </div>
+  );
+}
 // 首次加载的团队卡占位骨架(与 .bcard 大致同形:头像圈 + 两行标题 + CTA 条)。
 function SkeletonCard() {
   return (

@@ -365,6 +365,39 @@ body {
 .bcard--skeleton__head { display: flex; align-items: center; gap: 12px; }
 .bcard--skeleton__lines { flex: 1; min-width: 0; }
 
+/* ── App 自更新 banner(顶部细条)──────────────────────────────────────────────── */
+.update-banner {
+  position: relative; flex: 0 0 auto;
+  padding: 9px 14px 9px 16px; font-size: 13px;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  background: rgba(59,130,246,.10);                 /* available: accent tint */
+}
+.update-banner--ready       { background: rgba(34,197,94,.12); }
+.update-banner--error       { background: rgba(239,68,68,.12); }
+.update-banner--downloading { background: rgba(255,255,255,.05); }
+.update-banner__row { display: flex; align-items: center; gap: 10px; }
+.update-banner__icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border-radius: 50%; flex: 0 0 auto;
+  font-size: 12px; font-weight: 700; color: #fff;
+  background: linear-gradient(135deg,#3b82f6,#8b5cf6);
+}
+.update-banner--ready .update-banner__icon       { background: #22c55e; }
+.update-banner--error .update-banner__icon       { background: #ef4444; }
+.update-banner--downloading .update-banner__icon { background: transparent; color: #7aa2f7; }
+.update-banner__text { flex: 1; min-width: 0; color: #e6edf3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.update-banner__actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.update-banner__btn {
+  border: none; border-radius: 7px; padding: 5px 14px; font-size: 12px; font-weight: 600;
+  cursor: pointer; color: #fff; background: rgba(255,255,255,.12);
+}
+.update-banner__btn.is-accent { background: linear-gradient(135deg,#3b82f6,#8b5cf6); }
+.update-banner__btn:hover { filter: brightness(1.12); }
+.update-banner__x { border: none; background: transparent; color: #9aa0a6; font-size: 18px; line-height: 1; cursor: pointer; padding: 0 4px; border-radius: 6px; }
+.update-banner__x:hover { color: #e6edf3; background: rgba(255,255,255,.08); }
+.update-banner__bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255,255,255,.08); overflow: hidden; }
+.update-banner__bar > span { display: block; height: 100%; background: linear-gradient(90deg,#3b82f6,#8b5cf6); transition: width .2s ease; }
+
 /* ── Tabs row ── */
 .app__tabs {
   display: inline-flex;

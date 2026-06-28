@@ -1205,10 +1205,10 @@ electronApp.whenReady().then(async () => {
   // already run via the existing event handlers in app-updater.init() — we
   // just surface the verdict so the user knows their click had effect.
   async function onCheckForUpdatesClicked() {
-    const result = await appUpdater.checkInteractive();
+    const result = await appUpdater.check();
     const currentVersion = electronApp.getVersion();
     if (result.status === "available") {
-      const v = (result.info && result.info.version) || "?";
+      const v = result.version || "?";
       dialog.showMessageBox({
         type: "info",
         message: i18n.t("menu.updateAvailable", { version: v }),

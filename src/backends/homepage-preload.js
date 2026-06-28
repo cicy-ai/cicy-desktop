@@ -224,6 +224,7 @@ contextBridge.exposeInMainWorld("cicy", {
     getVersion:    ()  => logInvoke("app:get-version"),
     updateState:   ()  => logInvoke("app:update-state"),
     checkUpdate:   ()  => logInvoke("app:check-update"),
+    downloadUpdate:()  => logInvoke("app:download-update"),
     installUpdate: ()  => logInvoke("app:install-update"),
     onUpdateState: (cb) => {
       const handler = (_e, state) => { try { cb(state); } catch {} };

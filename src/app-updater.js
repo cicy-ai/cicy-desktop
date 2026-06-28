@@ -1,131 +1,201 @@
-// CiCy Desktop app-level auto-updater (electron-updater).
+// CiCy Desktop 自定义自更新(替掉 electron-updater 的全自动 quitAndInstall —— 它对
+// 未签名 mac / loose 源码版 / 多窗口 tab-shell 都不适配)。
 //
-// Windows: silently downloads in background; installs on next quit.
-// macOS:   unsigned builds can't replace themselves — we notify and open the
-//          release page instead (user downloads .dmg manually).
+// 产品流程:启动后比版本 → 有新版 broadcast「available」→ 渲染层顶部 banner「发现新版
+// [下载]」→ 用户点下载 → 按平台从对应源下安装包(带进度条)→ broadcast「downloading」
+// → 下完「ready」→ 用户点安装 → 拉起原生安装器并退出 app。
+//
+// 源(分网络 + 分平台):
+//   版本清单  CN → OSS releases/latest-version.txt;非 CN → GitHub releases/latest
+//   Windows  → OSS  cicy-desktop-<ver>.exe          (GitHub 不发 win 包)
+//   macOS    → GitHub cicy-desktop-<ver>-<arch>.pkg (CN 经 ghproxy 兜底)
+//   Linux    → GitHub CiCy-Desktop-<ver>.AppImage   (CN 经 ghproxy 兜底)
 
-const { autoUpdater } = require("electron-updater");
-const { app } = require("electron");
+const { app, shell } = require("electron");
 const path = require("path");
+const fs = require("fs");
+const https = require("https");
 const log = require("electron-log");
-const { resolveFeedUrl } = require("./sidecar/mirrors");
+const { OSS_RELEASES_BASE, MIRRORS, mirrorUrl } = require("./sidecar/mirrors");
 
-const GH_FEED_BASE = "https://github.com/cicy-ai/cicy-desktop/releases/latest/download";
+const REPO = "cicy-ai/cicy-desktop";
+const GH_DL = (ver) => `https://github.com/${REPO}/releases/download/v${ver}`;
 
-// Probe network once and cache.
+// ── 网络判定(缓存)──────────────────────────────────────────────────────────
 let _network = null;
 async function detectNetwork() {
   if (_network) return _network;
-  try { _network = await require("./sidecar/net-detect")(); }
-  catch { _network = "unknown"; }
+  try { _network = await require("./sidecar/net-detect")(); } catch { _network = "unknown"; }
   return _network;
 }
 
-// Set feed URL: CN → first reachable mirror via mirrors.js;
-//               global → default GitHub provider.
-async function applyFeedUrl() {
-  const net = await detectNetwork();
-  const feedUrl = net === "cn" ? await resolveFeedUrl(GH_FEED_BASE) : GH_FEED_BASE;
-  if (feedUrl === GH_FEED_BASE) {
-    autoUpdater.setFeedURL({ provider: "github", owner: "cicy-ai", repo: "cicy-desktop" });
-  } else {
-    log.info(`[app-updater] CN — feed: ${feedUrl}`);
-    autoUpdater.setFeedURL({ provider: "generic", url: feedUrl });
+// ── 版本比较:>0 a 新于 b ─────────────────────────────────────────────────────
+function cmpVer(a, b) {
+  const pa = String(a || "0").replace(/^v/, "").split(".");
+  const pb = String(b || "0").replace(/^v/, "").split(".");
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (parseInt(pa[i], 10) || 0) - (parseInt(pb[i], 10) || 0);
+    if (d) return d > 0 ? 1 : -1;
   }
+  return 0;
 }
 
-autoUpdater.logger = log;
-autoUpdater.autoDownload = true;
-autoUpdater.autoInstallOnAppQuit = false; // we call quitAndInstall() ourselves
+// 小工具:GET 文本(跟随重定向)
+function getText(url, redirects = 0) {
+  return new Promise((resolve, reject) => {
+    if (redirects > 5) return reject(new Error("too many redirects"));
+    const req = https.get(url, { headers: { "User-Agent": "cicy-desktop" }, timeout: 10000 }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        res.resume(); return getText(res.headers.location, redirects + 1).then(resolve, reject);
+      }
+      if (res.statusCode !== 200) { res.resume(); return reject(new Error(`HTTP ${res.statusCode}`)); }
+      let s = ""; res.setEncoding("utf8");
+      res.on("data", (d) => (s += d));
+      res.on("end", () => resolve(s));
+    });
+    req.on("error", reject);
+    req.on("timeout", () => { req.destroy(); reject(new Error("timeout")); });
+  });
+}
 
+// CN 走 ghproxy 兜底(OSS 没有 mac/linux 包)。
+function mirrored(githubUrl) {
+  const m = MIRRORS[0];
+  return m ? mirrorUrl(githubUrl, m) : githubUrl;
+}
+
+// ── 最新版本号 ────────────────────────────────────────────────────────────────
+async function fetchLatestVersion(network) {
+  if (network === "cn") {
+    // CN:OSS 版本清单(纯文本 "2.1.200")。
+    return (await getText(`${OSS_RELEASES_BASE}/latest-version.txt`)).trim().replace(/^v/, "");
+  }
+  // 非 CN:GitHub releases/latest 的 tag_name。
+  const j = JSON.parse(await getText(`https://api.github.com/repos/${REPO}/releases/latest`));
+  return String(j.tag_name || "").trim().replace(/^v/, "");
+}
+
+// ── 安装包 URL(分平台 + 分网络)+ 本地文件名 ────────────────────────────────
+function assetFor(version, network) {
+  const plat = process.platform;
+  const arch = process.arch === "arm64" ? "arm64" : "x64";
+  if (plat === "win32") {
+    // win 包只在 OSS(GitHub 不发);CN/非 CN 都用 OSS。
+    return { url: `${OSS_RELEASES_BASE}/cicy-desktop-${version}.exe`, file: `cicy-desktop-${version}.exe` };
+  }
+  if (plat === "darwin") {
+    const gh = `${GH_DL(version)}/cicy-desktop-${version}-${arch}.pkg`;
+    return { url: network === "cn" ? mirrored(gh) : gh, file: `cicy-desktop-${version}-${arch}.pkg` };
+  }
+  // linux
+  const gh = `${GH_DL(version)}/CiCy-Desktop-${version}.AppImage`;
+  return { url: network === "cn" ? mirrored(gh) : gh, file: `CiCy-Desktop-${version}.AppImage` };
+}
+
+// ── 下载(带进度,跟随重定向)──────────────────────────────────────────────────
+function download(url, dest, onProgress, redirects = 0) {
+  return new Promise((resolve, reject) => {
+    if (redirects > 6) return reject(new Error("too many redirects"));
+    const f = fs.createWriteStream(dest);
+    const req = https.get(url, { headers: { "User-Agent": "cicy-desktop" }, timeout: 30000 }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        f.close(); try { fs.unlinkSync(dest); } catch {}
+        return download(res.headers.location, dest, onProgress, redirects + 1).then(resolve, reject);
+      }
+      if (res.statusCode !== 200) { f.close(); try { fs.unlinkSync(dest); } catch {} return reject(new Error(`HTTP ${res.statusCode}`)); }
+      const total = parseInt(res.headers["content-length"] || "0", 10) || 0;
+      let transferred = 0, lastPct = -1;
+      res.on("data", (chunk) => {
+        transferred += chunk.length;
+        const percent = total ? Math.floor((transferred / total) * 100) : 0;
+        if (percent !== lastPct) { lastPct = percent; try { onProgress && onProgress({ percent, transferred, total }); } catch {} }
+      });
+      res.pipe(f);
+      f.on("finish", () => f.close(() => resolve()));
+      f.on("error", (e) => { try { fs.unlinkSync(dest); } catch {} reject(e); });
+    });
+    req.on("error", (e) => { try { fs.unlinkSync(dest); } catch {} reject(e); });
+    req.on("timeout", () => { req.destroy(); reject(new Error("timeout")); });
+  });
+}
+
+// ── 状态机 + 广播 ─────────────────────────────────────────────────────────────
 let _win = null;
-let _state = { status: "idle", progress: null, error: null, info: null };
+let _state = { status: "idle", version: null, current: null, progress: null, filePath: null, error: null };
+let _downloading = false;
 
 function broadcast(patch) {
   Object.assign(_state, patch);
-  if (_win && !_win.isDestroyed()) _win.webContents.send("app:update-state", _state);
+  try { if (_win && !_win.isDestroyed()) _win.webContents.send("app:update-state", _state); } catch {}
 }
+function getState() { return _state; }
 
 function init(mainWin) {
   _win = mainWin;
-  if (!app.isPackaged) {
-    const devCfg = path.join(__dirname, "..", "dev-app-update.yml");
-    if (!require("fs").existsSync(devCfg)) {
-      log.info("[app-updater] dev mode — no dev-app-update.yml, skipping");
-      return;
-    }
-    autoUpdater.updateConfigPath = devCfg;
-    autoUpdater.forceDevUpdateConfig = true;
-    log.info("[app-updater] dev mode — using dev-app-update.yml");
-  }
-
-  autoUpdater.on("checking-for-update",  () => broadcast({ status: "checking" }));
-  autoUpdater.on("update-not-available", (i) => broadcast({ status: "up-to-date", info: i }));
-  autoUpdater.on("update-available",     (i) => broadcast({ status: "available", info: i }));
-  autoUpdater.on("download-progress",    (p) => broadcast({ status: "downloading", progress: p }));
-  autoUpdater.on("update-downloaded",    (i) => {
-    broadcast({ status: "ready", info: i });
-    // Auto-install: kill current process and launch the new version immediately.
-    // On Windows this is the NSIS installer running silently + re-launching.
-    // On macOS (unsigned) this will throw — caught and logged, no crash.
-    log.info("[app-updater] update downloaded, applying now");
-    setTimeout(() => {
-      try { autoUpdater.quitAndInstall(true, true); } catch (e) {
-        log.warn("[app-updater] quitAndInstall failed:", e.message);
-      }
-    }, 1500); // brief delay so the UI can show "ready" state
-  });
-  autoUpdater.on("error", (err) => {
-    log.warn("[app-updater] error:", err.message);
-    broadcast({ status: "error", error: err.message });
-  });
-
-  setTimeout(() => check(), 15_000);
-  setInterval(() => check(), 10 * 60 * 1000);
+  _state.current = app.getVersion();
+  setTimeout(() => check().catch(() => {}), 15_000);      // 启动后探一次
+  setInterval(() => check().catch(() => {}), 30 * 60 * 1000); // 每 30 分钟
 }
 
+// 比版本;有新版 → available,否则 up-to-date。不自动下载(等用户点)。
 async function check() {
   try {
-    await applyFeedUrl();
-    await autoUpdater.checkForUpdates();
+    broadcast({ status: "checking", error: null });
+    const net = await detectNetwork();
+    const latest = await fetchLatestVersion(net);
+    const current = app.getVersion();
+    if (latest && cmpVer(latest, current) > 0) {
+      broadcast({ status: "available", version: latest, current, progress: null, filePath: null });
+    } else {
+      broadcast({ status: "up-to-date", version: latest || current, current });
+    }
+    return _state;
   } catch (e) {
     log.warn("[app-updater] check failed:", e.message);
+    broadcast({ status: "error", error: e.message });
+    return _state;
   }
 }
 
+// 用户点「下载」:按平台 + 网络下安装包到临时目录,带进度。
+async function downloadUpdate() {
+  if (_downloading) return _state;
+  const version = _state.version;
+  if (!version) { broadcast({ status: "error", error: "no version" }); return _state; }
+  _downloading = true;
+  try {
+    const net = await detectNetwork();
+    const { url, file } = assetFor(version, net);
+    // 下到 ~/Downloads(用户能直接找到安装包);目录不存在则建。
+    const dir = app.getPath("downloads");
+    try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+    const dest = path.join(dir, file);
+    log.info(`[app-updater] downloading ${url} → ${dest}`);
+    broadcast({ status: "downloading", progress: { percent: 0, transferred: 0, total: 0 }, filePath: null });
+    await download(url, dest, (p) => broadcast({ status: "downloading", progress: p }));
+    broadcast({ status: "ready", filePath: dest, progress: { percent: 100 } });
+    return _state;
+  } catch (e) {
+    log.warn("[app-updater] download failed:", e.message);
+    broadcast({ status: "error", error: e.message });
+    return _state;
+  } finally {
+    _downloading = false;
+  }
+}
+
+// 用户点「安装」:拉起原生安装器(win NSIS / mac pkg)并退出 app;linux AppImage 在
+// 文件管理器里定位(AppImage 非安装器,用户自行替换运行)。
 function installNow() {
-  autoUpdater.quitAndInstall(false, true);
+  const f = _state.filePath;
+  if (!f) return;
+  try {
+    if (process.platform === "linux") { shell.showItemInFolder(f); return; }
+    shell.openPath(f).then((err) => {
+      if (err) log.warn("[app-updater] openPath failed:", err);
+      else setTimeout(() => { try { app.quit(); } catch {} }, 800);
+    });
+  } catch (e) { log.warn("[app-updater] install failed:", e.message); }
 }
 
-function getState() { return _state; }
-
-// One-shot interactive check: triggers a fresh update check and resolves with
-// the terminal state ({ status: "available" | "up-to-date" | "error", info,
-// error }). Wraps autoUpdater's event-based flow so menu code can await a
-// single result and show a dialog. Does not interfere with the periodic
-// background check.
-function checkInteractive(timeoutMs = 30_000) {
-  return new Promise(async (resolve) => {
-    const { autoUpdater } = require("electron-updater");
-    let done = false;
-    const finish = (payload) => {
-      if (done) return;
-      done = true;
-      autoUpdater.removeListener("update-available",      onAvailable);
-      autoUpdater.removeListener("update-not-available",  onUpToDate);
-      autoUpdater.removeListener("error",                 onError);
-      resolve(payload);
-    };
-    const onAvailable = (info) => finish({ status: "available", info });
-    const onUpToDate  = (info) => finish({ status: "up-to-date", info });
-    const onError     = (err)  => finish({ status: "error", error: err.message });
-    autoUpdater.on("update-available",     onAvailable);
-    autoUpdater.on("update-not-available", onUpToDate);
-    autoUpdater.on("error",                onError);
-    setTimeout(() => finish({ status: "error", error: "timeout" }), timeoutMs);
-    try { await applyFeedUrl(); await autoUpdater.checkForUpdates(); }
-    catch (e) { finish({ status: "error", error: e.message }); }
-  });
-}
-
-module.exports = { init, check, installNow, getState, checkInteractive };
+module.exports = { init, check, getState, downloadUpdate, installNow };

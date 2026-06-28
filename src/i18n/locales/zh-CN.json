@@ -484,5 +484,13 @@
     "noContainerConfig": "没有拿到容器 mihomo 配置",
     "binMissing": "mihomo 二进制不存在(先 ensureBinary)",
     "configMissing": "host 配置不存在(先 writeConfig)"
+  },
+  "updateBanner": {
+    "available": "发现新版本 v{{v}}",
+    "downloading": "正在下载更新",
+    "ready": "新版本已下载,重启即可安装",
+    "error": "更新失败",
+    "downloadBtn": "下载",
+    "installBtn": "立即安装"
   }
 }
