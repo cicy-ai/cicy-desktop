@@ -8,12 +8,15 @@
 //
 // All current mirrors are prepend-style. Add domain-style entries as needed.
 
+// 自更新 CN feed 首选 OSS(自建,稳)。gh-proxy.com 反代已删(不稳/有问题);
+// ghproxy.net 留作 OSS 不可达时的兜底镜像。非 CN 走 GitHub 直连(见 app-updater)。
+const OSS_RELEASES_BASE = process.env.CICY_OSS_RELEASES_BASE
+  || "https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/releases";
+
 const MIRRORS = [
-  // gh.llkk.cc was removed — confirmed unreachable from APAC (Myanmar tested);
-  // its TCP connect times out, slowing the parallel race when other mirrors
-  // are healthy. Re-add only after re-validating reachability.
+  // gh.llkk.cc / gh-proxy.com removed — unreachable / unstable from APAC.
+  // Re-add only after re-validating reachability.
   { url: "https://ghproxy.net/",     type: "prepend" },
-  { url: "https://gh-proxy.com/",    type: "prepend" },
   // { url: "hub.gitmirror.com",     type: "domain"  },  // example domain-replace
 ];
 
@@ -57,6 +60,8 @@ async function resolveFeedUrl(feedBase) {
     req.end();
   });
 
+  // CN 首选 OSS:OSS 上有 electron-updater feed(latest*.yml)才用它。
+  if (await probe(OSS_RELEASES_BASE + "/latest.yml")) return OSS_RELEASES_BASE;
   for (const m of MIRRORS) {
     const base = mirrorUrl(feedBase, m);
     if (await probe(base + "/latest.yml")) return base;
@@ -64,4 +69,4 @@ async function resolveFeedUrl(feedBase) {
   return feedBase; // fallback: direct
 }
 
-module.exports = { MIRRORS, mirrorUrl, buildUrlList, resolveFeedUrl };
+module.exports = { MIRRORS, OSS_RELEASES_BASE, mirrorUrl, buildUrlList, resolveFeedUrl };
