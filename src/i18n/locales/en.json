@@ -490,11 +490,17 @@
     "downloading": "Downloading update",
     "ready": "Update downloaded — restart to install",
     "error": "Update failed",
-    "downloadBtn": "Download",
+    "downloadBtn": "Download update",
     "installBtn": "Install now",
     "checkBtn": "Check for updates",
     "checkingShort": "Checking…",
     "checking": "Checking for updates…",
-    "upToDate": "Up to date (v{{v}})"
+    "upToDate": "Up to date (v{{v}})",
+    "drawerTitle": "App update",
+    "startDl": "Starting download…",
+    "readyShort": "Downloaded",
+    "readyDrawer": "Downloaded — click Install to restart & update",
+    "later": "Later",
+    "eta": "{{s}}s left"
   }
 }

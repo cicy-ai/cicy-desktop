@@ -98,15 +98,31 @@ let drawerState = null; // null = closed
 function emitDrawer() { drawerListeners.forEach((l) => l(drawerState)); }
 function clockHHMMSS() { const d = new Date(); return d.toTimeString().slice(0, 8); }
 const updateDrawer = {
-  open({ teamId, fromVer, toVer, onRetry, title } = {}) {
+  open({ teamId, fromVer, toVer, onRetry, title, kind } = {}) {
     drawerState = {
       teamId, title: title || null, fromVer: fromVer || null, toVer: toVer || null,
-      status: "running",   // running | done | error
+      kind: kind || "sidecar",   // "sidecar"(cicy-code 更新,有 stepper) | "app"(应用自更新,显进度条)
+      status: "running",   // running | ready | done | error
       phase: "download",   // download | swap | done
+      progress: null,      // app 自更新下载进度 {percent,transferred,total,bytesPerSec,etaSec}
+      onInstall: null,     // app 自更新:下载完后「安装」回调
       logs: [],
       onRetry: onRetry || null,
       lastAt: Date.now(),
     };
+    emitDrawer();
+  },
+  // app 自更新:更新下载进度条(不刷 log)。
+  setProgress(p) {
+    if (!drawerState) return;
+    drawerState = { ...drawerState, status: "running", progress: p || drawerState.progress, lastAt: Date.now() };
+    emitDrawer();
+  },
+  // app 自更新:下载完成,待用户点「安装」。
+  ready({ onInstall, message } = {}) {
+    if (!drawerState) return;
+    const line = { id: ++drawerLogSeq, t: clockHHMMSS(), phase: "done", status: "done", message: message || tr("updateBanner.readyDrawer", "下载完成,点「安装」重启更新") };
+    drawerState = { ...drawerState, status: "ready", phase: "done", progress: { ...(drawerState.progress || {}), percent: 100 }, onInstall: onInstall || null, minimized: false, logs: [...drawerState.logs, line], lastAt: Date.now() };
     emitDrawer();
   },
   push(ev = {}) {
@@ -182,6 +198,7 @@ function UpdateDrawerHost() {
           </div>
         </div>
 
+        {st.kind !== "app" && (
         <div className="drawer__steps" data-id="UpdateDrawer-steps">
           {DRAWER_PHASE_KEYS.map((k, i) => {
             const label = drawerPhaseLabel(k);
@@ -197,6 +214,25 @@ function UpdateDrawerHost() {
             );
           })}
         </div>
+        )}
+
+        {/* app 自更新:醒目下载进度条(像 Docker 安装那样)*/}
+        {st.progress && (() => {
+          const pr = st.progress, mb = (b) => (b ? (b / 1048576).toFixed(1) : "0");
+          return (
+            <div className="drawer__dl" data-id="UpdateDrawer-dl">
+              <div className="drawer__dl-head">
+                <span className="drawer__dl-pct">{pr.percent || 0}%</span>
+                <span className="drawer__dl-stats">
+                  {pr.total ? `${mb(pr.transferred)} / ${mb(pr.total)} MB` : `${mb(pr.transferred)} MB`}
+                  {pr.bytesPerSec ? ` · ${mb(pr.bytesPerSec)} MB/s` : ""}
+                  {pr.etaSec ? ` · ${tr("updateBanner.eta", "剩 {{s}}s", { s: pr.etaSec })}` : ""}
+                </span>
+              </div>
+              <div className="drawer__dl-track"><span className="drawer__dl-fill" style={{ width: `${pr.percent || 0}%` }} /></div>
+            </div>
+          );
+        })()}
 
         <div className="drawer__log" data-id="UpdateDrawer-log" ref={logRef}>
           {st.logs.length === 0
@@ -219,7 +255,13 @@ function UpdateDrawerHost() {
         <div className="drawer__foot">
           {running ? (
             <>
-              <span className="drawer__foot-status">{tr("updateDrawer.inProgress", "更新进行中…")}</span>
+              <span className="drawer__foot-status">{st.kind === "app" ? tr("updateBanner.downloading", "正在下载更新") + "…" : tr("updateDrawer.inProgress", "更新进行中…")}</span>
+            </>
+          ) : st.status === "ready" ? (
+            <>
+              <span className="drawer__foot-status is-done">{tr("updateBanner.readyShort", "下载完成")}</span>
+              <button type="button" className="drawer__btn is-accent" data-id="UpdateDrawer-install" onClick={() => st.onInstall && st.onInstall()}>{tr("updateBanner.installBtn", "立即安装")}</button>
+              <button type="button" className="drawer__btn" data-id="UpdateDrawer-later" onClick={() => updateDrawer.close()}>{tr("updateBanner.later", "稍后")}</button>
             </>
           ) : st.status === "error" ? (
             <>
@@ -3145,51 +3187,45 @@ function Brand() {
   );
 }
 
-// app 自更新 banner(产品级):顶部细条,跟随 app:update-state。
-//   available  → 「发现新版本 vX [下载]」(可关闭)
-//   downloading→ 进度条 + 「45% · 32.1/72.4 MB」(不可关,可后台)
-//   ready      → 「已下载,重启安装 [立即安装] [稍后]」
-//   error      → 「更新失败:… [重试]」(可关闭)
+// app 自更新 banner = 入口条:只在「发现新版本」时出现「vX [下载更新]」。点下载后
+// 走 updateDrawer(像 Docker 安装那样的抽屉:醒目进度条 + 速度/剩余 + 安装按钮)。
 function UpdateBanner() {
   const [st, setSt] = useState(null);
   const [dismissed, setDismissed] = useState(false);
+  const active = useRef(false); // 用户已点下载 → 后续状态喂给 drawer
   useEffect(() => {
     let alive = true;
     window.cicy?.app?.updateState?.().then((s) => { if (alive) setSt(s); }).catch(() => {});
-    const unsub = window.cicy?.app?.onUpdateState?.((s) => setSt(s));
+    const unsub = window.cicy?.app?.onUpdateState?.((s) => {
+      setSt(s);
+      if (!active.current) return;
+      if (s.status === "downloading") updateDrawer.setProgress(s.progress || {});
+      else if (s.status === "ready") updateDrawer.ready({ onInstall: () => window.cicy?.app?.installUpdate?.() });
+      else if (s.status === "error") { updateDrawer.finish({ ok: false, message: s.error || tr("updateBanner.error", "更新失败") }); active.current = false; }
+    });
     return () => { alive = false; try { unsub && unsub(); } catch {} };
   }, []);
   const status = st?.status;
-  // 每次状态变化都重置「已关闭」——新状态(如下载完成)要重新出现。
   useEffect(() => { setDismissed(false); }, [status]);
-  const IMPORTANT = ["available", "downloading", "ready", "error"];
-  if (!IMPORTANT.includes(status) || dismissed) return null;
-  const p = st?.progress || {};
-  const mb = (b) => (b ? (b / 1048576).toFixed(1) : "0");
-  const download = () => { window.cicy?.app?.downloadUpdate?.(); };
-  const install = () => { window.cicy?.app?.installUpdate?.(); };
+  // 点「下载更新」→ 开抽屉,把下载/安装放进去(进度条/速度/剩余/安装,像 Docker 安装)。
+  const startDownload = () => {
+    active.current = true;
+    updateDrawer.open({ kind: "app", title: tr("updateBanner.drawerTitle", "应用更新"), fromVer: st?.current, toVer: st?.version, onRetry: startDownload });
+    updateDrawer.push({ phase: "download", status: "running", message: tr("updateBanner.startDl", "开始下载安装包…") });
+    updateDrawer.setProgress({ percent: 0 });
+    window.cicy?.app?.downloadUpdate?.();
+  };
+  if (status !== "available" || dismissed) return null; // 仅做入口;下载/安装在抽屉里
   return (
-    <div className={`update-banner update-banner--${status}`} data-id="UpdateBanner" data-status={status}>
+    <div className="update-banner update-banner--available" data-id="UpdateBanner" data-status={status}>
       <div className="update-banner__row">
-        <span className="update-banner__icon" aria-hidden>
-          {status === "downloading" ? <Spinner /> : status === "ready" ? "✓" : status === "error" ? "!" : "↑"}
-        </span>
-        <span className="update-banner__text" data-id="UpdateBanner-text">
-          {status === "available" && tr("updateBanner.available", "发现新版本 v{{v}}", { v: st.version })}
-          {status === "downloading" && `${tr("updateBanner.downloading", "正在下载更新")} ${p.percent || 0}%${p.total ? ` · ${mb(p.transferred)}/${mb(p.total)} MB` : ""}`}
-          {status === "ready" && tr("updateBanner.ready", "新版本已下载,重启即可安装")}
-          {status === "error" && `${tr("updateBanner.error", "更新失败")}${st.error ? `:${st.error}` : ""}`}
-        </span>
+        <span className="update-banner__icon" aria-hidden>↑</span>
+        <span className="update-banner__text" data-id="UpdateBanner-text">{tr("updateBanner.available", "发现新版本 v{{v}}", { v: st.version })}</span>
         <div className="update-banner__actions">
-          {status === "available" && <button type="button" className="update-banner__btn is-accent" data-id="UpdateBanner-download" onClick={download}>{tr("updateBanner.downloadBtn", "下载")}</button>}
-          {status === "ready" && <button type="button" className="update-banner__btn is-accent" data-id="UpdateBanner-install" onClick={install}>{tr("updateBanner.installBtn", "立即安装")}</button>}
-          {status === "error" && <button type="button" className="update-banner__btn is-accent" data-id="UpdateBanner-retry" onClick={download}>{tr("common.retry", "重试")}</button>}
-          {status !== "downloading" && <button type="button" className="update-banner__x" data-id="UpdateBanner-dismiss" onClick={() => setDismissed(true)} aria-label="dismiss">×</button>}
+          <button type="button" className="update-banner__btn is-accent" data-id="UpdateBanner-download" onClick={startDownload}>{tr("updateBanner.downloadBtn", "下载更新")}</button>
+          <button type="button" className="update-banner__x" data-id="UpdateBanner-dismiss" onClick={() => setDismissed(true)} aria-label="dismiss">×</button>
         </div>
       </div>
-      {status === "downloading" && (
-        <div className="update-banner__bar" data-id="UpdateBanner-bar"><span style={{ width: `${p.percent || 0}%` }} /></div>
-      )}
     </div>
   );
 }

@@ -104,11 +104,24 @@ function download(url, dest, onProgress, redirects = 0) {
       }
       if (res.statusCode !== 200) { f.close(); try { fs.unlinkSync(dest); } catch {} return reject(new Error(`HTTP ${res.statusCode}`)); }
       const total = parseInt(res.headers["content-length"] || "0", 10) || 0;
-      let transferred = 0, lastPct = -1;
+      let transferred = 0, lastEmit = 0;
+      const startT = Date.now();
+      let winT = startT, winBytes = 0, bytesPerSec = 0;
       res.on("data", (chunk) => {
         transferred += chunk.length;
-        const percent = total ? Math.floor((transferred / total) * 100) : 0;
-        if (percent !== lastPct) { lastPct = percent; try { onProgress && onProgress({ percent, transferred, total }); } catch {} }
+        const now = Date.now();
+        // 速度按 ~500ms 滑窗算,平滑不抖。
+        if (now - winT >= 500) {
+          bytesPerSec = (transferred - winBytes) / ((now - winT) / 1000);
+          winT = now; winBytes = transferred;
+        }
+        // 节流:每 ~120ms 或下载完才推一次(够顺滑又不刷爆 IPC)。
+        if (now - lastEmit >= 120 || transferred === total) {
+          lastEmit = now;
+          const percent = total ? Math.min(100, Math.floor((transferred / total) * 100)) : 0;
+          const etaSec = bytesPerSec > 0 && total ? Math.max(0, Math.round((total - transferred) / bytesPerSec)) : 0;
+          try { onProgress && onProgress({ percent, transferred, total, bytesPerSec, etaSec }); } catch {}
+        }
       });
       res.pipe(f);
       f.on("finish", () => f.close(() => resolve()));

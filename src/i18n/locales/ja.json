@@ -490,11 +490,17 @@
     "downloading": "アップデートをダウンロード中",
     "ready": "ダウンロード完了 — 再起動でインストール",
     "error": "アップデート失敗",
-    "downloadBtn": "ダウンロード",
+    "downloadBtn": "アップデートをダウンロード",
     "installBtn": "今すぐインストール",
     "checkBtn": "アップデートを確認",
     "checkingShort": "確認中…",
     "checking": "アップデートを確認中…",
-    "upToDate": "最新です(v{{v}})"
+    "upToDate": "最新です(v{{v}})",
+    "drawerTitle": "アプリ更新",
+    "startDl": "ダウンロード開始…",
+    "readyShort": "ダウンロード完了",
+    "readyDrawer": "完了 —「インストール」で再起動して更新",
+    "later": "後で",
+    "eta": "残り {{s}}秒"
   }
 }

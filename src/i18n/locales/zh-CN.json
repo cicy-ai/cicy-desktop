@@ -490,11 +490,17 @@
     "downloading": "正在下载更新",
     "ready": "新版本已下载,重启即可安装",
     "error": "更新失败",
-    "downloadBtn": "下载",
+    "downloadBtn": "下载更新",
     "installBtn": "立即安装",
     "checkBtn": "检查更新",
     "checkingShort": "检查中…",
     "checking": "正在检查更新…",
-    "upToDate": "已是最新版本 v{{v}}"
+    "upToDate": "已是最新版本 v{{v}}",
+    "drawerTitle": "应用更新",
+    "startDl": "开始下载安装包…",
+    "readyShort": "下载完成",
+    "readyDrawer": "下载完成,点「安装」重启更新",
+    "later": "稍后",
+    "eta": "剩 {{s}}s"
   }
 }
