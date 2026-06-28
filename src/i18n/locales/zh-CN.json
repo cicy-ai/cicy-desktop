@@ -470,7 +470,8 @@
     "opening": "打开 {{url}} …",
     "opened": "已打开",
     "hintOpenFailed": "拿到 token 但打开窗口失败:{{err}}",
-    "hintException": "打开过程异常:{{err}}"
+    "hintException": "打开过程异常:{{err}}",
+    "engineStartingNoReset": "Docker 引擎未运行,正在启动(不重置 WSL)…"
   },
   "dockerBadge": {
     "install-docker": "准备",

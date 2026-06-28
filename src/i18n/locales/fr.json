@@ -470,7 +470,8 @@
     "opening": "Ouverture de {{url}} …",
     "opened": "Ouvert",
     "hintOpenFailed": "Token obtenu mais échec d'ouverture de la fenêtre : {{err}}",
-    "hintException": "Exception lors de l'ouverture : {{err}}"
+    "hintException": "Exception lors de l'ouverture : {{err}}",
+    "engineStartingNoReset": "Moteur Docker non démarré, démarrage (sans réinitialiser WSL)…"
   },
   "dockerBadge": {
     "install-docker": "Prép.",

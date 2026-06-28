@@ -470,7 +470,8 @@
     "opening": "Opening {{url}} …",
     "opened": "Opened",
     "hintOpenFailed": "Got the token but failed to open the window: {{err}}",
-    "hintException": "Open failed with an exception: {{err}}"
+    "hintException": "Open failed with an exception: {{err}}",
+    "engineStartingNoReset": "Docker engine not running, starting it (without resetting WSL)…"
   },
   "dockerBadge": {
     "install-docker": "Prep",

@@ -397,7 +397,7 @@ async function launchDockerd() {
     { timeout: 20000 });
 }
 
-async function startEngine({ emit } = {}) {
+async function startEngine({ emit, noShutdown = false } = {}) {
   const e = (ev) => { try { emit && emit(ev); } catch {} };
   // Up to 3 attempts. Each: launch dockerd (detached, returns instantly) then POLL
   // the socket in SHORT, SEPARATE wsl calls — never hold the distro in one 120s call
@@ -424,7 +424,10 @@ async function startEngine({ emit } = {}) {
     // Recover. A stuck launch = WSL wedged → `wsl --shutdown` (full VM reset — the
     // ONLY thing that clears a real wedge; --terminate isn't enough). Otherwise
     // dockerd just died/is slow → clear stale runtime files for a clean relaunch.
-    if (stuck) { log.info(`[startEngine] WSL stuck → wsl --shutdown`); try { await wslShutdown(); } catch {} }
+    if (stuck && noShutdown) {
+      // 更新路径:绝不 wsl --shutdown(会把正在跑的容器 + 整个 VM 干掉)。只记录,交给上层处理。
+      log.warn(`[startEngine] WSL stuck but noShutdown=true → 跳过 wsl --shutdown(更新路径不重置 VM)`);
+    } else if (stuck) { log.info(`[startEngine] WSL stuck → wsl --shutdown`); try { await wslShutdown(); } catch {} }
     else { try { await wslRun("if ! pgrep dockerd >/dev/null 2>&1; then rm -f /var/run/docker.pid /run/docker.pid /var/run/docker.sock /run/docker.sock; fi", { timeout: 15000 }); } catch {} }
   }
   log.error("[startEngine] ✗ dockerd NOT up after 3 attempts");
@@ -873,7 +876,14 @@ async function restart({ container = "cicy-code-docker", port = 8008, volume = "
 // Streamed to the drawer so the user sees the npm pull + restart.
 async function update({ onProgress, container = "cicy-code-docker", port = 8008 } = {}) {
   const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
-  await startEngine();
+  // 更新一个 running 容器只需 docker exec——引擎必然在跑。绝不无条件 startEngine():它的
+  // 「WSL 卡住→wsl --shutdown」恢复路径会把正在跑的容器 + 整个 WSL VM 一起干掉(这正是
+  // 「点更新 → docker 挂 + WSL 卡死」的根因:一次瞬时 wsl 慢响应被误判成 wedged → shutdown)。
+  // 只有引擎确实没起才轻量拉一下,且**禁用 wsl --shutdown**(noShutdown)。
+  if (!(await dockerEngineUp())) {
+    emit({ phase: "container", status: "running", message: t("dockerOpen.engineStartingNoReset") });
+    await startEngine({ emit, noShutdown: true });
+  }
   emit({ phase: "image", status: "running", message: "更新 cicy-code（拉取最新版）…" });
   try {
     await wslRunStream(`docker exec ${container} bash -lc "command -v cicy-code-update.sh >/dev/null && cicy-code-update.sh || /usr/local/bin/cicy-code-update.sh"`,

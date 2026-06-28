@@ -470,7 +470,8 @@
     "opening": "{{url}} を開いています…",
     "opened": "開きました",
     "hintOpenFailed": "token は取得しましたがウィンドウを開けませんでした:{{err}}",
-    "hintException": "オープン中に例外:{{err}}"
+    "hintException": "オープン中に例外:{{err}}",
+    "engineStartingNoReset": "Docker エンジン未起動、起動します(WSL はリセットしません)…"
   },
   "dockerBadge": {
     "install-docker": "準備",
