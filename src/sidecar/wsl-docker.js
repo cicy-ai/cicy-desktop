@@ -543,7 +543,22 @@ function projectsMountArg() {
   } catch (e) { log.warn(`[wsl-docker] projects mount setup failed: ${e.message}`); return ""; }
 }
 
-async function runContainer({ port = 8008, container = "cicy-code-docker", volume = "cicy-team-8008", env = {}, emit } = {}) {
+// extraPorts → additional `-p 127.0.0.1:<p>:<p>` mappings (host=container, loopback
+// only). For container-internal agent services the user wants reachable from
+// Windows. Each adds one docker-proxy, so keep the list small. 8008/主端口自动排除。
+function publishArgs(port, extraPorts = []) {
+  const seen = new Set([Number(port), 8008]);
+  let args = `-p 127.0.0.1:${port}:8008`;
+  for (const raw of Array.isArray(extraPorts) ? extraPorts : []) {
+    const p = Number(raw);
+    if (!Number.isInteger(p) || p < 1 || p > 65535 || seen.has(p)) continue;
+    seen.add(p);
+    args += ` -p 127.0.0.1:${p}:${p}`;
+  }
+  return args;
+}
+
+async function runContainer({ port = 8008, container = "cicy-code-docker", volume = "cicy-team-8008", env = {}, extraPorts = [], emit } = {}) {
   // 每次容器"启动"(含已在跑被 adopt)都确保桌面快捷方式存在 —— 不存在就建,坏了就修。
   if (await probeHealth(port)) { ensureDesktopShortcut(volume, port).catch(() => {}); return { adopted: true }; }
   // Replace any stale same-named container.
@@ -562,7 +577,7 @@ async function runContainer({ port = 8008, container = "cicy-code-docker", volum
   // 只发布 :8008(单端口,1 个 docker-proxy)。EXTRA_PORTS 那段 18000-19999(2000 个端口)
   // 已删——docker 默认每端口起一个 userland-proxy 进程 → 2000 进程,docker run 卡死/吃内存/
   // 偶发失败(实测)。容器内 agent 服务需要从 Windows 直达时再按需单独暴露。
-  const cmd = `docker run -d --name ${container} --restart unless-stopped --dns 223.5.5.5 --dns 8.8.8.8 -p 127.0.0.1:${port}:8008 -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${projectsMountArg()} ${envArgs} ${IMAGE}`;
+  const cmd = `docker run -d --name ${container} --restart unless-stopped --dns 223.5.5.5 --dns 8.8.8.8 ${publishArgs(port, extraPorts)} -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${projectsMountArg()} ${envArgs} ${IMAGE}`;
   emit && emit({ phase: "container", status: "running", message: `$ ${cmd.length > 220 ? cmd.slice(0, 220) + " …" : cmd}` });
   await wslRun(cmd, { timeout: 60000 }); // 失败时 err.stderr 带 docker 真错误 → _bootstrap 的 errTail 显示
   ensureDesktopShortcut(volume, port).catch(() => {});
@@ -727,7 +742,7 @@ async function bootstrap(opts = {}) {
 // 注意: 默认容器/卷名保持 cicy-team / cicy-code-docker(回退实测"现在不行了"的改动)。
 // live 路径(docker:app-bootstrap)始终传显式 APP_*(cicy-team-8008)名,不靠这里的默认;
 // 改默认会让既有 cicy-team 卷的装机对不上 → 退回原值。
-async function _bootstrap({ onProgress, port = 8008, container = "cicy-code-docker", volume = "cicy-team", env = {} } = {}) {
+async function _bootstrap({ onProgress, port = 8008, container = "cicy-code-docker", volume = "cicy-team", env = {}, extraPorts = [] } = {}) {
   const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
 
   // Structured, PERSISTED trace of the whole run (electron-log → main.log) so a
@@ -838,7 +853,7 @@ async function _bootstrap({ onProgress, port = 8008, container = "cicy-code-dock
   begin("run-container");
   if (!(await probeHealth(port))) {
     emit({ phase: "container", status: "running", message: "启动 cicy-code 服务…" });
-    try { await runContainer({ port, container, volume, env, emit }); }
+    try { await runContainer({ port, container, volume, env, extraPorts, emit }); }
     catch (e) { fail("container_start_failed", e.message); emit({ phase: "container", status: "error", message: `服务启动失败：${e.message}（点重试）${errTail(e)}` }); finish(false, "container_start_failed"); return { ok: false, reason: "container_start_failed" }; }
     done();
   } else done(true);
@@ -991,14 +1006,14 @@ async function dockerRestart({ container = "cicy-code-docker-8008" } = {}) {
 // 重建容器:docker rm -f 旧容器 + docker run 新容器(用新 env,如新的 docker team 网关
 // key)。**保留 volume**(数据/api_token/deviceId 不丢),只是换掉容器本身 + env。
 // 破坏性(短暂中断 + 换 key)→ 调用方要 confirm。
-async function recreate({ onProgress, port = 8008, container = "cicy-code-docker-8008", volume = "cicy-team-8008", env = {} } = {}) {
+async function recreate({ onProgress, port = 8008, container = "cicy-code-docker-8008", volume = "cicy-team-8008", env = {}, extraPorts = [] } = {}) {
   const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
   // 重建 = 用最新镜像重建。OSS 有更新版先刷新(非破坏性,不删发行版/volume),再 rm + run。
   try { await ensureFreshImage({ emit }); } catch (e) { emit({ phase: "image", status: "running", message: `镜像刷新跳过(${e.message}),用现有镜像重建` }); }
   // 强删占用该端口的**任何**容器(含老名字 cicy-code-docker)+ 目标容器 —— 否则
   // runContainer 开头的 probeHealth 看到旧容器还健康会 adopt 它、不重建,key 就换不了。
   try { await wslRun(`docker ps -aq --filter publish=${port} | xargs -r docker rm -f 2>/dev/null; docker rm -f ${container} 2>/dev/null; true`, { timeout: 30000 }); } catch {}
-  const r = await runContainer({ port, container, volume, env, emit });
+  const r = await runContainer({ port, container, volume, env, extraPorts, emit });
   try { await ensureDesktopShortcut(volume, port); } catch {}
   return r;
 }

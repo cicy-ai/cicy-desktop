@@ -230,6 +230,21 @@
       "hostResolveFail": "Host version lookup failed; resolving inside container…",
       "scriptReady": "In-container update script refreshed (fast)",
       "scriptPushFail": "Failed to push update script; using baked one"
+    },
+    "ports": {
+      "menu": "Port settings",
+      "title": "Port settings",
+      "sub": "Extra ports (besides :8008) published so Windows can reach in-container services",
+      "mainFixed": ":8008 · cicy-code (fixed)",
+      "add": "+ Add port",
+      "ph": "Port 1-65535",
+      "save": "Save & rebuild",
+      "saving": "Saving…",
+      "cancel": "Cancel",
+      "hint": "Saving rebuilds the container (volume data kept) with a brief interruption",
+      "invalid": "Invalid port (1-65535, not 8008, no duplicates)",
+      "none": "No extra ports",
+      "remove": "Remove"
     }
   },
   "common": {

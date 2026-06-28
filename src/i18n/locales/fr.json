@@ -230,6 +230,21 @@
       "hostResolveFail": "Échec de la résolution de version côté hôte ; résolution dans le conteneur…",
       "scriptReady": "Script de mise à jour du conteneur actualisé (rapide)",
       "scriptPushFail": "Échec de l'envoi du script ; utilisation de la version intégrée"
+    },
+    "ports": {
+      "menu": "Réglage des ports",
+      "title": "Réglage des ports",
+      "sub": "Ports supplémentaires (hors :8008) publiés pour que Windows atteigne les services du conteneur",
+      "mainFixed": ":8008 · cicy-code (fixe)",
+      "add": "+ Ajouter un port",
+      "ph": "Port 1-65535",
+      "save": "Enregistrer et reconstruire",
+      "saving": "Enregistrement…",
+      "cancel": "Annuler",
+      "hint": "L'enregistrement reconstruit le conteneur (données du volume conservées), brève interruption",
+      "invalid": "Port invalide (1-65535, pas 8008, sans doublon)",
+      "none": "Aucun port supplémentaire",
+      "remove": "Retirer"
     }
   },
   "common": {

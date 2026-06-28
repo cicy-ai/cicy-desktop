@@ -2000,6 +2000,40 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
   const [busy, setBusy] = useState("");   // "" | bootstrap | restart | stop | upgrade | probe
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmRecreate, setConfirmRecreate] = useState(false); // 重建容器 in-app 确认弹窗(不用 native confirm)
+  const [portsOpen, setPortsOpen] = useState(false);   // 端口设置 modal
+  const [portList, setPortList] = useState([]);         // 编辑中的额外端口(字符串数组,便于输入)
+  const [portsBusy, setPortsBusy] = useState(false);
+  const [portsErr, setPortsErr] = useState("");
+  const openPorts = useCallback(async () => {
+    setMenuOpen(false); setPortsErr("");
+    try { const r = await window.cicy?.docker?.getPorts?.(); setPortList((r?.ports || []).map(String)); }
+    catch { setPortList([]); }
+    setPortsOpen(true);
+  }, []);
+  const savePorts = useCallback(async () => {
+    // 校验:1-65535、≠8008、去重、忽略空行。
+    const seen = new Set(); const out = [];
+    for (const raw of portList) {
+      const s = String(raw).trim(); if (!s) continue;
+      const p = Number(s);
+      if (!Number.isInteger(p) || p < 1 || p > 65535 || p === 8008 || seen.has(p)) { setPortsErr(tr("docker.ports.invalid", "有端口无效(1-65535,不能是 8008,不能重复)")); return; }
+      seen.add(p); out.push(p);
+    }
+    setPortsErr(""); setPortsBusy(true); setPortsOpen(false);
+    setBusy("recreate");
+    dockerDrawer.open({ onRetry: savePorts });
+    const unsub = window.cicy?.docker?.onAppProgress?.((ev) => dockerDrawer.push(ev));
+    try {
+      const r = await window.cicy?.docker?.setPorts?.(out);
+      dockerDrawer.finish({ ok: !!r?.ok, message: r?.ok ? tr("docker.ports.save", "保存并重建") + " ✅" : (r?.error || tr("docker.opFailed", "操作失败")) });
+      if (r?.ok) { try { const s = await window.cicy?.docker?.appRedetect?.(); if (s) setStatus(s); } catch {} }
+    } catch (e) {
+      dockerDrawer.finish({ ok: false, message: e.message });
+    } finally {
+      try { unsub && unsub(); } catch {}
+      setPortsBusy(false); setBusy(""); checkStatus();
+    }
+  }, [portList, checkStatus]);
   // Inline rename (mirrors LocalTeamCard): double-click the title to edit.
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -2372,6 +2406,10 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
                   onClick={() => runOp("restart", () => window.cicy.docker.appDockerRestart(), tr("docker.dockerRestarted", "已重启 Docker 容器"))}>
                   {tr("docker.dockerRestart", "重启 Docker")}
                 </button>
+                <button type="button" data-id="DockerCard-ports" className="bcard__menu-item"
+                  onClick={(e) => { e.stopPropagation(); openPorts(); }}>
+                  {tr("docker.ports.menu", "端口设置")}
+                </button>
                 <button type="button" data-id="DockerCard-recreate" className="bcard__menu-item is-danger"
                   onClick={(e) => { e.stopPropagation(); setMenuOpen(false); setConfirmRecreate(true); }}>
                   {tr("docker.recreate", "重建 Docker")}
@@ -2443,6 +2481,56 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
                 onClick={() => { setConfirmRecreate(false); runOp("restart", () => window.cicy.docker.appRecreate(), tr("docker.recreated", "已重建 Docker 容器")); }}
                 style={{ padding: "7px 16px", borderRadius: 8, border: "none", background: "#da3633", color: "white", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
                 {tr("docker.recreateOk", "确定重建")}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+      {portsOpen && createPortal(
+        <div data-id="DockerCard-ports-modal"
+          style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center" }}
+          onMouseDown={(e) => { if (e.target === e.currentTarget) setPortsOpen(false); }}>
+          <div onClick={(e) => e.stopPropagation()}
+            style={{ width: 420, maxWidth: "92vw", background: "#161b22", border: "1px solid #30363d", borderRadius: 12, padding: "20px 22px", boxShadow: "0 12px 40px rgba(0,0,0,0.5)" }}>
+            <h3 style={{ margin: "0 0 6px", fontSize: 16, color: "#e6edf3" }}>{tr("docker.ports.title", "端口设置")}</h3>
+            <p style={{ margin: "0 0 14px", fontSize: 12.5, lineHeight: 1.6, color: "#9aa4b2" }}>{tr("docker.ports.sub", "除 :8008 外,额外发布、可从 Windows 直达容器内服务的端口")}</p>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", marginBottom: 10, borderRadius: 8, background: "#0d1117", border: "1px solid #21262d", color: "#7d8590", fontSize: 13 }}>
+              🔒 {tr("docker.ports.mainFixed", ":8008 · cicy-code(固定)")}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 220, overflowY: "auto" }}>
+              {portList.length === 0 && (
+                <div style={{ fontSize: 12.5, color: "#6e7681", padding: "4px 2px" }}>{tr("docker.ports.none", "暂无额外端口")}</div>
+              )}
+              {portList.map((p, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <input data-id={`DockerCard-port-input-${i}`} type="text" inputMode="numeric" value={p}
+                    placeholder={tr("docker.ports.ph", "端口号 1-65535")}
+                    onChange={(e) => { const v = e.target.value.replace(/[^0-9]/g, ""); setPortList((list) => list.map((x, j) => j === i ? v : x)); setPortsErr(""); }}
+                    style={{ flex: 1, padding: "7px 10px", borderRadius: 8, border: "1px solid #30363d", background: "#0d1117", color: "#e6edf3", fontSize: 13, fontFamily: "var(--mono)" }} />
+                  <button type="button" data-id={`DockerCard-port-remove-${i}`} title={tr("docker.ports.remove", "移除")}
+                    onClick={() => { setPortList((list) => list.filter((_, j) => j !== i)); setPortsErr(""); }}
+                    style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #30363d", background: "transparent", color: "#da3633", cursor: "pointer", fontSize: 14 }}>✕</button>
+                </div>
+              ))}
+            </div>
+            <button type="button" data-id="DockerCard-port-add"
+              onClick={() => setPortList((list) => [...list, ""])}
+              style={{ marginTop: 10, padding: "7px 12px", borderRadius: 8, border: "1px dashed #30363d", background: "transparent", color: "#58a6ff", cursor: "pointer", fontSize: 13, width: "100%" }}>
+              {tr("docker.ports.add", "+ 添加端口")}
+            </button>
+            {portsErr && <div style={{ marginTop: 10, fontSize: 12.5, color: "#f85149" }}>{portsErr}</div>}
+            <p style={{ margin: "12px 0 16px", fontSize: 11.5, lineHeight: 1.5, color: "#6e7681" }}>{tr("docker.ports.hint", "保存会重建容器(volume 数据保留),会有短暂中断")}</p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <button type="button" data-id="DockerCard-ports-cancel" disabled={portsBusy}
+                onClick={() => setPortsOpen(false)}
+                style={{ padding: "7px 16px", borderRadius: 8, border: "1px solid #30363d", background: "transparent", color: "#c9d1d9", cursor: "pointer", fontSize: 13 }}>
+                {tr("docker.ports.cancel", "取消")}
+              </button>
+              <button type="button" data-id="DockerCard-ports-save" disabled={portsBusy}
+                onClick={savePorts}
+                style={{ padding: "7px 16px", borderRadius: 8, border: "none", background: "#238636", color: "white", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+                {portsBusy ? tr("docker.ports.saving", "保存中…") : tr("docker.ports.save", "保存并重建")}
               </button>
             </div>
           </div>

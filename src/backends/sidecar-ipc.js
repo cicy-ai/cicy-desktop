@@ -49,6 +49,26 @@ const APP_PORT = Number(process.env.CICY_DOCKER_APP_PORT || 8008);
 // (含 port)区分。
 const APP_CONTAINER = process.env.CICY_DOCKER_APP_CONTAINER || `cicy-code-docker-${APP_PORT}`;
 const APP_VOLUME = process.env.CICY_DOCKER_APP_VOLUME || `cicy-team-${APP_PORT}`;
+
+// 用户自定义的额外发布端口(除 :8008 外,给容器内 agent 服务从 Windows 直达用)。
+// 持久化在 userData/docker-ports.json,bootstrap/recreate 都会带上 -p。lazy 取
+// 路径(app 未 ready 时不取)。
+function portsFile() { return path.join(require("electron").app.getPath("userData"), "docker-ports.json"); }
+function sanitizePorts(arr) {
+  const out = [], seen = new Set([APP_PORT, 8008]);
+  for (const raw of Array.isArray(arr) ? arr : []) {
+    const p = Number(raw);
+    if (!Number.isInteger(p) || p < 1 || p > 65535 || seen.has(p)) continue;
+    seen.add(p); out.push(p);
+  }
+  return out;
+}
+function readExtraPorts() {
+  try { const j = JSON.parse(fs.readFileSync(portsFile(), "utf8")); return sanitizePorts(j && j.ports); } catch { return []; }
+}
+function writeExtraPorts(ports) {
+  try { fs.writeFileSync(portsFile(), JSON.stringify({ ports: sanitizePorts(ports) }, null, 2), "utf8"); } catch (e) { log.warn("[docker-ports] write failed:", e.message); }
+}
 const APP_MOUNT = process.env.CICY_DOCKER_APP_MOUNT || "/home/cicy";
 // :8008 docker 的网关 endpoint。key 不再从 :8008 借(native 已退役)—— 容器只用它
 // 自己独立云端 team 的 key(见 ensureDockerTeam / appOpts)。
@@ -263,7 +283,7 @@ function register({ sidecarLogPath } = {}) {
     await ensureDockerTeam().catch(() => {});
     const env = { CICY_AI_GATEWAY_LLM_ENDPOINT: GATEWAY_ENDPOINT };
     if (dockerTeamReg && dockerTeamReg.apiKey) env.CICY_AI_GATEWAY_LLM_API_KEY = dockerTeamReg.apiKey;
-    return { port: APP_PORT, container: APP_CONTAINER, volume: APP_VOLUME, env };
+    return { port: APP_PORT, container: APP_CONTAINER, volume: APP_VOLUME, env, extraPorts: readExtraPorts() };
   };
   // Register the running :8008 instance as a (custom) team so the card's "打开"
   // reuses the token-injected open/reload flow. addTeam dedups by host:port.
@@ -470,6 +490,28 @@ function register({ sidecarLogPath } = {}) {
       });
       if (result && result.ok) await registerAppTeam();
       return result;
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  // 端口设置:读当前已发布的额外端口(:8008 固定,不在列)。
+  ipcMain.handle("docker:get-ports", () => {
+    return { ok: true, mainPort: APP_PORT, ports: readExtraPorts() };
+  });
+  // 保存端口 → 持久化 → recreate 容器带上新的 -p(:8008 + 各额外端口)。volume 保留。
+  ipcMain.handle("docker:set-ports", async (e, input) => {
+    if (!APP_DOCKER_SUPPORTED) return { ok: false, error: "Docker cicy-code 仅支持 Windows" };
+    const ports = sanitizePorts(input && input.ports);
+    writeExtraPorts(ports);
+    try {
+      await ensureDockerTeam();
+      const result = await appDocker.recreate({
+        ...(await appOpts()), // 已含 extraPorts: readExtraPorts()(刚写入的)
+        onProgress: (ev) => { try { e.sender.send("docker:app-progress", ev); } catch {} },
+      });
+      await registerAppTeam();
+      return { ok: true, ports, result };
     } catch (err) {
       return { ok: false, error: err.message };
     }

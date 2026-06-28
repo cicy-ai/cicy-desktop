@@ -172,6 +172,8 @@ contextBridge.exposeInMainWorld("cicy", {
     appUpdate:    ()  => logInvoke("docker:app-update"),
     appStop:      ()  => logInvoke("docker:app-stop"),
     appUpgrade:   ()  => logInvoke("docker:app-upgrade"),
+    getPorts:     ()  => logInvoke("docker:get-ports"),               // 读已发布的额外端口
+    setPorts:     (ports) => logInvoke("docker:set-ports", { ports }), // 存端口 + recreate 带 -p
     // Open :8008 with the live container token (refuses if it can't read it).
     appOpen:      ()  => logInvoke("docker:app-open"),
     openDir:      (which) => logInvoke("docker:open-dir", which), // "projects"→C:\projects, 否则 WSL 卷
