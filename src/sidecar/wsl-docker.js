@@ -859,7 +859,9 @@ async function _bootstrap({ onProgress, port = 8008, container = "cicy-code-dock
 // running (that's the whole point of the supervisor layout). Falls back to a
 // full container restart on the pre-supervisor image.
 async function restart({ container = "cicy-code-docker", port = 8008, volume = "cicy-team-8008" } = {}) {
-  await startEngine();
+  // 重启 cicy-code 只需 docker exec——引擎必然在跑。同 update:绝不无条件 startEngine()
+  // (它误判卡住会 wsl --shutdown 把容器+WSL 干掉)。引擎确实没起才轻量拉,且 noShutdown。
+  if (!(await dockerEngineUp())) { await startEngine({ noShutdown: true }); }
   try {
     await wslRun(`docker exec ${container} supervisorctl -c /etc/supervisor/supervisord.conf restart cicy-code`, { timeout: 30000 });
   } catch {
