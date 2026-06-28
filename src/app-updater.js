@@ -64,6 +64,27 @@ function mirrored(githubUrl) {
   return m ? mirrorUrl(githubUrl, m) : githubUrl;
 }
 
+// HEAD 探测 URL 是否可下(200/206 = ok)。跟随重定向(GitHub release 会 302 到 CDN)。
+// 用于「先出包再更新版本」的客户端保险:版本号涨了但包还没传 → HEAD 404 → 先不报更新。
+function headOk(url, redirects = 0) {
+  return new Promise((resolve) => {
+    if (redirects > 6) return resolve(false);
+    let req;
+    try {
+      req = https.request(url, { method: "HEAD", headers: { "User-Agent": "cicy-desktop" }, timeout: 10000 }, (res) => {
+        res.resume();
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          return headOk(res.headers.location, redirects + 1).then(resolve);
+        }
+        resolve(res.statusCode === 200 || res.statusCode === 206);
+      });
+    } catch { return resolve(false); }
+    req.on("error", () => resolve(false));
+    req.on("timeout", () => { req.destroy(); resolve(false); });
+    req.end();
+  });
+}
+
 // ── 最新版本号 ────────────────────────────────────────────────────────────────
 async function fetchLatestVersion(network) {
   if (network === "cn") {
@@ -158,7 +179,12 @@ async function check() {
     const latest = await fetchLatestVersion(net);
     const current = app.getVersion();
     if (latest && cmpVer(latest, current) > 0) {
-      broadcast({ status: "available", version: latest, current, progress: null, filePath: null });
+      // 「先出包再更新版本」客户端保险:版本号涨了不代表包传完了。先 HEAD 确认本平台安装包
+      // 真能下(200),否则当成「还没就绪」继续显已是最新,避免用户点下载 404。
+      const { url } = assetFor(latest, net);
+      const ready = await headOk(url);
+      if (ready) broadcast({ status: "available", version: latest, current, progress: null, filePath: null });
+      else { log.info(`[app-updater] ${latest} 版本号已更新但安装包未就位(HEAD 非 200):${url} — 暂不提示更新`); broadcast({ status: "up-to-date", version: current, current }); }
     } else {
       broadcast({ status: "up-to-date", version: latest || current, current });
     }
