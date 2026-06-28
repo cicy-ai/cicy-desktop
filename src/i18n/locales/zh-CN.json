@@ -491,6 +491,10 @@
     "ready": "新版本已下载,重启即可安装",
     "error": "更新失败",
     "downloadBtn": "下载",
-    "installBtn": "立即安装"
+    "installBtn": "立即安装",
+    "checkBtn": "检查更新",
+    "checkingShort": "检查中…",
+    "checking": "正在检查更新…",
+    "upToDate": "已是最新版本 v{{v}}"
   }
 }

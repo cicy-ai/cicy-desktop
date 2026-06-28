@@ -1311,6 +1311,7 @@ function Header({ me, welcome, onLogout, mitmTeam }) {
   const [trustOpen, setTrustOpen] = useState(false);
   const [auditOpen, setAuditOpen] = useState(false);
   const [termsOpen, setTermsOpen] = useState(false);
+  const [checkingUpd, setCheckingUpd] = useState(false);
   const [appVer, setAppVer] = useState("");
   const wrap = useRef(null);
   // cicy-desktop's own version, shown at the very bottom of this menu.
@@ -1334,6 +1335,18 @@ function Header({ me, welcome, onLogout, mitmTeam }) {
   // Cloud dash pages: query-param routed, opened via a one-time handoff ticket
   // (no long-term token in the URL — see openCloudPage).
   const goDash = (query) => { openCloudPage(query); setOpen(false); };
+  // 主动检查更新:有新版 → updater 广播 → 顶部 banner 出现;最新/出错 → toast 反馈。
+  const checkUpdate = async () => {
+    setOpen(false); setCheckingUpd(true);
+    toast.show({ id: "app-update", message: tr("updateBanner.checking", "正在检查更新…"), status: "running" });
+    try {
+      const s = await window.cicy?.app?.checkUpdate?.();
+      if (s?.status === "available") toast.show({ id: "app-update", message: tr("updateBanner.available", "发现新版本 v{{v}}", { v: s.version }), status: "done", ttl: 4000 });
+      else if (s?.status === "up-to-date") toast.show({ id: "app-update", message: tr("updateBanner.upToDate", "已是最新版本 v{{v}}", { v: s.version || s.current }), status: "done", ttl: 3000 });
+      else toast.show({ id: "app-update", message: tr("updateBanner.error", "更新失败") + (s?.error ? `:${s.error}` : ""), status: "error", ttl: 5000 });
+    } catch (e) { toast.show({ id: "app-update", message: e.message, status: "error", ttl: 5000 }); }
+    finally { setCheckingUpd(false); }
+  };
   return (
     <>
     <header className="topbar">
@@ -1374,6 +1387,9 @@ function Header({ me, welcome, onLogout, mitmTeam }) {
             </button>
             <button type="button" data-id="UserChip-terms" className="user-chip__menu-item" onClick={() => { setOpen(false); setTermsOpen(true); }}>
               {tr("firstRunTerms.menu", "用户协议")}
+            </button>
+            <button type="button" data-id="UserChip-check-update" className="user-chip__menu-item" disabled={checkingUpd} onClick={checkUpdate}>
+              {checkingUpd ? tr("updateBanner.checkingShort", "检查中…") : tr("updateBanner.checkBtn", "检查更新")}
             </button>
             {/* HTTPS 审计入口暂时隐藏 */}
             {false && mitmTeam && (

@@ -491,6 +491,10 @@
     "ready": "Update downloaded — restart to install",
     "error": "Update failed",
     "downloadBtn": "Download",
-    "installBtn": "Install now"
+    "installBtn": "Install now",
+    "checkBtn": "Check for updates",
+    "checkingShort": "Checking…",
+    "checking": "Checking for updates…",
+    "upToDate": "Up to date (v{{v}})"
   }
 }

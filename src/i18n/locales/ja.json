@@ -491,6 +491,10 @@
     "ready": "ダウンロード完了 — 再起動でインストール",
     "error": "アップデート失敗",
     "downloadBtn": "ダウンロード",
-    "installBtn": "今すぐインストール"
+    "installBtn": "今すぐインストール",
+    "checkBtn": "アップデートを確認",
+    "checkingShort": "確認中…",
+    "checking": "アップデートを確認中…",
+    "upToDate": "最新です(v{{v}})"
   }
 }
