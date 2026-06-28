@@ -1155,7 +1155,7 @@ function TrustedSitesModal({ onClose }) {
   };
 
   return createPortal(
-    <div style={S.overlay} onClick={onClose} data-id="TrustedSitesModal">
+    <div style={S.overlay} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }} data-id="TrustedSitesModal">
       <div style={S.card} onClick={(e) => e.stopPropagation()}>
         <div style={S.head}>
           <h2 style={S.title}>{tr("trustedSites.title", "受信任站点")}</h2>
@@ -1285,7 +1285,7 @@ function AuditLogModal({ onClose }) {
   const Th = (t) => <div>{t}</div>;
 
   return createPortal(
-    <div style={S.overlay} onClick={onClose} data-id="AuditLogModal">
+    <div style={S.overlay} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }} data-id="AuditLogModal">
       <div style={S.card} onClick={(e) => e.stopPropagation()}>
         <div style={S.head}>
           <div style={S.titleWrap}>
@@ -1822,8 +1822,15 @@ const dockerDrawer = {
     // Log only milestone events — never the per-% running download ticks.
     const isRunningTick = ev.status === "running" && hasPct && isDl;
     if (!isRunningTick) {
-      const line = { id: ++dockerDrawerLogSeq, t: clockHHMMSS(), phase, status: ev.status || "running", message: ev.message || "" };
-      next.logs = [...dockerDrawerState.logs, line];
+      // 去重:两条订阅(全局兜底 + 某 run*() 自己的)偶发对同一事件各 push 一次 → 日志重复。
+      // 末行 phase/status/message 完全相同则跳过(兜底,不影响正常重复行很少的场景)。
+      const last = dockerDrawerState.logs[dockerDrawerState.logs.length - 1];
+      const st = ev.status || "running";
+      const msg = ev.message || "";
+      if (!(last && last.phase === phase && last.status === st && last.message === msg)) {
+        const line = { id: ++dockerDrawerLogSeq, t: clockHHMMSS(), phase, status: st, message: msg };
+        next.logs = [...dockerDrawerState.logs, line];
+      }
     }
     dockerDrawerState = next;
     emitDockerDrawer();
@@ -2021,7 +2028,12 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
       // 不到 docker:app-progress 完成事件,抽屉就一直转(用户看到的「正在跟随同一进度」假死)。
       // 这里检测到容器起来了就直接把抽屉收成「完成」,不再死等 promise。
       // kind!=="open":只自愈安装抽屉;「打开」抽屉(失败报告)绝不被「已就绪」劫持。
-      if (s?.running && dockerDrawerState && dockerDrawerState.status === "running" && dockerDrawerState.kind !== "open") {
+      // **只自愈真正卡住的抽屉**(>10s 没收到任何进度事件):否则会误杀正在进行的「更新/
+      // 重启 cicy-code」——它们是 in-place 操作,容器全程 healthy,点更新瞬间 busy 变化触发
+      // 一次 checkStatus 就会把还在跑的抽屉提前收成「完成」,用户点完成关掉、命令却还在跑、
+      // 卡片卡在「处理中」(实测 bug)。活跃流式的抽屉 lastAt 是新的,不动它。
+      const stale = Date.now() - (dockerDrawerState?.lastAt || 0) > 30000;
+      if (s?.running && dockerDrawerState && dockerDrawerState.status === "running" && dockerDrawerState.kind !== "open" && stale) {
         dockerDrawer.finish({ ok: true, message: "Docker cicy-code 已就绪" });
       }
     } catch (e) { console.warn("[DockerCard]", e); }
@@ -2414,7 +2426,7 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
       {confirmRecreate && createPortal(
         <div data-id="DockerCard-recreate-modal"
           style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center" }}
-          onClick={() => setConfirmRecreate(false)}>
+          onMouseDown={(e) => { if (e.target === e.currentTarget) setConfirmRecreate(false); }}>
           <div onClick={(e) => e.stopPropagation()}
             style={{ width: 360, maxWidth: "90vw", background: "#161b22", border: "1px solid #30363d", borderRadius: 12, padding: "20px 22px", boxShadow: "0 12px 40px rgba(0,0,0,0.5)" }}>
             <h3 style={{ margin: "0 0 8px", fontSize: 16, color: "#e6edf3" }}>{tr("docker.recreate", "重建 Docker")}</h3>
