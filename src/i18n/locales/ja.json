@@ -213,7 +213,11 @@
     "repairWsl": "WSL を修復",
     "wslBrokenRepair": "WSL 管理異常 · 「WSL を修復」で再インストール",
     "openWslDir": "WSL フォルダを開く",
-    "openProjectsDir": "プロジェクトフォルダを開く"
+    "openProjectsDir": "プロジェクトフォルダを開く",
+    "wslWedged": "WSL フリーズ · 「WSL を修復」をクリック",
+    "wslNeedReboot": "WSL サービスが停止不能です — Windows を再起動してください。次回起動時に自動修復します(旧データは改名保存、削除しません)。",
+    "wslRepaired": "WSL を修復しました",
+    "repairFailed": "修復に失敗"
   },
   "common": {
     "close": "Close",

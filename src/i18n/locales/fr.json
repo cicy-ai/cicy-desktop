@@ -213,7 +213,11 @@
     "repairWsl": "Réparer WSL",
     "wslBrokenRepair": "WSL non géré · cliquez Réparer WSL pour réinstaller",
     "openWslDir": "Ouvrir le dossier WSL",
-    "openProjectsDir": "Ouvrir le dossier projets"
+    "openProjectsDir": "Ouvrir le dossier projets",
+    "wslWedged": "WSL bloqué · cliquez Réparer WSL",
+    "wslNeedReboot": "Service WSL bloqué — REDÉMARREZ Windows ; réparation auto au prochain lancement (anciennes données renommées/conservées).",
+    "wslRepaired": "WSL réparé",
+    "repairFailed": "Échec de la réparation"
   },
   "common": {
     "close": "Close",

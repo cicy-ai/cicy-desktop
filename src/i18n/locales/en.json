@@ -213,7 +213,11 @@
     "repairWsl": "Repair WSL",
     "wslBrokenRepair": "WSL unmanaged · click Repair WSL to reinstall",
     "openWslDir": "Open WSL folder",
-    "openProjectsDir": "Open projects folder"
+    "openProjectsDir": "Open projects folder",
+    "wslWedged": "WSL frozen · click Repair WSL",
+    "wslNeedReboot": "WSL service is stuck — please RESTART Windows; CiCy auto-repairs on next launch (old data is renamed/kept, not deleted).",
+    "wslRepaired": "WSL repaired",
+    "repairFailed": "Repair failed"
   },
   "common": {
     "close": "Close",

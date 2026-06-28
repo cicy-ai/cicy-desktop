@@ -131,6 +131,72 @@ async function distroInstalled(distro = DISTRO) {
   });
 }
 
+// ── WSL 卡死(wedged)自愈 ────────────────────────────────────────────────────
+// 偶发深度死锁:所有 `wsl` 命令(连 `wsl --shutdown`)都 hang,且重启电脑也复发——
+// 成因 = 某 distro 的 vhdx 损坏 + LxssManager 卡在 STOP_PENDING。普通用户无从下手。
+// 关键:`sc query LxssManager` / 注册表 / 文件操作都不走 wsl、不会 hang,所以 app 能
+// 绕开卡死的 wsl 自检 + 自愈:检测到卡死 → 标记 → (重启后)bootstrap 启动时自动把坏
+// distro 从注册表移除 + 文件夹改名备份(不删,留 vhdx 可 `wsl --mount` 抢救)→ 重新导入。
+const WSL_RESET_FLAG = path.join(os.homedir(), "cicy-ai", "db", "wsl-reset-needed.flag");
+function markWslReset() { try { fs.mkdirSync(path.dirname(WSL_RESET_FLAG), { recursive: true }); fs.writeFileSync(WSL_RESET_FLAG, String(Date.now())); } catch {} }
+function wslResetPending() { try { return fs.existsSync(WSL_RESET_FLAG); } catch { return false; } }
+function clearWslReset() { try { fs.unlinkSync(WSL_RESET_FLAG); } catch {} }
+
+// LxssManager 卡在 STOP_PENDING/START_PENDING = WSL wedged(此刻所有 wsl 命令都 hang)。
+// 用 `sc query`(不经 wsl,秒回)判定,绝不 hang。
+function lxssWedged() {
+  if (process.platform !== "win32") return Promise.resolve(false);
+  return new Promise((resolve) => {
+    execFile("sc", ["query", "LxssManager"], { timeout: 8000, windowsHide: true }, (err, stdout) => {
+      if (err) return resolve(false);
+      resolve(/STOP_PENDING|START_PENDING/i.test(String(stdout || "")));
+    });
+  });
+}
+
+// 不经 wsl 移除坏 distro:删注册表 Lxss 项 + BasePath 文件夹改名备份(.bak-<ts>,不删)。
+// 仅当 distro 未挂载(vhdx 未锁)时成功——即重启后、任何 wsl 调用之前。返回 powershell 输出。
+function resetDistroFiles(distro = DISTRO) {
+  const ps = `$ErrorActionPreference='SilentlyContinue'
+$b='HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss'
+Get-ChildItem $b | ForEach-Object {
+  $p = Get-ItemProperty $_.PSPath
+  if ($p.DistributionName -eq '${distro}') {
+    $bp = $p.BasePath
+    if ($bp -and $bp.StartsWith('\\\\?\\')) { $bp = $bp.Substring(4) }
+    Remove-Item $_.PSPath -Recurse -Force
+    if ($bp -and (Test-Path $bp)) { Move-Item $bp ($bp + '.bak-' + (Get-Date -Format yyyyMMddHHmmss)) -Force }
+    Write-Output 'reset-done'
+  }
+}`;
+  const file = path.join(os.tmpdir(), `cicy-wsl-reset-${Date.now()}.ps1`);
+  return new Promise((resolve) => {
+    try { fs.writeFileSync(file, ps); } catch {}
+    execFile("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", file], { timeout: 30000, windowsHide: true }, (err, so) => {
+      try { fs.unlinkSync(file); } catch {}
+      resolve(String(so || "").trim());
+    });
+  });
+}
+
+// 一键修复(app 调):先试重启 LxssManager;还卡死(深度死锁,杀不动)→ 标记待重置 +
+// 告诉调用方需重启电脑(重启后 bootstrap 自动重置坏 distro)。
+async function repairWsl({ emit } = {}) {
+  if (process.platform !== "win32") return { ok: false, error: "win-only" };
+  const say = (m) => { try { emit && emit({ phase: "install-docker", status: "running", message: m }); } catch {} };
+  say("尝试重启 WSL 服务(LxssManager)…");
+  await new Promise((r) => execFile("powershell", ["-NoProfile", "-Command", "Restart-Service LxssManager -Force -ErrorAction SilentlyContinue"], { timeout: 30000, windowsHide: true }, () => r()));
+  await new Promise((r) => setTimeout(r, 2500));
+  if (await lxssWedged()) {
+    markWslReset();
+    say("WSL 服务仍卡死,需要重启电脑;重启后会自动修复。");
+    return { ok: false, needsReboot: true };
+  }
+  say("WSL 服务已恢复,正在重置环境…");
+  markWslReset(); // 坏 distro 仍可能在,交给(可能需重启后的)bootstrap 自动重置
+  return { ok: true };
+}
+
 // Install the Ubuntu distro WITHOUT launching its interactive first-run setup
 // (--no-launch). We always run commands as root afterwards, so no user account
 // is needed. Elevated via the scheduled-task path (reliable on these machines).
@@ -615,7 +681,13 @@ async function status(port = 8008) {
   const running = healthy || !!(engineUp && (await probeHealth(port)));
   // 服务在跑(:8008 健康)但 wsl 查不到发行版/引擎 → WSL 被孤儿化,管理(更新/重启)会失败。
   const wslUnmanaged = healthy && !engineUp;
-  return { wsl, distro, engineUp, running, unknown: unknown && !healthy, healthy, wslUnmanaged };
+  // WSL 卡死(wedged):wsl 探测超时(unknown)且 :8008 也不健康,再确认 LxssManager 卡在
+  // STOP_PENDING(sc query 不 hang)→ 这是死锁,不是「没装」。标记待重置,卡片给「修复」。
+  let wslWedged = false;
+  if (unknown && !healthy) {
+    if (await lxssWedged()) { wslWedged = true; markWslReset(); }
+  }
+  return { wsl, distro, engineUp, running, unknown: unknown && !healthy, healthy, wslUnmanaged, wslWedged };
 }
 
 // Guard against overlapping bootstrap runs (double-click 重试 / re-entrancy):
@@ -672,6 +744,17 @@ async function _bootstrap({ onProgress, port = 8008, container = "cicy-code-dock
     log.info(`[bootstrap] ${ok ? "DONE ✓" : `ABORT ✗ reason=${reason}`} total=${secs(BT0)} slowest=${slow ? `${slow[0]} ${(slow[1] / 1000).toFixed(1)}s` : "n/a"} steps=${JSON.stringify(steps.map(([n, d]) => [n, Math.round(d)]))}`);
   };
   log.info(`[bootstrap] START port=${port} container=${container} volume=${volume}`);
+
+  // 自愈:上次检测到 WSL 卡死(或修复流程标记了待重置)→ 此刻(重启后、未碰 wsl 前)把坏
+  // distro 从注册表移除 + 文件夹改名备份(不删数据),让下面走全新导入,而不是又去碰坏 distro
+  // 再次卡死。纯注册表/文件操作,不经 wsl。
+  if (process.platform === "win32" && wslResetPending()) {
+    begin("reset-broken-distro");
+    emit({ phase: "install-docker", status: "running", message: "检测到上次 WSL 卡死,正在重置环境(旧数据已改名备份,不删)…" });
+    try { const r = await resetDistroFiles(); log.info(`[bootstrap] reset-broken-distro out=${r || "(none)"}`); } catch (e) { log.warn(`[bootstrap] reset failed: ${e.message}`); }
+    clearWslReset();
+    done();
+  }
 
   // 0) Fast path: healthy AND the distro is TRULY wsl-managed → instant no-op.
   //    BUT a ZOMBIE :8008 (distro unregistered from WSL, yet a leftover wslhost.exe
@@ -867,5 +950,5 @@ async function readMihomoConfig(container = "cicy-code-docker-8008") {
 module.exports = {
   bootstrap, status, restart, stop, dockerRestart, recreate, update, upgrade, runContainer, readContainerToken,
   distroInstalled, dockerInstalled, dockerEngineUp, imagePresent, probeHealth, wslRun, hasGatewayKey,
-  readMihomoConfig,
+  readMihomoConfig, repairWsl, lxssWedged,
 };

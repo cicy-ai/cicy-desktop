@@ -2081,6 +2081,30 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
     }
   }, [checkStatus, onRefresh]);
 
+  // 修复 WSL(WSL 死锁时):重启 LxssManager;若深度死锁(杀不动)→ 提示重启电脑(重启后
+  // bootstrap 自动重置坏 distro)。全程走抽屉显示进度。
+  const repairWsl = useCallback(async () => {
+    setBusy("repair");
+    dockerDrawer.open({ onRetry: repairWsl });
+    const unsub = window.cicy?.docker?.onAppProgress?.((ev) => dockerDrawer.push(ev));
+    try {
+      const r = await window.cicy?.docker?.appRepairWsl?.();
+      if (r?.needsReboot) {
+        dockerDrawer.finish({ status: "reboot", message: tr("docker.wslNeedReboot", "WSL 服务卡死,请【重启 Windows】;重启后打开 CiCy 会自动修复(旧数据已改名备份,不删)。") });
+      } else if (r?.ok) {
+        dockerDrawer.finish({ ok: true, message: tr("docker.wslRepaired", "WSL 已修复 ✅") });
+        onRefresh?.();
+      } else {
+        dockerDrawer.finish({ ok: false, message: r?.error || tr("docker.repairFailed", "修复失败") });
+      }
+    } catch (e) {
+      dockerDrawer.finish({ ok: false, message: e.message });
+    } finally {
+      try { unsub && unsub(); } catch {}
+      setBusy(""); checkStatus();
+    }
+  }, [checkStatus, onRefresh]);
+
   // Upgrade: re-pull the R2 image + recreate the container — also through the
   // drawer so the user sees the pull/import/restart log (升级要能看日志).
   const runUpgrade = useCallback(async () => {
@@ -2181,10 +2205,13 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
   // 消失 → token 读不到、打不开。所以 wslUnmanaged 不再是「可打开」,而是「需修复」:
   // CTA 走「修复 WSL」自动重装(bootstrap 会杀僵尸端口 + wsl --shutdown + 重新 import)。
   const wslUnmanaged = !!status?.wslUnmanaged;
+  const wslWedged = !!status?.wslWedged; // WSL 死锁(LxssManager StopPending,所有 wsl 命令 hang)
   const realRunning = running && !wslUnmanaged; // 真能打开 = 健康 且 WSL 没孤儿化
-  const tone = realRunning ? "ok" : (wslUnmanaged || dockerRunning || installed || unknown) ? "warn" : "off";
+  const tone = realRunning ? "ok" : (wslWedged || wslUnmanaged || dockerRunning || installed || unknown) ? "warn" : "off";
   const isBusy = !!busy;
-  const stateText = wslUnmanaged
+  const stateText = wslWedged
+    ? tr("docker.wslWedged", "WSL 卡死 · 点「修复 WSL」")
+    : wslUnmanaged
     ? tr("docker.wslBrokenRepair", "WSL 管理异常 · 点「修复 WSL」重装")
     : running
     ? tr("docker.running", "运行中")
@@ -2204,7 +2231,7 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
     ? tr("docker.working", "处理中…")
     : realRunning
       ? tr("localTeams.open", "打开")
-      : wslUnmanaged
+      : (wslWedged || wslUnmanaged)
         ? tr("docker.repairWsl", "修复 WSL")
       : dockerRunning
         ? tr("docker.start", "启动")
@@ -2216,6 +2243,8 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
 
   const onCta = async () => {
     if (isBusy) return;
+    // WSL 死锁 → 走「修复 WSL」(重启 LxssManager;不行则提示重启电脑 + 重启后自动重置坏 distro)。
+    if (wslWedged) { repairWsl(); return; }
     // WSL 孤儿化 → 走「修复」(bootstrap 杀僵尸端口 + wsl --shutdown + 重新 import),不进打开。
     if (wslUnmanaged) { runBootstrap(); return; }
     if (realRunning) {

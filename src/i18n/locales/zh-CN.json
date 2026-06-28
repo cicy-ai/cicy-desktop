@@ -213,7 +213,11 @@
     "repairWsl": "修复 WSL",
     "wslBrokenRepair": "WSL 管理异常 · 点「修复 WSL」重装",
     "openWslDir": "打开 WSL 目录",
-    "openProjectsDir": "打开项目目录"
+    "openProjectsDir": "打开项目目录",
+    "wslWedged": "WSL 卡死 · 点「修复 WSL」",
+    "wslNeedReboot": "WSL 服务卡死,请【重启 Windows】;重启后打开 CiCy 会自动修复(旧数据已改名备份,不删)。",
+    "wslRepaired": "WSL 已修复",
+    "repairFailed": "修复失败"
   },
   "common": {
     "close": "关闭",

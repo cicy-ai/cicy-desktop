@@ -115,7 +115,7 @@ function register({ sidecarLogPath } = {}) {
       if (s.running) { try { ver = await require("../sidecar/version").running(APP_PORT); } catch {} }
       // installed: distro 装了 OR :8008 健康(WSL 抽风查不到 distro 但容器在跑 → 也算装了,
       // 否则卡片误显「下载安装」)。wslUnmanaged: 服务在跑但 WSL 管不到 → 卡片显式提示异常。
-      _dockerStatusCache = { installed: !!s.distro || !!s.healthy, dockerRunning: !!s.engineUp || !!s.healthy, running: !!s.running, unknown: !!s.unknown, wslUnmanaged: !!s.wslUnmanaged, version: ver, port: APP_PORT, platform: process.platform, chromeProxy: chromeProxyEnabled(), chromeProxyRunning: hostMihomo.running(), ts: Date.now() };
+      _dockerStatusCache = { installed: !!s.distro || !!s.healthy, dockerRunning: !!s.engineUp || !!s.healthy, running: !!s.running, unknown: !!s.unknown, wslUnmanaged: !!s.wslUnmanaged, wslWedged: !!s.wslWedged, version: ver, port: APP_PORT, platform: process.platform, chromeProxy: chromeProxyEnabled(), chromeProxyRunning: hostMihomo.running(), ts: Date.now() };
     } catch (e) {
       _dockerStatusCache = { installed: false, dockerRunning: false, running: false, unknown: true, port: APP_PORT, platform: process.platform, error: e.message, ts: Date.now() };
     }
@@ -381,6 +381,24 @@ function register({ sidecarLogPath } = {}) {
     } catch (err) {
       return { ok: false, error: err.message };
     }
+  });
+
+  // 「修复 WSL」: WSL 卡死(wslWedged)时用户一键自救。先试重启 LxssManager;若还卡死(深度
+  // 死锁,杀不动)→ 返回 needsReboot,渲染层提示重启电脑(重启后启动 bootstrap 会自动重置坏
+  // distro + 重新导入)。服务恢复了就顺手跑一遍 bootstrap 自愈。
+  ipcMain.handle("docker:app-repair-wsl", async (e) => {
+    if (!APP_DOCKER_SUPPORTED) return { ok: false, error: "仅 Windows" };
+    const emit = (ev) => { try { e.sender.send("docker:app-progress", ev); } catch {} };
+    try {
+      const r = await appDocker.repairWsl({ emit });
+      if (r && r.ok) {
+        try { await ensureDockerTeam(); await appDocker.bootstrap({ ...(await appOpts()), onProgress: emit }); } catch (err) { log.warn(`[repair-wsl] bootstrap after repair: ${err.message}`); }
+        try { await registerAppTeam(); } catch {}
+        try { await maybeStartChromeProxy(); } catch {}
+      }
+      await refreshDockerStatus().catch(() => {});
+      return r;
+    } catch (err) { return { ok: false, error: err.message }; }
   });
 
   // ⋯ menu → 重启 cicy-code (supervisorctl restart cicy-code; daemons stay up).
