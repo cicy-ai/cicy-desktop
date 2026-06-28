@@ -40,8 +40,21 @@ log() { printf '[cicy-code-update] %s\n' "$*"; }
 log "registry: $REG"
 
 # Resolve the concrete version number (so the install dir is version-named and
-# re-runs are idempotent / cacheable).
-ver="$(npm view "cicy-code@${want}" version --registry "$REG" | tail -n1)"
+# re-runs are idempotent / cacheable). FAIL FAST: npm's default retry/backoff can
+# burn ~2min on a slow/blocked registry — cap retries+timeout so one bad registry
+# fails in ~15s, then fall back to the other registry instead of hanging.
+resolve_ver() {
+  npm view "cicy-code@${want}" version --registry "$1" \
+    --fetch-retries=1 --fetch-timeout=15000 --fetch-retry-mintimeout=3000 --fetch-retry-maxtimeout=15000 \
+    2>/dev/null | tail -n1
+}
+ver="$(resolve_ver "$REG")"
+if [ -z "$ver" ]; then
+  alt="$NPM_CN"; [ "$REG" = "$NPM_CN" ] && alt="$NPM_OFFICIAL"
+  log "registry $REG slow/unreachable → falling back to $alt"
+  ver="$(resolve_ver "$alt")"
+  [ -n "$ver" ] && REG="$alt"
+fi
 [ -n "$ver" ] || { log "could not resolve cicy-code@${want}"; exit 1; }
 dest="$RT/$ver"
 
@@ -51,7 +64,8 @@ else
   log "installing v$ver from $REG"
   rm -rf "$dest"
   mkdir -p "$dest"
-  npm install -g "cicy-code@$ver" --prefix "$dest" --registry "$REG"
+  npm install -g "cicy-code@$ver" --prefix "$dest" --registry "$REG" \
+    --fetch-retries=2 --fetch-timeout=60000 --fetch-retry-maxtimeout=30000
 fi
 
 mkdir -p "$(dirname "$LINK")"
