@@ -1015,7 +1015,12 @@ async function recreate({ onProgress, port = 8008, container = "cicy-code-docker
   try { await wslRun(`docker ps -aq --filter publish=${port} | xargs -r docker rm -f 2>/dev/null; docker rm -f ${container} 2>/dev/null; true`, { timeout: 30000 }); } catch {}
   const r = await runContainer({ port, container, volume, env, extraPorts, emit });
   try { await ensureDesktopShortcut(volume, port); } catch {}
-  return r;
+  // 等 :8008 真正起来再返回——否则 docker run 一返回卡片就探测「没运行」,显示「启动」让
+  // 用户再点一下(实测:端口保存后重建,drawer 关了还要手动点启动)。
+  emit({ phase: "container", status: "running", message: t("docker.updating.starting") });
+  const healthy = await docker.waitUntil(() => probeHealth(port), { totalMs: 120000, everyMs: 3000 });
+  emit({ phase: "done", status: healthy ? "done" : "error", message: healthy ? t("docker.ready") : t("docker.updating.notReady") });
+  return { ...r, ok: healthy };
 }
 // Unregister the dedicated distro (idempotent; no-op if absent). Used by upgrade
 // to wipe a stale install before re-importing the latest pre-baked package.

@@ -229,7 +229,8 @@
       "failed": "Update failed: {{msg}} (this image may not support it; try Upgrade to reinstall)",
       "hostResolveFail": "Host version lookup failed; resolving inside container…",
       "scriptReady": "In-container update script refreshed (fast)",
-      "scriptPushFail": "Failed to push update script; using baked one"
+      "scriptPushFail": "Failed to push update script; using baked one",
+      "starting": "Starting cicy-code service…"
     },
     "ports": {
       "menu": "Port settings",
