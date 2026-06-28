@@ -83,6 +83,14 @@ function setupWindowHandlers(win) {
   if (!ses._autoDownloadEnabled) {
     ses._autoDownloadEnabled = true;
     ses.on("will-download", (event, item, webContents) => {
+      // File-explorer downloads (/api/fs/download) should let the user choose
+      // where to save: leave savePath unset so Electron shows the native Save As
+      // dialog. Everything else keeps the silent auto-save to ~/Downloads/electron.
+      const dlUrl = (() => { try { return item.getURL() || ""; } catch { return ""; } })();
+      if (dlUrl.includes("/api/fs/download")) {
+        log.info(`[Download] save-as dialog for ${item.getFilename()}`);
+        return;
+      }
       // 如果没有设置 savePath，自动保存
       setTimeout(() => {
         if (!item.getSavePath()) {
