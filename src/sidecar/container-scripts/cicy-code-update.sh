@@ -1,0 +1,82 @@
+#!/bin/bash
+# Vendored copy pushed INTO the running container by cicy-desktop at update time
+# (see wsl-docker.js update()), then executed. This is the authoritative script
+# for the "更新 cicy-code" flow: shipping a fix here rides cicy-desktop's own
+# auto-update (OSS, reaches Windows) — NO new container image / pull required,
+# which is why we cp-then-run instead of relying on the baked image copy.
+#
+# Hot-update cicy-code WITHOUT bouncing the container, the cloudflared tunnel,
+# or any user daemons: install the new version side-by-side, repoint one symlink,
+# restart only the supervisor program.
+#
+#   cicy-code-update            # → latest
+#   cicy-code-update 2.3.16     # → a pinned version
+set -euo pipefail
+
+HOME_DIR="${HOME:-/home/cicy}"
+
+# Registry selection: honor an explicit NPM_REGISTRY (cicy-desktop injects it via
+# `docker exec -e` per host network) — otherwise probe registry.npmjs.org with a
+# short timeout: reachable fast → official npm (best overseas); slow/blocked →
+# registry.npmmirror.com (CN mirror, the safe default).
+NPM_OFFICIAL="https://registry.npmjs.org"
+NPM_CN="https://registry.npmmirror.com"
+pick_registry() {
+  if [ -n "${NPM_REGISTRY:-}" ]; then echo "$NPM_REGISTRY"; return; fi
+  if curl -fsS -m 3 --connect-timeout 3 -o /dev/null "$NPM_OFFICIAL/cicy-code"; then
+    echo "$NPM_OFFICIAL"
+  else
+    echo "$NPM_CN"
+  fi
+}
+REG="$(pick_registry)"
+RT="$HOME_DIR/cicy-ai/runtime/cicy-code"
+LINK="$HOME_DIR/.local/bin/cicy-code"
+VERSIONS="$HOME_DIR/cicy-ai/runtime/versions.json"
+SVCTL="supervisorctl -c /etc/supervisor/supervisord.conf"
+
+want="${1:-latest}"
+log() { printf '[cicy-code-update] %s\n' "$*"; }
+log "registry: $REG"
+
+# Resolve the concrete version number (so the install dir is version-named and
+# re-runs are idempotent / cacheable).
+ver="$(npm view "cicy-code@${want}" version --registry "$REG" | tail -n1)"
+[ -n "$ver" ] || { log "could not resolve cicy-code@${want}"; exit 1; }
+dest="$RT/$ver"
+
+if [ -x "$dest/bin/cicy-code" ]; then
+  log "v$ver already installed → repointing"
+else
+  log "installing v$ver from $REG"
+  rm -rf "$dest"
+  mkdir -p "$dest"
+  npm install -g "cicy-code@$ver" --prefix "$dest" --registry "$REG"
+fi
+
+mkdir -p "$(dirname "$LINK")"
+ln -sfn "$dest/bin/cicy-code" "$LINK"
+# Keep the npm-global bin (first on PATH) following the canonical link too, so
+# interactive `cicy-code` matches what supervisor runs.
+ln -sfn "$LINK" "$HOME_DIR/.npm-global/bin/cicy-code" 2>/dev/null || true
+
+# Record current pointer (merge into the shared versions.json).
+mkdir -p "$(dirname "$VERSIONS")"
+tmp="$(mktemp)"
+if [ -s "$VERSIONS" ] && jq -e . "$VERSIONS" >/dev/null 2>&1; then
+  jq --arg v "$ver" '.["cicy-code"] = ((.["cicy-code"] // {}) + {current: $v})' "$VERSIONS" > "$tmp"
+else
+  jq -n --arg v "$ver" '{"cicy-code": {current: $v}}' > "$tmp"
+fi
+mv "$tmp" "$VERSIONS"
+
+log "symlink → $(readlink -f "$LINK")"
+
+# Reload: restart only this program (no-op gracefully if supervisord isn't up).
+if $SVCTL pid >/dev/null 2>&1; then
+  log "restarting via supervisor"
+  $SVCTL restart cicy-code
+else
+  log "supervisord not running yet; symlink set, will start on boot"
+fi
+log "done → v$ver"

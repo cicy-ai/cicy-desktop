@@ -887,8 +887,23 @@ async function update({ onProgress, container = "cicy-code-docker", port = 8008 
     await startEngine({ emit, noShutdown: true });
   }
   emit({ phase: "image", status: "running", message: "更新 cicy-code（拉取最新版）…" });
+  // 把 desktop 自带的最新 cicy-code-update.sh **cp 进容器再运行**:脚本的任何改动随
+  // desktop 发版下发(OSS 可达 Windows),不需要新镜像/拉镜像。base64 经 docker exec -i
+  // 写入,绕过 WSL/asar 路径问题。失败则回落到镜像里烤好的那份。
   try {
-    await wslRunStream(`docker exec ${container} bash -lc "command -v cicy-code-update.sh >/dev/null && cicy-code-update.sh || /usr/local/bin/cicy-code-update.sh"`,
+    const b64 = fs.readFileSync(path.join(__dirname, "container-scripts", "cicy-code-update.sh")).toString("base64");
+    await wslRun(`echo ${b64} | base64 -d | docker exec -i ${container} bash -c 'cat > /usr/local/bin/cicy-code-update.sh && chmod 0755 /usr/local/bin/cicy-code-update.sh'`, { timeout: 30000 });
+  } catch (e) { log.warn("[wsl-docker] push cicy-code-update.sh failed, fallback to baked:", e.message); }
+  // 按宿主机网络选 npm 源,-e NPM_REGISTRY 注入(脚本里 NPM_REGISTRY override 最高优先)。
+  // global→官方 npm;cn→npmmirror;unknown→不传,交给脚本自探判断。
+  let regEnv = "";
+  try {
+    const net = await require("./net-detect").detect();
+    if (net === "global") regEnv = "-e NPM_REGISTRY=https://registry.npmjs.org ";
+    else if (net === "cn") regEnv = "-e NPM_REGISTRY=https://registry.npmmirror.com ";
+  } catch {}
+  try {
+    await wslRunStream(`docker exec ${regEnv}${container} bash -lc "command -v cicy-code-update.sh >/dev/null && cicy-code-update.sh || /usr/local/bin/cicy-code-update.sh"`,
       { emit, phase: "image", timeout: 300000 });
   } catch (e) {
     emit({ phase: "done", status: "error", message: `更新失败：${e.message}（此镜像可能不支持，试试「升级」重装）` });
