@@ -2004,36 +2004,6 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
   const [portList, setPortList] = useState([]);         // 编辑中的额外端口(字符串数组,便于输入)
   const [portsBusy, setPortsBusy] = useState(false);
   const [portsErr, setPortsErr] = useState("");
-  const openPorts = useCallback(async () => {
-    setMenuOpen(false); setPortsErr("");
-    try { const r = await window.cicy?.docker?.getPorts?.(); setPortList((r?.ports || []).map(String)); }
-    catch { setPortList([]); }
-    setPortsOpen(true);
-  }, []);
-  const savePorts = useCallback(async () => {
-    // 校验:1-65535、≠8008、去重、忽略空行。
-    const seen = new Set(); const out = [];
-    for (const raw of portList) {
-      const s = String(raw).trim(); if (!s) continue;
-      const p = Number(s);
-      if (!Number.isInteger(p) || p < 1 || p > 65535 || p === 8008 || seen.has(p)) { setPortsErr(tr("docker.ports.invalid", "有端口无效(1-65535,不能是 8008,不能重复)")); return; }
-      seen.add(p); out.push(p);
-    }
-    setPortsErr(""); setPortsBusy(true); setPortsOpen(false);
-    setBusy("recreate");
-    dockerDrawer.open({ onRetry: savePorts });
-    const unsub = window.cicy?.docker?.onAppProgress?.((ev) => dockerDrawer.push(ev));
-    try {
-      const r = await window.cicy?.docker?.setPorts?.(out);
-      dockerDrawer.finish({ ok: !!r?.ok, message: r?.ok ? tr("docker.ports.save", "保存并重建") + " ✅" : (r?.error || tr("docker.opFailed", "操作失败")) });
-      if (r?.ok) { try { const s = await window.cicy?.docker?.appRedetect?.(); if (s) setStatus(s); } catch {} }
-    } catch (e) {
-      dockerDrawer.finish({ ok: false, message: e.message });
-    } finally {
-      try { unsub && unsub(); } catch {}
-      setPortsBusy(false); setBusy(""); checkStatus();
-    }
-  }, [portList, checkStatus]);
   // Inline rename (mirrors LocalTeamCard): double-click the title to edit.
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -2081,6 +2051,38 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
     const id = setInterval(() => { if (!busy) checkStatus(); }, 12000);
     return () => clearInterval(id);
   }, [checkStatus, busy]);
+
+  // 端口设置(定义在 checkStatus 之后:savePorts 依赖它,放前面会 TDZ 崩首页)。
+  const openPorts = useCallback(async () => {
+    setMenuOpen(false); setPortsErr("");
+    try { const r = await window.cicy?.docker?.getPorts?.(); setPortList((r?.ports || []).map(String)); }
+    catch { setPortList([]); }
+    setPortsOpen(true);
+  }, []);
+  const savePorts = useCallback(async () => {
+    // 校验:1-65535、≠8008、去重、忽略空行。
+    const seen = new Set(); const out = [];
+    for (const raw of portList) {
+      const s = String(raw).trim(); if (!s) continue;
+      const p = Number(s);
+      if (!Number.isInteger(p) || p < 1 || p > 65535 || p === 8008 || seen.has(p)) { setPortsErr(tr("docker.ports.invalid", "有端口无效(1-65535,不能是 8008,不能重复)")); return; }
+      seen.add(p); out.push(p);
+    }
+    setPortsErr(""); setPortsBusy(true); setPortsOpen(false);
+    setBusy("recreate");
+    dockerDrawer.open({ onRetry: savePorts });
+    const unsub = window.cicy?.docker?.onAppProgress?.((ev) => dockerDrawer.push(ev));
+    try {
+      const r = await window.cicy?.docker?.setPorts?.(out);
+      dockerDrawer.finish({ ok: !!r?.ok, message: r?.ok ? tr("docker.ports.save", "保存并重建") + " ✅" : (r?.error || tr("docker.opFailed", "操作失败")) });
+      if (r?.ok) { try { const s = await window.cicy?.docker?.appRedetect?.(); if (s) setStatus(s); } catch {} }
+    } catch (e) {
+      dockerDrawer.finish({ ok: false, message: e.message });
+    } finally {
+      try { unsub && unsub(); } catch {}
+      setPortsBusy(false); setBusy(""); checkStatus();
+    }
+  }, [portList, checkStatus]);
 
   // Close the ⋯ menu on outside-click / Esc (mirrors LocalTeamCard).
   useEffect(() => {
