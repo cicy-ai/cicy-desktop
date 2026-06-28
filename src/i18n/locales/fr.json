@@ -226,7 +226,10 @@
       "doneVersion": "cicy-code mis à jour vers v{{v}} 🎉",
       "doneLatest": "cicy-code mis à jour vers la dernière version 🎉",
       "notReady": "Mis à jour, mais :8008 ne répond pas encore — patientez ou réessayez",
-      "failed": "Échec de la mise à jour : {{msg}} (cette image peut ne pas le prendre en charge ; essayez « Mettre à niveau » pour réinstaller)"
+      "failed": "Échec de la mise à jour : {{msg}} (cette image peut ne pas le prendre en charge ; essayez « Mettre à niveau » pour réinstaller)",
+      "hostResolveFail": "Échec de la résolution de version côté hôte ; résolution dans le conteneur…",
+      "scriptReady": "Script de mise à jour du conteneur actualisé (rapide)",
+      "scriptPushFail": "Échec de l'envoi du script ; utilisation de la version intégrée"
     }
   },
   "common": {

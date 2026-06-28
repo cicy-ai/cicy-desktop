@@ -226,7 +226,10 @@
       "doneVersion": "cicy-code updated to v{{v}} 🎉",
       "doneLatest": "cicy-code updated to latest 🎉",
       "notReady": "Updated, but :8008 isn't responding yet — wait a moment or retry",
-      "failed": "Update failed: {{msg}} (this image may not support it; try Upgrade to reinstall)"
+      "failed": "Update failed: {{msg}} (this image may not support it; try Upgrade to reinstall)",
+      "hostResolveFail": "Host version lookup failed; resolving inside container…",
+      "scriptReady": "In-container update script refreshed (fast)",
+      "scriptPushFail": "Failed to push update script; using baked one"
     }
   },
   "common": {

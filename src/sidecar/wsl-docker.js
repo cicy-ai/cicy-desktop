@@ -877,7 +877,10 @@ async function restart({ container = "cicy-code-docker", port = 8008, volume = "
 function getJson(url, timeout = 12000) {
   const https = require("https");
   return new Promise((resolve, reject) => {
-    const req = https.get(url, { headers: { "User-Agent": "cicy-desktop", Accept: "application/json" }, timeout }, (res) => {
+    // Accept-Encoding: identity — Node http(s) does NOT auto-gunzip; force plain
+    // so JSON.parse never chokes on a compressed body. rejectUnauthorized:false —
+    // this only reads a version *string*, so survive TLS-intercepting proxies.
+    const req = https.get(url, { headers: { "User-Agent": "cicy-desktop", Accept: "application/json", "Accept-Encoding": "identity" }, timeout, rejectUnauthorized: false }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) { res.resume(); return getJson(res.headers.location, timeout).then(resolve, reject); }
       if (res.statusCode !== 200) { res.resume(); return reject(new Error(`HTTP ${res.statusCode}`)); }
       let s = ""; res.setEncoding("utf8"); res.on("data", (d) => (s += d));
@@ -890,15 +893,18 @@ function getJson(url, timeout = 12000) {
 
 // Resolve cicy-code's latest published version from the HOST (fast/reliable
 // network), trying the network-appropriate registry first then falling back.
-// Returns null if both fail (caller then lets the in-container script try).
+// 2 passes (transient failures are common), both registries each pass. Returns
+// null if all fail (caller then lets the in-container script try).
 async function resolveLatestCicy(net) {
   const CN = "https://registry.npmmirror.com", OFFICIAL = "https://registry.npmjs.org";
   const order = net === "global" ? [OFFICIAL, CN] : [CN, OFFICIAL];
-  for (const reg of order) {
-    try {
-      const j = await getJson(`${reg}/cicy-code/latest`, 12000);
-      if (j && j.version) return String(j.version);
-    } catch (e) { log.warn(`[wsl-docker] resolveLatestCicy via ${reg} failed:`, e.message); }
+  for (let pass = 0; pass < 2; pass++) {
+    for (const reg of order) {
+      try {
+        const j = await getJson(`${reg}/cicy-code/latest`, 12000);
+        if (j && j.version) return String(j.version);
+      } catch (e) { log.warn(`[wsl-docker] resolveLatestCicy via ${reg} (pass ${pass}) failed:`, e.message); }
+    }
   }
   return null;
 }
@@ -932,18 +938,26 @@ async function update({ onProgress, container = "cicy-code-docker", port = 8008 
   let net = "unknown";
   try { net = await require("./net-detect").detect(); } catch {}
   const [latest, current] = await Promise.all([resolveLatestCicy(net), installedCicyVersion(container)]);
+  log.info(`[wsl-docker] update: net=${net} latest=${latest} current=${current}`);
   // 2) 已是最新 → 秒回,根本不进容器装(你点更新等 2 分钟的就是这种「其实已最新」的空跑)。
   if (latest && current && latest === current) {
     emit({ phase: "done", status: "done", message: t("docker.updating.alreadyLatest", { v: current }) });
     return { ok: true, alreadyLatest: true, version: current };
   }
+  // 宿主机没解析出版本 → 给个可见提示(诊断:让用户/我们知道是 host 网络问题,而非容器)。
+  if (!latest) emit({ phase: "image", status: "running", message: t("docker.updating.hostResolveFail") });
   // 3) 真要装:cp desktop 自带的脚本进容器(随 desktop 发版下发,不依赖镜像),把**已解析
   //    的具体版本**作参数传进去 → 脚本跳过自己的 npm view,容器里不再有版本查询的卡顿。
   emit({ phase: "image", status: "running", message: latest ? t("docker.updating.toVersion", { v: latest }) : t("docker.updating.pulling") });
+  // cp 结果出到 drawer(诊断:之前静默失败 → 回落镜像内旧脚本 → 又卡 2 分钟,看不出来)。
   try {
     const b64 = fs.readFileSync(path.join(__dirname, "container-scripts", "cicy-code-update.sh")).toString("base64");
     await wslRun(`echo ${b64} | base64 -d | docker exec -i ${container} bash -c 'cat > /usr/local/bin/cicy-code-update.sh && chmod 0755 /usr/local/bin/cicy-code-update.sh'`, { timeout: 30000 });
-  } catch (e) { log.warn("[wsl-docker] push cicy-code-update.sh failed, fallback to baked:", e.message); }
+    emit({ phase: "image", status: "running", message: t("docker.updating.scriptReady") });
+  } catch (e) {
+    log.warn("[wsl-docker] push cicy-code-update.sh failed, fallback to baked:", e.message);
+    emit({ phase: "image", status: "running", message: t("docker.updating.scriptPushFail") });
+  }
   // 按宿主机网络选 npm 源(脚本里 NPM_REGISTRY override 最高优先)。
   let regEnv = "";
   if (net === "global") regEnv = "-e NPM_REGISTRY=https://registry.npmjs.org ";
