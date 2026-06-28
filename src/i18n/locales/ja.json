@@ -175,16 +175,7 @@
     "installerLaunched": "Docker インストーラーを開きました。完了後（WSL2/再起動あり）「再試行」を押してください",
     "engineDown": "Docker エンジン停止 · 起動",
     "startDocker": "Docker を起動",
-    "update": {
-      "checking": "cicy-code のバージョンを確認中…",
-      "alreadyLatest": "すでに最新です — v{{v}} ✅",
-      "toVersion": "cicy-code を更新中 → v{{v}}…",
-      "pulling": "cicy-code を更新中（最新版を取得）…",
-      "doneVersion": "cicy-code を v{{v}} に更新しました 🎉",
-      "doneLatest": "cicy-code を最新版に更新しました 🎉",
-      "notReady": "更新しましたが :8008 がまだ応答しません — 少し待つか再試行してください",
-      "failed": "更新に失敗：{{msg}}（このイメージは未対応の可能性。「アップグレード」で再インストールを）"
-    },
+    "update": "cicy-code を更新",
     "reloadWindow": "ウィンドウを再読み込み",
     "dockerRestart": "Docker を再起動",
     "dockerRestarted": "Docker コンテナを再起動しました",
@@ -226,7 +217,17 @@
     "wslWedged": "WSL フリーズ · 「WSL を修復」をクリック",
     "wslNeedReboot": "WSL サービスが停止不能です — Windows を再起動してください。次回起動時に自動修復します(旧データは改名保存、削除しません)。",
     "wslRepaired": "WSL を修復しました",
-    "repairFailed": "修復に失敗"
+    "repairFailed": "修復に失敗",
+    "updating": {
+      "checking": "cicy-code のバージョンを確認中…",
+      "alreadyLatest": "すでに最新です — v{{v}} ✅",
+      "toVersion": "cicy-code を更新中 → v{{v}}…",
+      "pulling": "cicy-code を更新中（最新版を取得）…",
+      "doneVersion": "cicy-code を v{{v}} に更新しました 🎉",
+      "doneLatest": "cicy-code を最新版に更新しました 🎉",
+      "notReady": "更新しましたが :8008 がまだ応答しません — 少し待つか再試行してください",
+      "failed": "更新に失敗：{{msg}}（このイメージは未対応の可能性。「アップグレード」で再インストールを）"
+    }
   },
   "common": {
     "close": "Close",

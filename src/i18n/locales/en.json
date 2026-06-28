@@ -175,16 +175,7 @@
     "installerLaunched": "Docker installer opened — finish it (installs WSL2, may reboot), then click Retry",
     "engineDown": "Docker engine down · Start",
     "startDocker": "Start Docker",
-    "update": {
-      "checking": "Checking cicy-code version…",
-      "alreadyLatest": "Already up to date — v{{v}} ✅",
-      "toVersion": "Updating cicy-code → v{{v}}…",
-      "pulling": "Updating cicy-code (pulling latest)…",
-      "doneVersion": "cicy-code updated to v{{v}} 🎉",
-      "doneLatest": "cicy-code updated to latest 🎉",
-      "notReady": "Updated, but :8008 isn't responding yet — wait a moment or retry",
-      "failed": "Update failed: {{msg}} (this image may not support it; try Upgrade to reinstall)"
-    },
+    "update": "Update cicy-code",
     "reloadWindow": "Reload window",
     "dockerRestart": "Restart Docker",
     "dockerRestarted": "Docker container restarted",
@@ -226,7 +217,17 @@
     "wslWedged": "WSL frozen · click Repair WSL",
     "wslNeedReboot": "WSL service is stuck — please RESTART Windows; CiCy auto-repairs on next launch (old data is renamed/kept, not deleted).",
     "wslRepaired": "WSL repaired",
-    "repairFailed": "Repair failed"
+    "repairFailed": "Repair failed",
+    "updating": {
+      "checking": "Checking cicy-code version…",
+      "alreadyLatest": "Already up to date — v{{v}} ✅",
+      "toVersion": "Updating cicy-code → v{{v}}…",
+      "pulling": "Updating cicy-code (pulling latest)…",
+      "doneVersion": "cicy-code updated to v{{v}} 🎉",
+      "doneLatest": "cicy-code updated to latest 🎉",
+      "notReady": "Updated, but :8008 isn't responding yet — wait a moment or retry",
+      "failed": "Update failed: {{msg}} (this image may not support it; try Upgrade to reinstall)"
+    }
   },
   "common": {
     "close": "Close",
