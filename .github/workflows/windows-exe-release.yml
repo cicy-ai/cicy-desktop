@@ -133,16 +133,22 @@ jobs:
           try { $advance = ([version]$version -ge [version]$cur) } catch { $advance = $true }
           if ($advance) {
             Write-Host "Advancing latest: $cur -> $version"
+            # 关键:版本指针(latest-version.txt)必须在所有安装包传完之后才写 —— 否则
+            # updater 先读到新版本号、用户点下载,但 exe 还没传完 → 404。所以先把所有 exe
+            # 传齐(versioned 已在上面传过 + latest + win-latest),最后才更新版本指针。
             & $oss cp "$($exe.FullName)" "$base/cicy-desktop-latest.exe" -f --acl public-read
             if ($LASTEXITCODE -ne 0) { Write-Error "latest upload failed"; exit 1 }
+            # Unified per-platform naming: cicy-desktop-<platform>-latest.<ext> so every OS
+            # shares one URL shape (win + mac-x64 + mac-arm64). The bare cicy-desktop-latest.exe
+            # / latest-version.txt are kept as backward-compat aliases for old links.
+            & $oss cp "$($exe.FullName)" "$base/cicy-desktop-win-latest.exe" -f --acl public-read
+            if ($LASTEXITCODE -ne 0) { Write-Error "win-latest upload failed"; exit 1 }
+            # —— 安装包全部就位,最后写版本指针(version file 永远最后)——
             Set-Content -NoNewline -Path "current-latest.txt" -Value $version
             & $oss cp "current-latest.txt" "$base/latest-version.txt" -f --acl public-read
             if ($LASTEXITCODE -ne 0) { Write-Error "latest-version.txt upload failed"; exit 1 }
-            # Unified per-platform naming: cicy-desktop-<platform>-latest.<ext> so every OS
-            # shares one URL shape (win + mac-x64 + mac-arm64). The bare cicy-desktop-latest.exe
-            # / latest-version.txt above are kept as backward-compat aliases for old links.
-            & $oss cp "$($exe.FullName)" "$base/cicy-desktop-win-latest.exe" -f --acl public-read
             & $oss cp "current-latest.txt" "$base/win-latest-version.txt" -f --acl public-read
+            if ($LASTEXITCODE -ne 0) { Write-Error "win-latest-version.txt upload failed"; exit 1 }
           } else {
             Write-Host "Skip latest: building $version < published $cur (older build — not clobbering newer latest)"
           }
