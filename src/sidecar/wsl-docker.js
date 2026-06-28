@@ -928,18 +928,18 @@ async function update({ onProgress, container = "cicy-code-docker", port = 8008 
     await startEngine({ emit, noShutdown: true });
   }
   // 1) 宿主机解析最新版 + 读容器已装版本(都很快;net-detect 决定源顺序 + 注入)。
-  emit({ phase: "image", status: "running", message: "检查 cicy-code 版本…" });
+  emit({ phase: "image", status: "running", message: t("docker.update.checking") });
   let net = "unknown";
   try { net = await require("./net-detect").detect(); } catch {}
   const [latest, current] = await Promise.all([resolveLatestCicy(net), installedCicyVersion(container)]);
   // 2) 已是最新 → 秒回,根本不进容器装(你点更新等 2 分钟的就是这种「其实已最新」的空跑)。
   if (latest && current && latest === current) {
-    emit({ phase: "done", status: "done", message: `已是最新版 v${current} ✅` });
+    emit({ phase: "done", status: "done", message: t("docker.update.alreadyLatest", { v: current }) });
     return { ok: true, alreadyLatest: true, version: current };
   }
   // 3) 真要装:cp desktop 自带的脚本进容器(随 desktop 发版下发,不依赖镜像),把**已解析
   //    的具体版本**作参数传进去 → 脚本跳过自己的 npm view,容器里不再有版本查询的卡顿。
-  emit({ phase: "image", status: "running", message: latest ? `更新 cicy-code → v${latest}…` : "更新 cicy-code（拉取最新版）…" });
+  emit({ phase: "image", status: "running", message: latest ? t("docker.update.toVersion", { v: latest }) : t("docker.update.pulling") });
   try {
     const b64 = fs.readFileSync(path.join(__dirname, "container-scripts", "cicy-code-update.sh")).toString("base64");
     await wslRun(`echo ${b64} | base64 -d | docker exec -i ${container} bash -c 'cat > /usr/local/bin/cicy-code-update.sh && chmod 0755 /usr/local/bin/cicy-code-update.sh'`, { timeout: 30000 });
@@ -954,11 +954,12 @@ async function update({ onProgress, container = "cicy-code-docker", port = 8008 
     await wslRunStream(`docker exec ${regEnv}${container} bash -lc "command -v cicy-code-update.sh >/dev/null && cicy-code-update.sh${verArg} || /usr/local/bin/cicy-code-update.sh${verArg}"`,
       { emit, phase: "image", timeout: 300000 });
   } catch (e) {
-    emit({ phase: "done", status: "error", message: `更新失败：${e.message}（此镜像可能不支持，试试「升级」重装）` });
+    emit({ phase: "done", status: "error", message: t("docker.update.failed", { msg: e.message }) });
     return { ok: false, reason: "update_failed" };
   }
   const healthy = await docker.waitUntil(() => probeHealth(port), { totalMs: 120000, everyMs: 3000 });
-  emit({ phase: "done", status: healthy ? "done" : "error", message: healthy ? `cicy-code 已更新到 v${latest || "最新"} 🎉` : "更新了但 :8008 还没响应——稍等或点重试" });
+  const doneMsg = healthy ? (latest ? t("docker.update.doneVersion", { v: latest }) : t("docker.update.doneLatest")) : t("docker.update.notReady");
+  emit({ phase: "done", status: healthy ? "done" : "error", message: doneMsg });
   return { ok: healthy, version: latest || null };
 }
 async function stop({ container = "cicy-code-docker" } = {}) {

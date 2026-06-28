@@ -175,7 +175,16 @@
     "installerLaunched": "Programme d installation Docker ouvert — terminez-le (WSL2/redemarrage), puis Reessayer",
     "engineDown": "Moteur Docker arrete · Demarrer",
     "startDocker": "Demarrer Docker",
-    "update": "Mettre à jour cicy-code",
+    "update": {
+      "checking": "Vérification de la version de cicy-code…",
+      "alreadyLatest": "Déjà à jour — v{{v}} ✅",
+      "toVersion": "Mise à jour de cicy-code → v{{v}}…",
+      "pulling": "Mise à jour de cicy-code (récupération de la dernière version)…",
+      "doneVersion": "cicy-code mis à jour vers v{{v}} 🎉",
+      "doneLatest": "cicy-code mis à jour vers la dernière version 🎉",
+      "notReady": "Mis à jour, mais :8008 ne répond pas encore — patientez ou réessayez",
+      "failed": "Échec de la mise à jour : {{msg}} (cette image peut ne pas le prendre en charge ; essayez « Mettre à niveau » pour réinstaller)"
+    },
     "reloadWindow": "Recharger la fenêtre",
     "dockerRestart": "Redémarrer Docker",
     "dockerRestarted": "Conteneur Docker redémarré",

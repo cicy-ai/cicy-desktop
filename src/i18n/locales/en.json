@@ -175,7 +175,16 @@
     "installerLaunched": "Docker installer opened — finish it (installs WSL2, may reboot), then click Retry",
     "engineDown": "Docker engine down · Start",
     "startDocker": "Start Docker",
-    "update": "Update cicy-code",
+    "update": {
+      "checking": "Checking cicy-code version…",
+      "alreadyLatest": "Already up to date — v{{v}} ✅",
+      "toVersion": "Updating cicy-code → v{{v}}…",
+      "pulling": "Updating cicy-code (pulling latest)…",
+      "doneVersion": "cicy-code updated to v{{v}} 🎉",
+      "doneLatest": "cicy-code updated to latest 🎉",
+      "notReady": "Updated, but :8008 isn't responding yet — wait a moment or retry",
+      "failed": "Update failed: {{msg}} (this image may not support it; try Upgrade to reinstall)"
+    },
     "reloadWindow": "Reload window",
     "dockerRestart": "Restart Docker",
     "dockerRestarted": "Docker container restarted",

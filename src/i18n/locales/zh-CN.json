@@ -175,7 +175,16 @@
     "installerLaunched": "已打开 Docker 安装程序——请完成安装（会装 WSL2、可能需重启），装好后点「重试」",
     "engineDown": "Docker 未运行 · 点启动",
     "startDocker": "启动 Docker",
-    "update": "更新 cicy-code",
+    "update": {
+      "checking": "检查 cicy-code 版本…",
+      "alreadyLatest": "已是最新版 v{{v}} ✅",
+      "toVersion": "更新 cicy-code → v{{v}}…",
+      "pulling": "更新 cicy-code（拉取最新版）…",
+      "doneVersion": "cicy-code 已更新到 v{{v}} 🎉",
+      "doneLatest": "cicy-code 已更新到最新 🎉",
+      "notReady": "更新了但 :8008 还没响应——稍等或点重试",
+      "failed": "更新失败：{{msg}}（此镜像可能不支持，试试「升级」重装）"
+    },
     "reloadWindow": "刷新窗口",
     "dockerRestart": "重启 Docker",
     "dockerRestarted": "已重启 Docker 容器",
