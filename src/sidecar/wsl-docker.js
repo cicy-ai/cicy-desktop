@@ -872,10 +872,51 @@ async function restart({ container = "cicy-code-docker", port = 8008, volume = "
   return ok;
 }
 
-// Update cicy-code IN PLACE: the supervisor image ships cicy-code-update.sh,
-// which installs the latest version side-by-side, repoints the symlink, and
-// `supervisorctl restart cicy-code` — no container recreate, daemons untouched.
-// Streamed to the drawer so the user sees the npm pull + restart.
+// Minimal JSON GET (host network, fail-fast). Used to resolve the latest
+// cicy-code version on the HOST instead of inside the slow container registry.
+function getJson(url, timeout = 12000) {
+  const https = require("https");
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { headers: { "User-Agent": "cicy-desktop", Accept: "application/json" }, timeout }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) { res.resume(); return getJson(res.headers.location, timeout).then(resolve, reject); }
+      if (res.statusCode !== 200) { res.resume(); return reject(new Error(`HTTP ${res.statusCode}`)); }
+      let s = ""; res.setEncoding("utf8"); res.on("data", (d) => (s += d));
+      res.on("end", () => { try { resolve(JSON.parse(s)); } catch (e) { reject(e); } });
+    });
+    req.on("error", reject);
+    req.on("timeout", () => { req.destroy(); reject(new Error("timeout")); });
+  });
+}
+
+// Resolve cicy-code's latest published version from the HOST (fast/reliable
+// network), trying the network-appropriate registry first then falling back.
+// Returns null if both fail (caller then lets the in-container script try).
+async function resolveLatestCicy(net) {
+  const CN = "https://registry.npmmirror.com", OFFICIAL = "https://registry.npmjs.org";
+  const order = net === "global" ? [OFFICIAL, CN] : [CN, OFFICIAL];
+  for (const reg of order) {
+    try {
+      const j = await getJson(`${reg}/cicy-code/latest`, 12000);
+      if (j && j.version) return String(j.version);
+    } catch (e) { log.warn(`[wsl-docker] resolveLatestCicy via ${reg} failed:`, e.message); }
+  }
+  return null;
+}
+
+// Current installed cicy-code version, read from the container's versions.json.
+async function installedCicyVersion(container) {
+  try {
+    const { stdout } = await wslRun(`docker exec ${container} bash -lc "cat ~/cicy-ai/runtime/versions.json 2>/dev/null"`, { timeout: 15000 });
+    const j = JSON.parse(stdout);
+    return j && j["cicy-code"] && j["cicy-code"].current ? String(j["cicy-code"].current) : null;
+  } catch { return null; }
+}
+
+// Update cicy-code IN PLACE. SMART path (避免容器内 npm view 卡 ~2min):
+//  1. 在宿主机解析最新版本号(host 网络,不过容器代理/DNS)
+//  2. 和容器里已装版本比对——一样就直接「已是最新」,根本不 docker exec
+//  3. 真有新版才 cp 脚本进容器,并把**已解析的具体版本**传给它(脚本跳过自己的 npm view)
+// 容器里只剩真正的 `npm install -g cicy-code@<ver>`(+ fail-fast/换源),不再有版本查询的卡顿。
 async function update({ onProgress, container = "cicy-code-docker", port = 8008 } = {}) {
   const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
   // 更新一个 running 容器只需 docker exec——引擎必然在跑。绝不无条件 startEngine():它的
@@ -886,32 +927,39 @@ async function update({ onProgress, container = "cicy-code-docker", port = 8008 
     emit({ phase: "container", status: "running", message: t("dockerOpen.engineStartingNoReset") });
     await startEngine({ emit, noShutdown: true });
   }
-  emit({ phase: "image", status: "running", message: "更新 cicy-code（拉取最新版）…" });
-  // 把 desktop 自带的最新 cicy-code-update.sh **cp 进容器再运行**:脚本的任何改动随
-  // desktop 发版下发(OSS 可达 Windows),不需要新镜像/拉镜像。base64 经 docker exec -i
-  // 写入,绕过 WSL/asar 路径问题。失败则回落到镜像里烤好的那份。
+  // 1) 宿主机解析最新版 + 读容器已装版本(都很快;net-detect 决定源顺序 + 注入)。
+  emit({ phase: "image", status: "running", message: "检查 cicy-code 版本…" });
+  let net = "unknown";
+  try { net = await require("./net-detect").detect(); } catch {}
+  const [latest, current] = await Promise.all([resolveLatestCicy(net), installedCicyVersion(container)]);
+  // 2) 已是最新 → 秒回,根本不进容器装(你点更新等 2 分钟的就是这种「其实已最新」的空跑)。
+  if (latest && current && latest === current) {
+    emit({ phase: "done", status: "done", message: `已是最新版 v${current} ✅` });
+    return { ok: true, alreadyLatest: true, version: current };
+  }
+  // 3) 真要装:cp desktop 自带的脚本进容器(随 desktop 发版下发,不依赖镜像),把**已解析
+  //    的具体版本**作参数传进去 → 脚本跳过自己的 npm view,容器里不再有版本查询的卡顿。
+  emit({ phase: "image", status: "running", message: latest ? `更新 cicy-code → v${latest}…` : "更新 cicy-code（拉取最新版）…" });
   try {
     const b64 = fs.readFileSync(path.join(__dirname, "container-scripts", "cicy-code-update.sh")).toString("base64");
     await wslRun(`echo ${b64} | base64 -d | docker exec -i ${container} bash -c 'cat > /usr/local/bin/cicy-code-update.sh && chmod 0755 /usr/local/bin/cicy-code-update.sh'`, { timeout: 30000 });
   } catch (e) { log.warn("[wsl-docker] push cicy-code-update.sh failed, fallback to baked:", e.message); }
-  // 按宿主机网络选 npm 源,-e NPM_REGISTRY 注入(脚本里 NPM_REGISTRY override 最高优先)。
-  // global→官方 npm;cn→npmmirror;unknown→不传,交给脚本自探判断。
+  // 按宿主机网络选 npm 源(脚本里 NPM_REGISTRY override 最高优先)。
   let regEnv = "";
+  if (net === "global") regEnv = "-e NPM_REGISTRY=https://registry.npmjs.org ";
+  else if (net === "cn") regEnv = "-e NPM_REGISTRY=https://registry.npmmirror.com ";
+  // 解析到了具体版本就传进去(脚本据此跳过 npm view);没解析到则传空 → 脚本走 latest+fail-fast。
+  const verArg = latest ? ` ${latest}` : "";
   try {
-    const net = await require("./net-detect").detect();
-    if (net === "global") regEnv = "-e NPM_REGISTRY=https://registry.npmjs.org ";
-    else if (net === "cn") regEnv = "-e NPM_REGISTRY=https://registry.npmmirror.com ";
-  } catch {}
-  try {
-    await wslRunStream(`docker exec ${regEnv}${container} bash -lc "command -v cicy-code-update.sh >/dev/null && cicy-code-update.sh || /usr/local/bin/cicy-code-update.sh"`,
+    await wslRunStream(`docker exec ${regEnv}${container} bash -lc "command -v cicy-code-update.sh >/dev/null && cicy-code-update.sh${verArg} || /usr/local/bin/cicy-code-update.sh${verArg}"`,
       { emit, phase: "image", timeout: 300000 });
   } catch (e) {
     emit({ phase: "done", status: "error", message: `更新失败：${e.message}（此镜像可能不支持，试试「升级」重装）` });
     return { ok: false, reason: "update_failed" };
   }
   const healthy = await docker.waitUntil(() => probeHealth(port), { totalMs: 120000, everyMs: 3000 });
-  emit({ phase: "done", status: healthy ? "done" : "error", message: healthy ? "cicy-code 已更新到最新 🎉" : "更新了但 :8008 还没响应——稍等或点重试" });
-  return { ok: healthy };
+  emit({ phase: "done", status: healthy ? "done" : "error", message: healthy ? `cicy-code 已更新到 v${latest || "最新"} 🎉` : "更新了但 :8008 还没响应——稍等或点重试" });
+  return { ok: healthy, version: latest || null };
 }
 async function stop({ container = "cicy-code-docker" } = {}) {
   try { await wslRun(`docker stop ${container}`, { timeout: 30000 }); } catch {}
