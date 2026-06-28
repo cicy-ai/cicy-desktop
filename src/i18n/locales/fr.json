@@ -535,6 +535,8 @@
     "readyShort": "Téléchargé",
     "readyDrawer": "Téléchargé — cliquez Installer pour redémarrer",
     "later": "Plus tard",
-    "eta": "{{s}}s restant"
+    "eta": "{{s}}s restant",
+    "updateNow": "Mettre à jour",
+    "modalSub": "Nous recommandons de mettre à jour vers la dernière version"
   }
 }

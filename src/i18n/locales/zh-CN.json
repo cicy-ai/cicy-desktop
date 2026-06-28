@@ -535,6 +535,8 @@
     "readyShort": "下载完成",
     "readyDrawer": "下载完成,点「安装」重启更新",
     "later": "稍后",
-    "eta": "剩 {{s}}s"
+    "eta": "剩 {{s}}s",
+    "updateNow": "立即更新",
+    "modalSub": "建议尽快更新到最新版本"
   }
 }

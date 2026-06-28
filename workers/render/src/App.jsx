@@ -3341,23 +3341,36 @@ function UpdateBanner() {
   // 点「下载更新」→ 开抽屉,把下载/安装放进去(进度条/速度/剩余/安装,像 Docker 安装)。
   const startDownload = () => {
     active.current = true;
+    setDismissed(true); // 关弹窗,交给抽屉显示进度
     updateDrawer.open({ kind: "app", title: tr("updateBanner.drawerTitle", "应用更新"), fromVer: st?.current, toVer: st?.version, onRetry: startDownload });
     updateDrawer.push({ phase: "download", status: "running", message: tr("updateBanner.startDl", "开始下载安装包…") });
     updateDrawer.setProgress({ percent: 0 });
     window.cicy?.app?.downloadUpdate?.();
   };
   if (status !== "available" || dismissed) return null; // 仅做入口;下载/安装在抽屉里
-  return (
-    <div className="update-banner update-banner--available" data-id="UpdateBanner" data-status={status}>
-      <div className="update-banner__row">
-        <span className="update-banner__icon" aria-hidden>↑</span>
-        <span className="update-banner__text" data-id="UpdateBanner-text">{tr("updateBanner.available", "发现新版本 v{{v}}", { v: st.version })}</span>
-        <div className="update-banner__actions">
-          <button type="button" className="update-banner__btn is-accent" data-id="UpdateBanner-download" onClick={startDownload}>{tr("updateBanner.downloadBtn", "下载更新")}</button>
-          <button type="button" className="update-banner__x" data-id="UpdateBanner-dismiss" onClick={() => setDismissed(true)} aria-label="dismiss">×</button>
+  // 强提示:居中模态弹窗(比 banner 醒目),点遮罩/「稍后」可关,下次启动/再检测到再弹。
+  return createPortal(
+    <div data-id="UpdateBanner"
+      style={{ position: "fixed", inset: 0, zIndex: 10000, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center" }}
+      onMouseDown={(e) => { if (e.target === e.currentTarget) setDismissed(true); }}>
+      <div onClick={(e) => e.stopPropagation()}
+        style={{ width: 380, maxWidth: "90vw", background: "#161b22", border: "1px solid #30363d", borderRadius: 14, padding: "24px 24px 20px", boxShadow: "0 20px 60px rgba(0,0,0,0.55)", textAlign: "center" }}>
+        <div style={{ fontSize: 34, lineHeight: 1, marginBottom: 12 }} aria-hidden>🚀</div>
+        <h3 style={{ margin: "0 0 8px", fontSize: 17, color: "#e6edf3" }} data-id="UpdateBanner-text">{tr("updateBanner.available", "发现新版本 v{{v}}", { v: st.version })}</h3>
+        <p style={{ margin: "0 0 20px", fontSize: 13, lineHeight: 1.6, color: "#9aa4b2" }}>{tr("updateBanner.modalSub", "建议尽快更新到最新版本")}</p>
+        <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+          <button type="button" data-id="UpdateBanner-later" onClick={() => setDismissed(true)}
+            style={{ flex: 1, padding: "9px 16px", borderRadius: 9, border: "1px solid #30363d", background: "transparent", color: "#c9d1d9", cursor: "pointer", fontSize: 14 }}>
+            {tr("updateBanner.later", "稍后")}
+          </button>
+          <button type="button" data-id="UpdateBanner-download" onClick={startDownload}
+            style={{ flex: 1, padding: "9px 16px", borderRadius: 9, border: "none", background: "#238636", color: "white", cursor: "pointer", fontSize: 14, fontWeight: 600 }}>
+            {tr("updateBanner.updateNow", "立即更新")}
+          </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 // 首次加载的团队卡占位骨架(与 .bcard 大致同形:头像圈 + 两行标题 + CTA 条)。
