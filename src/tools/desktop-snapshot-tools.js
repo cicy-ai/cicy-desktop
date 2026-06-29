@@ -54,6 +54,7 @@ module.exports = (registerTool) => {
         // BUT honor snapshotEnabled(): on macOS capture is off by default, and a live
         // `screencapture` here is exactly what pops the Screen-Recording prompt (just
         // less often than the daemon did) — so when disabled we must NOT live-capture.
+        // mac/linux:进程内即时抓屏(honor snapshotEnabled — mac 默认关避免授权弹窗)。
         if (process.platform !== "win32" && snap.snapshotEnabled()) {
           try {
             const r = await snap.captureB64(maxWidth);
@@ -63,14 +64,25 @@ module.exports = (registerTool) => {
             throw e;
           }
         }
+        // win32:进程内截不了(需 --disable-gpu)。按需起一个一次性 --disable-gpu 子进程
+        // 截一张、写盘,再读回来 —— 这样没有常驻 daemon 也能手动截图(手动触发→写盘→拉图)。
+        if (process.platform === "win32") {
+          try {
+            await snap.captureOnceWin();
+            const after = readDaemonB64();
+            if (after) return { content: [{ type: "text", text: after.b64 }] };
+          } catch (e) {
+            if (fresh) return { content: [{ type: "text", text: fresh.b64 }] };
+            throw e;
+          }
+        }
 
         if (fresh) return { content: [{ type: "text", text: fresh.b64 }] }; // stale is better than nothing
-        // mac/win 默认关(mac=避免反复弹屏幕录制授权;win=降资源占用,见 desktop-snapshot.js)。
-        // 关着时给明确提示而不是「daemon warming up」(误导)。
-        if (!snap.snapshotEnabled() && (process.platform === "darwin" || process.platform === "win32")) {
-          throw new Error("桌面截图默认关闭(降低资源占用 / 避免授权弹窗)。需要 agent 看屏幕时,启动 app 前设环境变量 CICY_DESKTOP_SNAPSHOT=1。");
+        // macOS 默认关(避免反复弹屏幕录制授权)。
+        if (process.platform === "darwin" && !snap.snapshotEnabled()) {
+          throw new Error("桌面截图在 macOS 默认关闭(避免反复弹屏幕录制授权)。需要 agent 看屏幕时,启动 app 前设环境变量 CICY_DESKTOP_SNAPSHOT=1。");
         }
-        throw new Error("no desktop snapshot yet (daemon warming up?)");
+        throw new Error("no desktop snapshot yet");
       } catch (error) {
         return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
       }

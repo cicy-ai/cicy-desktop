@@ -172,6 +172,29 @@ function stopDesktopSnapshots() {
   if (child) { try { child.kill(); } catch (_) {} child = null; }
 }
 
+// On-demand ONE-SHOT capture (no persistent daemon). win32: spawn a --disable-gpu
+// child that captures once, writes desktop.b64, and exits — so manual「立即截图」
+// works without the periodic daemon running. mac/linux: capture in-process once.
+// Resolves after the file is written; rejects on timeout/error.
+function captureOnceWin(timeoutMs = 20000) {
+  if (process.platform !== "win32") return captureOnce();
+  return new Promise((resolve, reject) => {
+    const dir = snapDir();
+    try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
+    let c;
+    try {
+      c = spawn(process.execPath, ["--disable-gpu", "--disable-logging", __filename], {
+        env: { ...process.env, CICY_SNAP_DAEMON: "1", CICY_SNAP_ONESHOT: "1" },
+        stdio: "ignore",
+        windowsHide: true,
+      });
+    } catch (e) { return reject(e); }
+    const timer = setTimeout(() => { try { c.kill(); } catch (_) {} reject(new Error("oneshot capture timeout")); }, timeoutMs);
+    c.on("exit", (code) => { clearTimeout(timer); resolve({ dir, code }); });
+    c.on("error", (e) => { clearTimeout(timer); reject(e); });
+  });
+}
+
 // ── daemon mode ───────────────────────────────────────────────────────────────
 // Entered when this file is the entry of `electron --disable-gpu
 // desktop-snapshot.js` (Windows capture child). Detected purely via the env flag
@@ -193,7 +216,13 @@ if (process.env.CICY_SNAP_DAEMON === "1") {
     }
   };
   console.error("[snap-daemon] booting, dir=" + snapDir());
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
+    // ONESHOT:截一张、写盘、退出(给 captureOnceWin 的按需手动截图用,不常驻)。
+    if (process.env.CICY_SNAP_ONESHOT === "1") {
+      await once();
+      try { app.quit(); } catch (_) {}
+      return;
+    }
     once();
     const t = setInterval(once, intervalMs());
     if (t.unref) t.unref();
@@ -203,4 +232,4 @@ if (process.env.CICY_SNAP_DAEMON === "1") {
   app.on("render-process-gone", () => app.quit());
 }
 
-module.exports = { startDesktopSnapshots, stopDesktopSnapshots, snapDir, captureOnce, captureB64, snapshotEnabled, MAX_W };
+module.exports = { startDesktopSnapshots, stopDesktopSnapshots, snapDir, captureOnce, captureOnceWin, captureB64, snapshotEnabled, MAX_W };

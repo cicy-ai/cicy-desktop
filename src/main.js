@@ -1095,32 +1095,24 @@ electronApp.whenReady().then(async () => {
     if (global.__cicyTitleSyncTimer.unref) global.__cicyTitleSyncTimer.unref();
   }
 
-  // Periodic per-window thumbnails → ~/cicy-files/window-thumbs (chrome-style
-  // small previews on disk; override dir via CICY_THUMB_DIR). Best-effort.
-  if (!global.__cicyThumbStarted) {
+  // 窗口缩略图 & 桌面快照:默认**不再周期截图**(资源占用大头;消费端 cicy-code 已改
+  // 用 live RPC /ui/snapshot 与按需 desktop_snapshot,见各文件)。改成「手动触发→按需截」:
+  //   - 窗口截图:cicy-code 走 electron_tab_screenshot / Page.captureScreenshot(live)
+  //   - 桌面截图:desktop_snapshot 工具按需截(win=一次性 --disable-gpu 子进程,mac/linux=live)
+  // 想恢复后台常驻连续截图(给一直盯屏幕的 agent)再用 CICY_DESKTOP_SNAPSHOT=1 显式开。
+  if (process.env.CICY_DESKTOP_SNAPSHOT === "1" && !global.__cicyDesktopSnapStarted) {
+    global.__cicyDesktopSnapStarted = true;
+    try {
+      const info = require("./utils/desktop-snapshot").startDesktopSnapshots();
+      log.info(`[desktop-snap] continuous desktop snapshots → ${info.dir} (every ${info.intervalMs}ms, mode ${info.mode})`);
+    } catch (e) { log.warn(`[desktop-snap] start failed: ${e.message}`); }
+  }
+  if (process.env.CICY_WINDOW_THUMBS === "1" && !global.__cicyThumbStarted) {
     global.__cicyThumbStarted = true;
     try {
       const info = require("./utils/window-thumbnails").startWindowThumbnails();
-      log.info(`[thumbs] window thumbnails → ${info.dir} (every ${info.intervalMs}ms, maxW ${info.maxWidth})`);
+      log.info(`[thumbs] window thumbnails → ${info.dir} (every ${info.intervalMs}ms)`);
     } catch (e) { log.warn(`[thumbs] start failed: ${e.message}`); }
-  }
-
-  // Periodic WHOLE-desktop snapshot → ~/cicy-files/desktop-snapshot/desktop.b64
-  // so the cloud (cicy-code) can read the screen via the `desktop_snapshot` tool.
-  // Windows uses a --disable-gpu child (GDI, no prompt); linux uses scrot.
-  //
-  // macOS: this spawns `screencapture`, which DOES trigger the Screen-Recording TCC
-  // prompt — and on an ad-hoc-signed build (no Apple cert) the grant never sticks, so
-  // the prompt fires over and over. So it's OFF by default on macOS (most users —
-  // docker/team management — don't need the agent to watch their screen). Opt in with
-  // CICY_DESKTOP_SNAPSHOT=1. Other platforms stay on (opt out with =0).
-  const __snap = require("./utils/desktop-snapshot");
-  if (!global.__cicyDesktopSnapStarted && __snap.snapshotEnabled()) {
-    global.__cicyDesktopSnapStarted = true;
-    try {
-      const info = __snap.startDesktopSnapshots();
-      log.info(`[desktop-snap] desktop snapshots → ${info.dir} (every ${info.intervalMs}ms, maxW ${info.maxWidth}, mode ${info.mode})`);
-    } catch (e) { log.warn(`[desktop-snap] start failed: ${e.message}`); }
   }
 
   // Local-team discovery — reads ~/cicy-ai/global.json's cicyDesktopNodes
