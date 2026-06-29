@@ -538,5 +538,9 @@
     "eta": "残り {{s}}秒",
     "updateNow": "今すぐ更新",
     "modalSub": "最新バージョンへの更新を推奨します"
+  },
+  "tabShell": {
+    "myTeam": "マイチーム",
+    "newTabBtn": "新しいタブ"
   }
 }

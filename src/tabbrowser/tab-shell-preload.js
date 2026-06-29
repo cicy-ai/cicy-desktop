@@ -4,7 +4,22 @@
 // main) — this preload is ONLY for the thin chrome UI, never the tab content.
 const { contextBridge, ipcRenderer } = require("electron");
 
+// i18n: this preload runs in the renderer process, so require("../i18n") is a
+// SEPARATE instance from main — init it with the main process's chosen locale
+// (i18n:locale ipc), so window.tabAPI.t matches the rest of the app.
+let __i18n = null;
+try {
+  __i18n = require("../i18n");
+  let mainLng;
+  try { mainLng = ipcRenderer.sendSync("i18n:locale"); } catch (_) {}
+  __i18n.init(mainLng || undefined);
+  if (mainLng && __i18n.i18next.language !== __i18n.pickLocale(mainLng)) {
+    __i18n.i18next.changeLanguage(__i18n.pickLocale(mainLng));
+  }
+} catch (e) { __i18n = null; }
+
 contextBridge.exposeInMainWorld("tabAPI", {
+  t: (key, fallback) => { try { return __i18n ? __i18n.t(key, { defaultValue: fallback }) : fallback; } catch (e) { return fallback; } },
   newTab: (url) => ipcRenderer.send("tabwin:new", { url: url || "" }),
   activate: (id) => ipcRenderer.send("tabwin:activate", { id }),
   close: (id) => ipcRenderer.send("tabwin:close", { id }),

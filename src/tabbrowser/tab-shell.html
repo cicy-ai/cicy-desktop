@@ -38,12 +38,12 @@
   body.is-win.is-fullscreen #tabs{padding-right:8px}
   .tab,#newtab{-webkit-app-region:no-drag}
   #tabs::-webkit-scrollbar{height:0}
-  .tab{position:relative;display:flex;align-items:center;gap:9px;height:32px;min-width:54px;max-width:240px;padding:0 12px;border-radius:10px 10px 0 0;font-size:12.5px;color:var(--muted);background:transparent;cursor:default;flex:1 1 0;transition:background .12s,color .12s}
+  .tab{position:relative;display:flex;align-items:center;gap:9px;height:32px;min-width:60px;max-width:240px;padding:0 16px;border-radius:10px 10px 0 0;font-size:12.5px;color:var(--muted);background:transparent;cursor:default;flex:1 1 0;transition:background .12s,color .12s}
   .tab:hover{background:rgba(255,255,255,.06);color:var(--fg)}
   /* home = the resident homepage tab: pinned first, fixed width, user icon, no
      title text, no close — like Chrome's profile/avatar button. */
   /* start-page tab: pinned, sizes to its "我的团队" label (not a flex-grow tab) */
-  .tab.home{flex:0 0 auto;min-width:0;max-width:none;padding:0 12px 0 10px}
+  .tab.home{flex:0 0 auto;min-width:0;max-width:none;padding:0 16px 0 14px}
   .tab.home .ttl{flex:0 0 auto}
   .tab.home .fav{overflow:visible}
   /* CiCy brand mark — gradient rounded square + ✦, matches the start page logo */
@@ -188,7 +188,7 @@
       try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(id)); } catch (_) {}
       d.classList.add('dragging');
     });
-    d.addEventListener('dragend', () => { dragId = null; clearDropMarker(); render(); });
+    d.addEventListener('dragend', () => { dragId = null; clearDropMarker(); lastTabsSig = null; render(); });
     d.addEventListener('dragover', (e) => {
       if (dragId == null || dragId === id) return;
       e.preventDefault();
@@ -205,14 +205,22 @@
     });
   }
 
+  const T = (k, f) => { try { return window.tabAPI.t(k, f); } catch (e) { return f; } };
+  let lastTabsSig = null;
   function render() {
+    // 只在 tab 条「显示内容」(id/title/active/loading/favicon/home)变化时才重建。
+    // 跳过 pushState 突发(SPA in-page 导航 / 重复标题推送)带来的冗余重建——那正是
+    // tab 一直闪 + 点击丢失(mousedown 到 click 之间 DOM 被清空,要点很多次)的根因。
+    const sig = JSON.stringify(state.tabs.map((t) => [t.id, t.home ? 1 : 0, t.active ? 1 : 0, t.loading ? 1 : 0, t.favicon || '', t.home ? '' : (t.title || '')]));
+    if (sig !== lastTabsSig) {
+    lastTabsSig = sig;
     tabsEl.innerHTML = '';
     const hasHome = state.tabs.some((x) => x.home);
     const nonHome = state.tabs.filter((x) => !x.home).length;
     state.tabs.forEach((t) => {
       const d = document.createElement('div');
       d.className = 'tab' + (t.home ? ' home' : '') + (t.active ? ' active' : '');
-      d.title = t.home ? '我的团队' : (t.url || '');
+      d.title = t.home ? T('tabShell.myTeam', '我的团队') : (t.url || '');
       d.onclick = () => window.tabAPI.activate(t.id);
       // resident start-page tab: pinned first, user icon only, no title, no close
       if (t.home) {
@@ -220,7 +228,7 @@
         ic.className = 'fav'; ic.innerHTML = CICY_LOGO;
         d.appendChild(ic);
         const ttl = document.createElement('span');
-        ttl.className = 'ttl'; ttl.textContent = '我的团队';
+        ttl.className = 'ttl'; ttl.textContent = T('tabShell.myTeam', '我的团队');
         d.appendChild(ttl);
         tabsEl.appendChild(d);
         return;
@@ -243,11 +251,12 @@
     });
     if (!NO_NEW) {
       const add = document.createElement('div');
-      add.id = 'newtab'; add.title = '新建标签';
+      add.id = 'newtab'; add.title = T('tabShell.newTabBtn', '新建标签');
       add.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
       add.onclick = () => window.tabAPI.newTab();
       tabsEl.appendChild(add);
     }
+    } // end tab-strip rebuild (skipped when sig unchanged → no flicker)
 
     const nav = state.nav || {};
     backEl.classList.toggle('off', !nav.canBack);

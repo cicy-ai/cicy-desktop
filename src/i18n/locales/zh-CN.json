@@ -538,5 +538,9 @@
     "eta": "剩 {{s}}s",
     "updateNow": "立即更新",
     "modalSub": "建议尽快更新到最新版本"
+  },
+  "tabShell": {
+    "myTeam": "我的团队",
+    "newTabBtn": "新建标签"
   }
 }

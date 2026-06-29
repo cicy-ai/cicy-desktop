@@ -538,5 +538,9 @@
     "eta": "{{s}}s restant",
     "updateNow": "Mettre à jour",
     "modalSub": "Nous recommandons de mettre à jour vers la dernière version"
+  },
+  "tabShell": {
+    "myTeam": "Mon équipe",
+    "newTabBtn": "Nouvel onglet"
   }
 }
