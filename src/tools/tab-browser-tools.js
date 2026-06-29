@@ -646,6 +646,21 @@ function activateTabIfOpen(accountIdx, url) {
   return { ok: false, active: false };
 }
 
+// 设头像后即时刷新已打开 tab 的 icon(否则要重开 tab 才变)。按 URL 反查 teams.json
+// 的头像更新 tab.avatar 并 pushState。云端 tab(不在 teams.json)不在此列,需重开。
+function refreshTabAvatars() {
+  let lt; try { lt = require("../backends/local-teams"); } catch (e) { return; }
+  for (const m of managers.values()) {
+    let changed = false;
+    for (const t of m.tabs) {
+      if (t.home) continue;
+      const a = lt.avatarForUrl(t.url) || "";
+      if (a !== (t.avatar || "")) { t.avatar = a; changed = true; }
+    }
+    if (changed) try { m.pushState(); } catch (e) {}
+  }
+}
+registerTabBrowserTools.refreshTabAvatars = refreshTabAvatars;
 registerTabBrowserTools.openTab = openTab;
 registerTabBrowserTools.reloadTabByUrl = reloadTabByUrl;
 registerTabBrowserTools.reloadTabIfOpen = reloadTabIfOpen;

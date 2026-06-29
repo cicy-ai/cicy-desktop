@@ -1127,7 +1127,11 @@ electronApp.whenReady().then(async () => {
     __ipcLT.handle("localTeams:add",     (_e, spec)    => lt.addTeam(spec || {}));
     __ipcLT.handle("localTeams:remove",  (_e, id)      => lt.removeTeam(id));
     __ipcLT.handle("localTeams:update",  (_e, payload) => lt.updateTeam(payload?.id, payload?.patch || {}));
-    __ipcLT.handle("localTeams:setAvatar", (_e, payload) => lt.setAvatar(payload?.id, payload?.dataUrl || ""));
+    __ipcLT.handle("localTeams:setAvatar", async (_e, payload) => {
+      const r = await lt.setAvatar(payload?.id, payload?.dataUrl || "");
+      try { require("./tools/tab-browser-tools").refreshTabAvatars(); } catch (e) {} // 即时刷新已开 tab 的 icon
+      return r;
+    });
     __ipcLT.handle("localTeams:avatars", () => lt.getAvatars());
     __ipcLT.handle("localTeams:upgrade", (_e, id)      => lt.upgradeTeam(id));
     // Pull cloud title NOW (homepage calls this on window focus so a dash rename
