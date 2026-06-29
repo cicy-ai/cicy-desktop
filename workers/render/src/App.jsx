@@ -3388,14 +3388,21 @@ function UpdateBanner() {
 function SkeletonCard() {
   return (
     <div className="bcard bcard--skeleton" data-id="SkeletonCard" aria-hidden>
-      <div className="bcard--skeleton__head">
-        <div className="skel skel--avatar" />
-        <div className="bcard--skeleton__lines">
-          <div className="skel skel--line" style={{ width: "58%" }} />
-          <div className="skel skel--line" style={{ width: "34%", height: 10, marginTop: 8 }} />
-        </div>
+      <div className="bcard__accent" style={{ background: "rgba(255,255,255,.08)", opacity: 1 }} />
+      {/* 对齐真实卡片:顶部 pill + kebab */}
+      <div className="bcard__top">
+        <div className="skel" style={{ width: 84, height: 26, borderRadius: 999 }} />
+        <div className="skel" style={{ width: 22, height: 22, borderRadius: 6 }} />
       </div>
-      <div className="skel skel--cta" />
+      {/* body:方头像(24)+ 名字行,下面 meta chip;flex:1 把 CTA 顶到底 */}
+      <div style={{ flex: 1, minHeight: 0, marginTop: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div className="skel" style={{ width: 24, height: 24, borderRadius: 6, flex: "0 0 auto" }} />
+          <div className="skel skel--line" style={{ width: "55%" }} />
+        </div>
+        <div className="skel" style={{ width: 60, height: 18, borderRadius: 6, marginTop: 12 }} />
+      </div>
+      <div className="skel skel--cta" style={{ marginTop: 0 }} />
     </div>
   );
 }
