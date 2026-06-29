@@ -2874,6 +2874,15 @@ function LocalTeamCard({ team, cloudCode, onOpen, onRename, onRefresh }) {
                     </button>
                     <button
                       type="button"
+                      data-id="LocalTeamCard-stop"
+                      className="bcard__menu-item is-danger"
+                      onClick={() => runOp("stop", () => window.cicy.sidecar.stop(), tr("sidecar.stoppedDone", "已停止"))}
+                    >
+                      {tr("sidecar.stop", "停止")}
+                    </button>
+                    {/* 局域网访问紧挨「帐单」上方(放在 stop 之后)。 */}
+                    <button
+                      type="button"
                       data-id="LocalTeamCard-lan"
                       className="bcard__menu-item"
                       title={tr("sidecar.lanHint", "开启后同局域网设备可用本机 IP 访问(api_token 仍校验);切换会自动重启 cicy-code")}
@@ -2893,14 +2902,6 @@ function LocalTeamCard({ team, cloudCode, onOpen, onRename, onRefresh }) {
                       }}
                     >
                       {tr("sidecar.lanAccess", "局域网访问")} · {lanOn ? tr("common.on", "开") : tr("common.off", "关")}
-                    </button>
-                    <button
-                      type="button"
-                      data-id="LocalTeamCard-stop"
-                      className="bcard__menu-item is-danger"
-                      onClick={() => runOp("stop", () => window.cicy.sidecar.stop(), tr("sidecar.stoppedDone", "已停止"))}
-                    >
-                      {tr("sidecar.stop", "停止")}
                     </button>
                   </>
                 )}
