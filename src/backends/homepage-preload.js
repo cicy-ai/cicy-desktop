@@ -212,7 +212,7 @@ contextBridge.exposeInMainWorld("cicy", {
   // Open / reload a URL as a TAB in profile 0 (homepage cards open like the local
   // card — current profile, not a new window / system browser).
   tabs: {
-    open:   (url, title, avatar) => logInvoke("tabs:open", { url, title, avatar }),
+    open:   (url, title, avatar, team) => logInvoke("tabs:open", { url, title, avatar, team }),
     reload: (url, title) => logInvoke("tabs:reload", { url, title }),
     reloadIfOpen: (url, title) => logInvoke("tabs:reloadIfOpen", { url, title }),
     activateIfOpen: (url) => logInvoke("tabs:activateIfOpen", { url }),

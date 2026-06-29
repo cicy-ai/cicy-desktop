@@ -151,7 +151,22 @@
     const w = document.createElement('span');
     w.className = 'fav';
     if (t.loading) { w.innerHTML = '<span class="spin"></span>'; return w; }
-    // team 自定义头像优先(tab icon = 团队头像);否则页面 favicon;再否则地球。
+    // 团队 tab:icon 只用团队头像;没设头像就用「名字首字母 + 稳定色块」(和卡片一致),
+    // **禁用页面 favicon**(避免 cicy-code 的 favicon 盖掉团队身份)。
+    if (t.team) {
+      if (t.avatar) {
+        const img = document.createElement('img'); img.src = t.avatar; w.appendChild(img);
+      } else {
+        const name = (t.title || '').trim();
+        const ini = (name[0] || '?').toUpperCase();
+        let h = 0; for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
+        const s = document.createElement('span');
+        s.style.cssText = 'display:flex;width:16px;height:16px;border-radius:4px;align-items:center;justify-content:center;background:hsl(' + h + ' 52% 46%);color:#fff;font-size:9px;font-weight:700;line-height:1';
+        s.textContent = ini; w.appendChild(s);
+      }
+      return w;
+    }
+    // 非团队 tab:页面 favicon → 否则地球。
     const src = t.avatar || t.favicon;
     if (src) {
       const img = document.createElement('img');
@@ -213,7 +228,7 @@
     // 只在 tab 条「显示内容」(id/title/active/loading/favicon/home)变化时才重建。
     // 跳过 pushState 突发(SPA in-page 导航 / 重复标题推送)带来的冗余重建——那正是
     // tab 一直闪 + 点击丢失(mousedown 到 click 之间 DOM 被清空,要点很多次)的根因。
-    const sig = JSON.stringify(state.tabs.map((t) => [t.id, t.home ? 1 : 0, t.active ? 1 : 0, t.loading ? 1 : 0, t.favicon || '', t.avatar || '', t.home ? '' : (t.title || '')]));
+    const sig = JSON.stringify(state.tabs.map((t) => [t.id, t.home ? 1 : 0, t.active ? 1 : 0, t.loading ? 1 : 0, t.team ? 1 : 0, t.favicon || '', t.avatar || '', t.home ? '' : (t.title || '')]));
     if (sig !== lastTabsSig) {
     lastTabsSig = sig;
     tabsEl.innerHTML = '';

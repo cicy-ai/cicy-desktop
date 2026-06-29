@@ -166,6 +166,7 @@ class TabManager {
         loading: !!t.loading,
         favicon: t.favicon || "",
         avatar: t.avatar || "",   // team 自定义头像 → tab icon 用它(优先于页面 favicon)
+        team: !!t.team,           // 团队 tab:icon 只用 avatar,禁用页面 favicon
         home: !!t.home,
       })),
       nav: {
@@ -223,7 +224,7 @@ class TabManager {
     // home = the resident homepage tab (pinned, first, user-icon, no close).
     // fixedTitle = a caller-supplied tab name (e.g. the team title) that the
     // page's own document.title must NOT override.
-    const tab = { id, view, title: "", url: target, home: !!opts.home, fixedTitle: opts.title || "", avatar: opts.avatar || "" };
+    const tab = { id, view, title: "", url: target, home: !!opts.home, fixedTitle: opts.title || "", avatar: opts.avatar || "", team: !!opts.team };
     // team tab 用团队自定义头像做 icon:调用方没给就按 URL 反查 teams.json(覆盖所有打开路径)。
     if (!tab.avatar && !opts.home) { try { tab.avatar = require("../backends/local-teams").avatarForUrl(target) || ""; } catch (e) {} }
     if (opts.home) this.tabs.unshift(tab); else this.tabs.push(tab);
@@ -363,7 +364,7 @@ function findManagerByTab(webContentsId) {
 // button / electron_tab_open / the panel can add tabs to profile 0 too.
 async function openTab(accountIdx, url, opts = {}) {
   const m = ensureManager(accountIdx);
-  const id = m.addTab(url, { trusted: !!opts.trusted, home: !!opts.home, title: opts.title || "", navigate: !!opts.navigate, avatar: opts.avatar || "" });
+  const id = m.addTab(url, { trusted: !!opts.trusted, home: !!opts.home, title: opts.title || "", navigate: !!opts.navigate, avatar: opts.avatar || "", team: !!opts.team });
   try { m.win.show(); m.win.focus(); } catch (e) {}
   // 记下这个团队 tab 的 webContentsId(打开 → set;关闭/销毁 → delete)。
   try {

@@ -1079,7 +1079,7 @@ export default function App() {
                 // Open as a TAB in the current profile (like the local card), NOT
                 // the system browser.
                 const url = t.kind === "private" ? t.host_url : (t.workspace_url || t.workspace_direct_url);
-                if (url) window.cicy?.tabs?.open?.(url, t.name || t.title || "", avatars[t.id] || "");
+                if (url) window.cicy?.tabs?.open?.(url, t.name || t.title || "", avatars[t.id] || "", true);
               }}
               avatar={avatars[t.id] || ""}
               onAvatar={fetchAvatars}

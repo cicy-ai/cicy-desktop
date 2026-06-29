@@ -303,7 +303,8 @@ async function openTeam(id, opts = {}) {
   try {
     const tabBrowser = require("../tools/tab-browser-tools");
     // tab name = the team's title (not the cicy-code SPA's document.title)
-    const r = await tabBrowser.openTab(0, url, { trusted: true, systemOpen: true, title: node.name || id });
+    // team=true + avatar:这是个团队 tab → icon 用团队头像、禁用页面 favicon(见 tab-shell)。
+    const r = await tabBrowser.openTab(0, url, { trusted: true, systemOpen: true, title: node.name || id, team: true, avatar: readAvatars()[id] || "" });
     log.info(`[local-teams] open ${id} → tab in win.id=${r.winId} (reused=${r.reused})`);
     return { ok: true, windowId: r.winId, reused: !!r.reused, tabbed: true };
   } catch (e) {
