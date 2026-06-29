@@ -101,7 +101,11 @@ class TabManager {
       // global bar). Without this, Windows draws the File/Edit/View row where the
       // titlebar was, so the strip never reaches the top edge. Alt still reveals it.
       autoHideMenuBar: true,
-      webPreferences: { preload: SHELL_PRELOAD, contextIsolation: true, nodeIntegration: false },
+      // sandbox:false —— shell 是我们自己的可信 chrome(标签条/工具栏),它的 preload
+      // 需要 require("../i18n")(fs/path/i18next)。不显式关沙箱的话现代 Electron 默认
+      // 开沙箱,require 会抛错 → tab-shell-preload 的 __i18n=null → tabAPI.t 永远只回
+      // fallback(实测「我的团队/新建标签」不走 i18n 的根因)。与 homepage 窗口一致。
+      webPreferences: { preload: SHELL_PRELOAD, contextIsolation: true, nodeIntegration: false, sandbox: false },
     };
     try { winOpts.icon = require("../utils/app-icon").appIconPath(); } catch (e) {}
     // 新开的非 0 profile 窗口相对原 profile(优先 profile 0)做级联偏移,避免完全压在
