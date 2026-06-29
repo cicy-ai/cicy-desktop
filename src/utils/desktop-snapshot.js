@@ -26,7 +26,7 @@ const electron = require("electron");
 
 const MAX_W = 600; // 压到 600 以下宽度
 const QUALITY = 60;
-const DEFAULT_INTERVAL_MS = 8000;
+const DEFAULT_INTERVAL_MS = 30000; // 8s→30s:降全屏截图频率(资源占用)
 
 function snapDir() {
   const fromEnv = (process.env.CICY_DESKTOP_SNAP_DIR || "").trim();
@@ -35,13 +35,16 @@ function snapDir() {
 
 // Is desktop screen capture allowed here? Single source of truth shared by the
 // periodic daemon (main.js) AND the on-demand `desktop_snapshot` tool's live fallback.
-// OFF by default on macOS: any capture trips the Screen-Recording prompt, and macOS 15
-// won't persist the grant for a non-Apple-Team-ID signature (ad-hoc AND a self-signed
-// cert both re-prompt — verified). So unless you ship an Apple Developer-ID + notarized
-// build, the only way to "no prompts" is to not capture. Opt in with CICY_DESKTOP_SNAPSHOT=1.
-// win/linux are ON by default (no such prompt); opt out with =0.
+// OFF by default on macOS AND Windows (opt in with CICY_DESKTOP_SNAPSHOT=1):
+//  - macOS: any capture trips the Screen-Recording prompt that won't persist for a
+//    non-Apple-Team-ID signature (re-prompts forever).
+//  - Windows: the periodic whole-desktop capture spawns an always-on --disable-gpu
+//    child + writes every 30s — pure overhead for users who only manage docker/teams
+//    and aren't being driven by a screen-watching cloud agent (资源占用). The on-demand
+//    `desktop_snapshot` tool still has its own live fallback when actually requested.
+// linux stays ON by default (no prompt, cheap scrot); opt out with =0.
 function snapshotEnabled() {
-  return process.platform === "darwin"
+  return (process.platform === "darwin" || process.platform === "win32")
     ? process.env.CICY_DESKTOP_SNAPSHOT === "1"
     : process.env.CICY_DESKTOP_SNAPSHOT !== "0";
 }

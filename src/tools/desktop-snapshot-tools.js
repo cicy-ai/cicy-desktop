@@ -65,8 +65,10 @@ module.exports = (registerTool) => {
         }
 
         if (fresh) return { content: [{ type: "text", text: fresh.b64 }] }; // stale is better than nothing
-        if (process.platform === "darwin" && !snap.snapshotEnabled()) {
-          throw new Error("桌面截图在 macOS 默认关闭(避免反复弹屏幕录制授权)。需要 agent 看屏幕时,启动 app 前设 CICY_DESKTOP_SNAPSHOT=1。");
+        // mac/win 默认关(mac=避免反复弹屏幕录制授权;win=降资源占用,见 desktop-snapshot.js)。
+        // 关着时给明确提示而不是「daemon warming up」(误导)。
+        if (!snap.snapshotEnabled() && (process.platform === "darwin" || process.platform === "win32")) {
+          throw new Error("桌面截图默认关闭(降低资源占用 / 避免授权弹窗)。需要 agent 看屏幕时,启动 app 前设环境变量 CICY_DESKTOP_SNAPSHOT=1。");
         }
         throw new Error("no desktop snapshot yet (daemon warming up?)");
       } catch (error) {

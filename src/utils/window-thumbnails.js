@@ -88,6 +88,10 @@ async function tick(opts) {
     const manifest = [];
     for (const win of wins) {
       try {
+        // 跳过最小化/隐藏的窗口:capturePage 即使对不可见窗口也强制离屏重绘+GPU 回读
+        // (高占用主因)。看不见的没必要刷预览,留用上次的缩略图即可。
+        if (win.isMinimized && win.isMinimized()) continue;
+        if (win.isVisible && !win.isVisible()) continue;
         const entry = await captureOne(win, dir, opts);
         if (entry) manifest.push(entry);
       } catch (_) {
@@ -104,7 +108,7 @@ async function tick(opts) {
 
 function startWindowThumbnails(options = {}) {
   const opts = {
-    intervalMs: options.intervalMs || 4000,
+    intervalMs: options.intervalMs || 20000,  // 4s→20s:降 capturePage 频率(资源占用大头)
     maxWidth: options.maxWidth || 320, // small rect, chrome-ish
     quality: options.quality || 60,
   };
