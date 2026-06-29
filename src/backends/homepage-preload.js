@@ -281,6 +281,7 @@ contextBridge.exposeInMainWorld("cicy", {
     add:     (spec)        => logInvoke("localTeams:add", spec),
     remove:  (id)          => logInvoke("localTeams:remove", id),
     update:  (id, patch)   => logInvoke("localTeams:update", { id, patch }),
+    setAvatar: (id, dataUrl) => logInvoke("localTeams:setAvatar", { id, dataUrl }),
     upgrade: (id)          => logInvoke("localTeams:upgrade", id),
     syncCloud: ()          => logInvoke("localTeams:syncCloud"),
     // Subscribe to relay requests forwarded from a child <webview>

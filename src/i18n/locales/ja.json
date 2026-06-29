@@ -409,7 +409,8 @@
     "deleteMsg": "このプライベートクラウドチームをクラウドから削除し,全デバイスに影響します。«{{name}}» を削除しますか?",
     "deleted": "チームを削除しました",
     "deleteFailed": "削除失敗",
-    "editAddr": "アドレスを変更"
+    "editAddr": "アドレスを変更",
+    "changeAvatar": "クリックでアバター変更"
   },
   "updateDrawer": {
     "done": "Update complete",

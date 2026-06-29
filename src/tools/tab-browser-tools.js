@@ -165,6 +165,7 @@ class TabManager {
         active: t.id === this.activeId,
         loading: !!t.loading,
         favicon: t.favicon || "",
+        avatar: t.avatar || "",   // team 自定义头像 → tab icon 用它(优先于页面 favicon)
         home: !!t.home,
       })),
       nav: {
@@ -222,7 +223,9 @@ class TabManager {
     // home = the resident homepage tab (pinned, first, user-icon, no close).
     // fixedTitle = a caller-supplied tab name (e.g. the team title) that the
     // page's own document.title must NOT override.
-    const tab = { id, view, title: "", url: target, home: !!opts.home, fixedTitle: opts.title || "" };
+    const tab = { id, view, title: "", url: target, home: !!opts.home, fixedTitle: opts.title || "", avatar: opts.avatar || "" };
+    // team tab 用团队自定义头像做 icon:调用方没给就按 URL 反查 teams.json(覆盖所有打开路径)。
+    if (!tab.avatar && !opts.home) { try { tab.avatar = require("../backends/local-teams").avatarForUrl(target) || ""; } catch (e) {} }
     if (opts.home) this.tabs.unshift(tab); else this.tabs.push(tab);
     wc.on("page-title-updated", (_e, title) => { if (!tab.fixedTitle) { tab.title = title; this.pushState(); } });
     wc.on("page-favicon-updated", (_e, favs) => { tab.favicon = (favs && favs[0]) || ""; this.pushState(); });

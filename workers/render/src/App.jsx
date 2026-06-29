@@ -2425,7 +2425,8 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
       <div className="bcard__body">
         {/* 8008 现在有独立云端 team(cloud_team_id 是它自己的,不再和 8008 串),所以
             标题可改名:本地节点名 + 云端 PATCH 双写(onRename 在父组件处理)。 */}
-        <div style={{ height: 28, display: "flex", alignItems: "center" }}>
+        <div style={{ height: 28, display: "flex", alignItems: "center", gap: 8 }}>
+          <TeamAvatar size={24} avatar={dockerTeam?.avatar} name={displayName} teamId={dockerTeam?.id} onChanged={onRefresh} />
           {editing ? (
             <input
               data-id="DockerCard-rename-input"
@@ -2938,7 +2939,8 @@ function LocalTeamCard({ team, cloudCode, onOpen, onRename, onRefresh }) {
       </div>
       <div className="bcard__body">
         {/* 固定高度容器:h3 与 input 同高,切换不引起卡片位移 */}
-        <div style={{ height: 28, display: "flex", alignItems: "center" }}>
+        <div style={{ height: 28, display: "flex", alignItems: "center", gap: 8 }}>
+        <TeamAvatar size={24} avatar={team?.avatar} name={team?.name} teamId={team?.id} onChanged={onRefresh} />
         {editing ? (
           <input
             data-id="LocalTeamCard-rename-input"
@@ -3385,6 +3387,32 @@ function SkeletonCard() {
         </div>
       </div>
       <div className="skel skel--cta" />
+    </div>
+  );
+}
+// 团队头像:有自定义图(data URL)就显示图,否则「团队名首字母 + 按名 hash 的稳定底色」
+// 圆角块。teamId 存在时点击可上传(resize 在主进程做,见 local-teams.setAvatar)。
+// 同一份用于卡片头像 + tab icon(tab 那边在 tab-shell.html faviconNode 用 t.avatar)。
+function hashHue(s) { let h = 0; for (let i = 0; i < (s || "").length; i++) h = (h * 31 + s.charCodeAt(i)) % 360; return h; }
+function TeamAvatar({ avatar, name, teamId, onChanged, size = 34 }) {
+  const fileRef = useRef(null);
+  const initial = ((name || "?").trim()[0] || "?").toUpperCase();
+  const hue = hashHue(name || teamId || "");
+  const pick = (e) => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = async () => { try { await window.cicy?.localTeams?.setAvatar?.(teamId, r.result); onChanged && onChanged(); } catch (_) {} };
+    r.readAsDataURL(f);
+  };
+  return (
+    <div data-id="TeamAvatar" className="team-avatar"
+      title={teamId ? tr("teamCard.changeAvatar", "点击更换头像") : ""}
+      onClick={teamId ? (e) => { e.stopPropagation(); fileRef.current && fileRef.current.click(); } : undefined}
+      style={{ width: size, height: size, borderRadius: 9, flex: "none", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", cursor: teamId ? "pointer" : "default", background: avatar ? "#0d1117" : `hsl(${hue} 52% 46%)`, color: "#fff", fontWeight: 700, fontSize: Math.round(size * 0.42), userSelect: "none" }}>
+      {avatar ? <img src={avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : initial}
+      {teamId && <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={pick} />}
     </div>
   );
 }

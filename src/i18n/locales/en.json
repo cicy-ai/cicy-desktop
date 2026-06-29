@@ -409,7 +409,8 @@
     "deleteMsg": "This will remove the private cloud team from the cloud, affecting all devices. Delete «{{name}}»?",
     "deleted": "Team deleted",
     "deleteFailed": "Delete failed",
-    "editAddr": "Edit address"
+    "editAddr": "Edit address",
+    "changeAvatar": "Click to change avatar"
   },
   "updateDrawer": {
     "done": "Update complete",

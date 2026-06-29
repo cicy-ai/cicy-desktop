@@ -409,7 +409,8 @@
     "deleteMsg": "删除后该私有云团队将从云端移除,影响所有设备。确定删除「{{name}}」?",
     "deleted": "团队已删除",
     "deleteFailed": "删除失败",
-    "editAddr": "更改地址"
+    "editAddr": "更改地址",
+    "changeAvatar": "点击更换头像"
   },
   "updateDrawer": {
     "done": "更新完成",

@@ -19,7 +19,7 @@ const https = require("https");
 const net = require("net");
 const { execFile } = require("child_process");
 const { spawn } = require("child_process");
-const { BrowserWindow } = require("electron");
+const { BrowserWindow, nativeImage } = require("electron");
 // i18n for the default team name ("Unnamed"/"未命名"/…). Resolved at create
 // time from the app locale; falls back to "Unnamed" if i18n isn't ready.
 let __t;
@@ -192,6 +192,7 @@ async function list({ refresh = false } = {}) {
       name: node.name || slug,
       base_url: baseUrl,
       api_token: node.api_token || "",
+      avatar: node.avatar || "",   // 自定义团队头像(data URL,≤64px);空=用首字母兜底
       // Cloud-issued teamId (from name-sync register). The renderer maps it to
       // the team's sk-cicy- gateway apiKey (via /api/teams) for the 账单 link —
       // the local api_token is an MCP token the cloud can't bill on.
@@ -951,4 +952,40 @@ async function upgradeTeam(id) {
   return result;
 }
 
-module.exports = { list, openTeam, reloadTeam, closeLocalWindows, addTeam, removeTeam, updateTeam, upgradeTeam, syncAllLocalTeams };
+// Set (or clear) a team's avatar. The uploaded image is resized to ≤64px and
+// stored as a data URL on the node — small enough for teams.json, and usable
+// directly as <img src> in the team card AND the tab strip icon (no file://).
+async function setAvatar(id, dataUrl) {
+  let stored = "";
+  if (dataUrl && /^data:image\//.test(dataUrl)) {
+    try {
+      let img = nativeImage.createFromDataURL(dataUrl);
+      if (!img.isEmpty()) {
+        const { width } = img.getSize();
+        if (width > 64) img = img.resize({ width: 64, height: 64, quality: "good" });
+        stored = img.toDataURL();
+      }
+    } catch (e) { log.warn(`[local-teams] setAvatar resize failed: ${e.message}`); }
+  }
+  await writeNodes((nodes) => {
+    if (nodes[id]) { if (stored) nodes[id].avatar = stored; else delete nodes[id].avatar; }
+    return nodes;
+  });
+  return { ok: true, avatar: stored };
+}
+
+// Look up a team's avatar by URL (origin+pathname match) — the tab strip uses
+// this to icon a team tab with its avatar. Returns "" if no team / no avatar.
+function avatarForUrl(url) {
+  try {
+    const key = stripVolatile(url);
+    const nodes = readNodes();
+    for (const id of Object.keys(nodes)) {
+      const b = nodes[id].base_url || "";
+      if (b && (stripVolatile(b) === key || key.startsWith(stripVolatile(b)))) return nodes[id].avatar || "";
+    }
+  } catch {}
+  return "";
+}
+
+module.exports = { list, openTeam, reloadTeam, closeLocalWindows, addTeam, removeTeam, updateTeam, upgradeTeam, syncAllLocalTeams, setAvatar, avatarForUrl };

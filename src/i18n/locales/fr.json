@@ -409,7 +409,8 @@
     "deleteMsg": "Cela supprimera l'équipe cloud privée du cloud, affectant tous les appareils. Supprimer «{{name}}»?",
     "deleted": "Équipe supprimée",
     "deleteFailed": "Échec de suppression",
-    "editAddr": "Modifier l'adresse"
+    "editAddr": "Modifier l'adresse",
+    "changeAvatar": "Cliquer pour changer l'avatar"
   },
   "updateDrawer": {
     "done": "Update complete",
