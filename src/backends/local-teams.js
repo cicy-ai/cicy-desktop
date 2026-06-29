@@ -22,9 +22,22 @@ const { spawn } = require("child_process");
 const { BrowserWindow, nativeImage } = require("electron");
 // i18n for the default team name ("Unnamed"/"未命名"/…). Resolved at create
 // time from the app locale; falls back to "Unnamed" if i18n isn't ready.
-let __t;
-try { __t = require("../i18n").t; } catch { __t = null; }
+let __t, __i18nMod;
+try { __i18nMod = require("../i18n"); __t = __i18nMod.t; } catch { __t = null; }
 const unnamedName = () => { try { return (__t && __t("localTeams.unnamed")) || "Unnamed"; } catch { return "Unnamed"; } };
+
+// 默认团队名(「本地团队」/「Local Team」/…)是注册时按当时语言写进 teams.json 的快照。
+// 切换语言后它不会变 → 显示时若发现存的就是任一语言的默认名,改用**当前语言**的默认名;
+// 用户改过的真实名字不匹配任何默认名 → 原样保留。
+function localizedTeamName(stored) {
+  try {
+    if (!__i18nMod || !__i18nMod.i18next) return stored;
+    const cur = __t("localTeams.defaultName");
+    if (!stored) return cur;
+    const isDefault = (__i18nMod.SUPPORTED || []).some((l) => __i18nMod.i18next.t("localTeams.defaultName", { lng: l }) === stored);
+    return isDefault ? cur : stored;
+  } catch { return stored; }
+}
 const log = require("electron-log");
 
 // global.json is now only read for the local sidecar's api_token (auto-fill).
@@ -202,7 +215,7 @@ async function list({ refresh = false } = {}) {
     const live = await probeLiveness(baseUrl, node.api_token);
     return {
       id: slug,
-      name: node.name || slug,
+      name: localizedTeamName(node.name) || slug,
       base_url: baseUrl,
       api_token: node.api_token || "",
       avatar: avatars[slug] || node.avatar || "",   // 自定义团队头像(data URL,≤64px);空=首字母兜底
@@ -304,7 +317,7 @@ async function openTeam(id, opts = {}) {
     const tabBrowser = require("../tools/tab-browser-tools");
     // tab name = the team's title (not the cicy-code SPA's document.title)
     // team=true + avatar:这是个团队 tab → icon 用团队头像、禁用页面 favicon(见 tab-shell)。
-    const r = await tabBrowser.openTab(0, url, { trusted: true, systemOpen: true, title: node.name || id, team: true, avatar: readAvatars()[id] || "" });
+    const r = await tabBrowser.openTab(0, url, { trusted: true, systemOpen: true, title: localizedTeamName(node.name) || id, team: true, avatar: readAvatars()[id] || "" });
     log.info(`[local-teams] open ${id} → tab in win.id=${r.winId} (reused=${r.reused})`);
     return { ok: true, windowId: r.winId, reused: !!r.reused, tabbed: true };
   } catch (e) {
