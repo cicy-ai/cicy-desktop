@@ -363,7 +363,7 @@ function findManagerByTab(webContentsId) {
 // button / electron_tab_open / the panel can add tabs to profile 0 too.
 async function openTab(accountIdx, url, opts = {}) {
   const m = ensureManager(accountIdx);
-  const id = m.addTab(url, { trusted: !!opts.trusted, home: !!opts.home, title: opts.title || "", navigate: !!opts.navigate });
+  const id = m.addTab(url, { trusted: !!opts.trusted, home: !!opts.home, title: opts.title || "", navigate: !!opts.navigate, avatar: opts.avatar || "" });
   try { m.win.show(); m.win.focus(); } catch (e) {}
   // 记下这个团队 tab 的 webContentsId(打开 → set;关闭/销毁 → delete)。
   try {

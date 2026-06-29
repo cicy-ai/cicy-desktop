@@ -363,6 +363,12 @@ export default function App() {
   // Used to distinguish "not yet probed" (unknown) from "probed and empty"
   // (cloud-only) in localHelperState below.
   const [localTeamsFetched, setLocalTeamsFetched] = useState(false);
+  // 通用头像映射 { id: dataUrl } —— 本地/Docker/云端团队都按 id 取头像(云端团队不在
+  // teams.json,所以单独拉一份映射,给所有卡片 + 打开 tab 时透传 avatar 用)。
+  const [avatars, setAvatars] = useState({});
+  const fetchAvatars = useCallback(async () => {
+    try { const m = await window.cicy?.localTeams?.avatars?.(); setAvatars(m && typeof m === "object" ? m : {}); } catch {}
+  }, []);
   // 「新加团队」下拉 + 自定义团队 modal: 点按钮出两个选项——自定义(本 modal 输 url/title)
   // 或私有云(跳云端团队中心)。自定义走 localTeams.add({base_url,name,api_token})。
   const [addMenuOpen, setAddMenuOpen] = useState(false);
@@ -575,7 +581,7 @@ export default function App() {
     // host_url/名字/状态的同步)。三件事并行。
     const reconcile = async () => {
       try { await window.cicy?.localTeams?.syncCloud?.(); } catch {}
-      await Promise.all([fetchLocalTeams(), refreshCloudTeams()]);
+      await Promise.all([fetchLocalTeams(), refreshCloudTeams(), fetchAvatars()]);
     };
 
     const schedule = () => {
@@ -1073,8 +1079,10 @@ export default function App() {
                 // Open as a TAB in the current profile (like the local card), NOT
                 // the system browser.
                 const url = t.kind === "private" ? t.host_url : (t.workspace_url || t.workspace_direct_url);
-                if (url) window.cicy?.tabs?.open?.(url, t.name || t.title || "");
+                if (url) window.cicy?.tabs?.open?.(url, t.name || t.title || "", avatars[t.id] || "");
               }}
+              avatar={avatars[t.id] || ""}
+              onAvatar={fetchAvatars}
               onRename={renameCloudTeam}
               onEditUrl={updateCloudTeamUrl}
               onDelete={deleteCloudTeam}
@@ -3097,7 +3105,7 @@ function ConfirmModal({ open, title, message, confirmLabel, danger, onConfirm, o
 // 私有云 / (历史)云端团队卡片。产品方向变更(w-10032):公有云不做了,主打 private
 // (用户自托管,数据不出企业)。private 字段:{name,kind:"private",status,apiKey,
 // gatewayUrl,host_url,titleVersion,deviceId:""}。卡片展示名字+host_url,点开可看/复制 apiKey。
-function TeamCard({ team, onOpen, onRename, onEditUrl, onDelete }) {
+function TeamCard({ team, onOpen, onRename, onEditUrl, onDelete, avatar, onAvatar }) {
   const isPrivate = team.kind === "private";
   const statusOk = team.status === "active";
   const serverName = team.name || team.title || "—";
@@ -3230,7 +3238,8 @@ function TeamCard({ team, onOpen, onRename, onEditUrl, onDelete }) {
       </div>
       <div className="bcard__body">
         {/* 固定高度容器:h3 与 input 同高,切换不引起位移 */}
-        <div style={{ height: 28, display: "flex", alignItems: "center" }}>
+        <div style={{ height: 28, display: "flex", alignItems: "center", gap: 8 }}>
+        <TeamAvatar size={24} avatar={avatar} name={team?.name || team?.title} teamId={team?.id} onChanged={onAvatar} />
         {editing ? (
           <input
             data-id="TeamCard-rename-input"

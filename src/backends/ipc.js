@@ -244,7 +244,7 @@ function register(opts = {}) {
   ipcMain.handle("tabs:open", async (_e, input) => {
     try {
       const tb = require("../tools/tab-browser-tools");
-      const r = await tb.openTab(0, String((input && input.url) || ""), { systemOpen: true, trusted: false, title: (input && input.title) || "" });
+      const r = await tb.openTab(0, String((input && input.url) || ""), { systemOpen: true, trusted: false, title: (input && input.title) || "", avatar: (input && input.avatar) || "" });
       return { ok: true, winId: r.winId, tabId: r.tabId };
     } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
   });
@@ -256,7 +256,7 @@ function register(opts = {}) {
       const tb = require("../tools/tab-browser-tools");
       const idx = Number((input && input.accountIdx) || 0) || 0;
       // navigate:true → 已有同 /dash tab 时导航到新 query(钱包/帐单/团队帐单切视图)。
-      const r = await tb.openTab(idx, String((input && input.url) || ""), { systemOpen: true, trusted: false, title: (input && input.title) || "", navigate: true });
+      const r = await tb.openTab(idx, String((input && input.url) || ""), { systemOpen: true, trusted: false, title: (input && input.title) || "", navigate: true, avatar: (input && input.avatar) || "" });
       return { ok: true, winId: r.winId, tabId: r.tabId };
     } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
   });

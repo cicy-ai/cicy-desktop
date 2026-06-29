@@ -33,6 +33,18 @@ const log = require("electron-log");
 // leak "Unnamed" ghosts into the team list). Shape: a flat { "<id>": {node} } map.
 const GLOBAL_JSON = path.join(os.homedir(), "cicy-ai", "global.json");
 const TEAMS_JSON = path.join(os.homedir(), "cicy-ai", "db", "teams.json");
+// 通用头像映射 { <id>: dataUrl } —— 按 id 存,本地/Docker/云端团队通用(云端团队不在
+// teams.json,只能用独立映射)。id 即各卡片用的 team id(本地 slug / 云端 cloud id)。
+const AVATARS_JSON = path.join(os.homedir(), "cicy-ai", "db", "team-avatars.json");
+function readAvatars() {
+  try { const o = JSON.parse(fs.readFileSync(AVATARS_JSON, "utf8")); return (o && typeof o === "object") ? o : {}; } catch { return {}; }
+}
+async function writeAvatars(map) {
+  const tmp = `${AVATARS_JSON}.tmp.${process.pid}.${Date.now()}`;
+  await fs.promises.mkdir(path.dirname(AVATARS_JSON), { recursive: true });
+  await fs.promises.writeFile(tmp, JSON.stringify(map, null, 2), { mode: 0o600 });
+  await fs.promises.rename(tmp, AVATARS_JSON);
+}
 const HEALTH_TIMEOUT_MS = 1500;
 const PORT_TIMEOUT_MS = 700; // raw TCP-connect liveness for the LOCAL sidecar
 const CACHE_MS = 4000; // small dedupe so rapid renderer polls don't fan-out
@@ -180,6 +192,7 @@ async function probeLiveness(baseUrl, token) {
 async function list({ refresh = false } = {}) {
   if (!refresh && _cache && Date.now() < _cacheUntil) return _cache;
   const nodes = readNodes();
+  const avatars = readAvatars();
   const slugs = Object.keys(nodes);
   const teams = await Promise.all(slugs.map(async (slug) => {
     const node = nodes[slug] || {};
@@ -192,7 +205,7 @@ async function list({ refresh = false } = {}) {
       name: node.name || slug,
       base_url: baseUrl,
       api_token: node.api_token || "",
-      avatar: node.avatar || "",   // 自定义团队头像(data URL,≤64px);空=用首字母兜底
+      avatar: avatars[slug] || node.avatar || "",   // 自定义团队头像(data URL,≤64px);空=首字母兜底
       // Cloud-issued teamId (from name-sync register). The renderer maps it to
       // the team's sk-cicy- gateway apiKey (via /api/teams) for the 账单 link —
       // the local api_token is an MCP token the cloud can't bill on.
@@ -956,6 +969,7 @@ async function upgradeTeam(id) {
 // stored as a data URL on the node — small enough for teams.json, and usable
 // directly as <img src> in the team card AND the tab strip icon (no file://).
 async function setAvatar(id, dataUrl) {
+  if (!id) return { ok: false, error: "no id" };
   let stored = "";
   if (dataUrl && /^data:image\//.test(dataUrl)) {
     try {
@@ -967,25 +981,31 @@ async function setAvatar(id, dataUrl) {
       }
     } catch (e) { log.warn(`[local-teams] setAvatar resize failed: ${e.message}`); }
   }
-  await writeNodes((nodes) => {
-    if (nodes[id]) { if (stored) nodes[id].avatar = stored; else delete nodes[id].avatar; }
-    return nodes;
-  });
+  const map = readAvatars();
+  if (stored) map[id] = stored; else delete map[id];
+  await writeAvatars(map);
+  _cacheUntil = 0;
   return { ok: true, avatar: stored };
 }
 
-// Look up a team's avatar by URL (origin+pathname match) — the tab strip uses
-// this to icon a team tab with its avatar. Returns "" if no team / no avatar.
+// Whole avatar map { id: dataUrl } — renderer fetches once and passes the right
+// avatar to EVERY card (local / Docker / cloud), all keyed by their team id.
+function getAvatars() { return readAvatars(); }
+
+// Look up a team's avatar by URL (origin+pathname match against teams.json) — the
+// tab strip uses this to icon a LOCAL/Docker team tab. Cloud team tabs pass the
+// avatar through tabs.open() instead (they're not in teams.json). "" if none.
 function avatarForUrl(url) {
   try {
     const key = stripVolatile(url);
     const nodes = readNodes();
+    const avatars = readAvatars();
     for (const id of Object.keys(nodes)) {
       const b = nodes[id].base_url || "";
-      if (b && (stripVolatile(b) === key || key.startsWith(stripVolatile(b)))) return nodes[id].avatar || "";
+      if (b && (stripVolatile(b) === key || key.startsWith(stripVolatile(b)))) return avatars[id] || "";
     }
   } catch {}
   return "";
 }
 
-module.exports = { list, openTeam, reloadTeam, closeLocalWindows, addTeam, removeTeam, updateTeam, upgradeTeam, syncAllLocalTeams, setAvatar, avatarForUrl };
+module.exports = { list, openTeam, reloadTeam, closeLocalWindows, addTeam, removeTeam, updateTeam, upgradeTeam, syncAllLocalTeams, setAvatar, getAvatars, avatarForUrl };

@@ -212,7 +212,7 @@ contextBridge.exposeInMainWorld("cicy", {
   // Open / reload a URL as a TAB in profile 0 (homepage cards open like the local
   // card — current profile, not a new window / system browser).
   tabs: {
-    open:   (url, title) => logInvoke("tabs:open", { url, title }),
+    open:   (url, title, avatar) => logInvoke("tabs:open", { url, title, avatar }),
     reload: (url, title) => logInvoke("tabs:reload", { url, title }),
     reloadIfOpen: (url, title) => logInvoke("tabs:reloadIfOpen", { url, title }),
     activateIfOpen: (url) => logInvoke("tabs:activateIfOpen", { url }),
@@ -282,6 +282,7 @@ contextBridge.exposeInMainWorld("cicy", {
     remove:  (id)          => logInvoke("localTeams:remove", id),
     update:  (id, patch)   => logInvoke("localTeams:update", { id, patch }),
     setAvatar: (id, dataUrl) => logInvoke("localTeams:setAvatar", { id, dataUrl }),
+    avatars: ()            => logInvoke("localTeams:avatars"),
     upgrade: (id)          => logInvoke("localTeams:upgrade", id),
     syncCloud: ()          => logInvoke("localTeams:syncCloud"),
     // Subscribe to relay requests forwarded from a child <webview>
