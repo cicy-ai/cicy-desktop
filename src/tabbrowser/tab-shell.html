@@ -159,7 +159,9 @@
       } else {
         const name = (t.title || '').trim();
         const ini = (name[0] || '?').toUpperCase();
-        let h = 0; for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
+        // 底色种子 = teamId(colorKey)→ 和卡片同色、且每个 team 唯一(默认名都一样不会撞色)
+        const seed = t.colorKey || t.url || name;
+        let h = 0; for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) % 360;
         const s = document.createElement('span');
         s.style.cssText = 'display:flex;width:16px;height:16px;border-radius:4px;align-items:center;justify-content:center;background:hsl(' + h + ' 52% 46%);color:#fff;font-size:9px;font-weight:700;line-height:1';
         s.textContent = ini; w.appendChild(s);

@@ -1079,7 +1079,7 @@ export default function App() {
                 // Open as a TAB in the current profile (like the local card), NOT
                 // the system browser.
                 const url = t.kind === "private" ? t.host_url : (t.workspace_url || t.workspace_direct_url);
-                if (url) window.cicy?.tabs?.open?.(url, t.name || t.title || "", avatars[t.id] || "", true);
+                if (url) window.cicy?.tabs?.open?.(url, t.name || t.title || "", avatars[t.id] || "", true, t.id);
               }}
               avatar={avatars[t.id] || ""}
               onAvatar={fetchAvatars}
@@ -3406,7 +3406,8 @@ function hashHue(s) { let h = 0; for (let i = 0; i < (s || "").length; i++) h = 
 function TeamAvatar({ avatar, name, teamId, onChanged, size = 34 }) {
   const fileRef = useRef(null);
   const initial = ((name || "?").trim()[0] || "?").toUpperCase();
-  const hue = hashHue(name || teamId || "");
+  // 底色按**唯一的 teamId** 算(默认名都本地化成同一个「Local team」,按名字会同色)。
+  const hue = hashHue(teamId || name || "");
   const pick = (e) => {
     const f = e.target.files && e.target.files[0];
     e.target.value = "";

@@ -244,7 +244,7 @@ function register(opts = {}) {
   ipcMain.handle("tabs:open", async (_e, input) => {
     try {
       const tb = require("../tools/tab-browser-tools");
-      const r = await tb.openTab(0, String((input && input.url) || ""), { systemOpen: true, trusted: false, title: (input && input.title) || "", avatar: (input && input.avatar) || "", team: !!(input && input.team) });
+      const r = await tb.openTab(0, String((input && input.url) || ""), { systemOpen: true, trusted: false, title: (input && input.title) || "", avatar: (input && input.avatar) || "", team: !!(input && input.team), colorKey: (input && input.colorKey) || "" });
       return { ok: true, winId: r.winId, tabId: r.tabId };
     } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
   });
