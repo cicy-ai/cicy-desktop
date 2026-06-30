@@ -148,8 +148,34 @@ function writeChromeConfig(next) {
   } catch {}
 }
 
+// Identity is recorded in the `accounts` map (accounts.gmail / .google / .github
+// → {account,password,totp}) via the account CLI; older code only wrote a bare
+// top-level `gmail`. normalizeAccounts coerces the map; resolveGmail prefers the
+// accounts map and falls back to the legacy field — so gmail shows whichever way
+// it was recorded (this is why panels showed empty: read top-level, wrote accounts).
+function normalizeAccounts(raw) {
+  const out = {};
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    for (const [svc, val] of Object.entries(raw)) {
+      if (typeof val === "string") out[svc] = { account: val };
+      else if (val && typeof val === "object" && !Array.isArray(val)) out[svc] = val;
+    }
+  }
+  return out;
+}
+function resolveGmail(accounts, fallback) {
+  const a = accounts || {};
+  return (
+    (a.gmail && a.gmail.account) ||
+    (a.google && a.google.account) ||
+    (typeof fallback === "string" ? fallback : "") ||
+    ""
+  );
+}
+
 function chromeView(idx, entry) {
   const e = entry && typeof entry === "object" ? entry : {};
+  const accounts = normalizeAccounts(e.accounts);
   return {
     id: `chrome-${idx}`,
     backend: "chrome",
@@ -159,7 +185,8 @@ function chromeView(idx, entry) {
     logins: (Array.isArray(e.logins) ? e.logins : []).map(normalizeLogin),
     note: typeof e.note === "string" ? e.note : "",
     // chrome-specific extras (read-only passthrough)
-    gmail: typeof e.gmail === "string" ? e.gmail : "",
+    gmail: resolveGmail(accounts, e.gmail),
+    accounts,
     port: typeof e.port === "number" ? e.port : 11000 + idx,
     rpaDir: typeof e.rpaDir === "string" ? e.rpaDir : `~/chrome/profile_${idx}`,
     platform: e.platform && typeof e.platform === "object" ? e.platform : {},
@@ -208,6 +235,9 @@ function writeAccount(data) {
 function electronView(idx, data) {
   const d = data && typeof data === "object" ? data : { accountIdx: idx };
   const meta = d.metadata && typeof d.metadata === "object" ? d.metadata : {};
+  // Electron identities may live on the account file directly (d.accounts) or
+  // under metadata (meta.accounts / meta.gmail); resolve from whichever is set.
+  const accounts = normalizeAccounts(d.accounts || meta.accounts);
   return {
     id: `electron-${idx}`,
     backend: "electron",
@@ -216,6 +246,8 @@ function electronView(idx, data) {
     proxy: normalizeProxy(d.proxy),
     logins: (Array.isArray(d.logins) ? d.logins : []).map(normalizeLogin),
     note: typeof d.note === "string" ? d.note : meta.description || "",
+    gmail: resolveGmail(accounts, d.gmail || meta.gmail),
+    accounts,
     partition: `persist:sandbox-${idx}`,
     ipInfo: normalizeIpInfo(d.ipInfo),
   };
