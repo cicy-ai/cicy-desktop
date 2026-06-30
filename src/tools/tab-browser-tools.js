@@ -399,7 +399,15 @@ function installIpc() {
   if (ipcInstalled) return;
   ipcInstalled = true;
   const mgr = (e) => managerByHost.get(e.sender.id);
-  ipcMain.on("tabwin:ready", (e) => { const m = mgr(e); if (m) m.pushState(); });
+  ipcMain.on("tabwin:ready", (e) => {
+    const m = mgr(e);
+    if (!m) return;
+    m.pushState();
+    // 关键:shell 此刻已订阅好 onFullscreen,补发**当前**全屏状态。否则窗口若是全屏出生
+    // (mac 上次全屏退出后再开,enter-full-screen 不触发)或事件早于订阅发出 → shell 收不到
+    // → #tabs 卡在非全屏的 78px 红绿灯让位区 = 我的团队 tab 左边一大块空(实测 mac 全屏)。
+    try { e.sender.send("window:fullscreen", !!m.win.isFullScreen()); } catch (err) {}
+  });
   ipcMain.on("tabwin:new", (e, { url }) => { const m = mgr(e); if (m) m.addTab(url || ""); });
   ipcMain.on("tabwin:activate", (e, { id }) => { const m = mgr(e); if (m) m.activate(id); });
   ipcMain.on("tabwin:close", (e, { id }) => { const m = mgr(e); if (m) m.close(id); });
