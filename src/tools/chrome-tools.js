@@ -166,6 +166,22 @@ function normalizePrivateChromeEntry(profileKey, accountIdx, entry) {
   };
 }
 
+// resolveGmail derives a profile's Google identity. The `account` CLI / UI now
+// records identities in the `accounts` map (accounts.gmail / accounts.google),
+// so read from there FIRST and only fall back to the legacy top-level `gmail`
+// field (which was only ever set at `add --gmail` time). This is why gmail/login
+// info showed empty: it was recorded into accounts.* but everything read the
+// top-level gmail field.
+function resolveGmail(normalized) {
+  const a = (normalized && normalized.accounts) || {};
+  return (
+    (a.gmail && a.gmail.account) ||
+    (a.google && a.google.account) ||
+    (normalized && normalized.gmail) ||
+    ""
+  );
+}
+
 function normalizeEffectiveChromeProfile(accountIdx, effectiveChromeProfile) {
   const parsed = injectedChromeProfileSchema.parse(effectiveChromeProfile || {});
   const gmail = typeof parsed.gmail === "string" ? parsed.gmail : "";
@@ -507,7 +523,7 @@ function registerChromeTools(registerTool) {
         views.push({
           profileKey,
           accountIdx,
-          gmail: normalized.gmail,
+          gmail: resolveGmail(normalized),
           note: normalized.note,
           orgPath: normalized.orgPath,
           rpaDir: normalized.rpaDir,
@@ -515,6 +531,9 @@ function registerChromeTools(registerTool) {
           proxy: normalized.proxyUrl,
           proxyRaw: normalized.proxy,
           platform: normalized.platform,
+          // The service→credentials map (accounts.gmail / .github / …) — the panel
+          // reads identities from here, so it must travel with the list view.
+          accounts: normalized.accounts,
           // parity with electron_list_profiles so the panel renders the same row
           ipInfo: profileStore.normalizeIpInfo(entry.ipInfo),
           logins: (Array.isArray(entry.logins) ? entry.logins : []).map(profileStore.normalizeLogin),
@@ -537,7 +556,7 @@ function registerChromeTools(registerTool) {
     async ({ includeHidden } = {}) => {
       const entries = listPrivateChromeEntries({ includeHidden: !!includeHidden });
       const gmails = entries
-        .map(({ profileKey, accountIdx, entry }) => normalizePrivateChromeEntry(profileKey, accountIdx, entry).gmail)
+        .map(({ profileKey, accountIdx, entry }) => resolveGmail(normalizePrivateChromeEntry(profileKey, accountIdx, entry)))
         .filter(Boolean);
       return toToolResult({ gmails });
     },
@@ -555,12 +574,13 @@ function registerChromeTools(registerTool) {
       const accounts = entries.map(({ profileKey, accountIdx, entry }) => {
         const normalized = normalizePrivateChromeEntry(profileKey, accountIdx, entry);
         const gh = normalized.platform?.github || {};
+        const ghAcct = (normalized.accounts && normalized.accounts.github) || {};
         return {
           profileKey,
           accountIdx,
-          gmail: normalized.gmail,
-          email: gh.email || "",
-          username: gh.username || "",
+          gmail: resolveGmail(normalized),
+          email: gh.email || ghAcct.email || "",
+          username: gh.username || ghAcct.account || "",
         };
       });
       return toToolResult({ githubAccounts: accounts });
