@@ -422,10 +422,11 @@ function injectGatewayKey(apiKey, gatewayUrl = GATEWAY_URL, globalJsonPath = GLO
   try {
     const cur = readGlobalConfig(globalJsonPath);
     const p = cur.providers;
-    // stt must specifically be on the gateway slot (defaultOpenAi), overriding
-    // cicy-code's seeded "cloudflare-ai" — so require the exact value here, not
-    // just "any truthy routing", or the pre-check would short-circuit the fix.
-    const routed = p && p.default && Object.keys(GATEWAY_DEFAULT_ROUTING).every((cli) => p.default[cli]) && p.default.stt === "defaultOpenAi";
+    // All gateway routes (incl. stt) just need to be SET — any value the operator
+    // chose counts. We seed missing slots below but never override a user's pick
+    // (e.g. routing stt to a Groq Whisper provider), so the pre-check must accept
+    // any truthy routing, not demand the exact gateway slot.
+    const routed = p && p.default && Object.keys(GATEWAY_DEFAULT_ROUTING).every((cli) => p.default[cli]);
     const itemsOk = p && Array.isArray(p.items) && Object.entries(GATEWAY_PROVIDER_TEMPLATES).every(([key, tpl]) => {
       const it = p.items.find((x) => x && x.key === key);
       return it && it.apiKey === apiKey && it.url === gatewayUrl && Object.keys(tpl).every((f) => it[f] !== undefined);
@@ -440,11 +441,10 @@ function injectGatewayKey(apiKey, gatewayUrl = GATEWAY_URL, globalJsonPath = GLO
     for (const [cli, slot] of Object.entries(GATEWAY_DEFAULT_ROUTING)) {
       if (!p.default[cli]) { p.default[cli] = slot; changed = true; }
     }
-    // Force STT onto the gateway slot. cicy-code seeds default.stt="cloudflare-ai"
-    // (direct-to-Cloudflare, needs .cf.prod creds), which the only-if-absent loop
-    // above never overwrites. Route it through the gateway instead so STT is
-    // metered via the team key and doesn't depend on local CF credentials.
-    if (p.default.stt !== "defaultOpenAi") { p.default.stt = "defaultOpenAi"; changed = true; }
+    // NOTE: stt is part of GATEWAY_DEFAULT_ROUTING above, so the only-if-absent
+    // loop already seeds default.stt="defaultOpenAi" on a fresh machine. We do NOT
+    // force it here — that would clobber an operator who routed stt elsewhere
+    // (e.g. a Groq Whisper provider) on every title-sync.
     if (!Array.isArray(p.items)) p.items = [];
     for (const [key, tpl] of Object.entries(GATEWAY_PROVIDER_TEMPLATES)) {
       let item = p.items.find((it) => it && it.key === key);
