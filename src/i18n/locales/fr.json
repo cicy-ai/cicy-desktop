@@ -246,7 +246,8 @@
       "invalid": "Port invalide (1-65535, pas 8008, sans doublon)",
       "none": "Aucun port supplémentaire",
       "remove": "Retirer"
-    }
+    },
+    "starting": "Démarrage…"
   },
   "common": {
     "close": "Close",
@@ -397,7 +398,9 @@
     "startedUnknownVer": "Démarré (version inconnue, attendu {{ver}})",
     "updateFail": "Échec de la mise à jour : {{err}}",
     "downloading": "Téléchargement {{label}} {{ver}}…",
-    "ready": "{{label}} {{ver}} prêt"
+    "ready": "{{label}} {{ver}} prêt",
+    "start": "Démarrer",
+    "started": "Démarré"
   },
   "teamCard": {
     "noHost": "No address set",

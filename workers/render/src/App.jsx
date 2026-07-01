@@ -2862,6 +2862,16 @@ function LocalTeamCard({ team, cloudCode, onOpen, onRename, onRefresh }) {
                     {tr("localTeams.reloadWindow", "刷新窗口")}
                   </button>
                 )}
+                {local && !running && (
+                  <button
+                    type="button"
+                    data-id="LocalTeamCard-start"
+                    className="bcard__menu-item is-accent"
+                    onClick={() => runOp("start", () => window.cicy.sidecar.start(), tr("sidecar.started", "已启动"))}
+                  >
+                    {tr("sidecar.start", "启动")}
+                  </button>
+                )}
                 {local && running && (
                   <>
                     <button

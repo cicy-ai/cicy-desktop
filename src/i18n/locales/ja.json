@@ -246,7 +246,8 @@
       "invalid": "無効なポート(1-65535、8008 不可、重複不可)",
       "none": "追加ポートなし",
       "remove": "削除"
-    }
+    },
+    "starting": "起動中…"
   },
   "common": {
     "close": "Close",
@@ -397,7 +398,9 @@
     "startedUnknownVer": "起動しました(バージョン不明、想定 {{ver}})",
     "updateFail": "更新に失敗: {{err}}",
     "downloading": "{{label}} {{ver}} をダウンロード中…",
-    "ready": "{{label}} {{ver}} 準備完了"
+    "ready": "{{label}} {{ver}} 準備完了",
+    "start": "起動",
+    "started": "起動しました"
   },
   "teamCard": {
     "noHost": "No address set",

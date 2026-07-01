@@ -246,7 +246,8 @@
       "invalid": "有端口无效(1-65535,不能是 8008,不能重复)",
       "none": "暂无额外端口",
       "remove": "移除"
-    }
+    },
+    "starting": "启动中…"
   },
   "common": {
     "close": "关闭",
@@ -397,7 +398,9 @@
     "startedUnknownVer": "已启动(版本未知,期望 {{ver}})",
     "updateFail": "更新失败:{{err}}",
     "downloading": "下载 {{label}} {{ver}}…",
-    "ready": "{{label}} {{ver}} 就绪"
+    "ready": "{{label}} {{ver}} 就绪",
+    "start": "启动",
+    "started": "已启动"
   },
   "teamCard": {
     "noHost": "未填访问地址",

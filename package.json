@@ -1,6 +1,6 @@
 {
   "name": "cicy-desktop",
-  "version": "2.1.215",
+  "version": "2.1.216",
   "description": "CiCy - AI-powered operating system browser",
   "main": "src/main.js",
   "bin": {
@@ -137,7 +137,7 @@
     "zod": "3.25",
     "electron-updater": "6.6.2"
   },
-  "//optionalDependencies": "(2026-06 \u56de\u8c03): mac/linux \u6539\u56de native cicy-code(:8008,colima \u5728 16G mac \u4e0a\u538b\u57ae\u5185\u5b58)\u2192 \u91cd\u65b0\u5185\u7f6e cicy-code-<plat> / cicy-mihomo-<plat>,localbin.fromBundle \u96f6\u7f51\u7edc seed(npm \u4ec5\u4f5c\u66f4\u65b0\u901a\u9053,\u5e26 npmmirror\u2192npmjs \u56de\u9000)\u3002\u8fd9\u4e9b\u7531 scripts/sync-runtime-deps.cjs \u5728 tag-push \u65f6\u540c\u6b65\u5230\u6700\u65b0\u7248\u3002npm \u7684 os/cpu \u5b57\u6bb5\u4fdd\u8bc1\u6bcf\u4e2a\u5e73\u53f0\u53ea\u88c5\u81ea\u5df1\u90a3\u4efd\u3002Windows \u4ecd\u8d70 docker(WSL :8009),\u5b83\u90a3\u4efd cicy-code-windows \u7528\u4e0d\u5230\u4f46 bundle \u7740\u65e0\u5bb3\u3002",
+  "//optionalDependencies": "(2026-06 回调): mac/linux 改回 native cicy-code(:8008,colima 在 16G mac 上压垮内存)→ 重新内置 cicy-code-<plat> / cicy-mihomo-<plat>,localbin.fromBundle 零网络 seed(npm 仅作更新通道,带 npmmirror→npmjs 回退)。这些由 scripts/sync-runtime-deps.cjs 在 tag-push 时同步到最新版。npm 的 os/cpu 字段保证每个平台只装自己那份。Windows 仍走 docker(WSL :8009),它那份 cicy-code-windows 用不到但 bundle 着无害。",
   "optionalDependencies": {
     "electron": "41.0.3",
     "cicy-code-darwin-x64": "2.3.22",

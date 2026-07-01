@@ -246,7 +246,8 @@
       "invalid": "Invalid port (1-65535, not 8008, no duplicates)",
       "none": "No extra ports",
       "remove": "Remove"
-    }
+    },
+    "starting": "Starting…"
   },
   "common": {
     "close": "Close",
@@ -397,7 +398,9 @@
     "startedUnknownVer": "Started (version unknown, expected {{ver}})",
     "updateFail": "Update failed: {{err}}",
     "downloading": "Downloading {{label}} {{ver}}…",
-    "ready": "{{label}} {{ver}} ready"
+    "ready": "{{label}} {{ver}} ready",
+    "start": "Start",
+    "started": "Started"
   },
   "teamCard": {
     "noHost": "No address set",
