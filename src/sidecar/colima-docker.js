@@ -415,6 +415,25 @@ async function ensureAutostart() {
   } catch {}
 }
 
+// Undo ensureAutostart. macOS moved from Colima to native cicy-code (colima
+// crushed memory on 16G Macs), but builds upgraded from the old Colima era still
+// carry the login LaunchAgent, which starts an unused `cicy-code` VM every boot.
+// Called once on darwin startup to tear that leftover down. Gated on the plist
+// actually existing so fresh/native-only installs never invoke colima at all.
+async function removeAutostart() {
+  if (process.platform !== "darwin") return;
+  try {
+    const label = `com.cicy.colima.${PROFILE}`;
+    const plist = path.join(os.homedir(), "Library", "LaunchAgents", `${label}.plist`);
+    if (!fs.existsSync(plist)) return; // no leftover → don't touch colima
+    try { await sh(`launchctl unload ${JSON.stringify(plist)} 2>/dev/null; true`, { timeout: 15000 }); } catch {}
+    try { fs.rmSync(plist, { force: true }); } catch {}
+    // Stop ONLY our profile's VM (never the user's default colima). Keep the VM
+    // image (no delete) so a rollback to a Colima build can restart it.
+    try { await sh(`export PATH=${BREW_PATHS}:$PATH; colima stop -p ${PROFILE} 2>/dev/null; true`, { timeout: 60000 }); } catch {}
+  } catch {}
+}
+
 // 桌面文件入口:Mac 上 /home/cicy 是 docker named volume(数据在 Colima VM 内,
 // 不在 Mac 文件系统上),Finder 没法像 WSL 的 \\wsl$ 那样直接浏览。所以 Mac 端
 // 暂不放桌面快捷方式(放了也是死链)。要看文件用 `colima ssh -p cicy-code` 进 VM,
@@ -601,5 +620,5 @@ async function readMihomoConfig(container = "cicy-code-docker-8008") {
 module.exports = {
   bootstrap, status, restart, stop, dockerRestart, recreate, update, upgrade, runContainer, readContainerToken,
   vmExists, colimaInstalled, dockerCliInstalled, engineUp, imagePresent, probeHealth, hasGatewayKey, authorizeHostSsh,
-  readMihomoConfig,
+  readMihomoConfig, removeAutostart,
 };

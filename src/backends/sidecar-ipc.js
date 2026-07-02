@@ -177,7 +177,14 @@ function register({ sidecarLogPath } = {}) {
     return _dockerStatusCache;
   }
   function startDockerStatusDaemon() {
-    if (!APP_DOCKER_SUPPORTED) return; // mac/linux: native cicy-code,不跑 docker reconcile(否则 colima 反复重试)
+    if (!APP_DOCKER_SUPPORTED) {
+      // mac/linux: native cicy-code, no docker reconcile. But macOS builds
+      // upgraded from the old Colima era still carry a login LaunchAgent that
+      // boots an unused `cicy-code` VM every login → tear that leftover down
+      // once (no-op when the plist doesn't exist, i.e. fresh/native installs).
+      if (process.platform === "darwin") colimaDocker.removeAutostart().catch(() => {});
+      return;
+    }
     setTimeout(() => { reconcileDocker().catch(() => {}); }, 2000);     // shortly after startup
     setInterval(() => { reconcileDocker().catch(() => {}); }, 60000);   // keep fresh + self-heal
   }
