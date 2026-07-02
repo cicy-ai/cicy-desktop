@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, dialog, shell } = require("electron");
+const { app, BrowserWindow, Menu, shell } = require("electron");
 const { default: contextMenu } = require("electron-context-menu");
 const contextMenuOptions = require("./context-menu-options");
 const path = require("path");
@@ -15,39 +15,78 @@ if (app) {
   app.name = "CiCy Desktop";
 }
 
-function setupWindowHandlers(win) {
-  // Hook window.open. App/internal popups (about:blank or trusted/local hosts —
-  // e.g. a popped-out ttyd terminal from CiCy Code) must open as REAL Electron
-  // windows WITH webviewTag, or any <webview> inside them (terminal / artifact
-  // guest) collapses to 0x0. Returning action:"deny" (the old behavior) routed
-  // every popup through a dialog; an *allowed* window.open window inherits
-  // DEFAULT webPreferences (webviewTag=false) unless we override it here.
-  // External links (other websites) keep the open-in-browser/app dialog.
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    log.info(`[WindowOpen] Intercepted: ${url}`);
-    if (!url || url === "about:blank" || isTrustedUrl(url)) {
-      return {
-        action: "allow",
-        overrideBrowserWindowOptions: {
-          autoHideMenuBar: true,
-          icon: require("./app-icon").appIconPath(),
-          webPreferences: {
-            webviewTag: true, // embedded <webview> (ttyd/artifact) must render
-            // hole #4: trusted pages no longer get raw Node. Their electronRPC
-            // bridge comes from webview-preload via contextBridge, so a trusted-origin
-            // XSS can't `require('child_process')` to bypass the rpc:guarded gate.
-            nodeIntegration: false,
-            contextIsolation: true,
-            preload: path.join(__dirname, "../backends/webview-preload.js"),
-            webSecurity: false,
-            enableClipboard: true,
-          },
+// Resolve the profile (accountIdx) a webContents lives in, from its session
+// partition: persist:sandbox-N → N; the default/"" session → 0 (profile 0, the
+// privileged/shared session). Mirrors getWindowInfo's derivation.
+function partitionOfWebContents(wc) {
+  // Electron's Session has NO readable `.partition`; the partition string lives on
+  // the webContents' WebPreferences. Reading session.partition (always undefined)
+  // made every profile resolve to 0. Prefer getWebPreferences(), fall back to
+  // session.partition just in case.
+  try {
+    const wp = wc && wc.getWebPreferences ? wc.getWebPreferences() : null;
+    if (wp && wp.partition) return wp.partition;
+    return (wc && wc.session && wc.session.partition) || "";
+  } catch (_) { return ""; }
+}
+
+function accountIdxOfWebContents(wc) {
+  // Prefer the cicyAccountIdx tag stamped at creation (the only reliable source for
+  // BrowserView tab guests, whose partition is never readable). Fall back to
+  // partition parsing for surfaces that carry a real partition.
+  if (wc && typeof wc.cicyAccountIdx === "number") return wc.cicyAccountIdx;
+  const partition = partitionOfWebContents(wc);
+  if (partition.startsWith("persist:sandbox-")) {
+    const n = parseInt(partition.slice("persist:sandbox-".length), 10);
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
+}
+
+// Single source of truth for the window.open policy. App/internal popups
+// (about:blank or trusted/local hosts — e.g. a popped-out ttyd terminal from CiCy
+// Code) open in-place as REAL Electron windows WITH webviewTag (any <webview>
+// inside them — terminal / artifact guest — otherwise collapses to 0x0).
+//
+// Any OTHER (external) URL is routed DETERMINISTICALLY by the OPENER's profile,
+// and never lands in profile 0: an opener in profile 0 (the privileged/shared
+// session — team cookies + trusted-origin RPC surface) has the link FORCED into
+// sandbox profile 1; an opener already in a sandbox profile N opens the link in
+// its OWN profile N. This mirrors the tab-browser policy (profile 0 link →
+// openTab(1); else same profile) — no dialog, no leak into profile 0.
+function windowOpenDecision(url, { wc } = {}) {
+  log.info(`[WindowOpen] Intercepted: ${url}`);
+  if (!url || url === "about:blank" || isTrustedUrl(url)) {
+    return {
+      action: "allow",
+      overrideBrowserWindowOptions: {
+        autoHideMenuBar: true,
+        icon: require("./app-icon").appIconPath(),
+        webPreferences: {
+          webviewTag: true, // embedded <webview> (ttyd/artifact) must render
+          // hole #4: trusted pages no longer get raw Node. Their electronRPC
+          // bridge comes from webview-preload via contextBridge, so a trusted-origin
+          // XSS can't `require('child_process')` to bypass the rpc:guarded gate.
+          nodeIntegration: false,
+          contextIsolation: true,
+          preload: path.join(__dirname, "../backends/webview-preload.js"),
+          webSecurity: false,
+          enableClipboard: true,
         },
-      };
-    }
-    showOpenLinkDialog(win, url);
-    return { action: "deny" };
-  });
+      },
+    };
+  }
+  // External URL: profile 0 → forced sandbox profile 1; any sandbox profile N →
+  // its own profile N. Never in-session for profile 0.
+  const openerIdx = accountIdxOfWebContents(wc);
+  const target = openerIdx === 0 ? 1 : openerIdx;
+  try { createWindow({ url }, target, true); }
+  catch (e) { log.warn(`[WindowOpen] open external in profile ${target} failed: ${e && e.message}`); }
+  return { action: "deny" };
+}
+
+function setupWindowHandlers(win) {
+  win.webContents.setWindowOpenHandler(({ url }) => windowOpenDecision(url, { wc: win.webContents }));
   if (!win.webContents.debugger.isAttached()) {
     win.webContents.debugger.attach("1.3");
   }
@@ -301,6 +340,12 @@ function createWindow(options = {}, accountIdx = 1, forceNew = false) {
     },
   });
 
+  // Stamp the profile on the window + its webContents so any holder of just the wc
+  // (context menu, accountIdxOfWebContents, thumbnails) resolves the REAL profile
+  // deterministically — session.partition/getWebPreferences().partition are not
+  // reliably readable back.
+  try { win.cicyAccountIdx = accountIdx; win.webContents.cicyAccountIdx = accountIdx; } catch (e) {}
+
   // 监听窗口状态变化并自动保存（基于URL）
   watchWindowState(win, accountIdx);
 
@@ -427,7 +472,7 @@ function getWindowInfo(win) {
   try {
     const wc = win.webContents;
     if (!wc || !wc.session) return null;
-    const partition = wc.session.partition || "";
+    const partition = partitionOfWebContents(wc);
     // persist:sandbox-N → account N (N>=1 are user profiles). Anything on the
     // default session (homepage / platform system windows, partition "") maps
     // to account 0 — the reserved system slot.
@@ -517,34 +562,13 @@ if (app) {
   });
 }
 
-function showOpenLinkDialog(parentWin, url) {
-  const i18n = require("../i18n");
-  dialog
-    .showMessageBox(parentWin, {
-      type: "question",
-      buttons: [
-        i18n.t("dialog.openLink.openInBrowser"),
-        i18n.t("dialog.openLink.openInApp"),
-        i18n.t("dialog.openLink.cancel"),
-      ],
-      defaultId: 0,
-      title: i18n.t("dialog.openLink.title"),
-      message: i18n.t("dialog.openLink.message"),
-      detail: url,
-    })
-    .then(({ response }) => {
-      if (response === 0) {
-        shell.openExternal(url);
-      } else if (response === 1) {
-        createWindow({ url }, 0, true);
-      }
-    });
-}
-
 module.exports = {
   createWindow,
   setupWindowHandlers,
+  windowOpenDecision,
   getWindowInfo,
+  partitionOfWebContents,
+  accountIdxOfWebContents,
   refreshTrustedOrigins,
   isTrustedUrl,
 };

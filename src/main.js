@@ -22,6 +22,18 @@ const appUpdater = require("./app-updater");
 const { attachContextMenu } = require("./utils/context-menu-options");
 electronApp.on("web-contents-created", (_e, wc) => {
   attachContextMenu(wc);
+  // Security backstop for window.open. createWindow (setupWindowHandlers) and the
+  // tab-browser install their OWN windowOpenHandler LATER, which replaces this one
+  // for those windows. This default therefore only stays in force for webContents
+  // nobody else configured (e.g. a raw agent-electron open). It guarantees
+  // window.open can never drop an external site into the opener's session — profile
+  // 0 / the default session shares cookies and may carry the electronRPC bridge, so
+  // an external popup there is an RCE/creds-leak surface. External links go to the
+  // system browser instead; trusted/local/about:blank popups are still allowed.
+  try {
+    const { windowOpenDecision } = require("./utils/window-utils");
+    wc.setWindowOpenHandler(({ url }) => windowOpenDecision(url, { wc }));
+  } catch (_) {}
   // Ctrl/Cmd+C inside a <webview> guest: on Windows the application menu's
   // role:"copy" accelerator doesn't reach the focused guest, so a selection
   // couldn't be copied with the keyboard (right-click 复制 is fixed separately via
@@ -65,7 +77,7 @@ if (process.platform === "linux") {
 const http = require("http");
 const log = require("electron-log");
 const { config } = require("./config");
-const { createWindow } = require("./utils/window-utils");
+const { createWindow, accountIdxOfWebContents } = require("./utils/window-utils");
 const { AuthManager } = require("./utils/auth");
 const { setupElectronFlags, setupErrorHandlers } = require("./server/electron-setup");
 const { parseArgs } = require("./server/args-parser");
@@ -1329,10 +1341,7 @@ electronApp.whenReady().then(async () => {
         BrowserWindow.getAllWindows()
           .map((w) => {
             try {
-              const part = w.webContents.session.partition || "";
-              const acc = part.startsWith("persist:sandbox-")
-                ? parseInt(part.replace("persist:sandbox-", ""), 10)
-                : 0;
+              const acc = accountIdxOfWebContents(w.webContents);
               return `${acc}::${registry.normalizeUrl(w.webContents.getURL())}`;
             } catch {
               return null;

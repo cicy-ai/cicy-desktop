@@ -31,7 +31,11 @@ function accountIdxOf(win) {
   // session (homepage / system windows) maps to 0.
   if (typeof win.cicyAccountIdx === "number") return win.cicyAccountIdx;
   try {
-    const p = win.webContents.session.partition || "";
+    // Session has no readable `.partition`; read it off WebPreferences (was
+    // session.partition → always undefined → every window mis-tagged profile 0).
+    const wc = win.webContents;
+    const wp = wc && wc.getWebPreferences ? wc.getWebPreferences() : null;
+    const p = (wp && wp.partition) || (wc && wc.session && wc.session.partition) || "";
     const m = /^persist:sandbox-(\d+)$/.exec(p);
     if (m) return parseInt(m[1], 10);
   } catch (_) {}

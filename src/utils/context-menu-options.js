@@ -59,8 +59,20 @@ const OPTIONS = {
     const url = (() => { try { return wc && wc.getURL ? wc.getURL() : ""; } catch (e) { return ""; } })();
     const title = (() => { try { return wc && wc.getTitle ? wc.getTitle() : ""; } catch (e) { return ""; } })();
     // profile id = 它所在 session 的 accountIdx:partition `persist:sandbox-<N>` → N,否则 0(系统槽)。
-    const part = (() => { try { return wc && wc.session ? (wc.session.partition || "") : ""; } catch (e) { return ""; } })();
-    const profile = part.startsWith("persist:sandbox-") ? (parseInt(part.replace("persist:sandbox-", ""), 10) || 0) : 0;
+    // profile id = the webContents' account. Tab-browser BrowserView guests do NOT
+    // expose a readable partition (session.partition AND getWebPreferences().partition
+    // both come back empty → everything mis-reported as profile 0), so read the
+    // `cicyAccountIdx` tag stamped on the wc at tab creation. Fall back to partition
+    // parsing only for non-tab surfaces (BrowserWindow / <webview>) without the tag.
+    const profile = (() => {
+      try {
+        if (wc && typeof wc.cicyAccountIdx === "number") return wc.cicyAccountIdx;
+        const wp = wc && wc.getWebPreferences ? wc.getWebPreferences() : null;
+        const part = (wp && wp.partition) || (wc && wc.session && wc.session.partition) || "";
+        const m = /^persist:sandbox-(\d+)$/.exec(part);
+        return m ? parseInt(m[1], 10) : 0;
+      } catch (e) { return 0; }
+    })();
     // 给 agent 用的一句话指令:带 webContents id + profile id + url + title,让它用 agent-electron 操作。
     const skillPrompt = t("ctxMenu.skillPrompt", { id: wcId, profile, url, title });
     // 导航:优先用 Electron 新 navigationHistory API,旧版兜底 wc.canGoBack/goBack。

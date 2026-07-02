@@ -214,6 +214,12 @@ class TabManager {
     const view = new BrowserView({ webPreferences: wp });
     const wc = view.webContents;
     const id = wc.id;
+    // Tag the tab's webContents with its profile so anything holding just the wc
+    // (context menu, window helpers) can resolve the REAL profile deterministically.
+    // BrowserView guests don't expose a readable partition (session.partition and
+    // getWebPreferences().partition both come back empty), so this tag — set from
+    // the owning TabManager's accountIdx — is the only reliable source.
+    try { wc.cicyAccountIdx = this.accountIdx; } catch (e) {}
     // BrowserView tabs aren't auto-covered by the global contextMenu() (it only
     // attaches to BrowserWindows + webviews), so give each tab exactly one
     // right-click menu (copy/paste/inspect) — without this, right-click did nothing.
