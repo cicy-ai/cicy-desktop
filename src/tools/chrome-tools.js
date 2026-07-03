@@ -279,7 +279,24 @@ async function ensurePageTargets({ debuggerPort, url, activateIfRunning, deps = 
 
   const pageTargets = targets.filter((target) => target.type === "page");
   const targetUrl = typeof url === "string" && url.length ? url : null;
-  const matchingTarget = targetUrl ? pageTargets.find((target) => target.url === targetUrl) || null : null;
+  // Match normalized, not by raw ===. launchChrome already opened `url` as the
+  // startup tab, but Chrome canonicalizes it (adds a trailing slash: passed
+  // "https://x.com" loads as "https://x.com/"), so an exact compare misses the
+  // tab we just launched → we'd createTarget a duplicate. Normalize a trailing
+  // slash on the path + a bare "#" so the existing tab is recognized.
+  const normUrl = (u) => {
+    if (typeof u !== "string" || !u) return null;
+    try {
+      const x = new URL(u);
+      return (x.origin + x.pathname.replace(/\/+$/, "") + x.search + (x.hash === "#" ? "" : x.hash)).toLowerCase();
+    } catch (_) {
+      return u.trim().replace(/\/+$/, "").toLowerCase();
+    }
+  };
+  const targetUrlNorm = normUrl(targetUrl);
+  const matchingTarget = targetUrlNorm
+    ? pageTargets.find((target) => normUrl(target.url) === targetUrlNorm) || null
+    : null;
 
   if (!pageTargets.length) {
     try {
