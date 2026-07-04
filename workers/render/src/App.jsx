@@ -928,7 +928,10 @@ export default function App() {
   // remote — probe-only, no restart/stop/update, just 打开).
   const localList  = (localTeams || []).filter((t) => isLocalSidecar(t.base_url));
   const customList = (localTeams || []).filter((t) => !isLocalSidecar(t.base_url) && !isDockerApp(t.base_url));
-  const localCount = localList.length;
+  // Windows 的本地团队是 Docker :8008(dockerTeam,单独 <DockerCard> 渲染,不在 localList),
+  // 所以「本地」计数要把它算上 —— 否则 Windows 明明有 1 个本地却显示 0。dockerTeam 只在 Windows
+  // 有值(isDockerApp win32-only),mac/linux 恒 null,不影响。
+  const localCount = localList.length + (dockerTeam ? 1 : 0);
   const customCount = customList.length;
   // /api/teams returns ALL of this owner's teams — including kind=local ones
   // (this device's AND other devices'). On the desktop the 云端 tab must show
