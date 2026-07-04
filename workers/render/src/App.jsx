@@ -3487,15 +3487,22 @@ function SkeletonCard() {
 // 团队头像:有自定义图(data URL)就显示图,否则「团队名首字母 + 按名 hash 的稳定底色」
 // 圆角块。teamId 存在时点击可上传(resize 在主进程做,见 local-teams.setAvatar)。
 // 同一份用于卡片头像 + tab icon(tab 那边在 tab-shell.html faviconNode 用 t.avatar)。
-// s must be a STRING: cloud team ids are NUMBERS (e.g. 71), and a number has no
-// `.length` → the loop never ran → every numeric id hashed to 0 → all cloud
-// avatars shared one color. Coerce so numeric ids hue like their string form.
-function hashHue(s) { s = String(s == null ? "" : s); let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360; return h; }
+// Avatar 底色:一组**明显区分**的离散色板,而不是连续色相(连续色相会落到糊在一起
+// 的邻近色,如 289° 紫 vs 314° 洋红)。12 个拉开 ≥24° 的色相 + 交替明度,不同 team 一眼
+// 可分,白字始终清晰。key 必须 String —— 云端 teamId 是数字(71),数字没 .length,循环
+// 不跑 → 恒 0 → 全同色。
+const AVATAR_PALETTE = [
+  "hsl(2 68% 48%)", "hsl(26 72% 46%)", "hsl(45 70% 42%)", "hsl(96 55% 38%)",
+  "hsl(140 58% 40%)", "hsl(168 62% 36%)", "hsl(192 70% 42%)", "hsl(210 72% 50%)",
+  "hsl(232 62% 56%)", "hsl(266 55% 55%)", "hsl(292 58% 50%)", "hsl(324 66% 50%)",
+];
+function hashStr(s) { s = String(s == null ? "" : s); let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 100003; return h; }
+function avatarBg(key) { return AVATAR_PALETTE[hashStr(key) % AVATAR_PALETTE.length]; }
 function TeamAvatar({ avatar, name, teamId, onChanged, size = 34 }) {
   const fileRef = useRef(null);
   const initial = ((name || "?").trim()[0] || "?").toUpperCase();
   // 底色按**唯一的 teamId** 算(默认名都本地化成同一个「Local team」,按名字会同色)。
-  const hue = hashHue(teamId || name || "");
+  const bg = avatarBg(teamId || name || "");
   const pick = (e) => {
     const f = e.target.files && e.target.files[0];
     e.target.value = "";
@@ -3508,7 +3515,7 @@ function TeamAvatar({ avatar, name, teamId, onChanged, size = 34 }) {
     <div data-id="TeamAvatar" className="team-avatar"
       title={teamId ? tr("teamCard.changeAvatar", "点击更换头像") : ""}
       onClick={teamId ? (e) => { e.stopPropagation(); fileRef.current && fileRef.current.click(); } : undefined}
-      style={{ width: size, height: size, borderRadius: 9, flex: "none", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", cursor: teamId ? "pointer" : "default", background: avatar ? "#0d1117" : `hsl(${hue} 52% 46%)`, color: "#fff", fontWeight: 700, fontSize: Math.round(size * 0.42), userSelect: "none" }}>
+      style={{ width: size, height: size, borderRadius: 9, flex: "none", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", cursor: teamId ? "pointer" : "default", background: avatar ? "#0d1117" : bg, color: "#fff", fontWeight: 700, fontSize: Math.round(size * 0.42), userSelect: "none" }}>
       {avatar ? <img src={avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : initial}
       {teamId && <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={pick} />}
     </div>

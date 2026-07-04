@@ -159,13 +159,15 @@
       } else {
         const name = (t.title || '').trim();
         const ini = (name[0] || '?').toUpperCase();
-        // 底色种子 = teamId(colorKey)→ 和卡片同色、且每个 team 唯一(默认名都一样不会撞色)
-        // String(): cloud teamId (colorKey) is a NUMBER → no .length → loop skipped
-        // → every numeric id hued to 0 → all cloud tab icons shared one color.
+        // 底色种子 = teamId(colorKey)。用与卡片(App.jsx avatarBg)**完全一致**的离散色板
+        // + 同一 hash,so tab icon 颜色 == 卡片头像颜色。String(): 数字 teamId 没 .length,
+        // 不转会恒 0 → 全同色。离散色板让不同 team 明显区分(连续色相会糊在一起)。
+        const AVATAR_PALETTE = ['hsl(2 68% 48%)','hsl(26 72% 46%)','hsl(45 70% 42%)','hsl(96 55% 38%)','hsl(140 58% 40%)','hsl(168 62% 36%)','hsl(192 70% 42%)','hsl(210 72% 50%)','hsl(232 62% 56%)','hsl(266 55% 55%)','hsl(292 58% 50%)','hsl(324 66% 50%)'];
         const seed = String(t.colorKey || t.url || name || "");
-        let h = 0; for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) % 360;
+        let h = 0; for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) % 100003;
+        const bg = AVATAR_PALETTE[h % AVATAR_PALETTE.length];
         const s = document.createElement('span');
-        s.style.cssText = 'display:flex;width:16px;height:16px;border-radius:4px;align-items:center;justify-content:center;background:hsl(' + h + ' 52% 46%);color:#fff;font-size:9px;font-weight:700;line-height:1';
+        s.style.cssText = 'display:flex;width:16px;height:16px;border-radius:4px;align-items:center;justify-content:center;background:' + bg + ';color:#fff;font-size:9px;font-weight:700;line-height:1';
         s.textContent = ini; w.appendChild(s);
       }
       return w;
