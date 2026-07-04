@@ -34,3 +34,6 @@ workers/render.bak.*
 
 # Legacy render dir moved out of cicy-code; not part of cicy-desktop releases.
 workers/desktop-render/
+
+# cloudflared bundle binaries (build assets, per-arch) — not source
+resources/cloudflared/cloudflared-darwin-*

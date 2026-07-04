@@ -261,7 +261,9 @@
     "confirm": "確認",
     "delete": "削除",
     "saving": "保存中…",
-    "noAuth": "未ログイン"
+    "noAuth": "未ログイン",
+    "loading": "読み込み中…",
+    "copied": "コピーしました"
   },
   "auth": {
     "restoring": "ログインを復元中…",
@@ -400,7 +402,26 @@
     "downloading": "{{label}} {{ver}} をダウンロード中…",
     "ready": "{{label}} {{ver}} 準備完了",
     "start": "起動",
-    "started": "起動しました"
+    "started": "起動しました",
+    "cftMenu": "Cloudflare トンネル",
+    "cftHint": "Cloudflare の名前付きトンネルで、このMacのcicy-codeを固定の公開ドメインに公開します(Cloudflare connector token が必要)。切り替えると cicy-code が再起動します",
+    "cftTitle": "Cloudflare トンネル",
+    "cftSubtitle": "このcicy-codeをCloudflareの名前付きトンネルで固定の公開ドメインに公開",
+    "cftEnable": "トンネルを有効化",
+    "cftToken": "トンネルトークン",
+    "cftHost": "公開ホスト(任意)",
+    "cftNeedToken": "有効化にはトンネルトークンが必要です",
+    "cftApplying": "Cloudflare トンネルを適用中、再起動しています…",
+    "cftOn": "Cloudflare トンネルを有効化しました",
+    "cftOff": "Cloudflare トンネルを無効化しました",
+    "cftFailed": "設定に失敗しました",
+    "cftRunning": "稼働中",
+    "cftStopped": "停止中",
+    "cftRefresh": "更新",
+    "cftRestart": "トンネルを再起動",
+    "cftStart": "トンネルを起動",
+    "cftRestarted": "トンネルを再起動しました",
+    "cftRestartHint": "現在のトークン/ホストでトンネルを再起動"
   },
   "teamCard": {
     "noHost": "No address set",

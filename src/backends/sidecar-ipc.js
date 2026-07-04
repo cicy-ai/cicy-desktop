@@ -623,6 +623,33 @@ function register({ sidecarLogPath } = {}) {
     }
   });
 
+  // 「Cloudflare Tunnel」配置: 读/写 {enabled, token, host}。set 后重启 cicy-code 让
+  // 新的 CICY_CFT_* 环境变量生效(mac native: sidecar.restart;win: 重建容器,runContainer
+  // 会注入 cftEnv)。全程把进度推到抽屉(op:restart)。
+  ipcMain.handle("sidecar:get-cft", () => {
+    try { return { ok: true, cft: sidecar.getCft() }; } catch (e) { return { ok: false, cft: { enabled: false, token: "", host: "" }, error: e.message }; }
+  });
+  ipcMain.handle("sidecar:set-cft", async (e, cfg) => {
+    const emit = (ev) => { try { e.sender.send("sidecar:op-progress", { op: "restart", ...ev }); } catch {} };
+    try {
+      const saved = sidecar.setCft(cfg || {});
+      emit({ phase: "swap", status: "running", message: `Cloudflare Tunnel 已${saved.enabled ? "开启" : "关闭"},正在重启 cicy-code…` });
+      if (process.platform === "win32") {
+        // Windows: recreate the container so it re-runs with the new CICY_CFT_* env.
+        try { await appDocker.recreate({ emit }); } catch (err) { try { await appDocker.dockerRestart({ emit }); } catch {} }
+      } else {
+        await sidecar.restart({ logPath: sidecarLogPath });
+      }
+      let up = false;
+      for (let i = 0; i < 240; i++) { if (await sidecar.probeExisting(PORT) || await appDocker.probeHealth?.(PORT)) { up = true; break; } await new Promise((r) => setTimeout(r, 500)); }
+      emit({ phase: "done", status: up ? "done" : "error", message: up ? `cicy-code 已重启(Cloudflare Tunnel ${saved.enabled ? "开" : "关"})` : "重启后 :8008 未就绪——稍等或重试" });
+      return { ok: up, cft: saved };
+    } catch (err) {
+      emit({ phase: "done", status: "error", message: `设置失败:${err.message}` });
+      return { ok: false, error: err.message };
+    }
+  });
+
   // Update: stop + spawn cicy-code@latest (or reload the Docker image on
   // win32). The npx re-resolve / image pull can take a while on a cold cache,
   // so allow a longer window for :8008 to come back.

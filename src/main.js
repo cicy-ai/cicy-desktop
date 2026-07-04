@@ -871,6 +871,29 @@ function startSidecarWatchdog({ intervalMs = 30_000 } = {}) {
   _sidecarWatchdogTimer = setInterval(tick, intervalMs);
 }
 
+// mac/linux: 把随 app 打包的 cloudflared cp 到 ~/.local/bin/cloudflared。cicy-code 用
+// --cft-token 时自己起 cloudflared,它先 LookPath(~/.local/bin 在 PATH),命中就不去
+// GitHub 下。Windows 不需要:docker 镜像已内置 cloudflared。best-effort,已存在则跳过。
+function seedCloudflaredToLocalBin() {
+  if (process.platform === "win32") return;
+  try {
+    const fs = require("fs"), path = require("path"), os = require("os");
+    const dest = path.join(os.homedir(), ".local", "bin", "cloudflared");
+    try { if (fs.existsSync(dest) && fs.statSync(dest).size > 0) return; } catch {}
+    const arch = process.arch === "arm64" ? "arm64" : "x64";
+    const cands = [
+      path.join(process.resourcesPath || "", "cloudflared", `cloudflared-darwin-${arch}`),
+      path.join(__dirname, "..", "resources", "cloudflared", `cloudflared-darwin-${arch}`),
+    ];
+    const src = cands.find((p) => { try { return fs.existsSync(p) && fs.statSync(p).size > 0; } catch { return false; } });
+    if (!src) { try { log.info("[cft] bundled cloudflared not found — cicy-code self-downloads if needed"); } catch {} return; }
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(src, dest);
+    fs.chmodSync(dest, 0o755);
+    try { log.info(`[cft] seeded cloudflared → ${dest}`); } catch {}
+  } catch (e) { try { log.warn(`[cft] seed cloudflared failed: ${e.message}`); } catch {} }
+}
+
 electronApp.whenReady().then(async () => {
   // Serve cicy://newtab (tab-browser start page) — must be after ready.
   require("./tabbrowser/newtab-protocol").installHandler();
@@ -896,6 +919,7 @@ electronApp.whenReady().then(async () => {
   // colima VM 在 16G mac 上把内存压垮被 jetsam SIGKILL。Windows 仍走 docker(WSL :8008,
   // 由 sidecar-ipc 管),不在这里起 native。
   if (process.platform !== "win32") {
+    seedCloudflaredToLocalBin(); // 把打包的 cloudflared cp 到 ~/.local/bin(cft 隧道用)
     const sidecarPort = Number(process.env.CICY_CODE_PORT || 8008);
     const lt = require("./backends/local-teams");
 
@@ -1332,9 +1356,9 @@ electronApp.whenReady().then(async () => {
     }
 
     // Persistent window registry: re-open windows that were still open when the
-    // app last quit. Windows the user/agent closed stay "closed" and are not
-    // reopened. Skip any url already live this session (homepage / START_URL).
-    try {
+    // app last quit. DEFAULT OFF — startup opens ONLY the homepage (不再一次拉起
+    // 上次所有窗口)。Opt back in with CICY_REOPEN_WINDOWS=1.
+    if (process.env.CICY_REOPEN_WINDOWS === "1") try {
       const { BrowserWindow } = require("electron");
       const registry = require("./utils/window-registry");
       const liveSet = new Set(

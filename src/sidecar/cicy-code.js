@@ -174,6 +174,7 @@ async function ensureEnv({ emit } = {}) {
     e({ phase: "deps", status: "running", message: t("sidecar.depDone", { dep }) });
   }
 
+
   // mihomo 二进制 —— desktop 用自己装的 node24 预装(诊断的根因 + 修法):
   //   cicy-code 装 mihomo 二进制走 `npm pack cicy-mihomo-<os>-<arch>`;josephs 之前是系统 node13
   //   (自带 npm6 太老)→ pack 不下来 → 二进制装不上(cicy-mihomo skill 包装器本身不需要 npm 能装,
@@ -242,6 +243,27 @@ function setPublicFlag(on) {
   return f.public;
 }
 
+// 「Cloudflare Tunnel」配置持久化(同 desktop-flags.json 的 cft 字段):
+// { enabled, token, host }。enabled 且 token 非空时,start() 注入 CICY_CFT_TOKEN/
+// CICY_CFT_HOST 环境变量 —— cicy-code 据此跑一条命名隧道(固定域名)。host 是对外
+// 公布的 FQDN(可空,命名隧道的 hostname 也可在 Cloudflare 面板里配)。
+function getCft() {
+  const c = readFlags().cft || {};
+  return { enabled: !!c.enabled, token: c.token || "", host: c.host || "" };
+}
+function setCft(cfg = {}) {
+  const f = readFlags();
+  f.cft = { enabled: !!cfg.enabled, token: String(cfg.token || "").trim(), host: String(cfg.host || "").trim() };
+  try { fs.mkdirSync(path.dirname(FLAGS_FILE), { recursive: true }); fs.writeFileSync(FLAGS_FILE, JSON.stringify(f, null, 2)); } catch (e) { console.warn(`[cicy-code-sidecar] setCft write failed: ${e.message}`); }
+  return getCft();
+}
+// Env the tunnel needs when enabled (shared by native spawn + the Windows container).
+function cftEnv() {
+  const c = getCft();
+  if (!c.enabled || !c.token) return {};
+  return { CICY_CFT_TOKEN: c.token, ...(c.host ? { CICY_CFT_HOST: c.host } : {}) };
+}
+
 
 async function start({ logPath, port = DEFAULT_PORT, force = false, version = null, emit = null } = {}) {
   // **永不重复 spawn 活着的实例**(bug 修复): cicy-code 首次启动要 `brew install tmux`
@@ -303,6 +325,9 @@ async function start({ logPath, port = DEFAULT_PORT, force = false, version = nu
     // mihomo 二进制 desktop 已用 node24 预装到 runtime store(避开 node13 的 npm6 装不上的坑)→
     // 注入 MIHOMO_BIN,cicy-code 的 cicy-mihomo 包装器直接用,不再自己 npm pack。
     ...(mihomoBin ? { MIHOMO_BIN: mihomoBin } : {}),
+    // 「Cloudflare Tunnel」开启时注入 connector token(+ 可选公网 host)→ cicy-code
+    // 起一条命名隧道。关闭时不注入,cicy-code 不起隧道。
+    ...cftEnv(),
   };
   // 「局域网访问」开关: 开 → 加 --public,cicy-code 绑 0.0.0.0(同局域网设备可访问,
   // api_token 仍把关);关 → 默认只绑 127.0.0.1。flag 存 runtime/desktop-flags.json。
@@ -514,4 +539,4 @@ async function update({ logPath, port = DEFAULT_PORT, emit } = {}) {
   }
 }
 
-module.exports = { start, stop, restart, update, probeExisting, clearNpxCache, isUpdating, isBusy, ensureEnv, ensureNode, isPublic, setPublicFlag };
+module.exports = { start, stop, restart, update, probeExisting, clearNpxCache, isUpdating, isBusy, ensureEnv, ensureNode, isPublic, setPublicFlag, getCft, setCft, cftEnv };

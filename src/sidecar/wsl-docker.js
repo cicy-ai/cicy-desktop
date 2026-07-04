@@ -563,6 +563,10 @@ async function runContainer({ port = 8008, container = "cicy-code-docker", volum
   if (await probeHealth(port)) { ensureDesktopShortcut(volume, port).catch(() => {}); return { adopted: true }; }
   // Replace any stale same-named container.
   try { await wslRun(`docker rm -f ${container}`, { timeout: 20000 }); } catch {}
+  // 「Cloudflare Tunnel」开启时,把 connector token(+ 可选 host)作为容器环境变量注入
+  // → 容器内 cicy-code 起命名隧道。配置存在宿主 desktop-flags.json,与 mac native 同源。
+  let cftE = {}; try { cftE = require("./cicy-code").cftEnv(); } catch {}
+  env = { ...(env || {}), ...cftE };
   const envArgs = Object.entries(env || {})
     .filter(([, v]) => v != null && v !== "")
     .map(([k, v]) => `-e ${k}='${String(v).replace(/'/g, "'\\''")}'`)

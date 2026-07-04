@@ -261,7 +261,9 @@
     "confirm": "Confirm",
     "delete": "Delete",
     "saving": "Saving…",
-    "noAuth": "Not logged in"
+    "noAuth": "Not logged in",
+    "loading": "Loading…",
+    "copied": "Copied"
   },
   "auth": {
     "restoring": "Restoring login…",
@@ -400,7 +402,26 @@
     "downloading": "Downloading {{label}} {{ver}}…",
     "ready": "{{label}} {{ver}} ready",
     "start": "Start",
-    "started": "Started"
+    "started": "Started",
+    "cftMenu": "Cloudflare Tunnel",
+    "cftHint": "Expose this Mac’s cicy-code on a fixed public domain via a Cloudflare named tunnel (needs a Cloudflare connector token); toggling restarts cicy-code",
+    "cftTitle": "Cloudflare Tunnel",
+    "cftSubtitle": "Expose this cicy-code on a fixed public domain via a Cloudflare named tunnel",
+    "cftEnable": "Enable tunnel",
+    "cftToken": "Tunnel Token",
+    "cftHost": "Public host (optional)",
+    "cftNeedToken": "A Tunnel Token is required to enable",
+    "cftApplying": "Applying Cloudflare Tunnel, restarting…",
+    "cftOn": "Cloudflare Tunnel enabled",
+    "cftOff": "Cloudflare Tunnel disabled",
+    "cftFailed": "Failed to set",
+    "cftRunning": "Running",
+    "cftStopped": "Not running",
+    "cftRefresh": "Refresh",
+    "cftRestart": "Restart tunnel",
+    "cftStart": "Start tunnel",
+    "cftRestarted": "Tunnel restarted",
+    "cftRestartHint": "Restart the tunnel with the current token/host"
   },
   "teamCard": {
     "noHost": "No address set",

@@ -1,6 +1,6 @@
 {
   "name": "cicy-desktop",
-  "version": "2.1.219",
+  "version": "2.1.220",
   "description": "CiCy - AI-powered operating system browser",
   "main": "src/main.js",
   "bin": {
@@ -47,6 +47,10 @@
       "package.json"
     ],
     "extraResources": [
+      {
+        "from": "resources/cloudflared",
+        "to": "cloudflared"
+      },
       {
         "from": "build/icon.png",
         "to": "build/icon.png"

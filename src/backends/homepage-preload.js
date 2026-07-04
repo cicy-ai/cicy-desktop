@@ -130,6 +130,8 @@ contextBridge.exposeInMainWorld("cicy", {
     update:      ()  => logInvoke("sidecar:update"),
     getPublic:   ()  => logInvoke("sidecar:get-public"),       // 局域网访问开关状态
     setPublic:   (on) => logInvoke("sidecar:set-public", on),  // 设开关 + 自动重启 cicy-code
+    getCft:      ()  => logInvoke("sidecar:get-cft"),          // Cloudflare Tunnel 配置 {enabled,token,host}
+    setCft:      (cfg) => logInvoke("sidecar:set-cft", cfg),   // 设配置 + 自动重启 cicy-code
     // live {op, phase, status, message, progress?} events during update —
     // returns an unsubscribe fn.
     onOpProgress: (cb) => {
