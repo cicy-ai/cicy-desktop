@@ -472,7 +472,18 @@ async function syncNameToCloud(id) {
   try {
     if (!cc.loginToken || !cc.loginToken()) return; // not logged in
     const node = readNodes()[id];
-    if (!node || !isLocalOrigin(node.base_url || "")) return;
+    if (!node) return;
+    // 自定义(远程 URL)团队:同步 {title, host_url} 到云端(kind=custom,复用 /api/teams)。
+    // docker 节点是 localhost(local-origin),不会进这;custom = 非 local-origin 的远程节点。
+    if (node.base_url && !isLocalOrigin(node.base_url)) {
+      const reg = await cc.registerCustomTeam({ teamId: node.cloud_team_id || null, title: node.name || "", hostUrl: node.base_url });
+      if (reg && reg.ok && reg.teamId && reg.teamId !== node.cloud_team_id) {
+        await writeNodes((nodes) => { if (nodes[id]) nodes[id].cloud_team_id = reg.teamId; return nodes; });
+        log.info(`[local-teams] custom team synced ${id} → cloud teamId=${reg.teamId}`);
+      }
+      return;
+    }
+    if (!isLocalOrigin(node.base_url || "")) return;
     // Docker 节点有自己独立的云端 team(POST /api/teams,sidecar ensureDockerTeam 管),
     // 绝不走这里的 device-register —— 否则会按本机 deviceId 复用回 8008 那个 team(40),
     // cloud_team_id 被覆盖、又和 8008 串名。按 is_docker 标记 OR 端口(docker app port)
@@ -530,6 +541,35 @@ async function syncNameToCloud(id) {
   } catch (e) { log.warn(`[local-teams] cloud title-sync ${id} failed: ${e.message}`); }
 }
 
+// 从云端拉取 kind=custom 团队,本地没有的按 host_url materialize 一张卡片。**只增**(这版
+// 删除不同步)。addTeam 内部按 base_url dedup,已有的不会重复建。best-effort。
+async function pullCustomTeams() {
+  let cc;
+  try { cc = require("../cloud/cloud-client"); } catch { return; }
+  try {
+    if (!cc.loginToken || !cc.loginToken()) return;
+    const list = await cc.listTeams();
+    if (!list || !list.ok || !Array.isArray(list.teams)) return;
+    const nodes = readNodes();
+    const stripUrl = (u) => { let s = String(u || "").trim(); try { const x = new URL(s); x.search = ""; x.hash = ""; s = x.toString(); } catch {} return normaliseUrl(s.replace(/\/$/, "")); };
+    const have = new Set(Object.values(nodes).map((n) => stripUrl(n?.base_url)).filter(Boolean));
+    const haveCloudIds = new Set(Object.values(nodes).map((n) => n?.cloud_team_id).filter(Boolean));
+    let n = 0;
+    for (const t of list.teams) {
+      if (t.kind !== "custom") continue;
+      const host = String(t.host_url || t.hostUrl || "").trim();
+      if (!host) continue;
+      const tid = t.teamId || t.id || null;
+      if (have.has(stripUrl(host)) || (tid && haveCloudIds.has(tid))) continue; // 本地已有
+      try {
+        const r = await addTeam({ base_url: host, name: t.title || t.name || host, cloud_team_id: tid });
+        if (r && r.ok) { n++; log.info(`[local-teams] materialized custom team ${host} (cloud teamId=${tid})`); }
+      } catch (e) { log.warn(`[local-teams] materialize custom ${host} failed: ${e.message}`); }
+    }
+    if (n) log.info(`[local-teams] pulled ${n} custom team(s) from cloud`);
+  } catch (e) { log.warn(`[local-teams] pullCustomTeams failed: ${e.message}`); }
+}
+
 // Sync EVERY existing local-origin team to cloud. Runs once at startup (after
 // login) so teams that were created BEFORE the cloud-client existed — or that
 // live on a freshly-deployed machine (e.g. a Windows box whose 本地团队 predates
@@ -541,11 +581,14 @@ async function syncAllLocalTeams() {
     const cc = require("../cloud/cloud-client");
     if (!cc.loginToken || !cc.loginToken()) return; // logged out → no-op
     const nodes = readNodes();
-    const ids = Object.keys(nodes).filter((id) => isLocalOrigin(nodes[id]?.base_url || ""));
+    // 所有带 base_url 的节点都过一遍 —— syncNameToCloud 内部按类型分流:local-origin →
+    // registerTeam,custom(远程 URL)→ registerCustomTeam,docker → 跳过。
+    const ids = Object.keys(nodes).filter((id) => !!(nodes[id]?.base_url));
     for (const id of ids) {
       try { await syncNameToCloud(id); } catch {}
     }
-    if (ids.length) log.info(`[local-teams] startup cloud-sync of ${ids.length} local team(s)`);
+    if (ids.length) log.info(`[local-teams] startup cloud-sync of ${ids.length} team(s)`);
+    try { await pullCustomTeams(); } catch {}
   } catch (e) { log.warn(`[local-teams] startup cloud-sync failed: ${e.message}`); }
 }
 

@@ -343,6 +343,29 @@ async function listTeams({ deviceId = null, kind = null } = {}) {
   return { ok: false, status: res.status, reason: res.reason, teams: [] };
 }
 
+// ── ③b custom teams(w-10122 v2.2.21+:复用 /api/teams,无新端点)──────────────
+// 自定义(远程 URL)团队的云端同步 —— 就俩字段 {title, host_url}。首次 POST /api/teams
+// {title,kind:custom,host_url}(cloud get-or-create by owner+host_url);已有 teamId 则
+// PATCH 改名/换址。custom apiKey 恒为 ''(远程节点自带 key,不依赖)。
+async function registerCustomTeam({ teamId = null, title = "", hostUrl = "" } = {}) {
+  const token = loginToken();
+  if (!token) return { ok: false, reason: "not_logged_in" };
+  if (!hostUrl) return { ok: false, reason: "no_host_url" };
+  if (teamId != null) {
+    const res = await cloudFetch(`/api/teams/${encodeURIComponent(teamId)}`, { method: "PATCH", body: { title: title || "", host_url: hostUrl } });
+    if (res.ok) { const t = (res.json && (res.json.team || res.json)) || {}; return { ok: true, teamId, name: t.title || t.name || title, hostUrl: t.host_url || hostUrl }; }
+    log.warn(`[cloud] custom team patch failed status=${res.status} reason=${res.reason || ""}`);
+    return { ok: false, status: res.status, reason: res.reason };
+  }
+  const res = await cloudFetch("/api/teams", { method: "POST", body: { title: title || "", kind: "custom", host_url: hostUrl } });
+  const t = res.ok && res.json ? (res.json.team || res.json) : null;
+  if (t && (t.teamId || t.id)) {
+    return { ok: true, teamId: t.teamId || t.id, name: t.title || t.name || title, hostUrl: t.host_url || hostUrl };
+  }
+  log.warn(`[cloud] custom team create failed status=${res.status} reason=${res.reason || ""}`);
+  return { ok: false, status: res.status, reason: res.reason, json: res.json };
+}
+
 // 建一个全新的独立 team(POST /api/teams)——不按 device 复用,每次建一个新的。
 // Docker 用它:一机可以有多个 docker 容器,各自一个独立 team(8008 那个 local team
 // 不动)。返回 { teamId, apiKey(=team token,既网关 key 也凭证), title, kind }。
@@ -493,6 +516,7 @@ module.exports = {
   registerDevice,
   registerTeam,
   listTeams,
+  registerCustomTeam,
   createTeam,
   registerDockerTeam,
   renameTeam,
