@@ -643,8 +643,29 @@ function register({ sidecarLogPath } = {}) {
       }
       let up = false;
       for (let i = 0; i < 240; i++) { if (await sidecar.probeExisting(PORT) || await appDocker.probeHealth?.(PORT)) { up = true; break; } await new Promise((r) => setTimeout(r, 500)); }
-      emit({ phase: "done", status: up ? "done" : "error", message: up ? `cicy-code 已重启(Cloudflare Tunnel ${saved.enabled ? "开" : "关"})` : "重启后 :8008 未就绪——稍等或重试" });
-      return { ok: up, cft: saved };
+      // 校验 token 是否有效:开启后轮询 /api/health 的 tunnel_url —— 有值 = cloudflared
+      // 真的连上了(token 有效);超时没有 = token 无效/连不上。cft.json 是本地写的,不算数。
+      let tunnelUrl = "";
+      if (up && saved.enabled) {
+        const http = require("http");
+        emit({ phase: "swap", status: "running", message: "校验隧道连接(token 是否有效)…" });
+        for (let i = 0; i < 40; i++) { // ~20s
+          try {
+            const h = await new Promise((res, rej) => {
+              const rq = http.get(`http://127.0.0.1:${PORT}/api/health`, { timeout: 3000 }, (r) => { let b = ""; r.on("data", (d) => (b += d)); r.on("end", () => { try { res(JSON.parse(b)); } catch (er) { rej(er); } }); });
+              rq.on("error", rej); rq.on("timeout", () => { rq.destroy(); rej(new Error("t")); });
+            });
+            if (h && h.tunnel_url) { tunnelUrl = h.tunnel_url; break; }
+          } catch {}
+          await new Promise((r) => setTimeout(r, 500));
+        }
+      }
+      const tunnelUp = !!tunnelUrl;
+      const okMsg = !saved.enabled ? "已关闭 Cloudflare Tunnel"
+        : tunnelUp ? `隧道已连接 ✅ ${tunnelUrl}`
+        : "cicy-code 已重启,但隧道未连上——Token 可能无效/过期,或域名未在 Cloudflare 配好路由";
+      emit({ phase: "done", status: up && (!saved.enabled || tunnelUp) ? "done" : "error", message: up ? okMsg : "重启后 :8008 未就绪——稍等或重试" });
+      return { ok: up, cft: saved, tunnelUp, url: tunnelUrl };
     } catch (err) {
       emit({ phase: "done", status: "error", message: `设置失败:${err.message}` });
       return { ok: false, error: err.message };

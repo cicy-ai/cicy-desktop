@@ -421,7 +421,10 @@
     "cftRestart": "Redémarrer le tunnel",
     "cftStart": "Démarrer le tunnel",
     "cftRestarted": "Tunnel redémarré",
-    "cftRestartHint": "Redémarrer le tunnel avec le token/hôte actuel"
+    "cftRestartHint": "Redémarrer le tunnel avec le token/hôte actuel",
+    "cftNeedHost": "L’hôte public est requis",
+    "cftTunnelDown": "Tunnel non connecté : le token est peut-être invalide/expiré, ou le nom d’hôte n’a pas de route dans Cloudflare",
+    "cftConnected": "Tunnel connecté"
   },
   "teamCard": {
     "noHost": "No address set",

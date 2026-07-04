@@ -421,7 +421,10 @@
     "cftRestart": "Restart tunnel",
     "cftStart": "Start tunnel",
     "cftRestarted": "Tunnel restarted",
-    "cftRestartHint": "Restart the tunnel with the current token/host"
+    "cftRestartHint": "Restart the tunnel with the current token/host",
+    "cftNeedHost": "Public host is required",
+    "cftTunnelDown": "Tunnel not connected: the token may be invalid/expired, or the hostname has no route in Cloudflare",
+    "cftConnected": "Tunnel connected"
   },
   "teamCard": {
     "noHost": "No address set",

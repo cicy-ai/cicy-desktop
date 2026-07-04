@@ -421,7 +421,10 @@
     "cftRestart": "トンネルを再起動",
     "cftStart": "トンネルを起動",
     "cftRestarted": "トンネルを再起動しました",
-    "cftRestartHint": "現在のトークン/ホストでトンネルを再起動"
+    "cftRestartHint": "現在のトークン/ホストでトンネルを再起動",
+    "cftNeedHost": "公開ホストは必須です",
+    "cftTunnelDown": "トンネル未接続:トークンが無効/期限切れ、またはホスト名が Cloudflare でルーティングされていません",
+    "cftConnected": "トンネル接続済み"
   },
   "teamCard": {
     "noHost": "No address set",

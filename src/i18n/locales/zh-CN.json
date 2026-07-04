@@ -421,7 +421,10 @@
     "cftRestart": "重启隧道",
     "cftStart": "启动隧道",
     "cftRestarted": "隧道已重启",
-    "cftRestartHint": "用当前 Token/Host 重新启动隧道"
+    "cftRestartHint": "用当前 Token/Host 重新启动隧道",
+    "cftNeedHost": "公网域名 Host 不能为空",
+    "cftTunnelDown": "隧道未连上:Token 可能无效/过期,或域名未在 Cloudflare 配好路由",
+    "cftConnected": "隧道已连接"
   },
   "teamCard": {
     "noHost": "未填访问地址",

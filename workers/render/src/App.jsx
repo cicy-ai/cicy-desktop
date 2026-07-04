@@ -3460,12 +3460,25 @@ function CftModal({ open, onClose, toastId = "cft-op" }) {
   }, [open]);
   const save = async () => {
     if (busy) return;
-    if (cfg.enabled && !String(cfg.token).trim()) { setErr(tr("sidecar.cftNeedToken", "开启需要填 Tunnel Token")); return; }
+    if (cfg.enabled) {
+      if (!String(cfg.token).trim()) { setErr(tr("sidecar.cftNeedToken", "开启需要填 Tunnel Token")); return; }
+      if (!String(cfg.host).trim()) { setErr(tr("sidecar.cftNeedHost", "公网域名 Host 不能为空")); return; }
+    }
     setBusy(true); setErr("");
     toast.show({ id: toastId, message: tr("sidecar.cftApplying", "应用 Cloudflare Tunnel,重启中…"), status: "running", progress: undefined });
     try {
       const r = await window.cicy.sidecar.setCft(cfg);
-      if (r?.ok) { if (r.cft) setCfg(r.cft); onClose && onClose(); toast.show({ id: toastId, message: r.cft?.enabled ? tr("sidecar.cftOn", "Cloudflare Tunnel 已开启") : tr("sidecar.cftOff", "Cloudflare Tunnel 已关闭"), status: "done", ttl: 3000 }); }
+      if (r?.ok) {
+        if (r.cft) setCfg(r.cft);
+        if (r.cft?.enabled && !r.tunnelUp) {
+          // 重启成功但隧道没连上 = token 无效/连不上,留在弹窗报错,别静默关掉
+          setErr(tr("sidecar.cftTunnelDown", "隧道未连上:Token 可能无效/过期,或域名未在 Cloudflare 配好路由"));
+          toast.show({ id: toastId, message: tr("sidecar.cftTunnelDown", "隧道未连上:Token 可能无效…"), status: "error", ttl: 7000 });
+        } else {
+          onClose && onClose();
+          toast.show({ id: toastId, message: r.cft?.enabled ? (tr("sidecar.cftConnected", "隧道已连接") + (r.url ? `: ${r.url}` : "")) : tr("sidecar.cftOff", "Cloudflare Tunnel 已关闭"), status: "done", ttl: 4000 });
+        }
+      }
       else { setErr(r?.error || tr("sidecar.cftFailed", "设置失败")); toast.show({ id: toastId, message: tr("sidecar.cftFailed", "设置失败") + (r?.error ? `: ${r.error}` : ""), status: "error", ttl: 6000 }); }
     } catch (e) { setErr(e?.message || String(e)); toast.show({ id: toastId, message: tr("sidecar.cftFailed", "设置失败") + `: ${e?.message || e}`, status: "error", ttl: 6000 }); }
     finally { setBusy(false); }
@@ -3488,10 +3501,10 @@ function CftModal({ open, onClose, toastId = "cft-op" }) {
               <span style={{ fontSize: 14, fontWeight: 600 }}>{tr("sidecar.cftEnable", "开启隧道")}</span>
             </label>
             <div style={{ fontSize: 12, opacity: .7, marginBottom: 6 }}>{tr("sidecar.cftToken", "Tunnel Token")}</div>
-            <input data-id="cft-token" className="login-email-input" style={{ width: "100%", fontFamily: "var(--mono)" }}
-              value={cfg.token} placeholder="eyJhIjoi…" spellCheck={false} disabled={busy}
-              onChange={(e) => setCfg((c) => ({ ...c, token: e.target.value.replace(/[\r\n]+/g, "").trim() }))} />
-            <div style={{ fontSize: 12, opacity: .7, margin: "12px 0 6px" }}>{tr("sidecar.cftHost", "公网域名 Host(可选)")}</div>
+            <textarea data-id="cft-token" rows={3} className="login-email-input" style={{ width: "100%", resize: "vertical", lineHeight: 1.4, fontFamily: "var(--mono)", wordBreak: "break-all" }}
+              value={cfg.token} placeholder="eyJhIjoi…(粘贴 Cloudflare connector token)" spellCheck={false} disabled={busy}
+              onChange={(e) => setCfg((c) => ({ ...c, token: e.target.value.replace(/\s+/g, "") }))} />
+            <div style={{ fontSize: 12, opacity: .7, margin: "12px 0 6px" }}>{tr("sidecar.cftHost", "公网域名 Host")}</div>
             <input data-id="cft-host" className="login-email-input" style={{ width: "100%", fontFamily: "var(--mono)" }}
               value={cfg.host} placeholder="cloudshell.cicy-ai.com" spellCheck={false} disabled={busy}
               onChange={(e) => setCfg((c) => ({ ...c, host: e.target.value.replace(/[\r\n\s]+/g, "").trim() }))}
