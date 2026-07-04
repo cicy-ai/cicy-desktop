@@ -635,8 +635,9 @@ function register({ sidecarLogPath } = {}) {
       const saved = sidecar.setCft(cfg || {});
       emit({ phase: "swap", status: "running", message: `Cloudflare Tunnel 已${saved.enabled ? "开启" : "关闭"},正在重启 cicy-code…` });
       if (process.platform === "win32") {
-        // Windows: recreate the container so it re-runs with the new CICY_CFT_* env.
-        try { await appDocker.recreate({ emit }); } catch (err) { try { await appDocker.dockerRestart({ emit }); } catch {} }
+        // Windows: recreate the container so runContainer re-injects the new
+        // CICY_CFT_* env (recreate's progress cb is `onProgress`, not `emit`).
+        try { await appDocker.recreate({ onProgress: emit }); } catch (err) { try { await appDocker.dockerRestart({ onProgress: emit }); } catch {} }
       } else {
         await sidecar.restart({ logPath: sidecarLogPath });
       }

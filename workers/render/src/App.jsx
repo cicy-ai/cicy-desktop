@@ -2389,6 +2389,7 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
                   onClick={(e) => { e.stopPropagation(); setMenuOpen(false); window.cicy?.tabs?.reloadIfOpen?.("http://127.0.0.1:8008", "Docker 团队"); }}>
                   {tr("docker.reloadWindow", "刷新窗口")}
                 </button>
+                <CftMenuButton closeMenu={() => setMenuOpen(false)} toastId="docker-op" />
                 <button type="button" data-id="DockerCard-open-dir" className="bcard__menu-item"
                   onClick={(e) => { e.stopPropagation(); setMenuOpen(false); window.cicy?.docker?.openDir?.(); }}>
                   {tr("docker.openWslDir", "打开 WSL 目录")}
@@ -2601,33 +2602,6 @@ function LocalTeamCard({ team, cloudCode, onOpen, onRename, onRefresh }) {
     if (!local || !window.cicy?.sidecar?.getPublic) return;
     window.cicy.sidecar.getPublic().then((r) => setLanOn(!!r?.public)).catch(() => {});
   }, [local]);
-  // Cloudflare Tunnel 配置 {enabled, token, host}(存 desktop-flags.json,改后重启 cicy-code)。
-  const [cftOpen, setCftOpen] = useState(false);
-  const [cftBusy, setCftBusy] = useState(false);
-  const [cftErr, setCftErr] = useState("");
-  const [cftCfg, setCftCfg] = useState({ enabled: false, token: "", host: "" });
-  useEffect(() => {
-    if (!local || !window.cicy?.sidecar?.getCft) return;
-    window.cicy.sidecar.getCft().then((r) => { if (r?.cft) setCftCfg({ enabled: !!r.cft.enabled, token: r.cft.token || "", host: r.cft.host || "" }); }).catch(() => {});
-  }, [local]);
-  const saveCft = async () => {
-    if (cftBusy) return;
-    if (cftCfg.enabled && !String(cftCfg.token).trim()) { setCftErr(tr("sidecar.cftNeedToken", "开启需要填 Tunnel Token")); return; }
-    setCftBusy(true); setCftErr("");
-    toast.show({ id: opToastId, message: tr("sidecar.cftApplying", "应用 Cloudflare Tunnel,重启中…"), status: "running", progress: undefined });
-    try {
-      const r = await window.cicy.sidecar.setCft(cftCfg);
-      if (r?.ok) {
-        if (r.cft) setCftCfg(r.cft);
-        setCftOpen(false);
-        toast.show({ id: opToastId, message: r.cft?.enabled ? tr("sidecar.cftOn", "Cloudflare Tunnel 已开启") : tr("sidecar.cftOff", "Cloudflare Tunnel 已关闭"), status: "done", ttl: 3000 });
-      } else {
-        setCftErr((r?.error ? `${r.error}` : tr("sidecar.cftFailed", "设置失败")));
-        toast.show({ id: opToastId, message: tr("sidecar.cftFailed", "设置失败") + (r?.error ? `: ${r.error}` : ""), status: "error", ttl: 6000 });
-      }
-    } catch (e) { setCftErr(e?.message || String(e)); toast.show({ id: opToastId, message: tr("sidecar.cftFailed", "设置失败") + `: ${e?.message || e}`, status: "error", ttl: 6000 }); }
-    finally { setCftBusy(false); }
-  };
   // cicy-code 版本统一从 sidecar.versions() 一处拿("拿版本就一个方法")。
   // running===undefined = 还没查到(用于区分"加载中" vs "停了/拿不到");区别于
   // running===null(查过了但 daemon 没报版本)。latest/installed 同源。
@@ -2940,15 +2914,7 @@ function LocalTeamCard({ team, cloudCode, onOpen, onRename, onRefresh }) {
                     >
                       {tr("sidecar.lanAccess", "局域网访问")} · {lanOn ? tr("common.on", "开") : tr("common.off", "关")}
                     </button>
-                    <button
-                      type="button"
-                      data-id="LocalTeamCard-cft"
-                      className="bcard__menu-item"
-                      title={tr("sidecar.cftHint", "用 Cloudflare 命名隧道把本机 cicy-code 暴露到固定公网域名(需要 Cloudflare connector token);切换会自动重启 cicy-code")}
-                      onClick={(e) => { e.stopPropagation(); setMenuOpen(false); setCftErr(""); setCftOpen(true); }}
-                    >
-                      {tr("sidecar.cftMenu", "Cloudflare 隧道")} · {cftCfg.enabled ? tr("common.on", "开") : tr("common.off", "关")}
-                    </button>
+                    <CftMenuButton closeMenu={() => setMenuOpen(false)} toastId={opToastId} />
                   </>
                 )}
                 {team.cloud_team_id && (
@@ -3066,37 +3032,6 @@ function LocalTeamCard({ team, cloudCode, onOpen, onRename, onRefresh }) {
           <div className="modal-actions">
             <button type="button" className="btn-ghost" disabled={urlBusy} onClick={() => setEditingUrl(false)}>{tr("common.cancel", "取消")}</button>
             <button type="button" className="btn-primary" data-id="LocalTeamCard-url-save" disabled={urlBusy} onClick={commitUrl}>{urlBusy ? tr("common.saving", "保存中…") : tr("common.save", "保存")}</button>
-          </div>
-        </div>
-      </div>,
-      document.body,
-    )}
-    {cftOpen && createPortal(
-      <div data-id="LocalTeamCard-cft-modal"
-        style={{ position: "fixed", inset: 0, zIndex: 66, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.5)" }}
-        onMouseDown={(e) => { if (!cftBusy && e.target === e.currentTarget) setCftOpen(false); }}>
-        <div onClick={(e) => e.stopPropagation()}
-          style={{ width: 440, maxWidth: "92vw", background: "var(--card, #1b1d22)", border: "1px solid var(--border, #2c2f36)", borderRadius: 14, padding: 22, boxShadow: "0 20px 60px rgba(0,0,0,.5)" }}>
-          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{tr("sidecar.cftTitle", "Cloudflare 隧道")}</div>
-          <div style={{ fontSize: 12, opacity: .6, marginBottom: 16 }}>{tr("sidecar.cftSubtitle", "把本机 cicy-code 通过 Cloudflare 命名隧道暴露到固定公网域名")}</div>
-          <label data-id="LocalTeamCard-cft-toggle-row" style={{ display: "flex", alignItems: "center", gap: 10, cursor: cftBusy ? "default" : "pointer", marginBottom: 16 }}>
-            <input type="checkbox" data-id="LocalTeamCard-cft-toggle" checked={cftCfg.enabled} disabled={cftBusy}
-              onChange={(e) => setCftCfg((c) => ({ ...c, enabled: e.target.checked }))} />
-            <span style={{ fontSize: 14, fontWeight: 600 }}>{tr("sidecar.cftEnable", "开启隧道")}</span>
-          </label>
-          <div style={{ fontSize: 12, opacity: .7, marginBottom: 6 }}>{tr("sidecar.cftToken", "Tunnel Token")}</div>
-          <input data-id="LocalTeamCard-cft-token" className="login-email-input" style={{ width: "100%", fontFamily: "var(--mono)" }}
-            value={cftCfg.token} placeholder="eyJhIjoi…" spellCheck={false} disabled={cftBusy}
-            onChange={(e) => setCftCfg((c) => ({ ...c, token: e.target.value.replace(/[\r\n]+/g, "").trim() }))} />
-          <div style={{ fontSize: 12, opacity: .7, margin: "12px 0 6px" }}>{tr("sidecar.cftHost", "公网域名 Host(可选)")}</div>
-          <input data-id="LocalTeamCard-cft-host" className="login-email-input" style={{ width: "100%", fontFamily: "var(--mono)" }}
-            value={cftCfg.host} placeholder="cloudshell.cicy-ai.com" spellCheck={false} disabled={cftBusy}
-            onChange={(e) => setCftCfg((c) => ({ ...c, host: e.target.value.replace(/[\r\n\s]+/g, "").trim() }))}
-            onKeyDown={(e) => { if (e.key === "Escape" && !cftBusy) setCftOpen(false); }} />
-          {cftErr && <div className="error" style={{ marginTop: 8, fontSize: 12 }}>{cftErr}</div>}
-          <div className="modal-actions">
-            <button type="button" className="btn-ghost" disabled={cftBusy} onClick={() => setCftOpen(false)}>{tr("common.cancel", "取消")}</button>
-            <button type="button" className="btn-primary" data-id="LocalTeamCard-cft-save" disabled={cftBusy} onClick={saveCft}>{cftBusy ? tr("common.saving", "保存中…") : tr("common.save", "保存")}</button>
           </div>
         </div>
       </div>,
@@ -3498,6 +3433,71 @@ const AVATAR_PALETTE = [
 ];
 function hashStr(s) { s = String(s == null ? "" : s); let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 100003; return h; }
 function avatarBg(key) { return AVATAR_PALETTE[hashStr(key) % AVATAR_PALETTE.length]; }
+// Cloudflare 隧道配置(菜单项 + modal)—— 抽成可复用组件,LocalTeamCard(mac native)
+// 和 DockerCard(Windows 容器)共用。保存 → sidecar.setCft → cicy-code 带 CICY_CFT_TOKEN/
+// CICY_CFT_HOST 重启(mac spawn env / win 容器 -e)。
+function CftMenuButton({ closeMenu, toastId = "cft-op" }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [cfg, setCfg] = useState({ enabled: false, token: "", host: "" });
+  useEffect(() => {
+    if (!window.cicy?.sidecar?.getCft) return;
+    window.cicy.sidecar.getCft().then((r) => { if (r?.cft) setCfg({ enabled: !!r.cft.enabled, token: r.cft.token || "", host: r.cft.host || "" }); }).catch(() => {});
+  }, []);
+  const save = async () => {
+    if (busy) return;
+    if (cfg.enabled && !String(cfg.token).trim()) { setErr(tr("sidecar.cftNeedToken", "开启需要填 Tunnel Token")); return; }
+    setBusy(true); setErr("");
+    toast.show({ id: toastId, message: tr("sidecar.cftApplying", "应用 Cloudflare Tunnel,重启中…"), status: "running", progress: undefined });
+    try {
+      const r = await window.cicy.sidecar.setCft(cfg);
+      if (r?.ok) { if (r.cft) setCfg(r.cft); setOpen(false); toast.show({ id: toastId, message: r.cft?.enabled ? tr("sidecar.cftOn", "Cloudflare Tunnel 已开启") : tr("sidecar.cftOff", "Cloudflare Tunnel 已关闭"), status: "done", ttl: 3000 }); }
+      else { setErr(r?.error || tr("sidecar.cftFailed", "设置失败")); toast.show({ id: toastId, message: tr("sidecar.cftFailed", "设置失败") + (r?.error ? `: ${r.error}` : ""), status: "error", ttl: 6000 }); }
+    } catch (e) { setErr(e?.message || String(e)); toast.show({ id: toastId, message: tr("sidecar.cftFailed", "设置失败") + `: ${e?.message || e}`, status: "error", ttl: 6000 }); }
+    finally { setBusy(false); }
+  };
+  return (
+    <>
+      <button type="button" data-id="cft-menu-item" className="bcard__menu-item"
+        title={tr("sidecar.cftHint", "用 Cloudflare 命名隧道把本机 cicy-code 暴露到固定公网域名(需要 Cloudflare connector token);切换会自动重启 cicy-code")}
+        onClick={(e) => { e.stopPropagation(); closeMenu && closeMenu(); setErr(""); setOpen(true); }}>
+        {tr("sidecar.cftMenu", "Cloudflare 隧道")} · {cfg.enabled ? tr("common.on", "开") : tr("common.off", "关")}
+      </button>
+      {open && createPortal(
+        <div data-id="cft-modal"
+          style={{ position: "fixed", inset: 0, zIndex: 66, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.5)" }}
+          onMouseDown={(e) => { if (!busy && e.target === e.currentTarget) setOpen(false); }}>
+          <div onClick={(e) => e.stopPropagation()}
+            style={{ width: 440, maxWidth: "92vw", background: "var(--card, #1b1d22)", border: "1px solid var(--border, #2c2f36)", borderRadius: 14, padding: 22, boxShadow: "0 20px 60px rgba(0,0,0,.5)" }}>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{tr("sidecar.cftTitle", "Cloudflare 隧道")}</div>
+            <div style={{ fontSize: 12, opacity: .6, marginBottom: 16 }}>{tr("sidecar.cftSubtitle", "把本机 cicy-code 通过 Cloudflare 命名隧道暴露到固定公网域名")}</div>
+            <label data-id="cft-toggle-row" style={{ display: "flex", alignItems: "center", gap: 10, cursor: busy ? "default" : "pointer", marginBottom: 16 }}>
+              <input type="checkbox" data-id="cft-toggle" checked={cfg.enabled} disabled={busy}
+                onChange={(e) => setCfg((c) => ({ ...c, enabled: e.target.checked }))} />
+              <span style={{ fontSize: 14, fontWeight: 600 }}>{tr("sidecar.cftEnable", "开启隧道")}</span>
+            </label>
+            <div style={{ fontSize: 12, opacity: .7, marginBottom: 6 }}>{tr("sidecar.cftToken", "Tunnel Token")}</div>
+            <input data-id="cft-token" className="login-email-input" style={{ width: "100%", fontFamily: "var(--mono)" }}
+              value={cfg.token} placeholder="eyJhIjoi…" spellCheck={false} disabled={busy}
+              onChange={(e) => setCfg((c) => ({ ...c, token: e.target.value.replace(/[\r\n]+/g, "").trim() }))} />
+            <div style={{ fontSize: 12, opacity: .7, margin: "12px 0 6px" }}>{tr("sidecar.cftHost", "公网域名 Host(可选)")}</div>
+            <input data-id="cft-host" className="login-email-input" style={{ width: "100%", fontFamily: "var(--mono)" }}
+              value={cfg.host} placeholder="cloudshell.cicy-ai.com" spellCheck={false} disabled={busy}
+              onChange={(e) => setCfg((c) => ({ ...c, host: e.target.value.replace(/[\r\n\s]+/g, "").trim() }))}
+              onKeyDown={(e) => { if (e.key === "Escape" && !busy) setOpen(false); }} />
+            {err && <div className="error" style={{ marginTop: 8, fontSize: 12 }}>{err}</div>}
+            <div className="modal-actions">
+              <button type="button" className="btn-ghost" disabled={busy} onClick={() => setOpen(false)}>{tr("common.cancel", "取消")}</button>
+              <button type="button" className="btn-primary" data-id="cft-save" disabled={busy} onClick={save}>{busy ? tr("common.saving", "保存中…") : tr("common.save", "保存")}</button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+}
 function TeamAvatar({ avatar, name, teamId, onChanged, size = 34 }) {
   const fileRef = useRef(null);
   const initial = ((name || "?").trim()[0] || "?").toUpperCase();
