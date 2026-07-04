@@ -64,6 +64,7 @@ const CACHE_MS = 4000; // small dedupe so rapid renderer polls don't fan-out
 
 let _cache = null;
 let _cacheUntil = 0;
+let _lastCustomPull = 0; // 节流:list({refresh}) 顺带 pull 自定义团队,最多每 20s 一次
 
 function readGlobal() {
   try {
@@ -204,6 +205,12 @@ async function probeLiveness(baseUrl, token) {
 
 async function list({ refresh = false } = {}) {
   if (!refresh && _cache && Date.now() < _cacheUntil) return _cache;
+  // 首页刷新时顺带拉一次云端自定义团队(节流 20s):别的设备加的 / 改址的 custom 团队,刷新
+  // 首页就能反映,不必重启。pull 内部 reconcile(增 + 改址),已同步的不动;登出则 no-op。
+  if (refresh && Date.now() - _lastCustomPull > 20000) {
+    _lastCustomPull = Date.now();
+    try { await pullCustomTeams(); } catch {}
+  }
   const nodes = readNodes();
   const avatars = readAvatars();
   const slugs = Object.keys(nodes);
@@ -551,24 +558,42 @@ async function pullCustomTeams() {
     const list = await cc.listTeams();
     if (!list || !list.ok || !Array.isArray(list.teams)) return;
     const nodes = readNodes();
+    // stripUrl:剥 query/hash 后归一 —— 只用于「本地是否已有这个地址」的去重(手动加、没记
+    // cloud_team_id 的情况)。norm:保留 query(含 ?token=)、只去尾斜杠 —— 用于判断云端 URL
+    // 相对本地是否**真的变了**(token 变化也要能测出,不能被 stripUrl 抹掉)。
     const stripUrl = (u) => { let s = String(u || "").trim(); try { const x = new URL(s); x.search = ""; x.hash = ""; s = x.toString(); } catch {} return normaliseUrl(s.replace(/\/$/, "")); };
+    const norm = (u) => String(u || "").trim().replace(/\/$/, "");
     const have = new Set(Object.values(nodes).map((n) => stripUrl(n?.base_url)).filter(Boolean));
-    // cloud_team_id 用 String 归一比较 —— 云端返回 number、本地可能存成 number/string,不归一
-    // 会漏判(dedup 失效 → 又 materialize 一次,可能按派生 id 覆盖掉用户刚改过 URL 的那张卡)。
-    const haveCloudIds = new Set(Object.values(nodes).map((n) => (n?.cloud_team_id != null ? String(n.cloud_team_id) : null)).filter(Boolean));
-    let n = 0;
+    // cloud_team_id(String 归一)→ 本地节点 id,用于命中已有团队做 URL reconcile。
+    const byCloudId = {};
+    for (const [k, v] of Object.entries(nodes)) { if (v?.cloud_team_id != null) byCloudId[String(v.cloud_team_id)] = k; }
+    let added = 0, updated = 0;
     for (const t of list.teams) {
       if (t.kind !== "custom") continue;
       const host = String(t.host_url || t.hostUrl || "").trim();
       if (!host) continue;
       const tid = t.teamId || t.id || null;
-      if (have.has(stripUrl(host)) || (tid != null && haveCloudIds.has(String(tid)))) continue; // 本地已有
+      const localId = tid != null ? byCloudId[String(tid)] : null;
+      if (localId) {
+        // 已有此团队(按 cloud_team_id 命中)。云端权威:host_url 变了(含加/换 ?token=)就把
+        // 本地 base_url 更新过来 —— 这才是「改 URL 跨设备同步」的下行环节(原来只增不改 = 白改)。
+        // 本地改动会经 Fix A(updateTeam 改址即同步)先上行到云端,所以云端总是最新,不会误回滚。
+        const cur = nodes[localId] || {};
+        if (norm(cur.base_url) !== norm(host)) {
+          await writeNodes((nds) => { if (nds[localId]) { nds[localId].base_url = host; nds[localId].updated_at = new Date().toISOString(); } return nds; });
+          updated++;
+          log.info(`[local-teams] custom team ${localId} url ← cloud (teamId=${tid})`);
+        }
+        continue;
+      }
+      if (have.has(stripUrl(host))) continue; // 本地手动加过同地址(还没记 cloud_team_id)→ 跳过
       try {
         const r = await addTeam({ base_url: host, name: t.title || t.name || host, cloud_team_id: tid });
-        if (r && r.ok) { n++; log.info(`[local-teams] materialized custom team ${host} (cloud teamId=${tid})`); }
+        if (r && r.ok) { added++; log.info(`[local-teams] materialized custom team ${host} (cloud teamId=${tid})`); }
       } catch (e) { log.warn(`[local-teams] materialize custom ${host} failed: ${e.message}`); }
     }
-    if (n) log.info(`[local-teams] pulled ${n} custom team(s) from cloud`);
+    // pull 改了本地 → 作废 list 缓存,首页下次 poll 立刻拿到新数据(不必重启)。
+    if (added || updated) { _cache = null; _cacheUntil = 0; log.info(`[local-teams] pull custom: +${added} added, ${updated} url-updated`); }
   } catch (e) { log.warn(`[local-teams] pullCustomTeams failed: ${e.message}`); }
 }
 
