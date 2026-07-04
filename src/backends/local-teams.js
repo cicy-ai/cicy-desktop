@@ -553,14 +553,16 @@ async function pullCustomTeams() {
     const nodes = readNodes();
     const stripUrl = (u) => { let s = String(u || "").trim(); try { const x = new URL(s); x.search = ""; x.hash = ""; s = x.toString(); } catch {} return normaliseUrl(s.replace(/\/$/, "")); };
     const have = new Set(Object.values(nodes).map((n) => stripUrl(n?.base_url)).filter(Boolean));
-    const haveCloudIds = new Set(Object.values(nodes).map((n) => n?.cloud_team_id).filter(Boolean));
+    // cloud_team_id 用 String 归一比较 —— 云端返回 number、本地可能存成 number/string,不归一
+    // 会漏判(dedup 失效 → 又 materialize 一次,可能按派生 id 覆盖掉用户刚改过 URL 的那张卡)。
+    const haveCloudIds = new Set(Object.values(nodes).map((n) => (n?.cloud_team_id != null ? String(n.cloud_team_id) : null)).filter(Boolean));
     let n = 0;
     for (const t of list.teams) {
       if (t.kind !== "custom") continue;
       const host = String(t.host_url || t.hostUrl || "").trim();
       if (!host) continue;
       const tid = t.teamId || t.id || null;
-      if (have.has(stripUrl(host)) || (tid && haveCloudIds.has(tid))) continue; // 本地已有
+      if (have.has(stripUrl(host)) || (tid != null && haveCloudIds.has(String(tid)))) continue; // 本地已有
       try {
         const r = await addTeam({ base_url: host, name: t.title || t.name || host, cloud_team_id: tid });
         if (r && r.ok) { n++; log.info(`[local-teams] materialized custom team ${host} (cloud teamId=${tid})`); }
@@ -597,11 +599,14 @@ async function addTeam(spec) {
   const baseUrlRaw = String(spec.base_url || "").trim();
   if (!baseUrlRaw) return { ok: false, error: "base_url required" };
   try { new URL(baseUrlRaw); } catch { return { ok: false, error: "bad base_url" }; }
-  // base_url 必须是干净的 origin(scheme://host:port[/path])——绝不能带 ?token= / #hash。
-  // 用户从「自定义」粘贴的 LAN 链接常带 ?token=...,直接存进去会:① 泄露 token 进 teams.json,
-  // ② 打开时 ?token= 拼两次 URL 坏掉,③ 后续 reconcile 撞 dedup。这里统一剥掉 query+hash。
+  // **本地团队**(localhost/127.0.0.1/::1)才把 base_url 剥成干净 origin —— 它 token 从
+  // global.json 实时读,URL 里存 ?token= 快照会陈旧、打开还会双拼。**自定义远程团队相反**:
+  // token 只在用户给的 URL 里,原样保留、绝不剥 query/hash(主人:不要动原始的 url),否则
+  // token 丢、节点打不开。isLocalUrl 在这里算一次,下面复用。
+  let isLocalUrl = false;
+  try { const h = new URL(baseUrlRaw).hostname; isLocalUrl = h === "127.0.0.1" || h === "localhost" || h === "::1"; } catch {}
   let baseUrl = baseUrlRaw.replace(/\/$/, "");
-  try { const u = new URL(baseUrl); u.search = ""; u.hash = ""; baseUrl = u.toString().replace(/\/$/, ""); } catch {}
+  if (isLocalUrl) { try { const u = new URL(baseUrl); u.search = ""; u.hash = ""; baseUrl = u.toString().replace(/\/$/, ""); } catch {} }
   const baseUrlKey = normaliseUrl(baseUrl);
   let port = null;
   try { port = parseInt(new URL(baseUrl).port, 10) || null; } catch {}
@@ -609,9 +614,7 @@ async function addTeam(spec) {
   // 本地团队的 token **不存进 teams.json**: localhost/127.0.0.1/::1 的 cicy-code 与
   // cicy-desktop 共用同一份 ~/cicy-ai/global.json,openTeam 打开时**实时读 global.json**(token
   // 轮换即时跟上)。存一份快照只会陈旧 → ?token= 旧值 → :8008 拒 → 卡登录。所以本地一律存 ""
-  // (与 :8008 docker 的 skipTokenAutofill 同理),不再自动回填。
-  let isLocalUrl = false;
-  try { const h = new URL(baseUrl).hostname; isLocalUrl = h === "127.0.0.1" || h === "localhost" || h === "::1"; } catch {}
+  // (与 :8008 docker 的 skipTokenAutofill 同理),不再自动回填。isLocalUrl 已在上面算过。
 
   // base_url is the dedupe key: if a team with the same URL already exists
   // we upsert it (refresh token + install meta), never create a duplicate.
@@ -714,9 +717,12 @@ async function updateTeam(id, patch) {
     if (k === "base_url") {
       if (!v) return { ok: false, error: "base_url cannot be empty" };
       try { new URL(String(v)); } catch { return { ok: false, error: "bad base_url" }; }
-      // 和 addTeam 一致:剥掉 ?token= / #hash,base_url 只存干净 origin。
+      // 和 addTeam 一致:本地团队剥成干净 origin;自定义远程团队**原样保留**(含 ?token=,
+      // 主人:不要动原始的 url)——token 只在 URL 里,剥了就打不开。
       let bu = String(v).replace(/\/$/, "");
-      try { const u = new URL(bu); u.search = ""; u.hash = ""; bu = u.toString().replace(/\/$/, ""); } catch {}
+      let localU = false;
+      try { const h = new URL(bu).hostname; localU = h === "127.0.0.1" || h === "localhost" || h === "::1"; } catch {}
+      if (localU) { try { const u = new URL(bu); u.search = ""; u.hash = ""; bu = u.toString().replace(/\/$/, ""); } catch {} }
       filtered[k] = bu;
     } else if (k === "api_token") {
       filtered[k] = String(v || "");
@@ -751,9 +757,9 @@ async function updateTeam(id, patch) {
   });
   if (!existed) return { ok: false, error: "team not found" };
   log.info(`[local-teams] update ${id} → ${Object.keys(filtered).join(",")}`);
-  // Rename → push the new title (with the base titleVersion) to the cloud, and
-  // pull down a newer cloud name if there is one (two-way LWW inside syncNameToCloud).
-  if (isRename) syncNameToCloud(id).catch(() => {});
+  // 改名 或 改 base_url(自定义团队换址)都要同步到云端:改名走 title,换址走 host_url
+  // (custom 分支 PATCH host_url)。否则云端留着旧 URL,下次 pull 又把旧地址拉回来 = 改了白改。
+  if (isRename || filtered.base_url) syncNameToCloud(id).catch(() => {});
   const next = readNodes()[id] || {};
   let port = null;
   try { port = parseInt(new URL(next.base_url || "").port, 10) || null; } catch {}

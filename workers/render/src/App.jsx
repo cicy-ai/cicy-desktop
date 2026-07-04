@@ -550,8 +550,10 @@ export default function App() {
     try {
       const r = await window.cicy.localTeams.add({ base_url: url, name: customTitle.trim(), failIfExists: true });
       if (!r || r.ok === false) { setCustomErr(r?.error === "exists" ? tr("teams.urlExists", "该地址已存在") : humanError(r?.error || "add failed")); return; }
-      setCustomOpen(false); setCustomTitle(""); setCustomUrl("");
+      // 先刷新列表(loading 全程覆盖到新卡出现),成功后再关 modal —— 否则关了之后到卡片
+      // 刷出来之间那段没 loading。
       await fetchLocalTeams();
+      setCustomTitle(""); setCustomUrl(""); setCustomOpen(false);
     } catch (e) {
       setCustomErr(humanError(e?.message || String(e)));
     } finally {
