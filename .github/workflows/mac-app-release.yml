@@ -254,3 +254,15 @@ jobs:
           done
           printf '%s' "$VER" > mac-latest-version.txt
           "$OSS" cp mac-latest-version.txt "$BASE/mac-latest-version.txt" -f --acl public-read || true
+
+          # Prune —— 版本化 pkg 只保留最新 2 个版本(每版含 x64+arm64),更旧的删掉(省 OSS)。
+          # 只匹配 cicy-desktop-<semver>-<arch>.pkg;mac-<arch>-latest.pkg 指针不含 semver、永远保留。非致命。
+          allvers=$("$OSS" ls "$BASE/cicy-desktop-" -s 2>/dev/null | grep -oE 'cicy-desktop-[0-9]+\.[0-9]+\.[0-9]+-(x64|arm64)\.pkg' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | sort -uV || true)
+          keep=$(echo "$allvers" | tail -2)
+          for v in $allvers; do
+            echo "$keep" | grep -qx "$v" && continue
+            for ARCH in x64 arm64; do
+              "$OSS" rm "$BASE/cicy-desktop-$v-$ARCH.pkg" -f 2>/dev/null || true
+            done
+            echo "Pruned old mac pkg version: $v"
+          done

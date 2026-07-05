@@ -153,6 +153,25 @@ jobs:
             Write-Host "Skip latest: building $version < published $cur (older build — not clobbering newer latest)"
           }
 
+          # 4) Prune —— releases/ 下带版本号的 exe 只保留最新 2 个,更旧的删掉(省 OSS 空间)。
+          #    只匹配 cicy-desktop-<semver>.exe;latest / win-latest 指针不含 semver、永远保留。
+          #    非致命:prune 失败只告警,不影响发版。
+          try {
+            $listing = & $oss ls "$base/cicy-desktop-" -s 2>$null
+            $verExes = @()
+            foreach ($line in $listing) {
+              if ($line -match 'cicy-desktop-(\d+\.\d+\.\d+)\.exe$') {
+                $verExes += [PSCustomObject]@{ Key = $line.Trim(); Ver = [version]$matches[1] }
+              }
+            }
+            $toDelete = @($verExes | Sort-Object Ver -Descending | Select-Object -Skip 2)
+            foreach ($o in $toDelete) {
+              Write-Host "Pruning old EXE: $($o.Key)"
+              & $oss rm "$($o.Key)" -f 2>$null
+            }
+            Write-Host "Prune done: kept newest 2 of $($verExes.Count) versioned exe(s), deleted $($toDelete.Count)"
+          } catch { Write-Host "::warning::OSS prune skipped: $_" }
+
           # 3) 保留策略 — 只留最近 $KEEP 个版本化 exe(~130MB/个),旧的删掉,避免 OSS 无限膨胀。
           #    latest.exe / latest-version.txt 不在此列(名字不匹配 X.Y.Z),永远保留。
           $KEEP = 2
