@@ -6,7 +6,7 @@
 // → 下完「ready」→ 用户点安装 → 拉起原生安装器并退出 app。
 //
 // 源(分网络 + 分平台):
-//   版本清单  CN → OSS releases/latest-version.txt;非 CN → GitHub releases/latest
+//   版本清单  CN → OSS releases/{win,mac}-latest-version.txt(按平台);非 CN → GitHub releases/latest
 //   Windows  → OSS  cicy-desktop-<ver>.exe          (GitHub 不发 win 包)
 //   macOS    → GitHub cicy-desktop-<ver>-<arch>.pkg (CN 经 ghproxy 兜底)
 //   Linux    → GitHub CiCy-Desktop-<ver>.AppImage   (CN 经 ghproxy 兜底)
@@ -88,8 +88,14 @@ function headOk(url, redirects = 0) {
 // ── 最新版本号 ────────────────────────────────────────────────────────────────
 async function fetchLatestVersion(network) {
   if (network === "cn") {
-    // CN:OSS 版本清单(纯文本 "2.1.200")。
-    return (await getText(`${OSS_RELEASES_BASE}/latest-version.txt`)).trim().replace(/^v/, "");
+    // CN:OSS 版本清单(纯文本 "2.1.200")。**按平台读各自的指针** —— win 和 mac 是两条独立
+    // CI、分别构建上传、版本可能不同步;都读裸名 latest-version.txt(只由 Windows CI 写)会让
+    // mac 客户端拿到 Windows 的版本号 → 去下不存在的 mac 包 → 404。win→win-、mac→mac-,
+    // linux 没有独立 OSS 指针、沿用裸名(与 win 同 tag 同步发布,且 linux 实际走 GitHub 下载)。
+    const file = process.platform === "win32" ? "win-latest-version.txt"
+               : process.platform === "darwin" ? "mac-latest-version.txt"
+               : "latest-version.txt";
+    return (await getText(`${OSS_RELEASES_BASE}/${file}`)).trim().replace(/^v/, "");
   }
   // 非 CN:GitHub releases/latest 的 tag_name。
   const j = JSON.parse(await getText(`https://api.github.com/repos/${REPO}/releases/latest`));
