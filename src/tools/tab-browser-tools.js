@@ -293,6 +293,12 @@ class TabManager {
     return true;
   }
 
+  // 让窗口「可见但不抢前台」:已显示 → 什么都不做;隐藏 → showInactive(绝不 focus)。
+  // 程序化/agent 驱动的开 tab、reload、activate 都用它 —— win.focus() 只有在 cicy-desktop 不
+  // 在前台时才有效(= 从用户当前 app 抢焦点),用户在 cicy-desktop 内操作时它本就是 no-op。
+  // 所以这些非「用户明确要打开 app」的路径一律不抢焦点,避免用户在微信等窗口时被莫名跳到前台。
+  surfaceQuiet() { try { if (!this.win.isVisible()) this.win.showInactive(); } catch (e) {} }
+
   close(id) {
     const i = this.tabs.findIndex((x) => x.id === id);
     if (i < 0) return false;
@@ -341,7 +347,7 @@ class TabManager {
       if (ignoreCache) tab.view.webContents.reloadIgnoringCache();
       else tab.view.webContents.reload();
     } catch (e) {}
-    try { this.activate(tab.id); this.win.show(); this.win.focus(); } catch (e) {}
+    try { this.activate(tab.id); this.surfaceQuiet(); } catch (e) {}
     return true;
   }
 
@@ -372,7 +378,7 @@ function findManagerByTab(webContentsId) {
 async function openTab(accountIdx, url, opts = {}) {
   const m = ensureManager(accountIdx);
   const id = m.addTab(url, { trusted: !!opts.trusted, home: !!opts.home, title: opts.title || "", navigate: !!opts.navigate, avatar: opts.avatar || "", team: !!opts.team, colorKey: opts.colorKey || "" });
-  try { m.win.show(); m.win.focus(); } catch (e) {}
+  try { m.surfaceQuiet(); } catch (e) {}
   // 记下这个团队 tab 的 webContentsId(打开 → set;关闭/销毁 → delete)。
   try {
     const tab = m.tabs.find((t) => t.id === id);
@@ -401,7 +407,9 @@ function openHomeWindow(accountIdx, homeUrl, opts = {}) {
   } else {
     const id = m.addTab(homeUrl, { home: true }); tab = m.tabs.find((t) => t.id === id);
   }
-  try { m.win.show(); m.win.focus(); } catch (e) {}
+  // 只有明确要求(tray「打开首页」/ 启动,activate!==false)才把窗口抢到前台;deeplink /
+  // second-instance 顺带触发(activate:false)只静默显示,绝不从用户当前 app 抢焦点。
+  if (opts.activate !== false) { try { m.win.show(); m.win.focus(); } catch (e) {} } else m.surfaceQuiet();
   let wc = null; try { wc = tab ? tab.view.webContents : null; } catch (e) {}
   return { win: m.win, wc };
 }
@@ -462,7 +470,7 @@ function registerTabBrowserTools(registerTool) {
       try {
         const m = ensureManager(accountIdx);
         if (m.tabs.length === 0 && accountIdx !== 0) m.addTab();
-        try { m.win.show(); m.win.focus(); } catch (e) {}
+        try { m.surfaceQuiet(); } catch (e) {}
         return ok({ success: true, accountIdx, winId: m.win.id });
       } catch (e) { return ok({ error: e.message }, true); }
     },
@@ -610,7 +618,7 @@ async function reloadTabByUrl(accountIdx, url, opts = {}) {
     const tab = m.tabs.find((t) => stripVol(t.url) === key);
     if (tab) {
       try { tab.view.webContents.reload(); } catch (e) {}
-      try { m.activate(tab.id); m.win.show(); m.win.focus(); } catch (e) {}
+      try { m.activate(tab.id); m.surfaceQuiet(); } catch (e) {}
       return { ok: true, winId: m.win.id, reloaded: true };
     }
   }
@@ -633,7 +641,7 @@ function reloadTabIfOpen(accountIdx, url, opts = {}) {
       if (mm && !mm.win.isDestroyed()) {
         try {
           const tab = mm.tabs.find((t) => { try { return t.view.webContents.id === wcId; } catch (e) { return false; } });
-          if (tab) { mm.activate(tab.id); mm.win.show(); mm.win.focus(); }
+          if (tab) { mm.activate(tab.id); mm.surfaceQuiet(); }
         } catch (e) {}
       }
       return { ok: true, winId: mm ? mm.win.id : undefined, reloaded: true, byWcId: true };
@@ -660,7 +668,7 @@ function activateTabIfOpen(accountIdx, url) {
       if (mm && !mm.win.isDestroyed()) {
         try {
           const tab = mm.tabs.find((t) => { try { return t.view.webContents.id === wcId; } catch (e) { return false; } });
-          if (tab) { mm.activate(tab.id); mm.win.show(); mm.win.focus(); return { ok: true, active: true }; }
+          if (tab) { mm.activate(tab.id); mm.surfaceQuiet(); return { ok: true, active: true }; }
         } catch (e) {}
       }
     }
