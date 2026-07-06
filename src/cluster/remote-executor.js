@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 async function forwardJsonRequest(baseUrl, token, requestPath, payload) {
   const response = await fetch(new URL(requestPath, baseUrl), {
     method: "POST",

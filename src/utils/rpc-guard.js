@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // RPC capability gate (security hole #3 — "trusted source XSS ≠ RCE").
 //
 // The renderer electronRPC bridge can invoke ANY registered tool, including host

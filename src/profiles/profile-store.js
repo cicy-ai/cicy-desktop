@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // profile-store.js — the shared "browser profile" standard across both backends.
 //
 // One profile = one backend (Chrome OR Electron); the two keep their own store

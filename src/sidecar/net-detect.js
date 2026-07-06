@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Detect whether the host is on the China mainland network.
 // Strategy:
 //   - Probe both google.com (typically blocked in CN) and baidu.com (typically reachable in CN).

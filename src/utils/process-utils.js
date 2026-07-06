@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 const { exec } = require("child_process");
 const net = require("net");
 const { promisify } = require("util");

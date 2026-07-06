@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 import { useEffect, useState } from "react";
 import Dashboard from "./components/Dashboard";
 import Login from "./components/Login";

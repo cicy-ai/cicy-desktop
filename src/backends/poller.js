@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Probes each backend's /api/health and returns the JSON payload. Used by
 // the homepage to populate per-backend status (uptime, mem, agents count).
 // Stateless — homepage caches results in renderer-side state.

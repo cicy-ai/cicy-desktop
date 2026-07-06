@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Robust "open this URL in the system browser".
 //
 // electron's shell.openExternal silently fails on some Windows setups — a fresh

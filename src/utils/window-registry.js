@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Persistent window registry.
 //
 // Background: every window list in the app (get_windows tool, /ui/windows,

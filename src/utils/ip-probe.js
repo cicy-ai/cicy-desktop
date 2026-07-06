@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Per-profile egress IP + geo probe. Fetches an IP-info API THROUGH a given
 // Electron session (so the result reflects that profile's proxy egress), in the
 // main process via net.request (no browser launch needed). Returns

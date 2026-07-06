@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Main-side IPC for the homepage. Same backends:* / windows:* / updates:*
 // contract as before plus the "one rebuild for the year" additions below
 // (app, shell, tos, logs). Anything more specific should go through the

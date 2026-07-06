@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Tiny, dependency-free Markdown → HTML renderer for static, TRUSTED content
 // (the terms-of-use string only). Not a general-purpose/safe renderer — do not
 // feed user input. Supports: # / ## / ### headings, --- rules, > blockquotes,

@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Windows NATIVE sidecar backend: run cicy-code.exe directly — no Docker, no
 // WSL. (2026-06 方向变更: the Docker route in docker.js is transitional and
 // being retired; this module replaces it once stable.)

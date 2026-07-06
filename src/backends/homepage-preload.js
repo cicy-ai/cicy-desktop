@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Homepage preload — last sweep. After this we should not need another
 // .app rebuild for routine UI work; everything new lands in the Vite
 // project at cicy-desktop/workers/render/src/ and HMRs in.

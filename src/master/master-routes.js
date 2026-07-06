@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 const express = require("express");
 const { randomUUID } = require("crypto");
 const remoteExecutor = require("../cluster/remote-executor");

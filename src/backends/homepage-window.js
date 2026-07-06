@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Homepage window — primary CiCy Desktop window. Singleton; closing it
 // does NOT quit the app.
 //

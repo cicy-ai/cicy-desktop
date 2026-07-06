@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Docker-版 cicy-code via WSL2 + Ubuntu + Docker Engine (选定方案 A).
 //
 // Instead of the heavy/fragile Docker Desktop GUI install, we run Docker Engine

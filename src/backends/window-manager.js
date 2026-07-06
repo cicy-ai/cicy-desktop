@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Opens BrowserWindow instances targeting a Backend. The local backend wraps
 // the bundled cicy-code daemon (started + supervised by src/sidecar/cicy-code.js)
 // and resolves its admin URL against ~/cicy-ai/global.json's api_token —

@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 const request = require("supertest");
 const { spawn } = require("child_process");
 const http = require("http");

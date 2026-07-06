@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Queries GitHub for the latest cicy-code release and compares against the
 // version currently reported by the bundled sidecar (via /api/health).
 // Phase 1 surface: { hasUpdate, currentVersion, latestVersion, releaseUrl }.

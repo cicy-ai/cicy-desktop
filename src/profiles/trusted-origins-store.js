@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Trusted-origins allowlist — the EXACT-hostname set of sites permitted to
 // receive the electronRPC bridge in profile 0 (i.e. allowed to run exec_shell &
 // friends on THIS machine). Persisted at ~/cicy-ai/db/trusted-origins.json as

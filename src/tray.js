@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Tray icon (macOS menu bar / Windows + Linux system tray) and macOS dock icon.
 // Loaded once after app.whenReady(). Resources live in build/ alongside the
 // platform installer icons; we ship them via electron-builder's `extraResources`

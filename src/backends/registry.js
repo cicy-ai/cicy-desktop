@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // File-backed BackendRegistry. Stores user's known cicy-code backends in
 // <userData>/backends.json. A pinned `local` entry is upserted on every load
 // so it cannot be accidentally deleted from the launcher UI.

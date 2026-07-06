@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 const { stopTestServer } = require('./tests/mcp/setup-test-server');
 
 module.exports = async () => {

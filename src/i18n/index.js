@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // CiCy Desktop i18n.
 // Single instance shared between main process and preload (loaded via require).
 // - locale comes from app.getLocale() (set in main.js init)

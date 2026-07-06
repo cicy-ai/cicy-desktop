@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Preload for the BrowserView tab-browser shell (tab strip + toolbar).
 // Exposes window.tabAPI so the chrome UI drives the main-process TabManager,
 // and receives tab state pushes. Tabs themselves are BrowserViews (managed in

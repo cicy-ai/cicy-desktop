@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // desktop-snapshot.js
 // Periodically captures the WHOLE desktop (not a window) to disk so the cloud
 // (cicy-code) can fetch a recent screen preview by just reading a file — no live

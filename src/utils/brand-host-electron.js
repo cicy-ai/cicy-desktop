@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Rebrand the HOST (unpackaged) Electron bundle so cicy-desktop presents as
 // "CiCy Desktop" at the OS level — menu-bar app name, Cmd-Tab app switcher,
 // Finder, and dock — instead of the stock "Electron".

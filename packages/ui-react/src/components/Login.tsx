@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 import { useState, type FormEvent } from "react";
 import { ArrowRight, KeyRound, Loader2, Server, ShieldCheck } from "lucide-react";
 import { getEndpoint, requestJson, setEndpoint, setToken } from "../lib/client";

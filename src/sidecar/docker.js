@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Windows sidecar backend: run cicy-code inside a Docker container.
 //
 // Platform split (2026-06): mac/linux start cicy-code locally via `npx

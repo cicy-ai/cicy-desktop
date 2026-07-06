@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Single source of truth for producing the SHIPPED homepage.
 //
 // The app loads src/backends/homepage-react/ (a prebuilt SPA snapshot). The

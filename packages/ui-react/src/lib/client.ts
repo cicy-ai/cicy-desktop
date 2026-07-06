@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 const DEFAULT_ENDPOINT = window.location.origin;
 const TOKEN_KEY = "ELECTRON_MCP_TOKEN";
 const ENDPOINT_KEY = "ELECTRON_MCP_ENDPOINT";

@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 const { z } = require("zod");
 const fs = require("fs");
 const os = require("os");

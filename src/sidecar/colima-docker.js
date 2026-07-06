@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Docker-版 cicy-code on macOS via Colima (Lima 轻量 VM + Docker 引擎).
 //
 // macOS 没有 WSL。对应 Windows 端「不装 Docker Desktop GUI、用确定性命令驱动

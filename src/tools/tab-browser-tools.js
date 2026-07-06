@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // tab-browser-tools.js — Chrome-like tabbed browser, one window per profile,
 // built on BrowserView tabs (NOT <webview>), so each tab is a full webContents
 // that can itself host <webview> (the cicy-code team app's artifact frame, the

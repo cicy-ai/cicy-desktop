@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // ~/.local/bin install model for the binaries cicy-desktop OWNS.
 //
 // (2026-06): cicy-desktop OWNS its runtime binaries and distributes

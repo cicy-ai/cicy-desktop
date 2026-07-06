@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Shared "which sites is this session logged into?" summarizer for BOTH backends.
 //
 // Input: an array of cookies, each with at least { name, domain }. Both

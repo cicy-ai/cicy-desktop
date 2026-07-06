@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Team Helper <webview> preload — runs inside the right-drawer webview that
 // loads the cloud helper SPA. Exposes a deliberately TINY surface compared
 // to homepage-preload.js: the helper agent is a remote third party, so it

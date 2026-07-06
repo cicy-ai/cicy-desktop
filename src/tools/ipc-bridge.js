@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 const { ipcMain, BrowserWindow } = require("electron");
 const { createWindow } = require("../utils/window-utils");
 const log = require("electron-log");

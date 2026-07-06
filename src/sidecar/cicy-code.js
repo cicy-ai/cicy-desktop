@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Discover / probe / spawn the cicy-code daemon for the Electron app.
 //
 // Principle (2026-06): the daemon is run via `npx cicy-code` — a single

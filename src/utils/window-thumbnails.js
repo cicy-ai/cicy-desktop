@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // window-thumbnails.js
 // Periodically writes a small JPEG thumbnail of every open BrowserWindow to a
 // folder — like Chrome's tab thumbnails. On-disk so the homepage / agents can

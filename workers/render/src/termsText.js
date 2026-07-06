@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // AUTO-GENERATED from w-10065 terms docs (草案 v0.2). Full terms body for the
 // first-run gate's '查看完整条款' / 'View full terms'. Both locales now have
 // the complete counsel-reviewed text.

@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // RPC audit log — an append-only record of (a) every electronRPC tool call and
 // (b) every authorization decision (including the TEMPORARY ones — "本次允许" /
 // "允许一次" / "本页面内允许" — which otherwise live only in memory and leave no

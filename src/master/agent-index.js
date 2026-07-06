@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 class AgentIndex {
   constructor() {
     this.agentsByWorker = new Map();

@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 const DEFAULT_INTERVAL_MS = 5000;
 
 class WorkerClient {

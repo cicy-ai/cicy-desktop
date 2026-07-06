@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // cicyui://newtab — the tab browser's start page, served via a custom scheme so a
 // new tab's URL is a clean "cicyui://newtab" instead of a giant inline data: URL
 // (url 不要那串 data: 天书). Chrome's chrome://newtab analog.

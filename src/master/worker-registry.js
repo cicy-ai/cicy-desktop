@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 const STALE_AFTER_MS = 15000;
 const OFFLINE_AFTER_MS = 30000;
 

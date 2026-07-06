@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // 统一导出所有工具模块，支持热重载
 
 module.exports = [

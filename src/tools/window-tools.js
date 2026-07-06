@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 const { BrowserWindow } = require("electron");
 const log = require("electron-log");
 const { z } = require("zod");

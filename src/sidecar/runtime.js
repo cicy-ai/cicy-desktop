@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Runtime Bundle v1 — versioned component store for everything cicy-desktop
 // runs locally (cicy-code, mihomo).
 //

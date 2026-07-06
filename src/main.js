@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 const { app: electronApp } = require("electron");
 const { default: contextMenu } = require("electron-context-menu");
 const fs = require("fs");

@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Email magic-link DEVICE-POLL login — cross-device safe.
 //
 // The 127.0.0.1 loopback in auth-loopback.js only works when the magic link is

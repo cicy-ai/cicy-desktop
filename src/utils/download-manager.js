@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // 全局下载管理器
 const downloads = new Map();
 let downloadIdCounter = 0;

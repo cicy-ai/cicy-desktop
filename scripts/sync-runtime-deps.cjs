@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Sync optionalDependencies to the LATEST published per-platform cicy-code and
 // cicy-mihomo subpackages, so every cicy-desktop build/publish bundles the
 // newest binaries. Run in CI before install/build (and before `npm publish`).

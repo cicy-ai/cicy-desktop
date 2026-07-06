@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Shared electron-context-menu (ecm) config + a universal attach helper so the
 // SAME i18n'd right-click menu — 重新加载 / 复制 / 粘贴 / 检查元素(DevTools)— applies to
 // EVERY surface: the tab-browser SHELL window (host/"BaseWindow"), BrowserView

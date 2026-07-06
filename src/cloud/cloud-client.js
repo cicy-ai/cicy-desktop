@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Cloud ⇄ cicy-desktop client (device / team / teams).
 //
 // Implements the contract agreed with the cloud side (w-10032), documented at

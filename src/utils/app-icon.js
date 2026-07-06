@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Resolve the bundled app icon for BrowserWindow({ icon }).
 //
 // When cicy-desktop runs UNPACKAGED (npx / npm i -g — the mac/win/linux default,

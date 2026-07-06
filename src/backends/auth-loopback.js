@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Loopback browser-login listener.
 //
 // Flow (B-variant of OAuth-style desktop login — same pattern as `gcloud

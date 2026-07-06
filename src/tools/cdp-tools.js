@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 const { BrowserWindow, clipboard } = require("electron");
 const { z } = require("zod");
 const { sendCDP } = require("../utils/cdp-utils");

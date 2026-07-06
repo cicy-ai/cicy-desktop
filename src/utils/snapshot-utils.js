@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // snapshot-utils.js
 // Snapshot utilities for CiCy Desktop server
 // Provides page snapshot capture with screenshots and element references

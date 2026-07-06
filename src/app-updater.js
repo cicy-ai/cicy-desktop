@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // CiCy Desktop 自定义自更新(替掉 electron-updater 的全自动 quitAndInstall —— 它对
 // 未签名 mac / loose 源码版 / 多窗口 tab-shell 都不适配)。
 //

@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Local-teams discovery — reads ~/cicy-ai/global.json and pings each
 // configured node's /api/health. Local-only by design: this module never
 // talks to the cloud, never runs `docker ps`, and never invents nodes

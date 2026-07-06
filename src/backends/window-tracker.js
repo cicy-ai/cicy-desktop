@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // Tracks BrowserWindows opened via openWindowForBackend, mapping each window
 // back to the backend that spawned it. Used by the homepage's "Recent
 // Windows" section. Cleans up on close.

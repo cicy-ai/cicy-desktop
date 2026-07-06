@@ -1,3 +1,6 @@
+// Copyright 2026 CiCy AI
+// SPDX-License-Identifier: Apache-2.0
+
 // IPC handlers for the cicy-code sidecar.
 //
 // cicy-code is no longer downloaded by an in-app installer — the sidecar runs
