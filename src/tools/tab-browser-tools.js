@@ -238,13 +238,17 @@ class TabManager {
     wc.on("page-title-updated", (_e, title) => { if (!tab.fixedTitle) { tab.title = title; this.pushState(); } });
     wc.on("page-favicon-updated", (_e, favs) => { tab.favicon = (favs && favs[0]) || ""; this.pushState(); });
     wc.on("did-start-loading", () => { tab.loading = true; this.pushState(); });
-    wc.on("did-stop-loading", () => { tab.loading = false; this.pushState(); });
+    wc.on("did-stop-loading", () => { tab.loading = false; try { const cu = wc.getURL(); if (cu && !cu.startsWith("about:blank")) tab.url = cu; } catch (e) {} this.pushState(); });
     // Re-sync fullscreen state after each (re)load: the SPA resets data-fullscreen
     // to "0" on mount, so a homepage reload while the window is fullscreen would
     // otherwise re-show the 34px traffic-light gutter (blank top strip).
     wc.on("did-finish-load", () => { try { wc.send("window:fullscreen", !!this.win.isFullScreen()); } catch (e) {} });
-    wc.on("did-navigate", (_e, u) => { tab.url = u; tab.favicon = ""; this.pushState(); });
-    wc.on("did-navigate-in-page", (_e, u) => { tab.url = u; this.pushState(); });
+    // **绝不把 about:blank 记进 tab.url**。这些 tab 从不真的停在 about:blank —— 但新建时会先
+    // 短暂经过 about:blank,导航事件的 u 偶尔就是 about:blank(或 about:blank#hash,SPA 在空白页
+    // 上先改了 hash)。若写进去,地址栏/tab 就显示 about:blank#teams,且任何「按 tab.url 重新导航」
+    // 的 reload(reloadTabByUrl)会真把页面导到 about:blank#teams。忽略它,保留上一个真实 URL。
+    wc.on("did-navigate", (_e, u) => { if (u && !u.startsWith("about:blank")) tab.url = u; tab.favicon = ""; this.pushState(); });
+    wc.on("did-navigate-in-page", (_e, u) => { if (u && !u.startsWith("about:blank")) tab.url = u; this.pushState(); });
     // popups / window.open → open as a tab. 安全(防"点链接 = 静默 RCE"):在 profile 0
     // (系统/特权 profile,tab 带 electronRPC 桥)里被点开的链接 —— 典型是 agent gotty
     // 打印的网址 —— 一律改到 profile 1 打开。profile 1 是硬沙箱(contextIsolation on /
