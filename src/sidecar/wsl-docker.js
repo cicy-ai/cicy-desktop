@@ -543,6 +543,20 @@ function projectsMountArg() {
   } catch (e) { log.warn(`[wsl-docker] projects mount setup failed: ${e.message}`); return ""; }
 }
 
+// 把 Windows 的每个盘都挂进容器 —— **动态枚举,不写死盘符**:`ls /mnt` 拿 WSL 已自动挂载的
+// 单字母目录(c/d/e…,有几个挂几个),逐盘 `-v /mnt/<x>:/mnt/<x>`。逐盘而非整挂 /mnt,是为了
+// 避开 /mnt/wsl 等非盘目录。USB/可移动盘 WSL 默认不自动挂进 /mnt,天然不在此列(主人:不用管 usb)。
+async function allDrivesMountArg() {
+  try {
+    const { stdout } = await wslRun("ls -1 /mnt 2>/dev/null", { timeout: 10000 });
+    const drives = String(stdout || "")
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter((s) => /^[a-z]$/i.test(s)); // 只取单字母盘符,排除 wsl 等
+    return drives.map((d) => `-v /mnt/${d}:/mnt/${d}`).join(" ");
+  } catch (e) { log.warn(`[wsl-docker] enumerate drives failed: ${e.message}`); return ""; }
+}
+
 // extraPorts → additional `-p 127.0.0.1:<p>:<p>` mappings (host=container, loopback
 // only). For container-internal agent services the user wants reachable from
 // Windows. Each adds one docker-proxy, so keep the list small. 8008/主端口自动排除。
@@ -581,7 +595,8 @@ async function runContainer({ port = 8008, container = "cicy-code-docker", volum
   // 只发布 :8008(单端口,1 个 docker-proxy)。EXTRA_PORTS 那段 18000-19999(2000 个端口)
   // 已删——docker 默认每端口起一个 userland-proxy 进程 → 2000 进程,docker run 卡死/吃内存/
   // 偶发失败(实测)。容器内 agent 服务需要从 Windows 直达时再按需单独暴露。
-  const cmd = `docker run -d --name ${container} --restart unless-stopped --dns 223.5.5.5 --dns 8.8.8.8 ${publishArgs(port, extraPorts)} -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${projectsMountArg()} ${envArgs} ${IMAGE}`;
+  const drivesArg = await allDrivesMountArg(); // 动态:有几个盘挂几个
+  const cmd = `docker run -d --name ${container} --restart unless-stopped --dns 223.5.5.5 --dns 8.8.8.8 ${publishArgs(port, extraPorts)} -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${projectsMountArg()} ${drivesArg} ${envArgs} ${IMAGE}`;
   emit && emit({ phase: "container", status: "running", message: `$ ${cmd.length > 220 ? cmd.slice(0, 220) + " …" : cmd}` });
   await wslRun(cmd, { timeout: 60000 }); // 失败时 err.stderr 带 docker 真错误 → _bootstrap 的 errTail 显示
   ensureDesktopShortcut(volume, port).catch(() => {});
