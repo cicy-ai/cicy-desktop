@@ -87,17 +87,20 @@ function headOk(url, redirects = 0) {
 
 // ── 最新版本号 ────────────────────────────────────────────────────────────────
 async function fetchLatestVersion(network) {
-  if (network === "cn") {
-    // CN:OSS 版本清单(纯文本 "2.1.200")。**按平台读各自的指针** —— win 和 mac 是两条独立
-    // CI、分别构建上传、版本可能不同步;都读裸名 latest-version.txt(只由 Windows CI 写)会让
-    // mac 客户端拿到 Windows 的版本号 → 去下不存在的 mac 包 → 404。win→win-、mac→mac-,
-    // linux 没有独立 OSS 指针、沿用裸名(与 win 同 tag 同步发布,且 linux 实际走 GitHub 下载)。
-    const file = process.platform === "win32" ? "win-latest-version.txt"
-               : process.platform === "darwin" ? "mac-latest-version.txt"
-               : "latest-version.txt";
+  // **Windows 包只在 OSS(GitHub 不发 win),版本清单也一律读 OSS —— 与网络判定无关。**
+  // 否则 net=unknown(启动探测超时会被缓存成 unknown 整个会话)或 global 时去读 GitHub,CN
+  // 用户读不到 → 更新提示整段会话都不出现(用户报的「更新 banner 没出现」)。win→win-latest。
+  if (process.platform === "win32") {
+    return (await getText(`${OSS_RELEASES_BASE}/win-latest-version.txt`)).trim().replace(/^v/, "");
+  }
+  // mac/linux:net-detect 契约是「cn 和 unknown 都优先镜像」—— 只有确认可达 GitHub(global)
+  // 才走 GitHub;cn/unknown 一律读 OSS。按平台读各自指针(win/mac 两条独立 CI、版本可能不
+  // 同步,读错平台会 404);linux 无独立 OSS 指针、沿用裸名(与 win 同 tag、走 GitHub 下载)。
+  if (network !== "global") {
+    const file = process.platform === "darwin" ? "mac-latest-version.txt" : "latest-version.txt";
     return (await getText(`${OSS_RELEASES_BASE}/${file}`)).trim().replace(/^v/, "");
   }
-  // 非 CN:GitHub releases/latest 的 tag_name。
+  // 确认可达 GitHub:releases/latest 的 tag_name。
   const j = JSON.parse(await getText(`https://api.github.com/repos/${REPO}/releases/latest`));
   return String(j.tag_name || "").trim().replace(/^v/, "");
 }
@@ -112,11 +115,11 @@ function assetFor(version, network) {
   }
   if (plat === "darwin") {
     const gh = `${GH_DL(version)}/cicy-desktop-${version}-${arch}.pkg`;
-    return { url: network === "cn" ? mirrored(gh) : gh, file: `cicy-desktop-${version}-${arch}.pkg` };
+    return { url: network === "global" ? gh : mirrored(gh), file: `cicy-desktop-${version}-${arch}.pkg` };
   }
   // linux
   const gh = `${GH_DL(version)}/CiCy-Desktop-${version}.AppImage`;
-  return { url: network === "cn" ? mirrored(gh) : gh, file: `CiCy-Desktop-${version}.AppImage` };
+  return { url: network === "global" ? gh : mirrored(gh), file: `CiCy-Desktop-${version}.AppImage` };
 }
 
 // ── 下载(带进度,跟随重定向)──────────────────────────────────────────────────
