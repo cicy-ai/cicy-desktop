@@ -248,7 +248,7 @@ async function handleDeepLink(url) {
       if (electronApp.isReady()) {
         try {
           const { openHomepage } = require("./backends/homepage-window");
-          openHomepage();
+          openHomepage({ activate: false }); // deeplink 顺带唤起,不抢用户当前 tab(团队列表已由 broadcast 刷新)
         } catch {}
       }
     }
@@ -276,7 +276,7 @@ electronApp.on("second-instance", (_e, argv) => {
 
   try {
     const { openHomepage } = require("./backends/homepage-window");
-    openHomepage();
+    openHomepage({ activate: false }); // 再次启动 exe 只把窗口带到前台,不抢走用户正在看的团队 tab
   } catch {}
   const { BrowserWindow } = require("electron");
   for (const w of BrowserWindow.getAllWindows()) {

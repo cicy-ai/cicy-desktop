@@ -28,10 +28,12 @@ let homeTabWc = null;   // the homepage's resident-tab webContents (primary path
 // browser window (homepage = profile 0 的起始页). Clicking a team there
 // opens the team as another tab in the same window. Falls back to a standalone
 // window only if the tab engine throws, so the homepage is never unreachable.
-async function openHomepage() {
+async function openHomepage(opts = {}) {
   try {
     const tabBrowser = require("../tools/tab-browser-tools");
-    const { win, wc } = tabBrowser.openHomeWindow(0, pickHomepageURL());
+    // opts.activate=false(deeplink / second-instance 顺带调用)→ 不抢用户当前 tab,只保证
+    // 首页存在 + 窗口在前台;不传(tray「打开首页」/ 启动)→ 默认切到首页 tab。
+    const { win, wc } = tabBrowser.openHomeWindow(0, pickHomepageURL(), opts);
     if (wc) {
       homeTabWc = wc;
       try { wc.once("destroyed", () => { if (homeTabWc === wc) homeTabWc = null; }); } catch {}

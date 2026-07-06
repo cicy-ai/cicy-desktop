@@ -389,11 +389,18 @@ async function openTab(accountIdx, url, opts = {}) {
 // { win, wc } so the homepage module can track the tab's webContents for the
 // main→renderer pushes (auth:complete, update-state) that used to target the
 // standalone homepage window.
-function openHomeWindow(accountIdx, homeUrl) {
+function openHomeWindow(accountIdx, homeUrl, opts = {}) {
   const m = ensureManager(accountIdx);
   let tab = m.tabs.find((t) => t.home);
-  if (tab) { m.activate(tab.id); }
-  else { const id = m.addTab(homeUrl, { home: true }); tab = m.tabs.find((t) => t.id === id); }
+  if (tab) {
+    // 只在明确要求(用户点「打开首页」/ 启动)时才切到首页 tab。deeplink / second-instance 等
+    // **顺带**触发 openHomepage 的路径传 activate:false —— 绝不抢走用户正在看的团队 tab,否则
+    // 对话着对话着窗口就莫名切到「我的团队」(用户报的 bug)。当前本来就是首页 tab、或还没有任何
+    // active tab 时,activate 无副作用,照常执行。
+    if (opts.activate !== false || m.activeId == null || m.activeId === tab.id) m.activate(tab.id);
+  } else {
+    const id = m.addTab(homeUrl, { home: true }); tab = m.tabs.find((t) => t.id === id);
+  }
   try { m.win.show(); m.win.focus(); } catch (e) {}
   let wc = null; try { wc = tab ? tab.view.webContents : null; } catch (e) {}
   return { win: m.win, wc };
