@@ -124,13 +124,14 @@
     "name": "cicybot",
     "email": "support@cicy-ai.com"
   },
-  "license": "MIT",
+  "license": "Apache-2.0",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.3",
     "chrome-remote-interface": "^0.33.0",
     "cors": "^2.8.5",
     "electron-context-menu": "^4.0.4",
     "electron-log": "^5.2.4",
+    "electron-updater": "6.6.2",
     "express": "^4.18.2",
     "i18next": "^26.2.0",
     "js-beautify": "^1.15.4",
@@ -138,23 +139,22 @@
     "serve-index": "^1.9.2",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
-    "zod": "3.25",
-    "electron-updater": "6.6.2"
+    "zod": "3.25"
   },
   "//optionalDependencies": "(2026-06 回调): mac/linux 改回 native cicy-code(:8008,colima 在 16G mac 上压垮内存)→ 重新内置 cicy-code-<plat> / cicy-mihomo-<plat>,localbin.fromBundle 零网络 seed(npm 仅作更新通道,带 npmmirror→npmjs 回退)。这些由 scripts/sync-runtime-deps.cjs 在 tag-push 时同步到最新版。npm 的 os/cpu 字段保证每个平台只装自己那份。Windows 仍走 docker(WSL :8009),它那份 cicy-code-windows 用不到但 bundle 着无害。",
   "optionalDependencies": {
-    "electron": "41.0.3",
-    "cicy-code-darwin-x64": "2.3.22",
     "cicy-code-darwin-arm64": "2.3.22",
-    "cicy-code-linux-x64": "2.3.22",
+    "cicy-code-darwin-x64": "2.3.22",
     "cicy-code-linux-arm64": "2.3.22",
+    "cicy-code-linux-x64": "2.3.22",
     "cicy-code-windows-x64": "2.3.22",
-    "cicy-mihomo-darwin-x64": "1.10.4",
     "cicy-mihomo-darwin-arm64": "1.10.4",
-    "cicy-mihomo-linux-x64": "1.10.4",
+    "cicy-mihomo-darwin-x64": "1.10.4",
     "cicy-mihomo-linux-arm64": "1.10.4",
+    "cicy-mihomo-linux-x64": "1.10.4",
+    "cicy-mihomo-windows-arm64": "1.10.4",
     "cicy-mihomo-windows-x64": "1.10.4",
-    "cicy-mihomo-windows-arm64": "1.10.4"
+    "electron": "41.0.3"
   },
   "devDependencies": {
     "@babel/core": "^7.29.0",
