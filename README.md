@@ -21,17 +21,9 @@ the right:
 
 ## CLI — `cicy-desktop`
 
-Manage the local desktop/cluster lifecycle:
-
-```bash
-cicy-desktop start
-cicy-desktop stop
-cicy-desktop status
-cicy-desktop restart
-cicy-desktop logs
-```
-
-`npm start` runs the same entrypoint.
+`cicy-desktop` launches the Electron app — `npm start` and `npx cicy-desktop` run
+the same entrypoint. Self-update with `cicy-desktop --update`; `--version` and
+`--help` print info.
 
 ## Run (end users, no clone)
 
@@ -69,7 +61,7 @@ Outside CN (or once electron is cached) a plain `npx -y cicy-desktop` is enough.
 git clone git@github.com:cicy-ai/cicy-desktop.git
 cd cicy-desktop
 npm install
-cicy-desktop start   # or: npm start
+cicy-desktop         # or: npm start — launches the app
 ```
 
 Config lives in `~/cicy-ai/global.json` (API token, gateway key, node list). The
