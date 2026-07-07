@@ -5,8 +5,7 @@
   "main": "src/main.js",
   "bin": {
     "cicy-desktop": "./bin/cicy-desktop",
-    "cicy": "./bin/cicy-desktop",
-    "cicy-rpc": "./bin/cicy-rpc"
+    "cicy": "./bin/cicy-desktop"
   },
   "scripts": {
     "start": "node ./bin/cicy-desktop",

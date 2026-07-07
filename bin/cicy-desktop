@@ -268,7 +268,7 @@ for (let i = 0; i < args.length; i++) {
   } else if (arg === "-v" || arg === "--version") {
     showVersion = true;
   } else if (arg === "-j" || arg === "--json") {
-    console.error("[x] --json is only supported by cicy-rpc");
+    console.error("[x] --json is not supported");
     process.exit(1);
   } else if (arg === "-cn" || arg === "--cn") {
     useCNMirror = true;
@@ -343,9 +343,7 @@ Examples:
   cicy status
   cicy restart
   cicy logs
-  cicy --port 8201
-
-RPC commands moved to: cicy-rpc`);
+  cicy --port 8201`);
 }
 
 function update() {
