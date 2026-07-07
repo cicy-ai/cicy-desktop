@@ -16,7 +16,6 @@
     "test": "jest",
     "test:ls": "node tests/test-ls.js",
     "build": "electron-builder --publish never",
-    "build:ui": "cd packages/ui-react && npm install && npm run build",
     "build:homepage": "node scripts/build-homepage.cjs",
     "prebuild:win": "node scripts/build-homepage.cjs",
     "prebuild:mac": "node scripts/build-homepage.cjs",

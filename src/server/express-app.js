@@ -3,7 +3,6 @@
 
 const express = require("express");
 const cors = require("cors");
-const fs = require("fs");
 const path = require("path");
 const uiRoutes = require("./ui-routes");
 
@@ -156,31 +155,18 @@ function createExpressApp(authMiddleware, tools = {}) {
     }
   });
 
-  const reactUiDir = path.join(__dirname, "../ui-react-dist");
-
-  // Keep legacy UI for fallback/debugging
+  // Legacy debug UI. The React /console (packages/ui-react → ui-react-dist) was
+  // removed — it was served but nothing in the app ever linked to it; the real
+  // desktop UI is the homepage + tab-shell. ui.html stays as a bare debug page.
   app.get("/ui-legacy", (req, res) => {
     res.sendFile(path.join(__dirname, "../ui.html"));
   });
 
-  // UI (React) lives at /console; /ui is reserved for UI APIs (snapshot, windows, etc.)
-  if (fs.existsSync(reactUiDir)) {
-    app.use("/console", express.static(reactUiDir));
-    app.get(["/console", "/console/*"], (req, res) => {
-      res.sendFile(path.join(reactUiDir, "index.html"));
-    });
-  } else {
-    // Fallback: serve legacy UI at /console too
-    app.get(["/console", "/console/*"], (req, res) => {
-      res.sendFile(path.join(__dirname, "../ui.html"));
-    });
-  }
-
   // Mount UI API routes under /ui
   app.use("/ui", uiRoutes);
 
-  // Convenience redirect
-  app.get("/", (req, res) => res.redirect("/console/chrome"));
+  // Root → the remaining legacy debug UI.
+  app.get("/", (req, res) => res.redirect("/ui-legacy"));
 
   return app;
 }
