@@ -4,8 +4,7 @@
   "description": "CiCy - AI-powered operating system browser",
   "main": "src/main.js",
   "bin": {
-    "cicy-desktop": "./bin/cicy-desktop",
-    "cicy": "./bin/cicy-desktop"
+    "cicy-desktop": "./bin/cicy-desktop"
   },
   "scripts": {
     "start": "node ./bin/cicy-desktop",

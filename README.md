@@ -19,19 +19,19 @@ the right:
 
 ![CiCy Desktop team workspace](assets/team.png)
 
-## CLI — `cicy` / `cicy-desktop`
+## CLI — `cicy-desktop`
 
 Manage the local desktop/cluster lifecycle:
 
 ```bash
-cicy start
-cicy stop
-cicy status
-cicy restart
-cicy logs
+cicy-desktop start
+cicy-desktop stop
+cicy-desktop status
+cicy-desktop restart
+cicy-desktop logs
 ```
 
-`cicy-desktop` is an alias for `cicy`; `npm start` runs the same entrypoint.
+`npm start` runs the same entrypoint.
 
 ## Run (end users, no clone)
 
@@ -69,7 +69,7 @@ Outside CN (or once electron is cached) a plain `npx -y cicy-desktop` is enough.
 git clone git@github.com:cicy-ai/cicy-desktop.git
 cd cicy-desktop
 npm install
-cicy start          # or: npm start
+cicy-desktop start   # or: npm start
 ```
 
 Config lives in `~/cicy-ai/global.json` (API token, gateway key, node list). The
