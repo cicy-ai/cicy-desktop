@@ -244,7 +244,10 @@
       const d = document.createElement('div');
       d.className = 'tab' + (t.home ? ' home' : '') + (t.active ? ' active' : '');
       d.title = t.home ? T('tabShell.myTeam', '我的团队') : (t.url || '');
-      d.onclick = () => window.tabAPI.activate(t.id);
+      // 按下即切(pointerdown),不用 click:render() 在切换/加载/标题更新时会 innerHTML=''
+      // 整条重建,若发生在用户 mousedown 与 mouseup 之间,click 就丢了(要点好几下才切)。
+      // pointerdown 在按下瞬间就激活,之后的重建不影响这次激活。
+      d.onpointerdown = () => window.tabAPI.activate(t.id);
       // resident start-page tab: pinned first, user icon only, no title, no close
       if (t.home) {
         const ic = document.createElement('span');
@@ -266,6 +269,7 @@
         const cls = document.createElement('span');
         cls.className = 'cls';
         cls.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg>';
+        cls.onpointerdown = (e) => e.stopPropagation(); // 别让「关闭」的按下冒泡成 tab 激活
         cls.onclick = (e) => { e.stopPropagation(); window.tabAPI.close(t.id); };
         d.appendChild(cls);
       }
