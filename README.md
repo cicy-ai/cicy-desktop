@@ -2,17 +2,9 @@
 
 CiCy Desktop is an Electron-based desktop automation worker with a small cluster control plane.
 
-The project now has **two separate CLIs**:
+## CLI — `cicy` / `cicy-desktop`
 
-- `cicy` / `cicy-desktop`: start, stop, inspect, and manage the local desktop/cluster lifecycle
-- `cicy-rpc`: call worker RPC tools such as `ping`, `tools`, `open_window`, and `exec_js`
-
-If you remember the old unified CLI model, that is no longer the current behavior.
-
-## CLI split
-
-### `cicy` / `cicy-desktop`
-Use this for local desktop/cluster management only:
+Manage the local desktop/cluster lifecycle:
 
 ```bash
 cicy start
@@ -31,19 +23,6 @@ cicy-desktop start
 Notes:
 - `npm start` runs the same desktop lifecycle entrypoint
 - `cicy --json` / `cicy -j` is not supported
-- RPC/tool commands moved to `cicy-rpc`
-
-### `cicy-rpc`
-Use this for RPC/tool calls only:
-
-```bash
-cicy-rpc init
-cicy-rpc tools
-cicy-rpc tools open_window
-cicy-rpc ping
-cicy-rpc open_window url=https://example.com
-cicy-rpc --json get_window_info win_id=1
-```
 
 ## Run (end users, no clone)
 
@@ -358,7 +337,6 @@ CICY_NODE=windows cicy-rpc get_window_info win_id=1
 Use the root README as the entrypoint, then go deeper here:
 
 - [CLI split and usage](./skills/cicy-cli/README.md)
-- [RPC CLI details](./packages/cicy-rpc/README.md)
 - [REST API notes](./docs/REST-API.md)
 - [Desktop service skill](./skills/cicy-desktop-service/README.md)
 
