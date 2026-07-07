@@ -1,6 +1,6 @@
 {
   "name": "cicy-desktop",
-  "version": "2.1.237",
+  "version": "2.1.238",
   "description": "CiCy - AI-powered operating system browser",
   "main": "src/main.js",
   "bin": {
@@ -9,10 +9,8 @@
   "scripts": {
     "start": "node ./bin/cicy-desktop",
     "start:master": "node src/master/master-main.js",
-    "format": "prettier --write \"src/**/*.js\" \"tests/**/*.js\"",
-    "format:check": "prettier --check \"src/**/*.js\" \"tests/**/*.js\"",
-    "test": "jest",
-    "test:ls": "node tests/test-ls.js",
+    "format": "prettier --write \"src/**/*.js\"",
+    "format:check": "prettier --check \"src/**/*.js\"",
     "build": "electron-builder --publish never",
     "build:homepage": "node scripts/build-homepage.cjs",
     "prebuild:win": "node scripts/build-homepage.cjs",
@@ -154,13 +152,8 @@
     "electron": "41.0.3"
   },
   "devDependencies": {
-    "@babel/core": "^7.29.0",
-    "@babel/preset-env": "^7.29.0",
-    "axios": "^1.13.5",
     "electron": "41.0.3",
     "electron-builder": "^26.7.0",
-    "jest": "^29.7.0",
-    "prettier": "^3.8.1",
-    "supertest": "^6.3.3"
+    "prettier": "^3.8.1"
   }
 }
