@@ -61,7 +61,7 @@ Outside CN (or once electron is cached) a plain `npx -y cicy-desktop` is enough.
 git clone git@github.com:cicy-ai/cicy-desktop.git
 cd cicy-desktop
 npm install
-cicy-desktop         # or: npm start — launches the app
+npm start
 ```
 
 Config lives in `~/cicy-ai/global.json` (API token, gateway key, node list). The
