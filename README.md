@@ -7,6 +7,18 @@ info — over MCP and HTTP, plus a homepage UI for managing local and remote
 teams. The `cicy-code` sidecar daemon is acquired at runtime (`npx cicy-code` on
 mac/linux, Docker-in-WSL on Windows), not bundled.
 
+## Screenshots
+
+The homepage — your teams (the local sidecar, private-cloud teams, and custom
+remote nodes), each a card you open as a tab:
+
+![CiCy Desktop homepage — team list](assets/my_teams.png)
+
+A team opened as a tab — the agent roster on the left, a live conversation on
+the right:
+
+![CiCy Desktop team workspace](assets/team.png)
+
 ## CLI — `cicy` / `cicy-desktop`
 
 Manage the local desktop/cluster lifecycle:
