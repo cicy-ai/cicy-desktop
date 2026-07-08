@@ -28,11 +28,13 @@ const { t } = require("../i18n"); // 安装/升级日志走 i18n(main 进程按 
 // ── Node runtime bootstrap ───────────────────────────────────────────────────
 // (2026-06): native cicy-code 走 `npx cicy-code`,需要一个**可用**的 Node。但用户
 // 机器可能没 node,或 node 太老(实测 josephs 是 node v13/npx6,老 npx 跑不动)。所以:
-// 系统有 node≥20 就用;没有/太老 → 下载 Node 24 到 ~/cicy-ai/runtime/node(免 sudo,
-// 用户自己拥有);下载也失败 → 提示用户去 nodejs.org 自己装。
+// 系统有 node≥20 就用;没有/太老 → 下载 Node 24 到 ~/.local/node(免 sudo,用户自己
+// 拥有);下载也失败 → 提示用户去 nodejs.org 自己装。老装在 ~/cicy-ai/runtime/node 的
+// 树:ensureNode 首次同盘 rename 迁进 ~/.local/node,迁不动也能被 legacy 搜索路径命中。
 const NODE_VER = process.env.CICY_NODE_VERSION || "v24.18.0";
-const NODE_HOME = path.join(os.homedir(), "cicy-ai", "runtime", "node");
-const NODE_SEARCH = ["/usr/local/bin", "/opt/homebrew/bin", path.join(os.homedir(), ".local", "bin"), path.join(NODE_HOME, "bin")];
+const NODE_HOME = path.join(os.homedir(), ".local", "node");
+const LEGACY_NODE_HOME = path.join(os.homedir(), "cicy-ai", "runtime", "node"); // read-only compat
+const NODE_SEARCH = ["/usr/local/bin", "/opt/homebrew/bin", path.join(os.homedir(), ".local", "bin"), path.join(NODE_HOME, "bin"), path.join(LEGACY_NODE_HOME, "bin")];
 function nodeMajor(bin) {
   try { const m = String(execFileSync(bin, ["-v"], { encoding: "utf8", timeout: 5000 })).match(/v(\d+)\./); return m ? Number(m[1]) : 0; } catch { return 0; }
 }
@@ -60,6 +62,15 @@ async function ensureNode({ emit } = {}) {
     }
     return dir;
   };
+  // Migrate a legacy ~/cicy-ai/runtime/node tree into ~/.local/node — same-fs
+  // rename is instant. Cross-fs (EXDEV) → leave it; the legacy NODE_SEARCH dir
+  // still finds it. New downloads (below) land in ~/.local/node directly.
+  try {
+    if (!fs.existsSync(path.join(NODE_HOME, "bin", "node")) && fs.existsSync(path.join(LEGACY_NODE_HOME, "bin", "node"))) {
+      fs.mkdirSync(path.dirname(NODE_HOME), { recursive: true });
+      fs.renameSync(LEGACY_NODE_HOME, NODE_HOME);
+    }
+  } catch {}
   let dir = findUsableNode();
   if (dir) return adopt(dir);
   const arch = process.arch === "arm64" ? "arm64" : "x64";

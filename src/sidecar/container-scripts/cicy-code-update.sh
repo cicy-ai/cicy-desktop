@@ -30,7 +30,12 @@ pick_registry() {
   fi
 }
 REG="$(pick_registry)"
-RT="$HOME_DIR/cicy-ai/runtime/cicy-code"
+# cicy-code's binary tree now lives under ~/.local/cicy-code/<ver>/, matching
+# cicy-code v2.3.193+ (api/cicy-code-update.sh). CICY_CODE_STORE overrides it.
+# versions.json deliberately STAYS under ~/cicy-ai/runtime — it's the SHARED
+# pointer the container's mihomo store & the Go server also read; only the
+# cicy-code binary tree moved off runtime.
+RT="${CICY_CODE_STORE:-$HOME_DIR/.local/cicy-code}"
 LINK="$HOME_DIR/.local/bin/cicy-code"
 VERSIONS="$HOME_DIR/cicy-ai/runtime/versions.json"
 SVCTL="supervisorctl -c /etc/supervisor/supervisord.conf"
