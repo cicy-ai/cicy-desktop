@@ -37,8 +37,27 @@ function archStr() { return process.arch === "arm64" ? "arm64" : "amd64"; }
 // OSS mirror of cicy-ai/cicy-mihomo releases (see mihomo/<ver>/mihomo-<os>-<arch>).
 function assetUrl() { return process.env.CICY_MIHOMO_RELEASE_URL || `${OSS_BASE}/mihomo/${VER}/mihomo-${osStr()}-${archStr()}${EXT}`; }
 
-const RT_DIR = path.join(os.homedir(), "cicy-ai", "runtime", "mihomo", VER.replace(/^v/, ""));
-function binPath() { return path.join(RT_DIR, "mihomo" + EXT); }
+// Store under ~/.local/bin like cicy-code / cicy-mihomo — never ~/cicy-ai/runtime
+// anymore. Old runtime-store copies still RESOLVE (read-only compat) so an
+// existing install isn't re-downloaded; ensureBinary migrates them in.
+const VERD = VER.replace(/^v/, "");
+const LOCAL_BIN = path.join(os.homedir(), ".local", "bin");
+const NEW_BIN = path.join(LOCAL_BIN, `mihomo-${VERD}${EXT}`);
+const LINK = path.join(LOCAL_BIN, `mihomo${EXT}`);
+const LEGACY_BIN = path.join(os.homedir(), "cicy-ai", "runtime", "mihomo", VERD, "mihomo" + EXT);
+function valid(p) { try { return fs.statSync(p).size > 1_000_000; } catch { return false; } }
+// resolve: ~/.local/bin versioned file first, legacy runtime store as fallback.
+function binPath() { return valid(NEW_BIN) ? NEW_BIN : valid(LEGACY_BIN) ? LEGACY_BIN : NEW_BIN; }
+// ~/.local/bin/mihomo → versioned file. We exec via the absolute versioned path,
+// so this symlink is only a PATH convenience — create it only when absent, never
+// clobber one that runtime.js / cicy-mihomo already points at their version.
+function ensureLink() {
+  try {
+    if (!valid(NEW_BIN) || fs.existsSync(LINK)) return;
+    if (IS_WIN) { fs.copyFileSync(NEW_BIN, LINK); return; }
+    fs.symlinkSync(NEW_BIN, LINK);
+  } catch {}
+}
 const HOST_CONFIG = path.join(os.homedir(), "cicy-ai", "db", "mihomo-host.yaml");
 // Log lives under ~/logs, NOT db/ — db/ holds data + config only (config below
 // stays in db/ as mihomo-host.yaml; this is just the runtime log).
@@ -50,7 +69,7 @@ const PID_FILE = path.join(os.homedir(), "cicy-ai", "db", "mihomo-host.pid");
 const HOST_MIXED = Number(process.env.CICY_HOST_MIHOMO_MIXED || 9011);
 const HOST_CTRL = Number(process.env.CICY_HOST_MIHOMO_CTRL || 19011);
 
-function binPresent() { try { return fs.statSync(binPath()).size > 1_000_000; } catch { return false; } }
+function binPresent() { return valid(NEW_BIN) || valid(LEGACY_BIN); }
 
 function download(url, dest, redirects = 0) {
   return new Promise((resolve, reject) => {
@@ -70,15 +89,22 @@ function download(url, dest, redirects = 0) {
   });
 }
 
-// Pull the mihomo binary from OSS into the runtime store (idempotent).
+// Ensure the mihomo binary is in ~/.local/bin/mihomo-<ver> (idempotent).
+// Already there → done. Only a legacy runtime copy → migrate it (no network).
+// Nothing → pull from OSS.
 async function ensureBinary({ emit } = {}) {
-  if (binPresent()) return binPath();
-  fs.mkdirSync(RT_DIR, { recursive: true });
+  if (valid(NEW_BIN)) { ensureLink(); return NEW_BIN; }
+  fs.mkdirSync(LOCAL_BIN, { recursive: true });
+  if (valid(LEGACY_BIN)) {
+    try { fs.copyFileSync(LEGACY_BIN, NEW_BIN); if (!IS_WIN) fs.chmodSync(NEW_BIN, 0o755); } catch {}
+    if (valid(NEW_BIN)) { ensureLink(); return NEW_BIN; }
+  }
   emit && emit({ phase: "chrome-proxy", status: "running", message: tt("downloading") });
-  await download(assetUrl(), binPath());
-  if (!IS_WIN) { try { fs.chmodSync(binPath(), 0o755); } catch {} }
-  if (!binPresent()) throw new Error(tt("verifyFailed"));
-  return binPath();
+  await download(assetUrl(), NEW_BIN);
+  if (!IS_WIN) { try { fs.chmodSync(NEW_BIN, 0o755); } catch {} }
+  if (!valid(NEW_BIN)) throw new Error(tt("verifyFailed"));
+  ensureLink();
+  return NEW_BIN;
 }
 
 // Build the HOST config from the container's mihomo.yaml: keep only what Chrome

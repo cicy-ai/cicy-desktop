@@ -1,36 +1,45 @@
 // Copyright 2026 CiCy AI
 // SPDX-License-Identifier: Apache-2.0
 
-// Runtime Bundle v1 — versioned component store for everything cicy-desktop
-// runs locally (cicy-code, mihomo).
+// Runtime Bundle v2 — versioned component store for everything cicy-desktop
+// runs locally (cicy-code, mihomo). Everything installs under ~/.local/bin,
+// matching cicy-code / cicy-mihomo: the store is on PATH, never in a private
+// ~/cicy-ai/runtime tree anymore.
 //
-// Layout:
-//   ~/cicy-ai/runtime/
-//     versions.json                  { "<comp>": { "current": "<ver>" }, ... }
-//     cicy-code/<ver>/cicy-code(.exe)
-//     mihomo/<ver>/mihomo(.exe)
+// Layout (writes ONLY here):
+//   ~/.local/bin/<comp>-<ver>          versioned binary (e.g. mihomo-1.10.4)
+//   ~/.local/bin/<comp>  ->  <comp>-<ver>   symlink we swap on switch (atomic
+//                                            relink; win32 copies instead —
+//                                            symlink needs admin there)
+//   ~/cicy-ai/db/local-bin-versions.json    { "<comp>": { "current", "previous" } }
 //
-// Sourcing order:
+// Resolution order (READS, with backward compat):
+//   ~/.local/bin/<comp>-<current>  →  ~/.local/bin/<comp> symlink  →
+//   legacy ~/cicy-ai/runtime/<comp>/<ver>/<bin>  (old installs still resolve
+//   until their next upgrade migrates them into ~/.local/bin).
+//
+// Sourcing order for the binary itself:
 //   1. first run: copy out of cicy-desktop's own node_modules — the platform
 //      subpackages are optionalDependencies, so `npm i -g cicy-desktop`
-//      already delivered the right binaries. First start = ZERO network,
-// ZERO npx.
-//   2. upgrades: `npm pack <pkg>@<ver>` (npmmirror default) → extract into
-//      runtime/<comp>/<ver>/ → caller verifies health → switchCurrent().
-//      The previous version stays on disk for instant rollback.
-//
-// The `current` pointer lives in versions.json (NOT a symlink — Windows
-// junction/symlink permissions are a minefield; a JSON pointer is identical
-// on every platform).
+//      already delivered the right binaries. First start = ZERO network.
+//   2. migrate: if only a legacy ~/cicy-ai/runtime binary exists, copy it into
+//      ~/.local/bin (no network) so the new layout takes over.
+//   3. upgrades: `npm pack <pkg>@<ver>` (npmmirror default) → extract → install
+//      into ~/.local/bin → caller verifies health → switchCurrent(). The
+//      previous versioned file stays on disk for instant rollback.
 const { execFile } = require("child_process");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-const RUNTIME_DIR = path.join(os.homedir(), "cicy-ai", "runtime");
-const VERSIONS_JSON = path.join(RUNTIME_DIR, "versions.json");
+const LOCAL_BIN = path.join(os.homedir(), ".local", "bin");
+const VERSIONS_JSON = path.join(os.homedir(), "cicy-ai", "db", "local-bin-versions.json");
+// read-only backward-compat fallbacks (never written anymore)
+const LEGACY_DIR = path.join(os.homedir(), "cicy-ai", "runtime");
+const LEGACY_VERSIONS = path.join(LEGACY_DIR, "versions.json");
 const REGISTRY = process.env.CICY_NPM_REGISTRY || "https://registry.npmmirror.com";
 const IS_WIN = process.platform === "win32";
+const EXT = IS_WIN ? ".exe" : "";
 
 // npm subpackage platform suffix. NOTE: Windows is "windows" not "win32" —
 // npm's spam filter 403s NEW package names containing 'win32', so EVERY cicy
@@ -48,21 +57,41 @@ const COMPONENTS = {
   "cicy-code": {
     kind: "bin",
     pkg: () => `cicy-code-${plat()}`,
-    bin: () => (IS_WIN ? "cicy-code.exe" : "cicy-code"),
+    bin: () => `cicy-code${EXT}`,
   },
   "mihomo": {
     kind: "bin",
     pkg: () => `cicy-mihomo-${plat()}`,
-    bin: () => (IS_WIN ? "mihomo.exe" : "mihomo"),
+    bin: () => `mihomo${EXT}`,
   },
 };
 
+// ~/.local/bin/<comp>-<ver>[.exe] — the versioned binary we own.
+function binFile(comp, ver) {
+  return path.join(LOCAL_BIN, `${comp}-${ver}${EXT}`);
+}
+// ~/.local/bin/<comp>[.exe] — the PATH entry (symlink, or copy on win32).
+function linkPath(comp) {
+  return path.join(LOCAL_BIN, `${comp}${EXT}`);
+}
+// legacy ~/cicy-ai/runtime/<comp>/<ver>/<bin> — read-only compat.
+function legacyBinPath(comp, ver) {
+  const c = COMPONENTS[comp];
+  return c ? path.join(LEGACY_DIR, comp, ver, c.bin()) : null;
+}
+
 function readVersions() {
-  try { return JSON.parse(fs.readFileSync(VERSIONS_JSON, "utf8")); } catch { return {}; }
+  for (const p of [VERSIONS_JSON, LEGACY_VERSIONS]) {
+    try {
+      const v = JSON.parse(fs.readFileSync(p, "utf8"));
+      if (v && Object.keys(v).length) return v;
+    } catch {}
+  }
+  return {};
 }
 
 function writeVersions(updater) {
-  fs.mkdirSync(RUNTIME_DIR, { recursive: true });
+  fs.mkdirSync(path.dirname(VERSIONS_JSON), { recursive: true });
   const next = updater(readVersions()) || {};
   const tmp = VERSIONS_JSON + ".tmp";
   fs.writeFileSync(tmp, JSON.stringify(next, null, 2));
@@ -74,51 +103,87 @@ function currentVersion(comp) {
   return readVersions()[comp]?.current || null;
 }
 
-function versionDir(comp, ver) {
-  return path.join(RUNTIME_DIR, comp, ver);
-}
-
 // Absolute path of the component's current executable. null when not installed.
+// ~/.local/bin versioned file → symlink → legacy runtime store (compat).
 function binPath(comp) {
   const c = COMPONENTS[comp];
+  if (!c) return null;
   const ver = currentVersion(comp);
-  if (!c || !ver) return null;
-  const p = path.join(versionDir(comp, ver), c.bin());
-  return fs.existsSync(p) ? p : null;
+  if (ver) {
+    const vf = binFile(comp, ver);
+    if (fs.existsSync(vf)) return vf;
+  }
+  const lp = linkPath(comp);
+  if (fs.existsSync(lp)) return lp;
+  if (ver) {
+    const legacy = legacyBinPath(comp, ver);
+    if (legacy && fs.existsSync(legacy)) return legacy; // old install, pre-migration
+  }
+  return null;
 }
 
-// Install a payload directory as <comp>@<ver> and return the version dir.
-// Payload = the npm package dir (or node_modules/<pkg>). Atomic-ish: extract
-// to .staging then rename.
-function installPayload(comp, ver, payloadDir) {
-  const c = COMPONENTS[comp];
-  const dst = versionDir(comp, ver);
-  if (fs.existsSync(dst)) return dst; // already installed — idempotent
+// Copy a single executable file into ~/.local/bin/<comp>-<ver>. Atomic-ish
+// (stage under a temp name, then rename). Idempotent.
+function installFromFile(comp, ver, srcFile) {
+  const dst = binFile(comp, ver);
+  if (fs.existsSync(dst)) return dst;
+  if (!fs.existsSync(srcFile)) throw new Error(`${comp}: source binary missing (${srcFile})`);
+  fs.mkdirSync(LOCAL_BIN, { recursive: true });
   const staging = dst + ".staging";
-  fs.rmSync(staging, { recursive: true, force: true });
-  fs.mkdirSync(staging, { recursive: true });
-  const src = path.join(payloadDir, c.bin());
-  if (!fs.existsSync(src)) { fs.rmSync(staging, { recursive: true, force: true }); throw new Error(`${comp}: ${c.bin()} missing in package`); }
-  fs.copyFileSync(src, path.join(staging, c.bin()));
-  if (!IS_WIN) fs.chmodSync(path.join(staging, c.bin()), 0o755);
+  try { fs.rmSync(staging, { force: true }); } catch {}
+  fs.copyFileSync(srcFile, staging);
+  if (!IS_WIN) fs.chmodSync(staging, 0o755);
   fs.renameSync(staging, dst);
   return dst;
 }
 
-function switchCurrent(comp, ver) {
-  writeVersions((v) => { v[comp] = { ...(v[comp] || {}), current: ver, switched_at: new Date().toISOString() }; return v; });
+// Install a payload directory (the npm package dir) as <comp>@<ver>.
+function installPayload(comp, ver, payloadDir) {
+  const c = COMPONENTS[comp];
+  return installFromFile(comp, ver, path.join(payloadDir, c.bin()));
 }
 
-// Keep current + previous; GC everything older.
+// Point ~/.local/bin/<comp> at <comp>-<ver>. Symlink on posix (atomic
+// tmp+rename), copy on win32 (symlink there needs admin — same call the
+// cicy-mihomo/cicy-code installers make).
+function relink(comp, ver) {
+  const target = binFile(comp, ver);
+  if (!fs.existsSync(target)) return;
+  const link = linkPath(comp);
+  fs.mkdirSync(LOCAL_BIN, { recursive: true });
+  if (IS_WIN) {
+    try { fs.rmSync(link, { force: true }); } catch {}
+    try { fs.copyFileSync(target, link); } catch {}
+    return;
+  }
+  const tmp = `${link}.tmp-${process.pid}`;
+  try {
+    try { fs.rmSync(tmp, { force: true }); } catch {}
+    fs.symlinkSync(target, tmp);
+    fs.renameSync(tmp, link); // atomically replaces the old symlink
+  } catch {
+    try { fs.rmSync(tmp, { force: true }); } catch {}
+  }
+}
+
+function switchCurrent(comp, ver) {
+  writeVersions((v) => { v[comp] = { ...(v[comp] || {}), current: ver, switched_at: new Date().toISOString() }; return v; });
+  relink(comp, ver);
+}
+
+// Keep current + previous versioned files; GC everything older in ~/.local/bin.
 function gc(comp) {
   const cur = currentVersion(comp);
-  const dir = path.join(RUNTIME_DIR, comp);
-  let entries = [];
-  try { entries = fs.readdirSync(dir).filter((d) => !d.endsWith(".staging")); } catch { return; }
   const prev = readVersions()[comp]?.previous;
+  const prefix = `${comp}-`;
+  let entries = [];
+  try { entries = fs.readdirSync(LOCAL_BIN); } catch { return; }
   for (const e of entries) {
-    if (e !== cur && e !== prev) {
-      try { fs.rmSync(path.join(dir, e), { recursive: true, force: true }); } catch {}
+    if (!e.startsWith(prefix)) continue; // skips the bare "<comp>" symlink too
+    if (e.endsWith(".staging") || e.includes(".tmp-")) { try { fs.rmSync(path.join(LOCAL_BIN, e), { force: true }); } catch {} continue; }
+    const ver = e.slice(prefix.length).replace(/\.exe$/, "");
+    if (ver !== cur && ver !== prev) {
+      try { fs.rmSync(path.join(LOCAL_BIN, e), { force: true }); } catch {}
     }
   }
 }
@@ -139,18 +204,33 @@ function bundledPkgDir(comp) {
   return null;
 }
 
-// First-run seeding: make sure SOME version of `comp` is installed + current,
-// sourcing from the bundled subpackage. Never touches the network.
+// First-run seeding / migration: make sure the current `comp` binary lives in
+// ~/.local/bin and its symlink is current. Never touches the network.
+//   • already in ~/.local/bin → just fix the symlink.
+//   • only a legacy ~/cicy-ai/runtime copy → migrate it into ~/.local/bin.
+//   • nothing → copy from the bundled subpackage.
 function ensureFromBundle(comp) {
   const c = COMPONENTS[comp];
   if (!c) return null;
-  const existing = binPath(comp);
-  if (existing) return existing;
+  const cur = currentVersion(comp);
+
+  if (cur && fs.existsSync(binFile(comp, cur))) { relink(comp, cur); return binFile(comp, cur); }
+
+  // migrate a legacy runtime-store install into ~/.local/bin (no network)
+  if (cur) {
+    const legacy = legacyBinPath(comp, cur);
+    if (legacy && fs.existsSync(legacy)) {
+      try { installFromFile(comp, cur, legacy); switchCurrent(comp, cur); return binPath(comp); } catch {}
+    }
+  }
+
+  // seed from the bundled optionalDependency subpackage
   const pkgDir = bundledPkgDir(comp);
-  if (!pkgDir) return null; // not bundled (e.g. dev tree) — caller may npm-install
+  if (!pkgDir) return binPath(comp); // dev tree / not bundled — may still resolve via legacy or symlink
   const ver = JSON.parse(fs.readFileSync(path.join(pkgDir, "package.json"), "utf8")).version;
   installPayload(comp, ver, pkgDir);
-  if (!currentVersion(comp)) switchCurrent(comp, ver);
+  if (!currentVersion(comp) || !fs.existsSync(binFile(comp, currentVersion(comp)))) switchCurrent(comp, ver);
+  else relink(comp, currentVersion(comp));
   return binPath(comp);
 }
 
@@ -171,14 +251,14 @@ async function checkUpdate(comp) {
 }
 
 // Download <pkg>@<ver> via `npm pack` (pacote verifies sha512 integrity),
-// extract, install as a runtime version. Does NOT switch `current` — the
-// caller health-checks first, then calls switchCurrent()/rollback.
+// extract, install into ~/.local/bin. Does NOT switch `current` — the caller
+// health-checks first, then calls switchCurrent()/rollback.
 async function fetchVersion(comp, ver, { emit } = {}) {
   const c = COMPONENTS[comp];
   const e = emit || (() => {});
-  if (fs.existsSync(versionDir(comp, ver))) {
+  if (fs.existsSync(binFile(comp, ver))) {
     e({ phase: "download", status: "skip", message: `${comp} ${ver} 已在本地，跳过下载` });
-    return versionDir(comp, ver);
+    return binFile(comp, ver);
   }
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `cicy-rt-${comp}-`));
   try {
@@ -189,9 +269,9 @@ async function fetchVersion(comp, ver, { emit } = {}) {
       execFile("tar", ["-xzf", tgz, "-C", tmp], { windowsHide: true, timeout: 120000 },
         (err) => (err ? reject(err) : resolve()));
     });
-    const dir = installPayload(comp, ver, path.join(tmp, "package"));
+    const file = installPayload(comp, ver, path.join(tmp, "package"));
     e({ phase: "download", status: "done", message: `${comp} ${ver} 就绪` });
-    return dir;
+    return file;
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -220,7 +300,7 @@ async function upgrade(comp, { emit, stop, start, verify } = {}) {
   } catch (err) {
     // rollback: pointer back, restart old version
     e({ phase: "swap", status: "error", message: `新版本异常（${err.message}），回滚到 ${from}` });
-    switchCurrent(comp, from);
+    if (from) switchCurrent(comp, from);
     if (start) { try { await start(); } catch {} }
     return { ok: false, from, to: latest, rolledBack: true, error: err.message };
   }
@@ -230,7 +310,7 @@ async function upgrade(comp, { emit, stop, start, verify } = {}) {
 }
 
 module.exports = {
-  RUNTIME_DIR, COMPONENTS,
-  binPath, currentVersion, ensureFromBundle, fetchVersion, switchCurrent,
+  LOCAL_BIN, COMPONENTS,
+  binPath, binFile, linkPath, currentVersion, ensureFromBundle, fetchVersion, switchCurrent,
   checkUpdate, upgrade, gc, readVersions,
 };

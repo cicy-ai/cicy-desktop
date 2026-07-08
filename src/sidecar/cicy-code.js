@@ -188,7 +188,10 @@ async function ensureEnv({ emit } = {}) {
   let mihomoBin = null;
   try {
     const runtime = require("./runtime");
-    mihomoBin = runtime.binPath("mihomo");
+    // ensureFromBundle migrates a legacy ~/cicy-ai/runtime mihomo into ~/.local/bin
+    // (no network) and fixes the symlink; falls through to the npm-pack path below
+    // when nothing is bundled/installed yet.
+    mihomoBin = runtime.ensureFromBundle("mihomo") || runtime.binPath("mihomo");
     if (!mihomoBin) {
       const prevPath = process.env.PATH;
       process.env.PATH = `${nodeBinDir}:${BREW_DIRS.join(":")}:${process.env.PATH || ""}`; // 让 runtime 的 execFile("npm") 命中 node24
@@ -203,7 +206,9 @@ async function ensureEnv({ emit } = {}) {
       } finally { process.env.PATH = prevPath; }
     }
     if (mihomoBin) {
-      linkBinsToDefaultPath(path.dirname(mihomoBin), ["mihomo"], e); // ~/.local/bin/mihomo → runtime
+      // runtime.js already owns ~/.local/bin/mihomo (symlink → mihomo-<ver>); no
+      // extra linking here (mihomoBin is itself under ~/.local/bin now, so the old
+      // linkBinsToDefaultPath call would have symlinked it to itself).
       e({ phase: "deps", status: "done", message: t("sidecar.mihomoReady", { bin: mihomoBin }) });
     }
   } catch (err) {
@@ -235,10 +240,17 @@ function probeExisting(port = DEFAULT_PORT, timeoutMs = 500) {
 
 let child = null;
 
-// 「局域网访问」开关持久化: 存 ~/cicy-ai/runtime/desktop-flags.json 的 public 字段。
+// 「局域网访问」开关持久化: 存 ~/cicy-ai/db/desktop-flags.json 的 public 字段。
 // start() 读它决定 npx cicy-code 加不加 --public。renderer 通过 sidecar:getPublic/setPublic 读写。
-const FLAGS_FILE = path.join(os.homedir(), "cicy-ai", "runtime", "desktop-flags.json");
-function readFlags() { try { return JSON.parse(fs.readFileSync(FLAGS_FILE, "utf8")) || {}; } catch { return {}; } }
+// 不再放 ~/cicy-ai/runtime;老位置只读兜底,首次写入即迁移(public/cft token 不丢)。
+const FLAGS_FILE = path.join(os.homedir(), "cicy-ai", "db", "desktop-flags.json");
+const LEGACY_FLAGS_FILE = path.join(os.homedir(), "cicy-ai", "runtime", "desktop-flags.json");
+function readFlags() {
+  for (const p of [FLAGS_FILE, LEGACY_FLAGS_FILE]) {
+    try { const v = JSON.parse(fs.readFileSync(p, "utf8")); if (v && typeof v === "object") return v; } catch {}
+  }
+  return {};
+}
 function isPublic() { return !!readFlags().public; }
 function setPublicFlag(on) {
   const f = readFlags(); f.public = !!on;
