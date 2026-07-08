@@ -96,7 +96,11 @@ async function ensureBinary({ emit } = {}) {
   if (valid(NEW_BIN)) { ensureLink(); return NEW_BIN; }
   fs.mkdirSync(LOCAL_BIN, { recursive: true });
   if (valid(LEGACY_BIN)) {
-    try { fs.copyFileSync(LEGACY_BIN, NEW_BIN); if (!IS_WIN) fs.chmodSync(NEW_BIN, 0o755); } catch {}
+    // atomic: stage then rename, so an interrupted copy never leaves a partial
+    // NEW_BIN that valid() would later mistake for a good binary.
+    const stg = NEW_BIN + ".mig";
+    try { fs.copyFileSync(LEGACY_BIN, stg); if (!IS_WIN) fs.chmodSync(stg, 0o755); fs.renameSync(stg, NEW_BIN); }
+    catch { try { fs.rmSync(stg, { force: true }); } catch {} }
     if (valid(NEW_BIN)) { ensureLink(); return NEW_BIN; }
   }
   emit && emit({ phase: "chrome-proxy", status: "running", message: tt("downloading") });
