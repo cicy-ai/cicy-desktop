@@ -269,6 +269,16 @@ function setPublicFlag(on) {
   return f.public;
 }
 
+// 「容器内使用 Docker」开关(desktop-flags.json 的 dood 字段 = Docker-outside-of-Docker)。
+// 开启后 runContainer 把宿主 dockerd 的 /var/run/docker.sock 挂进容器,并把 docker CLI 装进
+// 容器持久卷,容器内 agent 就能跑 docker。只影响 Windows/WSL(+mac colima)容器路径。
+function isDood() { return !!readFlags().dood; }
+function setDood(on) {
+  const f = readFlags(); f.dood = !!on;
+  try { fs.mkdirSync(path.dirname(FLAGS_FILE), { recursive: true }); fs.writeFileSync(FLAGS_FILE, JSON.stringify(f, null, 2)); } catch (e) { console.warn(`[cicy-code-sidecar] setDood write failed: ${e.message}`); }
+  return f.dood;
+}
+
 // 「Cloudflare Tunnel」配置持久化(同 desktop-flags.json 的 cft 字段):
 // { enabled, token, host }。enabled 且 token 非空时,start() 注入 CICY_CFT_TOKEN/
 // CICY_CFT_HOST 环境变量 —— cicy-code 据此跑一条命名隧道(固定域名)。host 是对外
@@ -565,4 +575,4 @@ async function update({ logPath, port = DEFAULT_PORT, emit } = {}) {
   }
 }
 
-module.exports = { start, stop, restart, update, probeExisting, clearNpxCache, isUpdating, isBusy, ensureEnv, ensureNode, isPublic, setPublicFlag, getCft, setCft, cftEnv };
+module.exports = { start, stop, restart, update, probeExisting, clearNpxCache, isUpdating, isBusy, ensureEnv, ensureNode, isPublic, setPublicFlag, isDood, setDood, getCft, setCft, cftEnv };

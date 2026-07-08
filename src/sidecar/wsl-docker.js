@@ -560,6 +560,55 @@ async function allDrivesMountArg() {
   } catch (e) { log.warn(`[wsl-docker] enumerate drives failed: ${e.message}`); return ""; }
 }
 
+// Docker-outside-of-Docker: 把 WSL 里 dockerd 的 socket 挂进容器,容器内 agent 就能直接跑
+// docker —— 复用 WSL 那个 dockerd,起的是**兄弟容器**(非嵌套),所以兄弟容器里 `-v` 的路径
+// 是 WSL 宿主视角、不是 cicy-code 容器内路径。socket 通常 root:docker(或 root:root)660,
+// 给容器进程 `--group-add <socket 的 gid>` 让非 root 的 cicy 用户也能访问。
+// socket 不在(dockerd 没起)→ 返回 ""(best-effort,不挡容器启动)。生效前提:容器镜像自带
+// docker CLI。挂载在 `docker run` 时定死,已在跑的容器要 recreate 才带上。
+async function dockerSockMountArg() {
+  const SOCK = "/var/run/docker.sock";
+  try { await wslRun(`test -S ${SOCK}`, { timeout: 8000 }); } catch { return ""; } // socket 不存在
+  let groupAdd = "";
+  try {
+    const { stdout } = await wslRun(`stat -c '%g' ${SOCK} 2>/dev/null`, { timeout: 8000 });
+    const gid = String(stdout || "").trim();
+    if (/^\d+$/.test(gid)) groupAdd = ` --group-add ${gid}`;
+  } catch {}
+  return `-v ${SOCK}:${SOCK}${groupAdd}`;
+}
+
+// 把 docker CLI(只客户端,不是 dockerd)装进容器的**持久卷** ~/.local/bin/docker —— 配合挂
+// 进来的 docker.sock,容器内 agent 就能直接跑 docker。装在卷里 → recreate 不丢。幂等:已装好
+// 就跳过。静态二进制:CN 先走 aliyun 镜像,兜底 download.docker.com。逐行进度流到抽屉。
+async function installDockerCli(container, { emit } = {}) {
+  const e = (ev) => { try { emit && emit(ev); } catch {} };
+  const sh = [
+    "set -e",
+    'BIN="$HOME/.local/bin/docker"',
+    'if [ -x "$BIN" ] && "$BIN" --version >/dev/null 2>&1; then echo "docker CLI 已安装:$($BIN --version)"; exit 0; fi',
+    'mkdir -p "$HOME/.local/bin"',
+    'case "$(uname -m)" in aarch64|arm64) A=aarch64;; *) A=x86_64;; esac',
+    'VER="${DOCKER_CLI_VER:-27.5.1}"',
+    "ok=0",
+    'for U in "https://mirrors.aliyun.com/docker-ce/linux/static/stable/$A/docker-$VER.tgz" "https://download.docker.com/linux/static/stable/$A/docker-$VER.tgz"; do',
+    '  echo "下载 docker CLI:$U"',
+    '  if curl -fL --retry 2 --connect-timeout 10 -o /tmp/dcli.tgz "$U"; then ok=1; break; fi',
+    '  echo "  该源失败,换下一个…"',
+    "done",
+    '[ "$ok" = 1 ] || { echo "所有下载源都失败"; exit 1; }',
+    'echo "解压安装…"',
+    "tar -xzf /tmp/dcli.tgz -C /tmp docker/docker",
+    'install -m 0755 /tmp/docker/docker "$BIN"',
+    "rm -rf /tmp/docker /tmp/dcli.tgz",
+    'echo "完成:$("$BIN" --version)"',
+  ].join("\n");
+  const b64 = Buffer.from(sh, "utf8").toString("base64");
+  e({ phase: "docker-cli", status: "running", message: "安装容器内 docker CLI…" });
+  await wslRunStream(`echo ${b64} | base64 -d | docker exec -i ${container} bash -s`, { emit, phase: "docker-cli", timeout: 300000 });
+  e({ phase: "docker-cli", status: "done", message: "容器内 docker CLI 就绪" });
+}
+
 // extraPorts → additional `-p 127.0.0.1:<p>:<p>` mappings (host=container, loopback
 // only). For container-internal agent services the user wants reachable from
 // Windows. Each adds one docker-proxy, so keep the list small. 8008/主端口自动排除。
@@ -575,7 +624,7 @@ function publishArgs(port, extraPorts = []) {
   return args;
 }
 
-async function runContainer({ port = 8008, container = "cicy-code-docker", volume = "cicy-team-8008", env = {}, extraPorts = [], emit } = {}) {
+async function runContainer({ port = 8008, container = "cicy-code-docker", volume = "cicy-team-8008", env = {}, extraPorts = [], dockerSock = false, emit } = {}) {
   // 每次容器"启动"(含已在跑被 adopt)都确保桌面快捷方式存在 —— 不存在就建,坏了就修。
   if (await probeHealth(port)) { ensureDesktopShortcut(volume, port).catch(() => {}); return { adopted: true }; }
   // Replace any stale same-named container.
@@ -599,7 +648,12 @@ async function runContainer({ port = 8008, container = "cicy-code-docker", volum
   // 已删——docker 默认每端口起一个 userland-proxy 进程 → 2000 进程,docker run 卡死/吃内存/
   // 偶发失败(实测)。容器内 agent 服务需要从 Windows 直达时再按需单独暴露。
   const drivesArg = await allDrivesMountArg(); // 动态:有几个盘挂几个
-  const cmd = `docker run -d --name ${container} --restart unless-stopped --dns 223.5.5.5 --dns 8.8.8.8 ${publishArgs(port, extraPorts)} -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${projectsMountArg()} ${drivesArg} ${envArgs} ${IMAGE}`;
+  // DooD:开关开时挂 WSL docker.sock。跟 cftEnv 一样内部读 flag(与显式 opt 取或),
+  // 这样任何 recreate 调用方式(带不带 appOpts)都能生效。
+  let doodOn = dockerSock;
+  if (!doodOn) { try { doodOn = require("./cicy-code").isDood(); } catch {} }
+  const sockArg = doodOn ? await dockerSockMountArg() : "";
+  const cmd = `docker run -d --name ${container} --restart unless-stopped --dns 223.5.5.5 --dns 8.8.8.8 ${publishArgs(port, extraPorts)} -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${projectsMountArg()} ${drivesArg} ${sockArg} ${envArgs} ${IMAGE}`;
   emit && emit({ phase: "container", status: "running", message: `$ ${cmd.length > 220 ? cmd.slice(0, 220) + " …" : cmd}` });
   await wslRun(cmd, { timeout: 60000 }); // 失败时 err.stderr 带 docker 真错误 → _bootstrap 的 errTail 显示
   ensureDesktopShortcut(volume, port).catch(() => {});
@@ -764,7 +818,7 @@ async function bootstrap(opts = {}) {
 // 注意: 默认容器/卷名保持 cicy-team / cicy-code-docker(回退实测"现在不行了"的改动)。
 // live 路径(docker:app-bootstrap)始终传显式 APP_*(cicy-team-8008)名,不靠这里的默认;
 // 改默认会让既有 cicy-team 卷的装机对不上 → 退回原值。
-async function _bootstrap({ onProgress, port = 8008, container = "cicy-code-docker", volume = "cicy-team", env = {}, extraPorts = [] } = {}) {
+async function _bootstrap({ onProgress, port = 8008, container = "cicy-code-docker", volume = "cicy-team", env = {}, extraPorts = [], dockerSock = false } = {}) {
   const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
 
   // Structured, PERSISTED trace of the whole run (electron-log → main.log) so a
@@ -875,7 +929,7 @@ async function _bootstrap({ onProgress, port = 8008, container = "cicy-code-dock
   begin("run-container");
   if (!(await probeHealth(port))) {
     emit({ phase: "container", status: "running", message: "启动 cicy-code 服务…" });
-    try { await runContainer({ port, container, volume, env, extraPorts, emit }); }
+    try { await runContainer({ port, container, volume, env, extraPorts, dockerSock, emit }); }
     catch (e) { fail("container_start_failed", e.message); emit({ phase: "container", status: "error", message: `服务启动失败：${e.message}（点重试）${errTail(e)}` }); finish(false, "container_start_failed"); return { ok: false, reason: "container_start_failed" }; }
     done();
   } else done(true);
@@ -1028,14 +1082,14 @@ async function dockerRestart({ container = "cicy-code-docker-8008" } = {}) {
 // 重建容器:docker rm -f 旧容器 + docker run 新容器(用新 env,如新的 docker team 网关
 // key)。**保留 volume**(数据/api_token/deviceId 不丢),只是换掉容器本身 + env。
 // 破坏性(短暂中断 + 换 key)→ 调用方要 confirm。
-async function recreate({ onProgress, port = 8008, container = "cicy-code-docker-8008", volume = "cicy-team-8008", env = {}, extraPorts = [] } = {}) {
+async function recreate({ onProgress, port = 8008, container = "cicy-code-docker-8008", volume = "cicy-team-8008", env = {}, extraPorts = [], dockerSock = false } = {}) {
   const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
   // 重建 = 用最新镜像重建。OSS 有更新版先刷新(非破坏性,不删发行版/volume),再 rm + run。
   try { await ensureFreshImage({ emit }); } catch (e) { emit({ phase: "image", status: "running", message: `镜像刷新跳过(${e.message}),用现有镜像重建` }); }
   // 强删占用该端口的**任何**容器(含老名字 cicy-code-docker)+ 目标容器 —— 否则
   // runContainer 开头的 probeHealth 看到旧容器还健康会 adopt 它、不重建,key 就换不了。
   try { await wslRun(`docker ps -aq --filter publish=${port} | xargs -r docker rm -f 2>/dev/null; docker rm -f ${container} 2>/dev/null; true`, { timeout: 30000 }); } catch {}
-  const r = await runContainer({ port, container, volume, env, extraPorts, emit });
+  const r = await runContainer({ port, container, volume, env, extraPorts, dockerSock, emit });
   try { await ensureDesktopShortcut(volume, port); } catch {}
   // 等 :8008 真正起来再返回——否则 docker run 一返回卡片就探测「没运行」,显示「启动」让
   // 用户再点一下(实测:端口保存后重建,drawer 关了还要手动点启动)。
@@ -1064,7 +1118,7 @@ async function upgrade({ onProgress, port = 8008, container = "cicy-code-docker"
   try { await stop({ container }); } catch {}
   try { await unregisterDistro(); } catch {}
   // Reuse the robust one-shot install flow (download → import → dockerd → run).
-  return await _bootstrap({ onProgress, port, container, volume, env });
+  return await _bootstrap({ onProgress, port, container, volume, env, dockerSock });
 }
 
 // 容器里有没有注入网关 key(reconcile 自愈用):printenv 看 CICY_AI_GATEWAY_LLM_API_KEY。
@@ -1082,5 +1136,5 @@ async function readMihomoConfig(container = "cicy-code-docker-8008") {
 module.exports = {
   bootstrap, status, restart, stop, dockerRestart, recreate, update, upgrade, runContainer, readContainerToken,
   distroInstalled, dockerInstalled, dockerEngineUp, imagePresent, probeHealth, wslRun, hasGatewayKey,
-  readMihomoConfig, repairWsl, lxssWedged,
+  readMihomoConfig, repairWsl, lxssWedged, installDockerCli,
 };

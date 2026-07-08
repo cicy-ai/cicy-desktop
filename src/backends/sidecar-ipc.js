@@ -293,7 +293,7 @@ function register({ sidecarLogPath } = {}) {
     await ensureDockerTeam().catch(() => {});
     const env = { CICY_AI_GATEWAY_LLM_ENDPOINT: GATEWAY_ENDPOINT };
     if (dockerTeamReg && dockerTeamReg.apiKey) env.CICY_AI_GATEWAY_LLM_API_KEY = dockerTeamReg.apiKey;
-    return { port: APP_PORT, container: APP_CONTAINER, volume: APP_VOLUME, env, extraPorts: readExtraPorts() };
+    return { port: APP_PORT, container: APP_CONTAINER, volume: APP_VOLUME, env, extraPorts: readExtraPorts(), dockerSock: sidecar.isDood() };
   };
   // Register the running :8008 instance as a (custom) team so the card's "打开"
   // reuses the token-injected open/reload flow. addTeam dedups by host:port.
@@ -669,6 +669,33 @@ function register({ sidecarLogPath } = {}) {
         : "cicy-code 已重启,但隧道未连上——Token 可能无效/过期,或域名未在 Cloudflare 配好路由";
       emit({ phase: "done", status: up && (!saved.enabled || tunnelUp) ? "done" : "error", message: up ? okMsg : "重启后 :8008 未就绪——稍等或重试" });
       return { ok: up, cft: saved, tunnelUp, url: tunnelUrl };
+    } catch (err) {
+      emit({ phase: "done", status: "error", message: `设置失败:${err.message}` });
+      return { ok: false, error: err.message };
+    }
+  });
+
+  // 「容器内使用 Docker」(Docker-outside-of-Docker)开关: 读/写 dood flag。set 后重建容器
+  // 让 docker.sock 挂载生效(runContainer 内部读 dood flag),开启时再把 docker CLI 装进容器
+  // 持久卷(带下载进度)。全程进度推抽屉(op:restart)。仅 Windows/WSL 有 installDockerCli。
+  ipcMain.handle("sidecar:get-dood", () => {
+    try { return { ok: true, dood: sidecar.isDood() }; } catch (e) { return { ok: false, dood: false, error: e.message }; }
+  });
+  ipcMain.handle("sidecar:set-dood", async (e, on) => {
+    const emit = (ev) => { try { e.sender.send("sidecar:op-progress", { op: "restart", ...ev }); } catch {} };
+    try {
+      sidecar.setDood(!!on);
+      emit({ phase: "swap", status: "running", message: `容器 Docker 访问已${on ? "开启" : "关闭"},正在重建容器…` });
+      try { await appDocker.recreate({ ...(await appOpts()), onProgress: emit }); }
+      catch (err) { try { await appDocker.dockerRestart?.({ onProgress: emit }); } catch {} }
+      let up = false;
+      for (let i = 0; i < 240; i++) { if ((await appDocker.probeHealth?.(PORT)) || (await sidecar.probeExisting(PORT))) { up = true; break; } await new Promise((r) => setTimeout(r, 500)); }
+      if (on && up && appDocker.installDockerCli) {
+        try { await appDocker.installDockerCli(APP_CONTAINER, { emit }); }
+        catch (err) { emit({ phase: "done", status: "error", message: `docker CLI 安装失败:${err.message}` }); return { ok: false, dood: true, error: err.message }; }
+      }
+      emit({ phase: "done", status: up ? "done" : "error", message: up ? `容器 Docker 访问已${on ? "开启" : "关闭"}` : "重建后 :8008 未就绪——稍等或重试" });
+      return { ok: up, dood: !!on };
     } catch (err) {
       emit({ phase: "done", status: "error", message: `设置失败:${err.message}` });
       return { ok: false, error: err.message };

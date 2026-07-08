@@ -135,6 +135,8 @@ contextBridge.exposeInMainWorld("cicy", {
     setPublic:   (on) => logInvoke("sidecar:set-public", on),  // 设开关 + 自动重启 cicy-code
     getCft:      ()  => logInvoke("sidecar:get-cft"),          // Cloudflare Tunnel 配置 {enabled,token,host}
     setCft:      (cfg) => logInvoke("sidecar:set-cft", cfg),   // 设配置 + 自动重启 cicy-code
+    getDood:     ()  => logInvoke("sidecar:get-dood"),         // 容器内使用 Docker(DooD)开关状态
+    setDood:     (on) => logInvoke("sidecar:set-dood", on),    // 设开关 + 重建容器 + 装 docker CLI
     // live {op, phase, status, message, progress?} events during update —
     // returns an unsubscribe fn.
     onOpProgress: (cb) => {

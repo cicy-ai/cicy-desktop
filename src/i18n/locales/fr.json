@@ -570,5 +570,17 @@
   "tabShell": {
     "myTeam": "Mon équipe",
     "newTabBtn": "Nouvel onglet"
+  },
+  "dood": {
+    "menu": "Utiliser Docker dans le conteneur",
+    "hint": "Monte le Docker de l'hôte dans le conteneur pour que son agent puisse exécuter docker (télécharge le CLI docker à la première activation ; le basculement recrée le conteneur)",
+    "title": "Utiliser Docker dans le conteneur",
+    "subtitle": "Monte le Docker de l'hôte dans le conteneur pour que son agent puisse exécuter docker (le CLI docker est téléchargé automatiquement à la première activation)",
+    "enable": "Autoriser Docker dans le conteneur",
+    "applying": "Activation de l'accès Docker du conteneur, reconstruction…",
+    "disabling": "Désactivation…",
+    "onDone": "Accès Docker du conteneur activé",
+    "offDone": "Accès Docker du conteneur désactivé",
+    "failed": "Échec de l'application"
   }
 }

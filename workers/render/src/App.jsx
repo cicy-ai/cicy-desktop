@@ -2016,6 +2016,7 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
   const [busy, setBusy] = useState("");   // "" | bootstrap | restart | stop | upgrade | probe
   const [menuOpen, setMenuOpen] = useState(false);
   const [cftOpen, setCftOpen] = useState(false); // Cloudflare 隧道 modal(卡片层,菜单外)
+  const [doodOpen, setDoodOpen] = useState(false); // 容器内使用 Docker(DooD)modal(卡片层,菜单外)
   const [confirmRecreate, setConfirmRecreate] = useState(false); // 重建容器 in-app 确认弹窗(不用 native confirm)
   const [portsOpen, setPortsOpen] = useState(false);   // 端口设置 modal
   const [portList, setPortList] = useState([]);         // 编辑中的额外端口(字符串数组,便于输入)
@@ -2411,6 +2412,11 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
                   onClick={(e) => { e.stopPropagation(); setMenuOpen(false); window.cicy?.docker?.openDir?.("projects"); }}>
                   {tr("docker.openProjectsDir", "打开项目目录")}
                 </button>
+                <button type="button" data-id="DockerCard-dood" className="bcard__menu-item"
+                  title={tr("dood.hint", "把宿主 Docker 挂进容器,容器内 agent 能直接跑 docker(首次开启自动下载 docker CLI,切换会重建容器)")}
+                  onClick={(e) => { e.stopPropagation(); setMenuOpen(false); setDoodOpen(true); }}>
+                  {tr("dood.menu", "容器内使用 Docker")}
+                </button>
                 <button type="button" data-id="DockerCard-billing" className="bcard__menu-item"
                   onClick={() => { setMenuOpen(false); openCloudPage((cloudCode || dockerTeam?.cloud_team_id) ? `?team=${encodeURIComponent(cloudCode || dockerTeam.cloud_team_id)}` : "?view=usage"); }}>
                   {tr("docker.billing", "帐单")}
@@ -2487,6 +2493,7 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
         <span>{ctaLabel}</span>
       </button>
       <CftModal open={cftOpen} onClose={() => setCftOpen(false)} toastId="docker-op" />
+      <DoodModal open={doodOpen} onClose={() => setDoodOpen(false)} toastId="docker-op" />
       {confirmRecreate && createPortal(
         <div data-id="DockerCard-recreate-modal"
           style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center" }}
@@ -3521,6 +3528,70 @@ function CftModal({ open, onClose, toastId = "cft-op" }) {
             <div className="modal-actions">
               <button type="button" className="btn-ghost" disabled={busy} onClick={() => setOpen(false)}>{tr("common.cancel", "取消")}</button>
               <button type="button" className="btn-primary" data-id="cft-save" disabled={busy} onClick={save}>{busy ? tr("common.saving", "保存中…") : tr("common.save", "保存")}</button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+}
+// 容器内使用 Docker(Docker-outside-of-Docker)modal —— 单 checkbox,像 CftModal 一样渲染在
+// 卡片层(菜单外)。开启 → sidecar.setDood → 重建容器挂 docker.sock + 把 docker CLI 装进容器
+// 持久卷,下载进度实时显示在弹窗里。DockerCard(Windows 容器)用。
+function DoodModal({ open, onClose, toastId = "dood-op" }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [on, setOn] = useState(false);
+  const [line, setLine] = useState("");
+  useEffect(() => {
+    if (!open || !window.cicy?.sidecar?.getDood) return;
+    setErr(""); setLine("");
+    window.cicy.sidecar.getDood().then((r) => setOn(!!r?.dood)).catch(() => {});
+  }, [open]);
+  // 把重建/下载进度实时显示在弹窗(installDockerCli 的每行输出经 op-progress 推来)
+  useEffect(() => {
+    if (!open || !busy || !window.cicy?.sidecar?.onOpProgress) return;
+    return window.cicy.sidecar.onOpProgress((ev) => { if (ev?.message) setLine(String(ev.message)); });
+  }, [open, busy]);
+  const save = async () => {
+    if (busy) return;
+    setBusy(true); setErr(""); setLine("");
+    toast.show({ id: toastId, message: on ? tr("dood.applying", "开启容器 Docker 访问,重建容器中…") : tr("dood.disabling", "关闭中…"), status: "running", progress: undefined });
+    try {
+      const r = await window.cicy.sidecar.setDood(on);
+      if (r?.ok) {
+        onClose && onClose();
+        toast.show({ id: toastId, message: on ? tr("dood.onDone", "容器 Docker 访问已开启") : tr("dood.offDone", "容器 Docker 访问已关闭"), status: "done", ttl: 4000 });
+      } else {
+        setErr(r?.error || tr("dood.failed", "设置失败"));
+        toast.show({ id: toastId, message: tr("dood.failed", "设置失败") + (r?.error ? `: ${r.error}` : ""), status: "error", ttl: 6000 });
+      }
+    } catch (e) { setErr(e?.message || String(e)); toast.show({ id: toastId, message: tr("dood.failed", "设置失败") + `: ${e?.message || e}`, status: "error", ttl: 6000 }); }
+    finally { setBusy(false); }
+  };
+  const setOpenX = (v) => { if (!v) onClose && onClose(); };
+  if (!open) return null;
+  return (
+    <>
+      {createPortal(
+        <div data-id="dood-modal"
+          style={{ position: "fixed", inset: 0, zIndex: 66, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.5)" }}
+          onMouseDown={(e) => { if (!busy && e.target === e.currentTarget) setOpenX(false); }}>
+          <div onClick={(e) => e.stopPropagation()}
+            style={{ width: 440, maxWidth: "92vw", background: "var(--card, #1b1d22)", border: "1px solid var(--border, #2c2f36)", borderRadius: 14, padding: 22, boxShadow: "0 20px 60px rgba(0,0,0,.5)" }}>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{tr("dood.title", "容器内使用 Docker")}</div>
+            <div style={{ fontSize: 12, opacity: .6, marginBottom: 16 }}>{tr("dood.subtitle", "把宿主 Docker 挂进容器,容器内 agent 就能直接跑 docker(首次开启会自动下载 docker CLI)")}</div>
+            <label data-id="dood-toggle-row" style={{ display: "flex", alignItems: "center", gap: 10, cursor: busy ? "default" : "pointer", marginBottom: 12 }}>
+              <input type="checkbox" data-id="dood-toggle" checked={on} disabled={busy}
+                onChange={(e) => setOn(e.target.checked)} />
+              <span style={{ fontSize: 14, fontWeight: 600 }}>{tr("dood.enable", "允许容器内使用 Docker")}</span>
+            </label>
+            {busy && line && <div data-id="dood-progress" style={{ fontSize: 11, opacity: .7, fontFamily: "var(--mono)", wordBreak: "break-all", margin: "0 0 8px", maxHeight: 60, overflow: "hidden" }}>{line}</div>}
+            {err && <div className="error" style={{ marginTop: 8, fontSize: 12 }}>{err}</div>}
+            <div className="modal-actions">
+              <button type="button" className="btn-ghost" disabled={busy} onClick={() => setOpenX(false)}>{tr("common.cancel", "取消")}</button>
+              <button type="button" className="btn-primary" data-id="dood-save" disabled={busy} onClick={save}>{busy ? tr("common.saving", "保存中…") : tr("common.save", "保存")}</button>
             </div>
           </div>
         </div>,

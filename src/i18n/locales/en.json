@@ -570,5 +570,17 @@
   "tabShell": {
     "myTeam": "My Team",
     "newTabBtn": "New tab"
+  },
+  "dood": {
+    "menu": "Use Docker in container",
+    "hint": "Mount the host Docker into the container so its agent can run docker (downloads the docker CLI on first enable; toggling rebuilds the container)",
+    "title": "Use Docker in container",
+    "subtitle": "Mount the host Docker into the container so its agent can run docker (the docker CLI is downloaded automatically on first enable)",
+    "enable": "Allow Docker inside the container",
+    "applying": "Enabling container Docker access, rebuilding…",
+    "disabling": "Disabling…",
+    "onDone": "Container Docker access enabled",
+    "offDone": "Container Docker access disabled",
+    "failed": "Failed to apply"
   }
 }
