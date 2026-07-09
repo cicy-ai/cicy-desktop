@@ -998,6 +998,17 @@ electronApp.whenReady().then(async () => {
     // renderer. A completed email login is thus indistinguishable downstream.
     const onAuthResult = (payload) => {
       if (payload && payload.token) {
+        // Account isolation: if a DIFFERENT user is signing in, drop the previous
+        // account's cloud/remote teams so they don't leak onto this account. The
+        // login below re-pulls this account's own teams fresh. Local machine
+        // teams (localhost) are kept — they belong to the device.
+        try {
+          const prevUid = String((readGlobalConfig(GLOBAL_JSON)?.desktopAuth?.userId) || "");
+          const nextUid = payload.userId != null ? String(payload.userId) : "";
+          if (prevUid && nextUid && prevUid !== nextUid) {
+            require("./backends/local-teams").purgeAccountTeams().catch(() => {});
+          }
+        } catch {}
         saveDesktopAuth(payload);
         // Now that we have a real owner-bound login token, report this
         // machine to the cloud (best-effort; safe to call repeatedly —
@@ -1067,6 +1078,8 @@ electronApp.whenReady().then(async () => {
     __ipcMainAuth.handle("auth:logout", () => {
       try {
         updateGlobalConfig(GLOBAL_JSON, (c) => { delete c.desktopAuth; return c; });
+        // Drop this account's cloud/remote teams on logout (local machines stay).
+        require("./backends/local-teams").purgeAccountTeams().catch(() => {});
         log.info("[auth] desktop login cleared (explicit logout)");
       } catch (e) { log.warn(`[auth] logout clear failed: ${e.message}`); }
       return { ok: true };

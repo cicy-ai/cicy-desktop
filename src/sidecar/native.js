@@ -143,7 +143,15 @@ async function start({ port = 8008, logPath = null, emit, version = null } = {})
   };
   // --helper removed : boot cicy-code in normal mode (full tmux-based
   // multi-agent), not the single headless 团队助手.
-  const child = spawn(exe, ["--desktop"], { stdio, detached: true, windowsHide: true, env });
+  const args = ["--desktop"];
+  // Host role: if a zero-trust gateway is provisioned (~/cicy-ai/db/gateway.json
+  // with url+token), boot with --gateway so this machine dials OUT and becomes
+  // reachable through the gateway (no inbound port). Absent → plain local boot.
+  try {
+    const gwPath = require("path").join(require("os").homedir(), "cicy-ai", "db", "gateway.json");
+    if (require("fs").existsSync(gwPath)) args.push("--gateway");
+  } catch { /* best-effort */ }
+  const child = spawn(exe, args, { stdio, detached: true, windowsHide: true, env });
   child.unref();
   try { fs.writeFileSync(PID_FILE, String(child.pid)); } catch {}
   console.log(`[native-sidecar] spawned ${exe} --desktop pid=${child.pid} port=${port} log=${logPath || "(none)"}`);

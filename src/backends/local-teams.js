@@ -1101,4 +1101,26 @@ function avatarForUrl(url) {
   return "";
 }
 
-module.exports = { list, openTeam, reloadTeam, closeLocalWindows, addTeam, removeTeam, updateTeam, upgradeTeam, syncAllLocalTeams, setAvatar, getAvatars, avatarForUrl };
+// Remove teams tied to a cloud ACCOUNT (remote base_url — pulled from the cloud
+// via pullCustomTeams, or user-added remote nodes) so switching/leaving an account
+// doesn't leak them onto the next user. LOCAL machine teams on THIS device
+// (localhost base_url) are kept — they belong to the box, not the account. The
+// next login re-pulls the new account's own teams fresh.
+async function purgeAccountTeams() {
+  let removed = 0;
+  try {
+    await writeNodes((nodes) => {
+      for (const id of Object.keys(nodes)) {
+        let host = "";
+        try { host = new URL(String(nodes[id]?.base_url || "")).hostname.toLowerCase(); } catch {}
+        const isLocal = host === "" || host === "127.0.0.1" || host === "localhost" || host === "::1";
+        if (!isLocal) { delete nodes[id]; removed++; }
+      }
+      return nodes;
+    });
+  } catch (e) { log.warn(`[local-teams] purgeAccountTeams failed: ${e.message}`); }
+  if (removed) { _cache = null; _cacheUntil = 0; log.info(`[local-teams] purged ${removed} account team(s) (login/logout)`); }
+  return removed;
+}
+
+module.exports = { list, openTeam, reloadTeam, closeLocalWindows, addTeam, removeTeam, updateTeam, upgradeTeam, syncAllLocalTeams, purgeAccountTeams, setAvatar, getAvatars, avatarForUrl };
