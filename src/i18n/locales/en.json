@@ -589,5 +589,11 @@
     "onDone": "Container Docker access enabled",
     "offDone": "Container Docker access disabled",
     "failed": "Failed to apply"
+  },
+  "plan": {
+    "personal": "Personal",
+    "team": "Team",
+    "enterprise": "Enterprise",
+    "hint": "Current account plan"
   }
 }

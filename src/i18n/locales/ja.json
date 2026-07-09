@@ -589,5 +589,11 @@
     "onDone": "コンテナ Docker アクセスを有効化しました",
     "offDone": "コンテナ Docker アクセスを無効化しました",
     "failed": "設定に失敗しました"
+  },
+  "plan": {
+    "personal": "パーソナル",
+    "team": "チーム",
+    "enterprise": "エンタープライズ",
+    "hint": "現在のアカウントプラン"
   }
 }

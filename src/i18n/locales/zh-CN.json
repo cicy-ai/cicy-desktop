@@ -589,5 +589,11 @@
     "onDone": "容器 Docker 访问已开启",
     "offDone": "容器 Docker 访问已关闭",
     "failed": "设置失败"
+  },
+  "plan": {
+    "personal": "个人版",
+    "team": "团队版",
+    "enterprise": "企业版",
+    "hint": "当前账号版本"
   }
 }

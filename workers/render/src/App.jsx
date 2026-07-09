@@ -1366,6 +1366,17 @@ function Header({ me, welcome, onLogout, mitmTeam }) {
   const name = me?.display_name || me?.username || "…";
   const initials = (name || "?").slice(0, 1).toUpperCase();
   const [open, setOpen] = useState(false);
+  // 账号版本档位(个人版/团队版/企业版)—— 账号级,来自 tunnelStatus()=GET /api/gateway/tunnels
+  // 的 tier 字段(personal|team|enterprise)。~分钟级刷新以反映升/降档。
+  const [tier, setTier] = useState("");
+  useEffect(() => {
+    if (!window.cicy?.sidecar?.tunnelStatus) return;
+    let stop = false;
+    const load = () => window.cicy.sidecar.tunnelStatus().then((r) => { if (!stop && r?.ok && r.tier) setTier(String(r.tier)); }).catch(() => {});
+    load();
+    const id = setInterval(load, 60000);
+    return () => { stop = true; clearInterval(id); };
+  }, []);
   const [trustOpen, setTrustOpen] = useState(false);
   const [auditOpen, setAuditOpen] = useState(false);
   const [termsOpen, setTermsOpen] = useState(false);
@@ -1405,6 +1416,13 @@ function Header({ me, welcome, onLogout, mitmTeam }) {
     } catch (e) { toast.show({ id: "app-update", message: e.message, status: "error", ttl: 5000 }); }
     finally { setCheckingUpd(false); }
   };
+  // 用户版本徽章(个人版/团队版/企业版)—— tier 来自 tunnelStatus()。规范值映射,未知原样,空不渲染。
+  const planTxt = (() => {
+    const raw = String(tier || "").toLowerCase().trim();
+    if (!raw) return "";
+    const map = { personal: tr("plan.personal", "个人版"), team: tr("plan.team", "团队版"), enterprise: tr("plan.enterprise", "企业版") };
+    return map[raw] || raw;
+  })();
   return (
     <>
     <header className="topbar">
@@ -1424,6 +1442,12 @@ function Header({ me, welcome, onLogout, mitmTeam }) {
           className={`user-chip__trigger${open ? " is-open" : ""}`}
           onClick={() => setOpen((v) => !v)}
         >
+          {planTxt && (
+            <span data-id="UserChip-plan" className="plan-badge" title={tr("plan.hint", "当前账号版本")}
+              style={{ fontSize: 11, fontWeight: 600, lineHeight: 1.4, padding: "1px 7px", marginRight: 6, borderRadius: 999, whiteSpace: "nowrap", background: "var(--accent-soft, rgba(120,140,255,.16))", color: "var(--accent, #9db0ff)" }}>
+              {planTxt}
+            </span>
+          )}
           <div className="avatar">{initials}</div>
           <span className="user-name">{name}</span>
           <span className="user-chip__caret" aria-hidden>▾</span>

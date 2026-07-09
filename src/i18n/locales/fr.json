@@ -589,5 +589,11 @@
     "onDone": "Accès Docker du conteneur activé",
     "offDone": "Accès Docker du conteneur désactivé",
     "failed": "Échec de l'application"
+  },
+  "plan": {
+    "personal": "Personnel",
+    "team": "Équipe",
+    "enterprise": "Entreprise",
+    "hint": "Offre du compte actuel"
   }
 }
