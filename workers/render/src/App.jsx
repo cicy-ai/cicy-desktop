@@ -2624,6 +2624,17 @@ function LocalTeamCard({ team, cloudCode, onOpen, onRename, onRefresh }) {
     if (!local || !window.cicy?.sidecar?.getPublic) return;
     window.cicy.sidecar.getPublic().then((r) => setLanOn(!!r?.public)).catch(() => {});
   }, [local]);
+  // 零信任隧道:tunnelStatus() 拿档位(tunnelLimit>0=付费档,才显示「开启隧道」项);
+  // getGateway() 拿是否已在运行(enabled + slug)。
+  const [tunnelLimit, setTunnelLimit] = useState(0);
+  const [gwEnabled, setGwEnabled] = useState(false);
+  const [gwSlug, setGwSlug] = useState("");
+  const refreshTunnel = useCallback(() => {
+    if (!local || !window.cicy?.sidecar?.tunnelStatus) return;
+    window.cicy.sidecar.tunnelStatus().then((r) => { if (r?.ok) setTunnelLimit(Number(r.tunnelLimit) || 0); }).catch(() => {});
+    window.cicy.sidecar.getGateway?.().then((r) => { const g = r?.gateway || {}; setGwEnabled(!!g.enabled); setGwSlug(g.slug || ""); }).catch(() => {});
+  }, [local]);
+  useEffect(() => { refreshTunnel(); }, [refreshTunnel]);
   // cicy-code 版本统一从 sidecar.versions() 一处拿("拿版本就一个方法")。
   // running===undefined = 还没查到(用于区分"加载中" vs "停了/拿不到");区别于
   // running===null(查过了但 daemon 没报版本)。latest/installed 同源。
@@ -2941,6 +2952,26 @@ function LocalTeamCard({ team, cloudCode, onOpen, onRename, onRefresh }) {
                       onClick={(e) => { e.stopPropagation(); setMenuOpen(false); setCftOpen(true); }}>
                       {tr("sidecar.cftMenu", "Cloudflare 隧道")}
                     </button>
+                    {tunnelLimit > 0 && (
+                      <button type="button" data-id="LocalTeamCard-tunnel" className="bcard__menu-item"
+                        title={tr("sidecar.tunnelHint", "把本机 cicy-code 通过零信任隧道暴露到公网固定地址(付费档);开启后 cicy-code 自动拨号")}
+                        disabled={busy === "tunnel" || gwEnabled}
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          if (busy || gwEnabled) return;
+                          setMenuOpen(false); setBusy("tunnel");
+                          toast.show({ id: opToastId, message: tr("sidecar.tunnelEnabling", "开启隧道,重启 cicy-code 中…"), status: "running", progress: undefined });
+                          try {
+                            const r = await window.cicy.sidecar.enrollTunnel(null);
+                            if (r?.ok) toast.show({ id: opToastId, message: tr("sidecar.tunnelOn", "隧道已开启") + (r.slug ? ` · ${r.slug}` : ""), status: "done", ttl: 5000 });
+                            else if (r?.status === 402) toast.show({ id: opToastId, message: tr("sidecar.tunnelNeedUpgrade", "当前为免费档,升级团队档位后可用固定隧道"), status: "error", ttl: 8000 });
+                            else toast.show({ id: opToastId, message: tr("sidecar.tunnelFailed", "开启隧道失败") + (r?.error ? `: ${r.error}` : ""), status: "error", ttl: 7000 });
+                          } catch (e2) { toast.show({ id: opToastId, message: tr("sidecar.tunnelFailed", "开启隧道失败") + `: ${e2?.message || e2}`, status: "error", ttl: 7000 }); }
+                          refreshTunnel(); setBusy(""); onRefresh?.();
+                        }}>
+                        {gwEnabled ? (tr("sidecar.tunnelRunning", "隧道运行中") + (gwSlug ? ` · ${gwSlug}` : "")) : tr("sidecar.tunnelMenu", "开启隧道")}
+                      </button>
+                    )}
                   </>
                 )}
                 {team.cloud_team_id && (

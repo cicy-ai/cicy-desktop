@@ -424,7 +424,14 @@
     "cftRestartHint": "用当前 Token/Host 重新启动隧道",
     "cftNeedHost": "公网域名 Host 不能为空",
     "cftTunnelDown": "隧道未连上:Token 可能无效/过期,或域名未在 Cloudflare 配好路由",
-    "cftConnected": "隧道已连接"
+    "cftConnected": "隧道已连接",
+    "tunnelMenu": "开启隧道",
+    "tunnelRunning": "隧道运行中",
+    "tunnelHint": "把本机 cicy-code 通过零信任隧道暴露到公网固定地址(付费档);开启后 cicy-code 自动拨号",
+    "tunnelEnabling": "开启隧道,重启 cicy-code 中…",
+    "tunnelOn": "隧道已开启",
+    "tunnelNeedUpgrade": "当前为免费档,升级团队档位后可用固定隧道",
+    "tunnelFailed": "开启隧道失败"
   },
   "teamCard": {
     "noHost": "未填访问地址",

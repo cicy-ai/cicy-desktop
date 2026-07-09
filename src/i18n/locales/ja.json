@@ -424,7 +424,14 @@
     "cftRestartHint": "現在のトークン/ホストでトンネルを再起動",
     "cftNeedHost": "公開ホストは必須です",
     "cftTunnelDown": "トンネル未接続:トークンが無効/期限切れ、またはホスト名が Cloudflare でルーティングされていません",
-    "cftConnected": "トンネル接続済み"
+    "cftConnected": "トンネル接続済み",
+    "tunnelMenu": "トンネルを有効化",
+    "tunnelRunning": "トンネル稼働中",
+    "tunnelHint": "このマシンの cicy-code をゼロトラストトンネルで固定の公開アドレスに公開します(有料プラン)。有効化すると cicy-code が自動接続します",
+    "tunnelEnabling": "トンネルを有効化、cicy-code を再起動中…",
+    "tunnelOn": "トンネルを有効化しました",
+    "tunnelNeedUpgrade": "無料プランです。チームプランをアップグレードすると固定トンネルを利用できます",
+    "tunnelFailed": "トンネルの有効化に失敗しました"
   },
   "teamCard": {
     "noHost": "No address set",

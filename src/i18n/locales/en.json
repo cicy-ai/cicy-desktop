@@ -424,7 +424,14 @@
     "cftRestartHint": "Restart the tunnel with the current token/host",
     "cftNeedHost": "Public host is required",
     "cftTunnelDown": "Tunnel not connected: the token may be invalid/expired, or the hostname has no route in Cloudflare",
-    "cftConnected": "Tunnel connected"
+    "cftConnected": "Tunnel connected",
+    "tunnelMenu": "Enable tunnel",
+    "tunnelRunning": "Tunnel running",
+    "tunnelHint": "Expose this machine's cicy-code over a zero-trust tunnel at a fixed public address (paid tier); cicy-code dials in automatically once enabled",
+    "tunnelEnabling": "Enabling tunnel, restarting cicy-code…",
+    "tunnelOn": "Tunnel enabled",
+    "tunnelNeedUpgrade": "Free tier — upgrade your team plan to use a fixed tunnel",
+    "tunnelFailed": "Failed to enable tunnel"
   },
   "teamCard": {
     "noHost": "No address set",
