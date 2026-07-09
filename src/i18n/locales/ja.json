@@ -573,9 +573,9 @@
   },
   "dood": {
     "menu": "コンテナ内で Docker を使う",
-    "hint": "ホストの Docker をコンテナにマウントし、コンテナ内の agent が docker を実行できるようにします(初回有効化時に docker CLI をダウンロード、切り替えでコンテナを再作成)",
+    "hint": "ホストの Docker と docker クライアントをコンテナにマウントし、agent が docker を実行できるようにします(切り替えでコンテナを再作成、即時反映・ダウンロード不要)",
     "title": "コンテナ内で Docker を使う",
-    "subtitle": "ホストの Docker をコンテナにマウントして、コンテナ内の agent が docker を直接実行できます(初回は docker CLI を自動ダウンロード)",
+    "subtitle": "ホストの Docker と docker クライアントをコンテナにマウントして、agent が docker を直接実行できます(即時反映、ダウンロード不要)",
     "enable": "コンテナ内での Docker を許可",
     "applying": "コンテナ Docker アクセスを有効化、再作成中…",
     "disabling": "無効化中…",

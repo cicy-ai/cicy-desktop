@@ -564,8 +564,10 @@ async function allDrivesMountArg() {
 // docker —— 复用 WSL 那个 dockerd,起的是**兄弟容器**(非嵌套),所以兄弟容器里 `-v` 的路径
 // 是 WSL 宿主视角、不是 cicy-code 容器内路径。socket 通常 root:docker(或 root:root)660,
 // 给容器进程 `--group-add <socket 的 gid>` 让非 root 的 cicy 用户也能访问。
-// socket 不在(dockerd 没起)→ 返回 ""(best-effort,不挡容器启动)。生效前提:容器镜像自带
-// docker CLI。挂载在 `docker run` 时定死,已在跑的容器要 recreate 才带上。
+// 同时把 WSL 自带的 docker 客户端(静态 Go 二进制,/usr/bin/docker)只读挂进容器 PATH —— 这样
+// 容器里立刻有 `docker` 命令可用,**不用下载**(之前下 70MB static tarball 会让 UI 卡在"保存中")。
+// socket 不在(dockerd 没起)→ 返回 ""(best-effort,不挡容器启动)。挂载在 `docker run` 时定死,
+// 已在跑的容器要 recreate 才带上。
 async function dockerSockMountArg() {
   const SOCK = "/var/run/docker.sock";
   try { await wslRun(`test -S ${SOCK}`, { timeout: 8000 }); } catch { return ""; } // socket 不存在
@@ -575,38 +577,13 @@ async function dockerSockMountArg() {
     const gid = String(stdout || "").trim();
     if (/^\d+$/.test(gid)) groupAdd = ` --group-add ${gid}`;
   } catch {}
-  return `-v ${SOCK}:${SOCK}${groupAdd}`;
-}
-
-// 把 docker CLI(只客户端,不是 dockerd)装进容器的**持久卷** ~/.local/bin/docker —— 配合挂
-// 进来的 docker.sock,容器内 agent 就能直接跑 docker。装在卷里 → recreate 不丢。幂等:已装好
-// 就跳过。静态二进制:CN 先走 aliyun 镜像,兜底 download.docker.com。逐行进度流到抽屉。
-async function installDockerCli(container, { emit } = {}) {
-  const e = (ev) => { try { emit && emit(ev); } catch {} };
-  const sh = [
-    "set -e",
-    'BIN="$HOME/.local/bin/docker"',
-    'if [ -x "$BIN" ] && "$BIN" --version >/dev/null 2>&1; then echo "docker CLI 已安装:$($BIN --version)"; exit 0; fi',
-    'mkdir -p "$HOME/.local/bin"',
-    'case "$(uname -m)" in aarch64|arm64) A=aarch64;; *) A=x86_64;; esac',
-    'VER="${DOCKER_CLI_VER:-27.5.1}"',
-    "ok=0",
-    'for U in "https://mirrors.aliyun.com/docker-ce/linux/static/stable/$A/docker-$VER.tgz" "https://download.docker.com/linux/static/stable/$A/docker-$VER.tgz"; do',
-    '  echo "下载 docker CLI:$U"',
-    '  if curl -fL --retry 2 --connect-timeout 10 -o /tmp/dcli.tgz "$U"; then ok=1; break; fi',
-    '  echo "  该源失败,换下一个…"',
-    "done",
-    '[ "$ok" = 1 ] || { echo "所有下载源都失败"; exit 1; }',
-    'echo "解压安装…"',
-    "tar -xzf /tmp/dcli.tgz -C /tmp docker/docker",
-    'install -m 0755 /tmp/docker/docker "$BIN"',
-    "rm -rf /tmp/docker /tmp/dcli.tgz",
-    'echo "完成:$("$BIN" --version)"',
-  ].join("\n");
-  const b64 = Buffer.from(sh, "utf8").toString("base64");
-  e({ phase: "docker-cli", status: "running", message: "安装容器内 docker CLI…" });
-  await wslRunStream(`echo ${b64} | base64 -d | docker exec -i ${container} bash -s`, { emit, phase: "docker-cli", timeout: 300000 });
-  e({ phase: "docker-cli", status: "done", message: "容器内 docker CLI 就绪" });
+  let cliMount = "";
+  try {
+    const { stdout } = await wslRun(`command -v docker 2>/dev/null`, { timeout: 8000 });
+    const p = String(stdout || "").trim();
+    if (p) cliMount = ` -v ${p}:/usr/local/bin/docker:ro`;
+  } catch {}
+  return `-v ${SOCK}:${SOCK}${cliMount}${groupAdd}`;
 }
 
 // extraPorts → additional `-p 127.0.0.1:<p>:<p>` mappings (host=container, loopback
@@ -1136,5 +1113,5 @@ async function readMihomoConfig(container = "cicy-code-docker-8008") {
 module.exports = {
   bootstrap, status, restart, stop, dockerRestart, recreate, update, upgrade, runContainer, readContainerToken,
   distroInstalled, dockerInstalled, dockerEngineUp, imagePresent, probeHealth, wslRun, hasGatewayKey,
-  readMihomoConfig, repairWsl, lxssWedged, installDockerCli,
+  readMihomoConfig, repairWsl, lxssWedged,
 };

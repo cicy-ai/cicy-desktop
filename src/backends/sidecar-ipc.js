@@ -676,8 +676,8 @@ function register({ sidecarLogPath } = {}) {
   });
 
   // 「容器内使用 Docker」(Docker-outside-of-Docker)开关: 读/写 dood flag。set 后重建容器
-  // 让 docker.sock 挂载生效(runContainer 内部读 dood flag),开启时再把 docker CLI 装进容器
-  // 持久卷(带下载进度)。全程进度推抽屉(op:restart)。仅 Windows/WSL 有 installDockerCli。
+  // 让 docker.sock + WSL 的 docker 客户端挂载生效(runContainer 内部读 dood flag)。不再下载
+  // docker CLI(改为直接挂 WSL 现成的二进制,秒生效,避免卡在"保存中")。进度推抽屉(op:restart)。
   ipcMain.handle("sidecar:get-dood", () => {
     try { return { ok: true, dood: sidecar.isDood() }; } catch (e) { return { ok: false, dood: false, error: e.message }; }
   });
@@ -690,10 +690,6 @@ function register({ sidecarLogPath } = {}) {
       catch (err) { try { await appDocker.dockerRestart?.({ onProgress: emit }); } catch {} }
       let up = false;
       for (let i = 0; i < 240; i++) { if ((await appDocker.probeHealth?.(PORT)) || (await sidecar.probeExisting(PORT))) { up = true; break; } await new Promise((r) => setTimeout(r, 500)); }
-      if (on && up && appDocker.installDockerCli) {
-        try { await appDocker.installDockerCli(APP_CONTAINER, { emit }); }
-        catch (err) { emit({ phase: "done", status: "error", message: `docker CLI 安装失败:${err.message}` }); return { ok: false, dood: true, error: err.message }; }
-      }
       emit({ phase: "done", status: up ? "done" : "error", message: up ? `容器 Docker 访问已${on ? "开启" : "关闭"}` : "重建后 :8008 未就绪——稍等或重试" });
       return { ok: up, dood: !!on };
     } catch (err) {

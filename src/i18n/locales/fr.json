@@ -573,9 +573,9 @@
   },
   "dood": {
     "menu": "Utiliser Docker dans le conteneur",
-    "hint": "Monte le Docker de l'hôte dans le conteneur pour que son agent puisse exécuter docker (télécharge le CLI docker à la première activation ; le basculement recrée le conteneur)",
+    "hint": "Monte le Docker et le client docker de l'hôte dans le conteneur pour que son agent puisse exécuter docker (le basculement recrée le conteneur ; effet immédiat, sans téléchargement)",
     "title": "Utiliser Docker dans le conteneur",
-    "subtitle": "Monte le Docker de l'hôte dans le conteneur pour que son agent puisse exécuter docker (le CLI docker est téléchargé automatiquement à la première activation)",
+    "subtitle": "Monte le Docker et le client docker de l'hôte dans le conteneur pour que son agent puisse exécuter docker (immédiat, sans téléchargement)",
     "enable": "Autoriser Docker dans le conteneur",
     "applying": "Activation de l'accès Docker du conteneur, reconstruction…",
     "disabling": "Désactivation…",

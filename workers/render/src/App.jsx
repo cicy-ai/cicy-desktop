@@ -2413,7 +2413,7 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
                   {tr("docker.openProjectsDir", "打开项目目录")}
                 </button>
                 <button type="button" data-id="DockerCard-dood" className="bcard__menu-item"
-                  title={tr("dood.hint", "把宿主 Docker 挂进容器,容器内 agent 能直接跑 docker(首次开启自动下载 docker CLI,切换会重建容器)")}
+                  title={tr("dood.hint", "把宿主 Docker + docker 客户端挂进容器,容器内 agent 能直接跑 docker(切换会重建容器,秒生效、无需下载)")}
                   onClick={(e) => { e.stopPropagation(); setMenuOpen(false); setDoodOpen(true); }}>
                   {tr("dood.menu", "容器内使用 Docker")}
                 </button>
@@ -3581,7 +3581,7 @@ function DoodModal({ open, onClose, toastId = "dood-op" }) {
           <div onClick={(e) => e.stopPropagation()}
             style={{ width: 440, maxWidth: "92vw", background: "var(--card, #1b1d22)", border: "1px solid var(--border, #2c2f36)", borderRadius: 14, padding: 22, boxShadow: "0 20px 60px rgba(0,0,0,.5)" }}>
             <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{tr("dood.title", "容器内使用 Docker")}</div>
-            <div style={{ fontSize: 12, opacity: .6, marginBottom: 16 }}>{tr("dood.subtitle", "把宿主 Docker 挂进容器,容器内 agent 就能直接跑 docker(首次开启会自动下载 docker CLI)")}</div>
+            <div style={{ fontSize: 12, opacity: .6, marginBottom: 16 }}>{tr("dood.subtitle", "把宿主 Docker + docker 客户端挂进容器,容器内 agent 就能直接跑 docker(秒生效,无需下载)")}</div>
             <label data-id="dood-toggle-row" style={{ display: "flex", alignItems: "center", gap: 10, cursor: busy ? "default" : "pointer", marginBottom: 12 }}>
               <input type="checkbox" data-id="dood-toggle" checked={on} disabled={busy}
                 onChange={(e) => setOn(e.target.checked)} />

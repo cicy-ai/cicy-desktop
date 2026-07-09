@@ -573,9 +573,9 @@
   },
   "dood": {
     "menu": "Use Docker in container",
-    "hint": "Mount the host Docker into the container so its agent can run docker (downloads the docker CLI on first enable; toggling rebuilds the container)",
+    "hint": "Mount the host Docker + docker client into the container so its agent can run docker (toggling rebuilds the container; takes effect instantly, no download)",
     "title": "Use Docker in container",
-    "subtitle": "Mount the host Docker into the container so its agent can run docker (the docker CLI is downloaded automatically on first enable)",
+    "subtitle": "Mount the host Docker + docker client into the container so its agent can run docker (instant, no download)",
     "enable": "Allow Docker inside the container",
     "applying": "Enabling container Docker access, rebuilding…",
     "disabling": "Disabling…",
