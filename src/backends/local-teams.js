@@ -572,8 +572,10 @@ async function pullCustomTeams() {
     for (const [k, v] of Object.entries(nodes)) { if (v?.cloud_team_id != null) byCloudId[String(v.cloud_team_id)] = k; }
     let added = 0, updated = 0;
     for (const t of list.teams) {
-      if (t.kind !== "custom") continue;
-      const host = String(t.host_url || t.hostUrl || "").trim();
+      // custom teams (remote URL) OR any team with a zero-trust gateway address:
+      // gateway teams are reached at <slug>.gw.cicy-ai.com (preferred over host_url).
+      if (t.kind !== "custom" && !t.gateway_url) continue;
+      const host = String(t.gateway_url || t.host_url || t.hostUrl || "").trim();
       if (!host) continue;
       const tid = t.teamId || t.id || null;
       const localId = tid != null ? byCloudId[String(tid)] : null;
