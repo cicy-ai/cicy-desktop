@@ -528,7 +528,7 @@ async function listTunnels() {
   if (!token) return { ok: false, reason: "not_logged_in", tunnels: [], tunnelLimit: 0 };
   const res = await cloudFetch("/api/gateway/tunnels", { method: "GET" });
   if (res.ok && res.json) {
-    return { ok: true, tunnels: res.json.tunnels || [], tunnelLimit: res.json.tunnel_limit || 0, tunnelCount: res.json.tunnel_count || 0 };
+    return { ok: true, tunnels: res.json.tunnels || [], tier: res.json.tier || "", tunnelLimit: res.json.tunnel_limit || 0, tunnelCount: res.json.tunnel_count || 0, tunnelRemaining: res.json.tunnel_remaining };
   }
   return { ok: false, status: res.status, reason: res.reason, tunnels: [], tunnelLimit: 0 };
 }
