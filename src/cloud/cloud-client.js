@@ -506,10 +506,39 @@ async function registerTeamAndInjectKey({ teamId = null, title = "", globalJsonP
   return { ...reg, injected: true };
 }
 
+// ── zero-trust tunnels (v2.2.71+): expose a team's :8008 via the gateway ──────
+// enrollTunnel binds a tunnel to a team — PAID tiers only (the cloud returns 402
+// for the free tier, which uses Cloudflare directly). Returns the gateway_url +
+// node-token to write into gateway.json so this machine dials the gateway in.
+async function enrollTunnel(teamId) {
+  const token = loginToken();
+  if (!token) return { ok: false, reason: "not_logged_in" };
+  if (teamId == null) return { ok: false, reason: "no_team_id" };
+  const res = await cloudFetch(`/api/gateway/enroll?team=${encodeURIComponent(teamId)}`, { method: "POST" });
+  if (res.ok && res.json && res.json.token) {
+    return { ok: true, gatewayUrl: res.json.gateway_url, token: res.json.token, slug: res.json.slug };
+  }
+  return { ok: false, status: res.status, reason: (res.json && res.json.error) || res.reason || "enroll_failed" };
+}
+
+// listTunnels reports the caller's tunnels + the tier cap/usage (tunnel_limit).
+// tunnelLimit === 0 → free tier: the "开启隧道" action must be hidden/disabled.
+async function listTunnels() {
+  const token = loginToken();
+  if (!token) return { ok: false, reason: "not_logged_in", tunnels: [], tunnelLimit: 0 };
+  const res = await cloudFetch("/api/gateway/tunnels", { method: "GET" });
+  if (res.ok && res.json) {
+    return { ok: true, tunnels: res.json.tunnels || [], tunnelLimit: res.json.tunnel_limit || 0, tunnelCount: res.json.tunnel_count || 0 };
+  }
+  return { ok: false, status: res.status, reason: res.reason, tunnels: [], tunnelLimit: 0 };
+}
+
 module.exports = {
   CLOUD_BASE,
   GATEWAY_URL,
   GLOBAL_JSON,
+  enrollTunnel,
+  listTunnels,
   loginToken,
   getDeviceId,
   getPublicIp,

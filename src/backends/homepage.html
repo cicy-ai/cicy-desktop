@@ -518,6 +518,8 @@
     info: null,
     progress: null,
     error: null,
+    tunnelLimit: 0,   // zero-trust tunnel tier cap: 0 = free (hide 开启隧道), >0 = paid
+    gwEnabled: false, // whether a tunnel is currently on for this machine
 
     async refresh() {
       this.state = "checking";
@@ -538,6 +540,13 @@
         this.state = "error";
         this.error = e.message;
       }
+      // Zero-trust tunnel: tier cap (gates the "开启隧道" item) + current on/off.
+      try {
+        const ts = await window.cicy.sidecar.tunnelStatus();
+        this.tunnelLimit = (ts && typeof ts.tunnelLimit === "number") ? ts.tunnelLimit : 0;
+        const gw = await window.cicy.sidecar.getGateway();
+        this.gwEnabled = !!(gw && gw.gateway && gw.gateway.enabled);
+      } catch { /* keep prior tier */ }
       this.render();
     },
 
@@ -793,6 +802,10 @@
               <div class="more-item" data-act="check-update">
                 ${iconUse("i-refresh","sm")} 检查更新
               </div>
+              ${sidecarUI.tunnelLimit > 0 ? `<div class="more-divider"></div>
+              <div class="more-item" data-act="tunnel">
+                ${iconUse("i-open","sm")} ${sidecarUI.gwEnabled ? "隧道运行中" : "开启隧道"}
+              </div>` : ""}
             </div>
           </div>
           <button class="open local" data-act="open" ${openDisabled ? `disabled title="${esc(disabledReason)}"` : ""}>${iconUse("i-open","sm")} Open</button>
@@ -945,6 +958,26 @@
             }
             // Re-render local rows so the more menu reflects the new state.
             if (typeof refreshLocalRows === "function") refreshLocalRows();
+          };
+        } else if (act === "tunnel") {
+          // Zero-trust tunnel: expose this machine's :8008 via the gateway. The
+          // cloud returns 402 for the free tier (which uses Cloudflare directly).
+          btn.onclick = async (e) => {
+            e.stopPropagation();
+            btn.closest(".more-menu").hidden = true;
+            document.querySelectorAll(".btn-more").forEach(b => b.classList.remove("active"));
+            if (sidecarUI.gwEnabled) { showToast("隧道已在运行"); return; }
+            showToast("正在开启隧道…");
+            const r = await window.cicy.sidecar.enrollTunnel(null); // null → this machine's local team
+            if (r && r.ok) {
+              sidecarUI.gwEnabled = true;
+              showToast(`隧道已开启: ${r.slug ? r.slug + ".gw.cicy-ai.com" : "已连接"}`);
+              if (typeof refreshLocalRows === "function") refreshLocalRows();
+            } else if (r && r.status === 402) {
+              showToast("隧道是付费功能,请升级到团队档", true);
+            } else {
+              showToast(`开启失败: ${(r && (r.reason || r.error)) || "unknown"}`, true);
+            }
           };
         } else if (act === "update") {
           btn.onclick = (e) => {

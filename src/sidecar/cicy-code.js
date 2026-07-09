@@ -300,6 +300,26 @@ function cftEnv() {
   return { CICY_CFT_TOKEN: c.token, ...(c.host ? { CICY_CFT_HOST: c.host } : {}) };
 }
 
+// Zero-trust gateway tunnel (paid tiers) — the managed counterpart to cft above.
+// { enabled, url, token, slug }: when enrolled (via cloud /api/gateway/enroll),
+// inject CICY_GATEWAY_URL (wss://<slug>.gw.cicy-ai.com/_tunnel/connect) + the
+// node-token so cicy-code dials OUT to the gateway. Mirrors getCft/setCft/cftEnv.
+function getGateway() {
+  const c = readFlags().gateway || {};
+  return { enabled: !!c.enabled, url: c.url || "", token: c.token || "", slug: c.slug || "" };
+}
+function setGateway(cfg = {}) {
+  const f = readFlags();
+  f.gateway = { enabled: !!cfg.enabled, url: String(cfg.url || "").trim(), token: String(cfg.token || "").trim(), slug: String(cfg.slug || "").trim() };
+  try { fs.mkdirSync(path.dirname(FLAGS_FILE), { recursive: true }); fs.writeFileSync(FLAGS_FILE, JSON.stringify(f, null, 2)); } catch (e) { console.warn(`[cicy-code-sidecar] setGateway write failed: ${e.message}`); }
+  return getGateway();
+}
+function gatewayEnv() {
+  const c = getGateway();
+  if (!c.enabled || !c.url || !c.token) return {};
+  return { CICY_GATEWAY_URL: c.url, CICY_GATEWAY_TOKEN: c.token };
+}
+
 
 async function start({ logPath, port = DEFAULT_PORT, force = false, version = null, emit = null } = {}) {
   // **永不重复 spawn 活着的实例**(bug 修复): cicy-code 首次启动要 `brew install tmux`
@@ -364,6 +384,9 @@ async function start({ logPath, port = DEFAULT_PORT, force = false, version = nu
     // 「Cloudflare Tunnel」开启时注入 connector token(+ 可选公网 host)→ cicy-code
     // 起一条命名隧道。关闭时不注入,cicy-code 不起隧道。
     ...cftEnv(),
+    // Zero-trust gateway (paid tiers): when a tunnel is enrolled, cicy-code dials
+    // OUT to <slug>.gw.cicy-ai.com. Off → not injected, no gateway dial.
+    ...gatewayEnv(),
   };
   // 「局域网访问」开关: 开 → 加 --public,cicy-code 绑 0.0.0.0(同局域网设备可访问,
   // api_token 仍把关);关 → 默认只绑 127.0.0.1。flag 存 runtime/desktop-flags.json。
@@ -575,4 +598,4 @@ async function update({ logPath, port = DEFAULT_PORT, emit } = {}) {
   }
 }
 
-module.exports = { start, stop, restart, update, probeExisting, clearNpxCache, isUpdating, isBusy, ensureEnv, ensureNode, isPublic, setPublicFlag, isDood, setDood, getCft, setCft, cftEnv };
+module.exports = { start, stop, restart, update, probeExisting, clearNpxCache, isUpdating, isBusy, ensureEnv, ensureNode, isPublic, setPublicFlag, isDood, setDood, getCft, setCft, cftEnv, getGateway, setGateway, gatewayEnv };
