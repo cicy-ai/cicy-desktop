@@ -1136,6 +1136,19 @@ electronApp.whenReady().then(async () => {
       .catch((e) => log.warn(`[cloud] device-info/register (on launch) failed: ${e.message}`));
   } catch (e) { log.warn(`[cloud] device-info launch hook failed: ${e.message}`); }
 
+  // Periodic device heartbeat → lets the ops backend show per-device liveness.
+  // Re-POST /api/device/register every 60s (idempotent upsert by owner+deviceId;
+  // cloud records last_seen on each call → "active if now - last_seen < N min").
+  // Runs in MAIN, not the renderer, so it keeps beating even when the homepage
+  // window is hidden/minimized. Best-effort, no-op when not logged in;
+  // registerDevice reads cached deviceInfo (no network detection per beat).
+  try {
+    const cc = require("./cloud/cloud-client");
+    const HEARTBEAT_MS = Math.max(15000, Number(process.env.CICY_DEVICE_HEARTBEAT_MS || 60000));
+    const beat = setInterval(() => { try { cc.registerDevice().catch(() => {}); } catch (_) {} }, HEARTBEAT_MS);
+    if (beat && typeof beat.unref === "function") beat.unref();
+  } catch (e) { log.warn(`[cloud] device heartbeat setup failed: ${e.message}`); }
+
   // Cloud↔desktop title reconcile. The homepage drives the FAST cadence by window
   // visibility (聚焦 ~3s / 切回立即,见 App.jsx + localTeams:syncCloud IPC). This
   // 30s timer is just the SLOW fallback for when no homepage window is open / it's
