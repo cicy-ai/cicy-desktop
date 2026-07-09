@@ -2053,6 +2053,16 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
   const [menuOpen, setMenuOpen] = useState(false);
   const [cftOpen, setCftOpen] = useState(false); // Cloudflare 隧道 modal(卡片层,菜单外)
   const [doodOpen, setDoodOpen] = useState(false); // 容器内使用 Docker(DooD)modal(卡片层,菜单外)
+  // 零信任隧道:Windows 的 :8008 是本机 docker 团队,也要能开网关(tunnelLimit>0=付费档才显示)。
+  const [tunnelLimit, setTunnelLimit] = useState(0);
+  const [gwEnabled, setGwEnabled] = useState(false);
+  const [gwSlug, setGwSlug] = useState("");
+  const refreshTunnel = useCallback(() => {
+    if (!window.cicy?.sidecar?.tunnelStatus) return;
+    window.cicy.sidecar.tunnelStatus().then((r) => { if (r?.ok) setTunnelLimit(Number(r.tunnelLimit) || 0); }).catch(() => {});
+    window.cicy.sidecar.getGateway?.().then((r) => { const g = r?.gateway || {}; setGwEnabled(!!g.enabled); setGwSlug(g.slug || ""); }).catch(() => {});
+  }, []);
+  useEffect(() => { refreshTunnel(); }, [refreshTunnel]);
   const [confirmRecreate, setConfirmRecreate] = useState(false); // 重建容器 in-app 确认弹窗(不用 native confirm)
   const [portsOpen, setPortsOpen] = useState(false);   // 端口设置 modal
   const [portList, setPortList] = useState([]);         // 编辑中的额外端口(字符串数组,便于输入)
@@ -2440,6 +2450,26 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
                   onClick={(e) => { e.stopPropagation(); setMenuOpen(false); setCftOpen(true); }}>
                   {tr("sidecar.cftMenu", "Cloudflare 隧道")}
                 </button>
+                {tunnelLimit > 0 && (
+                  <button type="button" data-id="DockerCard-tunnel" className="bcard__menu-item"
+                    title={tr("sidecar.tunnelHint", "把本机 cicy-code 通过零信任隧道暴露到公网固定地址(付费档);开启后 cicy-code 自动拨号")}
+                    disabled={busy === "tunnel" || gwEnabled}
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      if (busy || gwEnabled) return;
+                      setMenuOpen(false); setBusy("tunnel");
+                      toast.show({ id: "docker-op", message: tr("sidecar.tunnelEnabling", "开启隧道,重启 cicy-code 中…"), status: "running", progress: undefined });
+                      try {
+                        const r = await window.cicy.sidecar.enrollTunnel(null);
+                        if (r?.ok) toast.show({ id: "docker-op", message: tr("sidecar.tunnelOn", "隧道已开启") + (r.slug ? ` · ${r.slug}` : ""), status: "done", ttl: 5000 });
+                        else if (r?.status === 402) toast.show({ id: "docker-op", message: tr("sidecar.tunnelNeedUpgrade", "当前为免费档,升级团队档位后可用固定隧道"), status: "error", ttl: 8000 });
+                        else toast.show({ id: "docker-op", message: tr("sidecar.tunnelFailed", "开启隧道失败") + (r?.error ? `: ${r.error}` : ""), status: "error", ttl: 7000 });
+                      } catch (e2) { toast.show({ id: "docker-op", message: tr("sidecar.tunnelFailed", "开启隧道失败") + `: ${e2?.message || e2}`, status: "error", ttl: 7000 }); }
+                      refreshTunnel(); setBusy(""); onRefresh?.();
+                    }}>
+                    {gwEnabled ? (tr("sidecar.tunnelRunning", "隧道运行中") + (gwSlug ? ` · ${gwSlug}` : "")) : tr("sidecar.tunnelMenu", "开启隧道")}
+                  </button>
+                )}
                 <button type="button" data-id="DockerCard-open-dir" className="bcard__menu-item"
                   onClick={(e) => { e.stopPropagation(); setMenuOpen(false); window.cicy?.docker?.openDir?.(); }}>
                   {tr("docker.openWslDir", "打开 WSL 目录")}
