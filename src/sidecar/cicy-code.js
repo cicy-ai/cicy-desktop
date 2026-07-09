@@ -300,25 +300,29 @@ function cftEnv() {
   return { CICY_CFT_TOKEN: c.token, ...(c.host ? { CICY_CFT_HOST: c.host } : {}) };
 }
 
-// Zero-trust gateway tunnel (paid tiers) — the managed counterpart to cft above.
-// { enabled, url, token, slug }: when enrolled (via cloud /api/gateway/enroll),
-// inject CICY_GATEWAY_URL (wss://<slug>.gw.cicy-ai.com/_tunnel/connect) + the
-// node-token so cicy-code dials OUT to the gateway. Mirrors getCft/setCft/cftEnv.
-function getGateway() {
-  const c = readFlags().gateway || {};
-  return { enabled: !!c.enabled, url: c.url || "", token: c.token || "", slug: c.slug || "" };
+// 自托管隧道 cicy-tunnel(替代原 cloud enroll gateway)—— 面板同 cft,就 { enabled, url, token }。
+// 用户从自己的 cicy-tunnel `enroll` 拿到 wss url + node token,填进来;enabled 且 url+token 非空
+// 时,start()/容器注入 CICY_TUNNEL_URL/TOKEN(cicy-code 据此主动拨出到隧道)。同时注入旧名
+// CICY_GATEWAY_* 作兼容,老 cicy-code 也能拨。Mirrors getCft/setCft/cftEnv。
+// 读取时兼容旧 f.gateway(老配置无缝迁移)。
+function getTunnel() {
+  const c = readFlags().tunnel || readFlags().gateway || {};
+  return { enabled: !!c.enabled, url: c.url || "", token: c.token || "" };
 }
-function setGateway(cfg = {}) {
+function setTunnel(cfg = {}) {
   const f = readFlags();
-  f.gateway = { enabled: !!cfg.enabled, url: String(cfg.url || "").trim(), token: String(cfg.token || "").trim(), slug: String(cfg.slug || "").trim() };
-  try { fs.mkdirSync(path.dirname(FLAGS_FILE), { recursive: true }); fs.writeFileSync(FLAGS_FILE, JSON.stringify(f, null, 2)); } catch (e) { console.warn(`[cicy-code-sidecar] setGateway write failed: ${e.message}`); }
-  return getGateway();
+  f.tunnel = { enabled: !!cfg.enabled, url: String(cfg.url || "").trim(), token: String(cfg.token || "").trim() };
+  delete f.gateway; // 迁移到 tunnel,清掉旧键
+  try { fs.mkdirSync(path.dirname(FLAGS_FILE), { recursive: true }); fs.writeFileSync(FLAGS_FILE, JSON.stringify(f, null, 2)); } catch (e) { console.warn(`[cicy-code-sidecar] setTunnel write failed: ${e.message}`); }
+  return getTunnel();
 }
-function gatewayEnv() {
-  const c = getGateway();
+function tunnelEnv() {
+  const c = getTunnel();
   if (!c.enabled || !c.url || !c.token) return {};
-  return { CICY_GATEWAY_URL: c.url, CICY_GATEWAY_TOKEN: c.token };
+  return { CICY_TUNNEL_URL: c.url, CICY_TUNNEL_TOKEN: c.token, CICY_GATEWAY_URL: c.url, CICY_GATEWAY_TOKEN: c.token };
 }
+// 兼容别名(旧调用方)。
+const getGateway = getTunnel, setGateway = setTunnel, gatewayEnv = tunnelEnv;
 
 
 async function start({ logPath, port = DEFAULT_PORT, force = false, version = null, emit = null } = {}) {
@@ -384,6 +388,7 @@ async function start({ logPath, port = DEFAULT_PORT, force = false, version = nu
     // 「Cloudflare Tunnel」开启时注入 connector token(+ 可选公网 host)→ cicy-code
     // 起一条命名隧道。关闭时不注入,cicy-code 不起隧道。
     ...cftEnv(),
+    ...tunnelEnv(),
     // Zero-trust gateway (paid tiers): when a tunnel is enrolled, cicy-code dials
     // OUT to <slug>.gw.cicy-ai.com. Off → not injected, no gateway dial.
     ...gatewayEnv(),
@@ -598,4 +603,4 @@ async function update({ logPath, port = DEFAULT_PORT, emit } = {}) {
   }
 }
 
-module.exports = { start, stop, restart, update, probeExisting, clearNpxCache, isUpdating, isBusy, ensureEnv, ensureNode, isPublic, setPublicFlag, isDood, setDood, getCft, setCft, cftEnv, getGateway, setGateway, gatewayEnv };
+module.exports = { start, stop, restart, update, probeExisting, clearNpxCache, isUpdating, isBusy, ensureEnv, ensureNode, isPublic, setPublicFlag, isDood, setDood, getCft, setCft, cftEnv, getTunnel, setTunnel, tunnelEnv, getGateway, setGateway, gatewayEnv };

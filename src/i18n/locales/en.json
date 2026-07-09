@@ -595,5 +595,21 @@
     "team": "Team",
     "enterprise": "Enterprise",
     "hint": "Current account plan"
+  },
+  "tunnel": {
+    "menu": "Self-hosted tunnel",
+    "hint": "Expose this cicy-code via your own cicy-tunnel at <slug>.gw.<domain> (paste url+token, transparent forwarding, no --public); toggling restarts cicy-code",
+    "title": "Self-hosted tunnel · cicy-tunnel",
+    "subtitle": "Expose this cicy-code via your own cicy-tunnel at <slug>.gw.<domain>, transparent forwarding. Get url+token from the tunnel's enroll.",
+    "enable": "Enable tunnel",
+    "url": "Tunnel URL",
+    "token": "Node token",
+    "tokenPh": "Paste the token from enroll",
+    "needUrl": "URL required to enable (wss://…/_tunnel/connect)",
+    "needToken": "Node token required to enable",
+    "applying": "Applying tunnel config, restarting cicy-code…",
+    "on": "Tunnel enabled",
+    "off": "Tunnel disabled",
+    "failed": "Failed to apply"
   }
 }

@@ -633,45 +633,32 @@ function register({ sidecarLogPath } = {}) {
     try { return { ok: true, cft: sidecar.getCft() }; } catch (e) { return { ok: false, cft: { enabled: false, token: "", host: "" }, error: e.message }; }
   });
 
-  // ── zero-trust gateway tunnel (paid tiers) — mirrors the cft flow above ──────
-  ipcMain.handle("sidecar:get-gateway", () => {
-    try { return { ok: true, gateway: sidecar.getGateway() }; } catch (e) { return { ok: false, gateway: { enabled: false }, error: e.message }; }
+  // ── 自托管隧道 cicy-tunnel(url+token 自填面板,替代原云端 enroll)—— 流程同 cft ──────
+  ipcMain.handle("sidecar:get-tunnel", () => {
+    try { return { ok: true, tunnel: sidecar.getTunnel() }; } catch (e) { return { ok: false, tunnel: { enabled: false, url: "", token: "" }, error: e.message }; }
   });
-  // Tier cap for the UI: tunnelLimit === 0 → free tier → hide/disable "开启隧道".
+  // 账号套餐等级(徽章用)—— 从云端取 tier,忽略 tunnels 列表;与自填隧道解耦。
   ipcMain.handle("tunnel:status", async () => {
     try { return cc ? await cc.listTunnels() : { ok: false, tunnelLimit: 0 }; } catch (e) { return { ok: false, tunnelLimit: 0, error: e.message }; }
   });
-  // Enroll a tunnel for a team → save gateway config → restart cicy-code so it
-  // dials OUT to <slug>.gw.cicy-ai.com. The cloud returns 402 for the free tier.
-  ipcMain.handle("tunnel:enroll", async (e, teamId) => {
+  // 存 url+token(desktop-flags.json)→ 重启 cicy-code(mac)/重建容器(win)让新的
+  // CICY_TUNNEL_URL/TOKEN 生效,节点据此主动拨出到 <slug>.gw.<域名>。透明转发,不鉴权。
+  ipcMain.handle("sidecar:set-tunnel", async (e, cfg) => {
     const emit = (ev) => { try { e.sender.send("sidecar:op-progress", { op: "restart", ...ev }); } catch {} };
     try {
-      if (!cc) return { ok: false, error: "cloud-client unavailable" };
-      // No team id from the UI → expose THIS machine's local team (idempotent
-      // get-or-create by device, the same call login already makes).
-      let tid = teamId;
-      if (!tid && cc.registerTeam) {
-        try { const reg = await cc.registerTeam({}); if (reg && reg.ok && reg.teamId) tid = reg.teamId; } catch {}
-      }
-      if (!tid) return { ok: false, error: "no local team to expose" };
-      const res = await cc.enrollTunnel(tid);
-      if (!res.ok) return res; // {ok:false, status:402, reason} — UI shows upsell
-      let host = "";
-      try { host = new URL(res.gatewayUrl).host; } catch {}
-      const wss = host ? `wss://${host}/_tunnel/connect` : "";
-      sidecar.setGateway({ enabled: true, url: wss, token: res.token, slug: res.slug });
-      emit({ phase: "swap", status: "running", message: "隧道已开启,正在重启 cicy-code…" });
+      const saved = sidecar.setTunnel(cfg || {});
+      emit({ phase: "swap", status: "running", message: `隧道已${saved.enabled ? "开启" : "关闭"},正在重启 cicy-code…` });
       if (process.platform === "win32") {
-        try { await appDocker.recreate({ onProgress: emit }); } catch { try { await appDocker.dockerRestart({ onProgress: emit }); } catch {} }
+        try { await appDocker.recreate({ ...(await appOpts()), onProgress: emit }); } catch { try { await appDocker.dockerRestart?.({ onProgress: emit }); } catch {} }
       } else {
         await sidecar.restart({ logPath: sidecarLogPath });
       }
       let up = false;
-      for (let i = 0; i < 240; i++) { if (await sidecar.probeExisting(PORT) || await appDocker.probeHealth?.(PORT)) { up = true; break; } await new Promise((r) => setTimeout(r, 500)); }
-      emit({ phase: "done", status: up ? "done" : "error", message: up ? "隧道已连接" : "重启后未就绪" });
-      return { ok: up, gatewayUrl: res.gatewayUrl, slug: res.slug };
+      for (let i = 0; i < 240; i++) { if ((await sidecar.probeExisting(PORT)) || (await appDocker.probeHealth?.(PORT))) { up = true; break; } await new Promise((r) => setTimeout(r, 500)); }
+      emit({ phase: "done", status: up ? "done" : "error", message: up ? `隧道已${saved.enabled ? "开启" : "关闭"}` : "重启后 :8008 未就绪——稍等或重试" });
+      return { ok: up, tunnel: saved };
     } catch (err) {
-      emit({ phase: "done", status: "error", message: err.message });
+      emit({ phase: "done", status: "error", message: `设置失败:${err.message}` });
       return { ok: false, error: err.message };
     }
   });

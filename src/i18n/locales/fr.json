@@ -595,5 +595,21 @@
     "team": "Équipe",
     "enterprise": "Entreprise",
     "hint": "Offre du compte actuel"
+  },
+  "tunnel": {
+    "menu": "Tunnel auto-hébergé",
+    "hint": "Expose ce cicy-code via votre propre cicy-tunnel sur <slug>.gw.<domaine> (collez url+token, transfert transparent, sans --public) ; le basculement redémarre cicy-code",
+    "title": "Tunnel auto-hébergé · cicy-tunnel",
+    "subtitle": "Expose ce cicy-code via votre propre cicy-tunnel sur <slug>.gw.<domaine>, transfert transparent. url+token via enroll.",
+    "enable": "Activer le tunnel",
+    "url": "URL du tunnel",
+    "token": "Token du nœud",
+    "tokenPh": "Collez le token d'enroll",
+    "needUrl": "URL requise pour activer (wss://…/_tunnel/connect)",
+    "needToken": "Token du nœud requis pour activer",
+    "applying": "Application de la config, redémarrage de cicy-code…",
+    "on": "Tunnel activé",
+    "off": "Tunnel désactivé",
+    "failed": "Échec de l'application"
   }
 }

@@ -135,9 +135,9 @@ contextBridge.exposeInMainWorld("cicy", {
     setPublic:   (on) => logInvoke("sidecar:set-public", on),  // 设开关 + 自动重启 cicy-code
     getCft:      ()  => logInvoke("sidecar:get-cft"),          // Cloudflare Tunnel 配置 {enabled,token,host}
     setCft:      (cfg) => logInvoke("sidecar:set-cft", cfg),   // 设配置 + 自动重启 cicy-code
-    getGateway:  ()  => logInvoke("sidecar:get-gateway"),      // 零信任隧道配置 {enabled,url,token,slug}
-    tunnelStatus:()  => logInvoke("tunnel:status"),            // 档位/上限 {ok,tunnelLimit,tunnelCount}
-    enrollTunnel:(teamId) => logInvoke("tunnel:enroll", teamId), // 对某 team 开隧道 + 重启 cicy-code(付费档)
+    getTunnel:   ()  => logInvoke("sidecar:get-tunnel"),       // 自托管隧道配置 {enabled,url,token}
+    setTunnel:   (cfg) => logInvoke("sidecar:set-tunnel", cfg),// 设 url+token + 重启 cicy-code
+    tunnelStatus:()  => logInvoke("tunnel:status"),            // 账号套餐 {ok,tier,tunnelLimit}(徽章用,与隧道解耦)
     getDood:     ()  => logInvoke("sidecar:get-dood"),         // 容器内使用 Docker(DooD)开关状态
     setDood:     (on) => logInvoke("sidecar:set-dood", on),    // 设开关 + 重建容器 + 装 docker CLI
     // live {op, phase, status, message, progress?} events during update —

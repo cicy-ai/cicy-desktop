@@ -595,5 +595,21 @@
     "team": "团队版",
     "enterprise": "企业版",
     "hint": "当前账号版本"
+  },
+  "tunnel": {
+    "menu": "自托管隧道",
+    "hint": "把本机 cicy-code 通过你自建的 cicy-tunnel 暴露到 <slug>.gw.<域名>(填 url+token,透明转发、不需 --public);切换会重启 cicy-code",
+    "title": "自托管隧道 · cicy-tunnel",
+    "subtitle": "把本机 cicy-code 通过你自建的 cicy-tunnel 暴露到 <slug>.gw.<域名>,透明转发。url+token 从隧道 enroll 拿。",
+    "enable": "开启隧道",
+    "url": "隧道地址 URL",
+    "token": "节点 Token",
+    "tokenPh": "粘贴 enroll 输出的 token",
+    "needUrl": "开启需要填隧道地址(wss://…/_tunnel/connect)",
+    "needToken": "开启需要填节点 token",
+    "applying": "应用隧道配置,重启 cicy-code 中…",
+    "on": "隧道已开启",
+    "off": "隧道已关闭",
+    "failed": "设置失败"
   }
 }

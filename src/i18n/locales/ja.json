@@ -595,5 +595,21 @@
     "team": "チーム",
     "enterprise": "エンタープライズ",
     "hint": "現在のアカウントプラン"
+  },
+  "tunnel": {
+    "menu": "セルフホストトンネル",
+    "hint": "自前の cicy-tunnel 経由でこの cicy-code を <slug>.gw.<ドメイン> に公開(url+token を貼付、透過転送、--public 不要)。切り替えで cicy-code を再起動",
+    "title": "セルフホストトンネル · cicy-tunnel",
+    "subtitle": "自前の cicy-tunnel 経由でこの cicy-code を <slug>.gw.<ドメイン> に公開、透過転送。url+token は enroll から取得。",
+    "enable": "トンネルを有効化",
+    "url": "トンネル URL",
+    "token": "ノードトークン",
+    "tokenPh": "enroll のトークンを貼付",
+    "needUrl": "有効化には URL が必要(wss://…/_tunnel/connect)",
+    "needToken": "有効化にはノードトークンが必要",
+    "applying": "トンネル設定を適用、cicy-code を再起動中…",
+    "on": "トンネルを有効化しました",
+    "off": "トンネルを無効化しました",
+    "failed": "設定に失敗しました"
   }
 }
