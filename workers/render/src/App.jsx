@@ -1372,7 +1372,17 @@ function Header({ me, welcome, onLogout, mitmTeam }) {
   useEffect(() => {
     if (!window.cicy?.sidecar?.tunnelStatus) return;
     let stop = false;
-    const load = () => window.cicy.sidecar.tunnelStatus().then((r) => { if (!stop && r?.ok && r.tier) setTier(String(r.tier)); }).catch(() => {});
+    const load = () => window.cicy.sidecar.tunnelStatus().then((r) => {
+      if (stop || !r?.ok) return;
+      // 优先用云端 tier;老后端(v2.2.72 前)没这字段 → 按 w-10122 规则从 tunnel_limit 推:
+      // 0→personal / N>0→team / -1→enterprise。
+      let tv = r.tier;
+      if (!tv) {
+        const lim = Number(r.tunnelLimit ?? r.tunnel_limit);
+        if (Number.isFinite(lim)) tv = lim < 0 ? "enterprise" : lim > 0 ? "team" : "personal";
+      }
+      if (tv) setTier(String(tv));
+    }).catch(() => {});
     load();
     const id = setInterval(load, 60000);
     return () => { stop = true; clearInterval(id); };
