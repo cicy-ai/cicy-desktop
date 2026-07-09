@@ -584,7 +584,13 @@ async function pullCustomTeams() {
         // 本地 base_url 更新过来 —— 这才是「改 URL 跨设备同步」的下行环节(原来只增不改 = 白改)。
         // 本地改动会经 Fix A(updateTeam 改址即同步)先上行到云端,所以云端总是最新,不会误回滚。
         const cur = nodes[localId] || {};
-        if (norm(cur.base_url) !== norm(host)) {
+        // 本机 sidecar/docker 团队的 base_url 永远是本机地址(127.0.0.1:8008)——桌面访问的是
+        // 它自己的 :8008;gateway_url/host_url 只是「别人怎么访问它」,绝不能拿来覆盖本机 base_url
+        // (否则本机团队变成远程 auth_error 卡、Local 计数掉 0 —— 开隧道后就撞过这个 bug)。
+        // base_url 可能已被污染成网关 URL,所以用稳定的 node key(127-0-0-1-<port> / localhost-)
+        // + is_docker 兜底识别本机。只有真正的远程 custom 团队才下行 reconcile base_url。
+        const isLocalNode = !!cur.is_docker || isLocalOrigin(cur.base_url) || /^(127-0-0-1|localhost)[-.]/.test(String(localId));
+        if (!isLocalNode && norm(cur.base_url) !== norm(host)) {
           await writeNodes((nds) => { if (nds[localId]) { nds[localId].base_url = host; nds[localId].updated_at = new Date().toISOString(); } return nds; });
           updated++;
           log.info(`[local-teams] custom team ${localId} url ← cloud (teamId=${tid})`);
