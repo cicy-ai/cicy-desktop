@@ -1439,6 +1439,14 @@ function Header({ me, welcome, onLogout, mitmTeam }) {
       {/* logo 移到 tab-shell 的「我的团队」标签(CICY_LOGO),topbar 不再重复显示品牌 */}
       <div className="user-chip" data-id="UserChip" ref={wrap}>
         {welcome && <span className="welcome">{welcome}</span>}
+        {/* 账号版本徽标 —— user-chip 行内的独立元素(不写进 avatar 按钮,点它不展开菜单),
+            靠 user-chip 的 inline-flex 排在头像左边 */}
+        {planTxt && (
+          <span data-id="UserChip-plan" className="plan-badge" title={tr("plan.hint", "当前账号版本")}
+            style={{ fontSize: 11, fontWeight: 600, lineHeight: 1.6, padding: "2px 9px", borderRadius: 999, whiteSpace: "nowrap", background: "var(--accent-soft, rgba(120,140,255,.16))", color: "var(--accent, #9db0ff)" }}>
+            {planTxt}
+          </span>
+        )}
         {!me ? (
           // 首次打开:profile 还没拉到 → avatar/名字用 skeleton 占位
           <div className="user-chip__trigger user-chip__trigger--skel" data-id="UserChip-skeleton" aria-hidden>
@@ -1452,12 +1460,6 @@ function Header({ me, welcome, onLogout, mitmTeam }) {
           className={`user-chip__trigger${open ? " is-open" : ""}`}
           onClick={() => setOpen((v) => !v)}
         >
-          {planTxt && (
-            <span data-id="UserChip-plan" className="plan-badge" title={tr("plan.hint", "当前账号版本")}
-              style={{ fontSize: 11, fontWeight: 600, lineHeight: 1.4, padding: "1px 7px", marginRight: 6, borderRadius: 999, whiteSpace: "nowrap", background: "var(--accent-soft, rgba(120,140,255,.16))", color: "var(--accent, #9db0ff)" }}>
-              {planTxt}
-            </span>
-          )}
           <div className="avatar">{initials}</div>
           <span className="user-name">{name}</span>
           <span className="user-chip__caret" aria-hidden>▾</span>
