@@ -2051,9 +2051,7 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
   const [status, setStatus] = useState(null);
   const [busy, setBusy] = useState("");   // "" | bootstrap | restart | stop | upgrade | probe
   const [menuOpen, setMenuOpen] = useState(false);
-  const [cftOpen, setCftOpen] = useState(false); // Cloudflare 隧道 modal(卡片层,菜单外)
   const [doodOpen, setDoodOpen] = useState(false); // 容器内使用 Docker(DooD)modal(卡片层,菜单外)
-  const [tunnelOpen, setTunnelOpen] = useState(false); // 自托管隧道(cicy-tunnel)配置 modal(卡片层,菜单外)
   const [confirmRecreate, setConfirmRecreate] = useState(false); // 重建容器 in-app 确认弹窗(不用 native confirm)
   const [portsOpen, setPortsOpen] = useState(false);   // 端口设置 modal
   const [portList, setPortList] = useState([]);         // 编辑中的额外端口(字符串数组,便于输入)
@@ -2436,16 +2434,6 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
                   onClick={(e) => { e.stopPropagation(); setMenuOpen(false); window.cicy?.tabs?.reloadIfOpen?.("http://127.0.0.1:8008", "Docker 团队"); }}>
                   {tr("docker.reloadWindow", "刷新窗口")}
                 </button>
-                <button type="button" data-id="DockerCard-cft" className="bcard__menu-item"
-                  title={tr("sidecar.cftHint", "用 Cloudflare 命名隧道把 cicy-code 暴露到固定公网域名(需要 Cloudflare connector token);切换会自动重启 cicy-code")}
-                  onClick={(e) => { e.stopPropagation(); setMenuOpen(false); setCftOpen(true); }}>
-                  {tr("sidecar.cftMenu", "Cloudflare 隧道")}
-                </button>
-                <button type="button" data-id="DockerCard-tunnel-cfg" className="bcard__menu-item"
-                  title={tr("tunnel.hint", "把本机 cicy-code 通过你自建的 cicy-tunnel 暴露到 <slug>.gw.<域名>(填 url+token,透明转发、不需 --public);切换会重启 cicy-code")}
-                  onClick={(e) => { e.stopPropagation(); setMenuOpen(false); setTunnelOpen(true); }}>
-                  {tr("tunnel.menu", "自托管隧道")}
-                </button>
                 <button type="button" data-id="DockerCard-open-dir" className="bcard__menu-item"
                   onClick={(e) => { e.stopPropagation(); setMenuOpen(false); window.cicy?.docker?.openDir?.(); }}>
                   {tr("docker.openWslDir", "打开 WSL 目录")}
@@ -2534,8 +2522,6 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
         {isBusy ? <Spinner /> : <ArrowIcon />}
         <span>{ctaLabel}</span>
       </button>
-      <CftModal open={cftOpen} onClose={() => setCftOpen(false)} toastId="docker-op" />
-      <TunnelModal open={tunnelOpen} onClose={() => setTunnelOpen(false)} toastId="docker-op" />
       <DoodModal open={doodOpen} onClose={() => setDoodOpen(false)} toastId="docker-op" />
       {confirmRecreate && createPortal(
         <div data-id="DockerCard-recreate-modal"
@@ -2660,14 +2646,12 @@ function LocalTeamCard({ team, cloudCode, onOpen, onRename, onRefresh }) {
   const running = team.status === "running";
   const [busy, setBusy] = useState("");   // "" | start | restart | update | stop | lan
   const [menuOpen, setMenuOpen] = useState(false);
-  const [cftOpen, setCftOpen] = useState(false); // Cloudflare 隧道 modal(卡片层,菜单外)
   // 局域网访问开关: cicy-code --public 状态。仅本地团队;初始从 sidecar.getPublic() 读。
   const [lanOn, setLanOn] = useState(false);
   useEffect(() => {
     if (!local || !window.cicy?.sidecar?.getPublic) return;
     window.cicy.sidecar.getPublic().then((r) => setLanOn(!!r?.public)).catch(() => {});
   }, [local]);
-  const [tunnelOpen, setTunnelOpen] = useState(false); // 自托管隧道(cicy-tunnel)配置 modal(卡片层,菜单外)
   // cicy-code 版本统一从 sidecar.versions() 一处拿("拿版本就一个方法")。
   // running===undefined = 还没查到(用于区分"加载中" vs "停了/拿不到");区别于
   // running===null(查过了但 daemon 没报版本)。latest/installed 同源。
@@ -2980,16 +2964,6 @@ function LocalTeamCard({ team, cloudCode, onOpen, onRename, onRefresh }) {
                     >
                       {tr("sidecar.lanAccess", "局域网访问")} · {lanOn ? tr("common.on", "开") : tr("common.off", "关")}
                     </button>
-                    <button type="button" data-id="LocalTeamCard-cft" className="bcard__menu-item"
-                      title={tr("sidecar.cftHint", "用 Cloudflare 命名隧道把本机 cicy-code 暴露到固定公网域名(需要 Cloudflare connector token);切换会自动重启 cicy-code")}
-                      onClick={(e) => { e.stopPropagation(); setMenuOpen(false); setCftOpen(true); }}>
-                      {tr("sidecar.cftMenu", "Cloudflare 隧道")}
-                    </button>
-                    <button type="button" data-id="LocalTeamCard-tunnel-cfg" className="bcard__menu-item"
-                      title={tr("tunnel.hint", "把本机 cicy-code 通过你自建的 cicy-tunnel 暴露到 <slug>.gw.<域名>(填 url+token,透明转发、不需 --public);切换会重启 cicy-code")}
-                      onClick={(e) => { e.stopPropagation(); setMenuOpen(false); setTunnelOpen(true); }}>
-                      {tr("tunnel.menu", "自托管隧道")}
-                    </button>
                   </>
                 )}
                 {team.cloud_team_id && (
@@ -3112,8 +3086,6 @@ function LocalTeamCard({ team, cloudCode, onOpen, onRename, onRefresh }) {
       </div>,
       document.body,
     )}
-    <CftModal open={cftOpen} onClose={() => setCftOpen(false)} toastId={opToastId} />
-    <TunnelModal open={tunnelOpen} onClose={() => setTunnelOpen(false)} toastId={opToastId} />
     <ConfirmModal open={confirmDel}
       title={tr("localTeams.deleteTitle", "删除团队")}
       message={tr("localTeams.deleteMsg", "确定删除「{{name}}」?此操作不可撤销。", { name: team.name })}
@@ -3510,151 +3482,9 @@ const AVATAR_PALETTE = [
 ];
 function hashStr(s) { s = String(s == null ? "" : s); let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 100003; return h; }
 function avatarBg(key) { return AVATAR_PALETTE[hashStr(key) % AVATAR_PALETTE.length]; }
-// Cloudflare 隧道 modal —— open 受控组件,**渲染在卡片层(菜单外)**,否则点菜单项关掉
-// 菜单会把 modal 一起卸载(Windows 上就是这样点不开)。LocalTeamCard(mac native)和
-// DockerCard(Windows 容器)共用。保存 → sidecar.setCft → cicy-code 带 CICY_CFT_TOKEN/
-// CICY_CFT_HOST 重启(mac spawn env / win 容器 -e)。
-function CftModal({ open, onClose, toastId = "cft-op" }) {
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-  const [cfg, setCfg] = useState({ enabled: false, token: "", host: "" });
-  useEffect(() => {
-    if (!open || !window.cicy?.sidecar?.getCft) return;
-    setErr("");
-    window.cicy.sidecar.getCft().then((r) => { if (r?.cft) setCfg({ enabled: !!r.cft.enabled, token: r.cft.token || "", host: r.cft.host || "" }); }).catch(() => {});
-  }, [open]);
-  const save = async () => {
-    if (busy) return;
-    if (cfg.enabled) {
-      if (!String(cfg.token).trim()) { setErr(tr("sidecar.cftNeedToken", "开启需要填 Tunnel Token")); return; }
-      if (!String(cfg.host).trim()) { setErr(tr("sidecar.cftNeedHost", "公网域名 Host 不能为空")); return; }
-    }
-    setBusy(true); setErr("");
-    toast.show({ id: toastId, message: tr("sidecar.cftApplying", "应用 Cloudflare Tunnel,重启中…"), status: "running", progress: undefined });
-    try {
-      const r = await window.cicy.sidecar.setCft(cfg);
-      if (r?.ok) {
-        if (r.cft) setCfg(r.cft);
-        if (r.cft?.enabled && !r.tunnelUp) {
-          // 重启成功但隧道没连上 = token 无效/连不上,留在弹窗报错,别静默关掉
-          setErr(tr("sidecar.cftTunnelDown", "隧道未连上:Token 可能无效/过期,或域名未在 Cloudflare 配好路由"));
-          toast.show({ id: toastId, message: tr("sidecar.cftTunnelDown", "隧道未连上:Token 可能无效…"), status: "error", ttl: 7000 });
-        } else {
-          onClose && onClose();
-          toast.show({ id: toastId, message: r.cft?.enabled ? (tr("sidecar.cftConnected", "隧道已连接") + (r.url ? `: ${r.url}` : "")) : tr("sidecar.cftOff", "Cloudflare Tunnel 已关闭"), status: "done", ttl: 4000 });
-        }
-      }
-      else { setErr(r?.error || tr("sidecar.cftFailed", "设置失败")); toast.show({ id: toastId, message: tr("sidecar.cftFailed", "设置失败") + (r?.error ? `: ${r.error}` : ""), status: "error", ttl: 6000 }); }
-    } catch (e) { setErr(e?.message || String(e)); toast.show({ id: toastId, message: tr("sidecar.cftFailed", "设置失败") + `: ${e?.message || e}`, status: "error", ttl: 6000 }); }
-    finally { setBusy(false); }
-  };
-  const setOpen = (v) => { if (!v) onClose && onClose(); }; // modal 内部沿用 setOpen(false) 关闭
-  if (!open) return null;
-  return (
-    <>
-      {createPortal(
-        <div data-id="cft-modal"
-          style={{ position: "fixed", inset: 0, zIndex: 66, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.5)" }}
-          onMouseDown={(e) => { if (!busy && e.target === e.currentTarget) setOpen(false); }}>
-          <div onClick={(e) => e.stopPropagation()}
-            style={{ width: 440, maxWidth: "92vw", background: "var(--card, #1b1d22)", border: "1px solid var(--border, #2c2f36)", borderRadius: 14, padding: 22, boxShadow: "0 20px 60px rgba(0,0,0,.5)" }}>
-            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{tr("sidecar.cftTitle", "Cloudflare 隧道")}</div>
-            <div style={{ fontSize: 12, opacity: .6, marginBottom: 16 }}>{tr("sidecar.cftSubtitle", "把本机 cicy-code 通过 Cloudflare 命名隧道暴露到固定公网域名")}</div>
-            <label data-id="cft-toggle-row" style={{ display: "flex", alignItems: "center", gap: 10, cursor: busy ? "default" : "pointer", marginBottom: 16 }}>
-              <input type="checkbox" data-id="cft-toggle" checked={cfg.enabled} disabled={busy}
-                onChange={(e) => setCfg((c) => ({ ...c, enabled: e.target.checked }))} />
-              <span style={{ fontSize: 14, fontWeight: 600 }}>{tr("sidecar.cftEnable", "开启隧道")}</span>
-            </label>
-            <div style={{ fontSize: 12, opacity: .7, marginBottom: 6 }}>{tr("sidecar.cftToken", "Tunnel Token")}</div>
-            <textarea data-id="cft-token" rows={3} className="login-email-input" style={{ width: "100%", resize: "vertical", lineHeight: 1.4, fontFamily: "var(--mono)", wordBreak: "break-all" }}
-              value={cfg.token} placeholder="eyJhIjoi…(粘贴 Cloudflare connector token)" spellCheck={false} disabled={busy}
-              onChange={(e) => setCfg((c) => ({ ...c, token: e.target.value.replace(/\s+/g, "") }))} />
-            <div style={{ fontSize: 12, opacity: .7, margin: "12px 0 6px" }}>{tr("sidecar.cftHost", "公网域名 Host")}</div>
-            <input data-id="cft-host" className="login-email-input" style={{ width: "100%", fontFamily: "var(--mono)" }}
-              value={cfg.host} placeholder="cloudshell.cicy-ai.com" spellCheck={false} disabled={busy}
-              onChange={(e) => setCfg((c) => ({ ...c, host: e.target.value.replace(/[\r\n\s]+/g, "").trim() }))}
-              onKeyDown={(e) => { if (e.key === "Escape" && !busy) setOpen(false); }} />
-            {err && <div className="error" style={{ marginTop: 8, fontSize: 12 }}>{err}</div>}
-            <div className="modal-actions">
-              <button type="button" className="btn-ghost" disabled={busy} onClick={() => setOpen(false)}>{tr("common.cancel", "取消")}</button>
-              <button type="button" className="btn-primary" data-id="cft-save" disabled={busy} onClick={save}>{busy ? tr("common.saving", "保存中…") : tr("common.save", "保存")}</button>
-            </div>
-          </div>
-        </div>,
-        document.body,
-      )}
-    </>
-  );
-}
 // 容器内使用 Docker(Docker-outside-of-Docker)modal —— 单 checkbox,像 CftModal 一样渲染在
 // 卡片层(菜单外)。开启 → sidecar.setDood → 重建容器挂 docker.sock + 把 docker CLI 装进容器
 // 持久卷,下载进度实时显示在弹窗里。DockerCard(Windows 容器)用。
-// 自托管隧道 cicy-tunnel modal —— url + token + 开关,和 CftModal 一模一样(渲染在卡片层)。
-// 保存 → sidecar.setTunnel → cicy-code 带 CICY_TUNNEL_URL/TOKEN 重启,主动拨出到隧道。透明转发。
-function TunnelModal({ open, onClose, toastId = "tunnel-op" }) {
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-  const [cfg, setCfg] = useState({ enabled: false, url: "", token: "" });
-  useEffect(() => {
-    if (!open || !window.cicy?.sidecar?.getTunnel) return;
-    setErr("");
-    window.cicy.sidecar.getTunnel().then((r) => { if (r?.tunnel) setCfg({ enabled: !!r.tunnel.enabled, url: r.tunnel.url || "", token: r.tunnel.token || "" }); }).catch(() => {});
-  }, [open]);
-  const save = async () => {
-    if (busy) return;
-    if (cfg.enabled) {
-      if (!String(cfg.url).trim()) { setErr(tr("tunnel.needUrl", "开启需要填隧道地址(wss://…/_tunnel/connect)")); return; }
-      if (!String(cfg.token).trim()) { setErr(tr("tunnel.needToken", "开启需要填节点 token")); return; }
-    }
-    setBusy(true); setErr("");
-    toast.show({ id: toastId, message: tr("tunnel.applying", "应用隧道配置,重启 cicy-code 中…"), status: "running", progress: undefined });
-    try {
-      const r = await window.cicy.sidecar.setTunnel(cfg);
-      if (r?.ok) {
-        if (r.tunnel) setCfg(r.tunnel);
-        onClose && onClose();
-        toast.show({ id: toastId, message: cfg.enabled ? tr("tunnel.on", "隧道已开启") : tr("tunnel.off", "隧道已关闭"), status: "done", ttl: 4000 });
-      } else { setErr(r?.error || tr("tunnel.failed", "设置失败")); toast.show({ id: toastId, message: tr("tunnel.failed", "设置失败") + (r?.error ? `: ${r.error}` : ""), status: "error", ttl: 6000 }); }
-    } catch (e) { setErr(e?.message || String(e)); toast.show({ id: toastId, message: tr("tunnel.failed", "设置失败") + `: ${e?.message || e}`, status: "error", ttl: 6000 }); }
-    finally { setBusy(false); }
-  };
-  const setOpen = (v) => { if (!v) onClose && onClose(); };
-  if (!open) return null;
-  return (
-    <>
-      {createPortal(
-        <div data-id="tunnel-modal"
-          style={{ position: "fixed", inset: 0, zIndex: 66, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.5)" }}
-          onMouseDown={(e) => { if (!busy && e.target === e.currentTarget) setOpen(false); }}>
-          <div onClick={(e) => e.stopPropagation()}
-            style={{ width: 440, maxWidth: "92vw", background: "var(--card, #1b1d22)", border: "1px solid var(--border, #2c2f36)", borderRadius: 14, padding: 22, boxShadow: "0 20px 60px rgba(0,0,0,.5)" }}>
-            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{tr("tunnel.title", "自托管隧道 · cicy-tunnel")}</div>
-            <div style={{ fontSize: 12, opacity: .6, marginBottom: 16 }}>{tr("tunnel.subtitle", "把本机 cicy-code 通过你自建的 cicy-tunnel 暴露到 <slug>.gw.<域名>,透明转发。url+token 从隧道 enroll 拿。")}</div>
-            <label data-id="tunnel-toggle-row" style={{ display: "flex", alignItems: "center", gap: 10, cursor: busy ? "default" : "pointer", marginBottom: 16 }}>
-              <input type="checkbox" data-id="tunnel-toggle" checked={cfg.enabled} disabled={busy}
-                onChange={(e) => setCfg((c) => ({ ...c, enabled: e.target.checked }))} />
-              <span style={{ fontSize: 14, fontWeight: 600 }}>{tr("tunnel.enable", "开启隧道")}</span>
-            </label>
-            <div style={{ fontSize: 12, opacity: .7, marginBottom: 6 }}>{tr("tunnel.url", "隧道地址 URL")}</div>
-            <input data-id="tunnel-url" className="login-email-input" style={{ width: "100%", fontFamily: "var(--mono)" }}
-              value={cfg.url} placeholder="wss://my-mac.gw.example.com/_tunnel/connect" spellCheck={false} disabled={busy}
-              onChange={(e) => setCfg((c) => ({ ...c, url: e.target.value.replace(/[\r\n\s]+/g, "").trim() }))} />
-            <div style={{ fontSize: 12, opacity: .7, margin: "12px 0 6px" }}>{tr("tunnel.token", "节点 Token")}</div>
-            <textarea data-id="tunnel-token" rows={3} className="login-email-input" style={{ width: "100%", resize: "vertical", lineHeight: 1.4, fontFamily: "var(--mono)", wordBreak: "break-all" }}
-              value={cfg.token} placeholder={tr("tunnel.tokenPh", "粘贴 enroll 输出的 token")} spellCheck={false} disabled={busy}
-              onChange={(e) => setCfg((c) => ({ ...c, token: e.target.value.replace(/\s+/g, "") }))} />
-            {err && <div className="error" style={{ marginTop: 8, fontSize: 12 }}>{err}</div>}
-            <div className="modal-actions">
-              <button type="button" className="btn-ghost" disabled={busy} onClick={() => setOpen(false)}>{tr("common.cancel", "取消")}</button>
-              <button type="button" className="btn-primary" data-id="tunnel-save" disabled={busy} onClick={save}>{busy ? tr("common.saving", "保存中…") : tr("common.save", "保存")}</button>
-            </div>
-          </div>
-        </div>,
-        document.body,
-      )}
-    </>
-  );
-}
 function DoodModal({ open, onClose, toastId = "dood-op" }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
