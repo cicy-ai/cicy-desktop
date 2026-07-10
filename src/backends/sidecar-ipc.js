@@ -631,6 +631,28 @@ function register({ sidecarLogPath } = {}) {
     try { return cc ? await cc.listTunnels() : { ok: false, tunnelLimit: 0 }; } catch (e) { return { ok: false, tunnelLimit: 0, error: e.message }; }
   });
 
+  // 「容器内使用 Docker」(Docker-outside-of-Docker)开关: 读/写 dood flag。set 后重建容器
+  // 让 docker.sock + WSL 的 docker 客户端挂载生效(runContainer 内部读 dood flag)。
+  ipcMain.handle("sidecar:get-dood", () => {
+    try { return { ok: true, dood: sidecar.isDood() }; } catch (e) { return { ok: false, dood: false, error: e.message }; }
+  });
+  ipcMain.handle("sidecar:set-dood", async (e, on) => {
+    const emit = (ev) => { try { e.sender.send("sidecar:op-progress", { op: "restart", ...ev }); } catch {} };
+    try {
+      sidecar.setDood(!!on);
+      emit({ phase: "swap", status: "running", message: `容器 Docker 访问已${on ? "开启" : "关闭"},正在重建容器…` });
+      try { await appDocker.recreate({ ...(await appOpts()), onProgress: emit }); }
+      catch (err) { try { await appDocker.dockerRestart?.({ onProgress: emit }); } catch {} }
+      let up = false;
+      for (let i = 0; i < 240; i++) { if ((await appDocker.probeHealth?.(PORT)) || (await sidecar.probeExisting(PORT))) { up = true; break; } await new Promise((r) => setTimeout(r, 500)); }
+      emit({ phase: "done", status: up ? "done" : "error", message: up ? `容器 Docker 访问已${on ? "开启" : "关闭"}` : "重建后 :8008 未就绪——稍等或重试" });
+      return { ok: up, dood: !!on };
+    } catch (err) {
+      emit({ phase: "done", status: "error", message: `设置失败:${err.message}` });
+      return { ok: false, error: err.message };
+    }
+  });
+
   // Update: stop + spawn cicy-code@latest (or reload the Docker image on
   // win32). The npx re-resolve / image pull can take a while on a cold cache,
   // so allow a longer window for :8008 to come back.
