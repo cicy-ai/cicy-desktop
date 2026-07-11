@@ -972,8 +972,6 @@ export default function App() {
         mitmTeam={localList.length > 0 ? localList[0] : null} />
       <UpdateBanner />
       <main className="main">
-        {/* 分区标题:团队 */}
-        <div data-id="SectionHead-teams" style={{ margin: "4px 0 10px", borderBottom: "2px solid currentColor", paddingBottom: 6, fontSize: 18, fontWeight: 700 }}>{tr("teams.sectionTeams", "团队")}</div>
         {/* 整行:左边 tab 药丸,右边「新加团队」顶到行尾 */}
         <div className="app__tabsrow">
           <div className="app__tabs">
