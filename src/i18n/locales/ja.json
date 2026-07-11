@@ -622,6 +622,14 @@
     "url": "URL",
     "editUrl": "URL を変更",
     "deleteTitle": "Hub を削除",
-    "deleteConfirm": "削除しますか"
+    "deleteConfirm": "削除しますか",
+    "paste": "Hub JSON",
+    "pasteSub": "Hub の JSON(url + token)を貼り付け。ローカルのみ保存。",
+    "badPaste": "解析できません — Hub の JSON(url 必須)を貼り付けてください",
+    "editTitle": "Hub を編集",
+    "editAddr": "編集",
+    "empty": "Hub がありません — 「Hub を追加」で JSON を貼り付け",
+    "noTeams": "この Hub にオンラインの team はありません",
+    "agents": "{n} エージェント"
   }
 }

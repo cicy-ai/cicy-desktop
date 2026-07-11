@@ -622,6 +622,14 @@
     "url": "URL",
     "editUrl": "Change URL",
     "deleteTitle": "Delete Hub",
-    "deleteConfirm": "Delete"
+    "deleteConfirm": "Delete",
+    "paste": "Hub JSON",
+    "pasteSub": "Paste the Hub JSON (url + token). Stored locally only.",
+    "badPaste": "Can't parse — paste the Hub JSON (must include url)",
+    "editTitle": "Edit Hub",
+    "editAddr": "Edit",
+    "empty": "No hubs yet — click Add Hub and paste the Hub JSON",
+    "noTeams": "No teams online in this hub",
+    "agents": "{n} agents"
   }
 }

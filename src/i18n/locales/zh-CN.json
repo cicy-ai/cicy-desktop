@@ -622,6 +622,14 @@
     "url": "地址 URL",
     "editUrl": "更改地址",
     "deleteTitle": "删除 Hub",
-    "deleteConfirm": "确定删除"
+    "deleteConfirm": "确定删除",
+    "paste": "Hub JSON",
+    "pasteSub": "粘贴 Hub 的 JSON(含 url、token),只存在本地(不上云)。",
+    "badPaste": "无法解析,请粘贴 Hub 的 JSON(需含 url)",
+    "editTitle": "编辑 Hub",
+    "editAddr": "编辑",
+    "empty": "还没有 Hub —— 点「添加 Hub」粘贴 Hub 的 JSON",
+    "noTeams": "该 Hub 暂无在线 team",
+    "agents": "{n} agent"
   }
 }

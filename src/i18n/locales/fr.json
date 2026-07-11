@@ -622,6 +622,14 @@
     "url": "URL",
     "editUrl": "Modifier l'URL",
     "deleteTitle": "Supprimer le Hub",
-    "deleteConfirm": "Supprimer"
+    "deleteConfirm": "Supprimer",
+    "paste": "JSON du Hub",
+    "pasteSub": "Collez le JSON du Hub (url + token). Stocké localement.",
+    "badPaste": "Analyse impossible — collez le JSON du Hub (url requise)",
+    "editTitle": "Modifier le Hub",
+    "editAddr": "Modifier",
+    "empty": "Aucun Hub — cliquez sur Ajouter un Hub et collez le JSON",
+    "noTeams": "Aucune team en ligne dans ce Hub",
+    "agents": "{n} agents"
   }
 }
