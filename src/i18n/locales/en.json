@@ -630,6 +630,7 @@
     "editAddr": "Edit",
     "empty": "No hubs yet — click Add Hub and paste the Hub JSON",
     "noTeams": "No teams online in this hub",
-    "agents": "{n} agents"
+    "agents": "{n} agents",
+    "scan": "Scan with CiCy Mobile to add this hub"
   }
 }

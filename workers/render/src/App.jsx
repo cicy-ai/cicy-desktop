@@ -3,6 +3,7 @@
 
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
+import qrcode from "qrcode-generator";
 import "./App.css";
 import { TERMS_VERSION, termsForDisplay } from "./termsText";
 import { mdToHtml } from "./mdLite";
@@ -1197,36 +1198,30 @@ export default function App() {
           <div className="app__tabs" data-id="HubTabs">
             {hubs.map((h) => (
               renamingHubId === h.id ? (
-                <input key={h.id} data-id="HubTab-rename" autoFocus className="app__tab" value={hubRenameDraft}
+                <input key={h.id} data-id="HubTab-rename" autoFocus className="app__tab hubtab" value={hubRenameDraft}
                   onChange={(e) => setHubRenameDraft(e.target.value)}
                   onBlur={() => { const n = hubRenameDraft.trim(); if (n) updateHub(h.id, { name: n }); setRenamingHubId(null); }}
                   onKeyDown={(e) => { if (e.key === "Enter") { const n = hubRenameDraft.trim(); if (n) updateHub(h.id, { name: n }); setRenamingHubId(null); } else if (e.key === "Escape") setRenamingHubId(null); }}
-                  style={{ width: 96, font: "inherit", padding: "4px 10px", border: "1px solid #3b82f6", borderRadius: 999, background: "#0d1117", color: "#e6edf3" }} />
+                  style={{ font: "inherit", padding: "4px 10px", border: "1px solid #3b82f6", borderRadius: 999, background: "#0d1117", color: "#e6edf3" }} />
               ) : (
-                <button key={h.id} type="button" data-id="HubTab"
-                  className={`app__tab ${selectedHubId === h.id ? "is-active" : ""}`}
-                  onClick={() => setSelectedHubId(h.id)}
-                  onDoubleClick={() => { setHubRenameDraft(h.name); setRenamingHubId(h.id); }}
-                  title={h.url}>
-                  {h.name}
-                </button>
+                // 一个 Hub tab = 容器:名字(双击行内改名)+ hover 才显的 ⚙ 编辑 / ✕ 删除。加宽 + 预留
+                // 操作区(始终占位,hover 只切换 opacity)→ 不跳动。
+                <div key={h.id} data-id="HubTab"
+                  className={`app__tab hubtab ${selectedHubId === h.id ? "is-active" : ""}`}
+                  onClick={() => setSelectedHubId(h.id)} title={h.url}>
+                  <span className="hubtab__name"
+                    onDoubleClick={(e) => { e.stopPropagation(); setHubRenameDraft(h.name); setRenamingHubId(h.id); }}>{h.name}</span>
+                  <span className="hubtab__actions">
+                    <button type="button" data-id="HubTab-edit-btn" title={tr("hub.editAddr", "编辑地址")}
+                      onClick={(e) => { e.stopPropagation(); openEditHub(h); }}>⚙</button>
+                    <button type="button" data-id="HubTab-del-btn" className="is-danger" title={tr("common.delete", "删除")}
+                      onClick={(e) => { e.stopPropagation(); setHubDelId(h.id); }}>✕</button>
+                  </span>
+                </div>
               )
             ))}
             <button type="button" data-id="HubTab-add" className="app__tab" style={{ opacity: .75 }} onClick={openAddHub}>＋ {tr("hub.add", "添加 Hub")}</button>
           </div>
-          {selectedHubId && hubs.some((h) => h.id === selectedHubId) && (
-            <div className="app__hub-actions" style={{ display: "flex", gap: 2, alignItems: "center" }}>
-              <button type="button" data-id="HubTab-rename-btn" title={tr("localTeams.rename", "重命名")}
-                style={{ cursor: "pointer", border: "none", background: "transparent", color: "#8b949e", fontSize: 12, padding: "4px 8px" }}
-                onClick={() => { const h = hubs.find((x) => x.id === selectedHubId); setHubRenameDraft(h?.name || ""); setRenamingHubId(selectedHubId); }}>✎ {tr("localTeams.rename", "重命名")}</button>
-              <button type="button" data-id="HubTab-edit-btn" title={tr("hub.editAddr", "编辑地址")}
-                style={{ cursor: "pointer", border: "none", background: "transparent", color: "#8b949e", fontSize: 12, padding: "4px 8px" }}
-                onClick={() => { const h = hubs.find((x) => x.id === selectedHubId); if (h) openEditHub(h); }}>⚙ {tr("hub.editAddr", "编辑")}</button>
-              <button type="button" data-id="HubTab-del-btn" title={tr("common.delete", "删除")}
-                style={{ cursor: "pointer", border: "none", background: "transparent", color: "#f97066", fontSize: 12, padding: "4px 8px" }}
-                onClick={() => setHubDelId(selectedHubId)}>🗑 {tr("common.delete", "删除")}</button>
-            </div>
-          )}
         </div>
         <div className="app__grid" data-id="HubTeamsGrid">
           {!hubs.length ? (
@@ -1245,27 +1240,49 @@ export default function App() {
           )}
         </div>
 
-        {/* 加 / 编辑 Hub modal:粘贴 Hub 的 JSON(含 url + token),只存本地 */}
-        {hubModalOpen && (
+        {/* 加 / 编辑 Hub modal:粘 JSON + 二维码(CiCy Mobile 扫码添加同一 Hub)+ 仓库地址 */}
+        {hubModalOpen && (() => {
+          const editHub = hubEditId ? hubs.find((h) => h.id === hubEditId) : null;
+          const src = editHub ? { url: editHub.url, token: editHub.token || "" } : parseHubPaste(hubPaste);
+          const qrText = src && src.url ? JSON.stringify({ v: 1, type: "hub", url: src.url, token: src.token || "" }) : "";
+          return (
           <div data-id="HubModal" style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.5)" }}
             onMouseDown={(e) => { if (e.target === e.currentTarget) setHubModalOpen(false); }}>
-            <div onClick={(e) => e.stopPropagation()} style={{ width: 460, maxWidth: "92vw", background: "var(--card, #1b1d22)", border: "1px solid var(--border, #2c2f36)", borderRadius: 14, padding: 22, boxShadow: "0 20px 60px rgba(0,0,0,.5)" }}>
+            <div onClick={(e) => e.stopPropagation()} style={{ width: qrText ? 600 : 460, maxWidth: "92vw", background: "var(--card, #1b1d22)", border: "1px solid var(--border, #2c2f36)", borderRadius: 14, padding: 22, boxShadow: "0 20px 60px rgba(0,0,0,.5)" }}>
               <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{hubEditId ? tr("hub.editTitle", "编辑 Hub") : tr("hub.addTitle", "添加 Hub")}</div>
               <div style={{ fontSize: 12, opacity: .6, marginBottom: 16 }}>{tr("hub.pasteSub", "粘贴 Hub 的 JSON(含 url、token),只存在本地(不上云)。")}</div>
-              <div style={{ fontSize: 12, opacity: .7, marginBottom: 6 }}>{tr("hub.name", "名称(可选)")}</div>
-              <input data-id="HubModal-name" className="login-email-input" style={{ width: "100%" }} value={hubName} placeholder="Hub1" onChange={(e) => setHubName(e.target.value)} />
-              <div style={{ fontSize: 12, opacity: .7, margin: "12px 0 6px" }}>{tr("hub.paste", "Hub JSON")}</div>
-              <textarea data-id="HubModal-paste" className="login-email-input" style={{ width: "100%", minHeight: 120, fontFamily: "var(--mono)", fontSize: 11, resize: "vertical" }} spellCheck={false}
-                value={hubPaste} placeholder={'{"v":1,"type":"hub","url":"https://hub.cicy-ai.com","token":"…"}'}
-                onChange={(e) => { setHubPaste(e.target.value); setHubErr(""); }} />
-              {hubErr && <div className="error" style={{ marginTop: 8, fontSize: 12 }}>{hubErr}</div>}
-              <div className="modal-actions">
-                <button type="button" className="btn-ghost" data-id="HubModal-cancel" onClick={() => setHubModalOpen(false)}>{tr("common.cancel", "取消")}</button>
-                <button type="button" className="btn-primary" data-id="HubModal-save" disabled={!hubPaste.trim()} onClick={submitHubModal}>{tr("common.save", "保存")}</button>
+              <div style={{ display: "flex", gap: 20, alignItems: "flex-start" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, opacity: .7, marginBottom: 6 }}>{tr("hub.name", "名称(可选)")}</div>
+                  <input data-id="HubModal-name" className="login-email-input" style={{ width: "100%" }} value={hubName} placeholder="Hub1" onChange={(e) => setHubName(e.target.value)} />
+                  <div style={{ fontSize: 12, opacity: .7, margin: "12px 0 6px" }}>{tr("hub.paste", "Hub JSON")}</div>
+                  <textarea data-id="HubModal-paste" className="login-email-input" style={{ width: "100%", minHeight: 120, fontFamily: "var(--mono)", fontSize: 11, resize: "vertical" }} spellCheck={false}
+                    value={hubPaste} placeholder={'{"v":1,"type":"hub","url":"https://hub.cicy-ai.com","token":"…"}'}
+                    onChange={(e) => { setHubPaste(e.target.value); setHubErr(""); }} />
+                  {hubErr && <div className="error" style={{ marginTop: 8, fontSize: 12 }}>{hubErr}</div>}
+                </div>
+                {qrText && (
+                  <div data-id="HubModal-qr" style={{ flex: "none", width: 172, textAlign: "center" }}>
+                    <HubQR text={qrText} size={172} />
+                    <div style={{ fontSize: 11, opacity: .6, marginTop: 8, lineHeight: 1.5 }}>{tr("hub.scan", "用 CiCy Mobile 扫码添加此 Hub")}</div>
+                  </div>
+                )}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 18, gap: 12 }}>
+                <button type="button" data-id="HubModal-repo" title="https://github.com/cicy-ai/cicy-hub"
+                  onClick={() => window.cicy?.shell?.openExternal?.("https://github.com/cicy-ai/cicy-hub")}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "none", background: "transparent", cursor: "pointer", color: "var(--muted, #8b949e)", fontSize: 12, fontFamily: "var(--mono)", padding: 0 }}>
+                  <GithubMark /> cicy-ai/cicy-hub
+                </button>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button type="button" className="btn-ghost" data-id="HubModal-cancel" onClick={() => setHubModalOpen(false)}>{tr("common.cancel", "取消")}</button>
+                  <button type="button" className="btn-primary" data-id="HubModal-save" disabled={!hubPaste.trim()} onClick={submitHubModal}>{tr("common.save", "保存")}</button>
+                </div>
               </div>
             </div>
           </div>
-        )}
+          );
+        })()}
         {/* 删除 Hub 确认 */}
         {hubDelId && createPortal(
           <div data-id="HubDelModal" style={{ position: "fixed", inset: 0, zIndex: 65, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.5)" }}
@@ -3776,6 +3793,30 @@ function HubTeamCard({ team, onOpen }) {
         <span>{tr("localTeams.open", "打开")}</span>
       </button>
     </div>
+  );
+}
+// Hub 二维码 —— 把 Hub 的 {v,type,url,token} JSON 编码成 QR,CiCy Mobile 扫码即添加同一 Hub。
+// qrcode-generator 打进 bundle(CSP 禁 CDN);纠错级 L 拿最大容量(JWT token 较长)。白底利于扫描。
+function HubQR({ text, size = 172 }) {
+  const html = useMemo(() => {
+    try {
+      const qr = qrcode(0, "L");
+      qr.addData(String(text || ""));
+      qr.make();
+      return qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+    } catch { return ""; }
+  }, [text]);
+  if (!html) return null;
+  return (
+    <div data-id="HubQR" style={{ width: size, height: size, background: "#fff", borderRadius: 10, padding: 8, boxSizing: "border-box" }}
+      dangerouslySetInnerHTML={{ __html: html }} />
+  );
+}
+function GithubMark({ size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/>
+    </svg>
   );
 }
 function BrandGlyph() {

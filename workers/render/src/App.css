@@ -441,6 +441,17 @@ body {
   text-align: center;
 }
 .app__tab.is-active .app__tab-count { background: rgba(91,141,247,.3); color: #fff; }
+/* Hub tab:比普通 tab 宽一点;名字左、hover 才显 ⚙/✕ 操作(始终占位,只切 opacity → 不跳动) */
+.hubtab { min-width: 92px; justify-content: space-between; padding-right: 8px; }
+.hubtab .hubtab__name { cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hubtab .hubtab__actions { display: inline-flex; align-items: center; gap: 1px; opacity: 0; transition: opacity 120ms ease; flex: none; }
+.hubtab:hover .hubtab__actions, .hubtab.is-active .hubtab__actions { opacity: .85; }
+.hubtab .hubtab__actions button {
+  appearance: none; border: 0; background: transparent; cursor: pointer;
+  color: #9ca3af; font-size: 11px; line-height: 1; padding: 3px 4px; border-radius: 4px;
+}
+.hubtab .hubtab__actions button:hover { color: #e5e7eb; background: rgba(255,255,255,.10); }
+.hubtab .hubtab__actions button.is-danger:hover { color: #f97066; background: rgba(249,112,102,.14); }
 /* 整行:tab 药丸在左,「新加团队」顶到行尾 */
 .app__tabsrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; }
 /* 行尾"新加团队"动作按钮:独立强调色按钮,跟 tab 药丸区分开 */

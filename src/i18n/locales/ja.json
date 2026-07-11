@@ -630,6 +630,7 @@
     "editAddr": "編集",
     "empty": "Hub がありません — 「Hub を追加」で JSON を貼り付け",
     "noTeams": "この Hub にオンラインの team はありません",
-    "agents": "{n} エージェント"
+    "agents": "{n} エージェント",
+    "scan": "CiCy Mobile でスキャンしてこの Hub を追加"
   }
 }
