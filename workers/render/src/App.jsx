@@ -958,54 +958,19 @@ export default function App() {
         mitmTeam={localList.length > 0 ? localList[0] : null} />
       <UpdateBanner />
       <main className="main">
-        {/* 整行:左边 tab 药丸,右边「新加团队」顶到行尾 */}
-        <div className="app__tabsrow">
-          <div className="app__tabs">
-            {[
-              { k: "all",    label: tr("teamFilter.all", "全部"),   n: localCount + customCount + cloudCount },
-              { k: "local",  label: tr("teamFilter.local", "本地"),   n: localCount },
-              { k: "cloud",  label: tr("teamFilter.cloud", "私有云"), n: cloudCount },
-              { k: "custom", label: tr("teamFilter.custom", "自定义"), n: customCount },
-            ].map(({ k, label, n }) => (
-              <button
-                key={k}
-                type="button"
-                className={`app__tab ${tab === k ? "is-active" : ""}`}
-                onClick={() => setTab(k)}
-              >
-                {label}
-                <span className="app__tab-count">{n}</span>
-              </button>
-            ))}
-          </div>
-          {/* 行尾:新加团队 → 下拉两个选项:① 自定义(modal 输 url/title)② 私有云(跳云端团队中心) */}
+        {/* filter tab 条已删除,直接展示全部团队;行尾保留「新加团队」 */}
+        <div className="app__tabsrow" style={{ justifyContent: "flex-end" }}>
+          {/* 行尾:新加团队 → 直接去云端团队中心添加(私有云)。自定义入口已删。 */}
           <div data-id="AddTeamWrap" style={{ position: "relative" }}>
             <button
               type="button"
               data-id="AddTeamButton"
               className="app__add-team"
               title={tr("teams.addHint", "添加团队")}
-              onClick={() => setAddMenuOpen((v) => !v)}
+              onClick={() => openCloudPage("?tab=private")}
             >
               + {tr("teams.add", "新加团队")}
             </button>
-            {addMenuOpen && (
-              <>
-                <div onClick={() => setAddMenuOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                <div data-id="AddTeamMenu" role="menu" style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 41, minWidth: 240, background: "var(--card, #1b1d22)", border: "1px solid var(--border, #2c2f36)", borderRadius: 10, boxShadow: "0 10px 30px rgba(0,0,0,.45)", overflow: "hidden" }}>
-                  <button type="button" data-id="AddTeamMenu-custom" className="bcard__menu-item" style={{ display: "block", width: "100%", textAlign: "left", padding: "11px 14px", border: "none", background: "transparent", cursor: "pointer", color: "inherit" }}
-                    onClick={() => { setAddMenuOpen(false); setCustomErr(""); setCustomOpen(true); }}>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>{tr("teams.addCustom", "自定义团队")}</div>
-                    <div style={{ fontSize: 11, opacity: .6, marginTop: 2 }}>{tr("teams.addCustomSub", "手动输入地址和名称")}</div>
-                  </button>
-                  <button type="button" data-id="AddTeamMenu-private" className="bcard__menu-item" style={{ display: "block", width: "100%", textAlign: "left", padding: "11px 14px", border: "none", borderTop: "1px solid var(--border, #2c2f36)", background: "transparent", cursor: "pointer", color: "inherit" }}
-                    onClick={() => { setAddMenuOpen(false); openCloudPage("?tab=private"); }}>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>{tr("teams.addPrivate", "私有云团队")}</div>
-                    <div style={{ fontSize: 11, opacity: .6, marginTop: 2 }}>{tr("teams.addPrivateSub", "去云端团队中心添加")}</div>
-                  </button>
-                </div>
-              </>
-            )}
           </div>
         </div>
 
