@@ -1164,10 +1164,10 @@ export default function App() {
               onRefresh={fetchLocalTeams}
             />
           )}
-          {showCustom && customList.map((t) => (
+          {!firstLoading && showCustom && customList.map((t) => (
             <LocalTeamCard key={"custom:" + t.id} team={t} cloudCode={cloudCodeFor(t.cloud_team_id)} onOpen={() => openLocalTeam(t.id)} onRename={renameLocalTeam} onRefresh={fetchLocalTeams} />
           ))}
-          {showCloud && cloudList.map((t) => (
+          {!firstLoading && showCloud && cloudList.map((t) => (
             <TeamCard
               key={"cloud:" + t.id}
               team={t}
