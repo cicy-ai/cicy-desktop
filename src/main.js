@@ -79,6 +79,18 @@ if (process.platform === "linux") {
 
 const http = require("http");
 const log = require("electron-log");
+
+// 全局兜底:任何未捕获的异常 / Promise 拒绝都**只记录、绝不退出**。一个工具出错(尤其
+// Chrome CDP 的 WebSocket 掉线/页面关闭时 emit 'error' 没人接)不该把整个 Electron worker
+// (= cicy-desktop 本体)带走。曾复现:agent 操作系统 Chrome 失败 → CDP client 的 WS 抛 error
+// → uncaughtException → cicy-desktop 连带被杀。worker 必须对工具级错误免疫。
+process.on("uncaughtException", (err) => {
+  try { log.error("[uncaughtException] kept alive:", (err && err.stack) || err); } catch {}
+});
+process.on("unhandledRejection", (reason) => {
+  try { log.error("[unhandledRejection] kept alive:", (reason && reason.stack) || reason); } catch {}
+});
+
 const { config } = require("./config");
 const { createWindow, accountIdxOfWebContents } = require("./utils/window-utils");
 const { AuthManager } = require("./utils/auth");

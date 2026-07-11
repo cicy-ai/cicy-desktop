@@ -88,12 +88,35 @@ async function waitForDebugger(debuggerPort, host = "127.0.0.1", timeoutMs = 150
   );
 }
 
-async function callCdp({ debuggerPort, method, params = {}, host = "127.0.0.1", target }) {
-  const client = await CDP(target ? { host, port: debuggerPort, target } : { host, port: debuggerPort });
+function timeoutReject(ms, label) {
+  return new Promise((_, reject) => setTimeout(() => reject(new Error(`CDP ${label} timeout after ${ms}ms`)), ms));
+}
+// 给 CDP client 挂一个吞掉的 'error' 监听 —— chrome-remote-interface 的 client 是 EventEmitter,
+// 底层 WS 掉线 / 目标页导航或关闭 / Chrome 崩溃时会 emit 'error'。**没有 'error' 监听时 Node 会
+// 直接抛 → uncaughtException → 主进程(cicy-desktop)整个崩**。挂上它,错误仍会通过 send() 的
+// reject 正常返回给调用方,只是不再炸进程。
+function guardClient(client) {
+  try { client.on("error", () => {}); } catch {}
+  return client;
+}
+
+async function callCdp({ debuggerPort, method, params = {}, host = "127.0.0.1", target, timeoutMs = 30000 }) {
+  const connectP = CDP(target ? { host, port: debuggerPort, target } : { host, port: debuggerPort });
+  // 连接一旦成功就先挂 error 监听(哪怕后面因超时被丢弃,也不让这个"孤儿"连接之后的 WS error 崩进程),
+  // 并在孤儿情况下关闭它。
+  connectP.then((c) => guardClient(c)).catch(() => {});
+  let client;
   try {
-    return await client.send(method, params || {});
+    client = await Promise.race([connectP, timeoutReject(timeoutMs, `connect ${host}:${debuggerPort}`)]);
+  } catch (e) {
+    connectP.then((c) => { try { c.close().catch(() => {}); } catch {} }).catch(() => {}); // 迟到的连接收尾
+    throw e;
+  }
+  guardClient(client);
+  try {
+    return await Promise.race([client.send(method, params || {}), timeoutReject(timeoutMs, method)]);
   } finally {
-    await client.close().catch(() => {});
+    try { await client.close().catch(() => {}); } catch {}
   }
 }
 
