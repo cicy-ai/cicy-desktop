@@ -387,8 +387,6 @@ export default function App() {
   // { id, name, url, avatar? }。卡片与 team 完全一致:头像 + 行内改名 + ⋯ 菜单(改地址/删除),
   // tab 打开方式也和 team 相同(tabs.open(..., team=true, colorKey))。
   const [hubs, setHubs] = useState(() => { try { return JSON.parse(localStorage.getItem("cicy_hubs") || "[]"); } catch { return []; } });
-  const [hubsLoading, setHubsLoading] = useState(true);   // 首屏 skeleton(与团队一致的加载体验)
-  useEffect(() => { const t = setTimeout(() => setHubsLoading(false), 260); return () => clearTimeout(t); }, []);
   const [hubModalOpen, setHubModalOpen] = useState(false);
   const [hubName, setHubName] = useState("");
   const [hubUrl, setHubUrl] = useState("");
@@ -546,6 +544,9 @@ export default function App() {
   useEffect(() => {
     const bearer = token || accessToken;
     if (bearer) fetchProfile(bearer, userId);
+    // 没登录:teams 不会有 fetchProfile 去 resolve,直接置空 —— 否则 teams 恒 null →
+    // firstLoading(localTeams===null || teams===null)永真 → 团队/Hub 区一直转 skeleton。
+    else setTeams((t) => (t === null ? [] : t));
   }, [token, accessToken, userId, fetchProfile]);
 
   // Local teams: probe on mount (independent of cloud login — local team
@@ -1131,7 +1132,7 @@ export default function App() {
         {/* 分区标题:Hub —— 本地存的 cicy-hub 地址(不上云) */}
         <div data-id="SectionHead-hub" style={{ margin: "26px 0 12px", borderBottom: "1px solid var(--border, rgba(255,255,255,.08))", paddingBottom: 8, fontSize: 13, fontWeight: 600, letterSpacing: .3, opacity: .8 }}>{tr("hub.section", "Hub")}</div>
         <div className="app__grid">
-          {hubsLoading
+          {firstLoading
             ? [0, 1, 2].map((i) => <SkeletonCard key={"hubskel" + i} />)
             : hubs.map((h) => (
               <HubCard
@@ -1144,7 +1145,7 @@ export default function App() {
                 onRemove={() => removeHub(h.id)}
               />
             ))}
-          {!hubsLoading && (
+          {!firstLoading && (
             <button type="button" data-id="HubCard-add" className="bcard" title={tr("hub.add", "添加 Hub")}
               style={{ cursor: "pointer", minHeight: 96, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 30, opacity: .6, background: "var(--card, #1b1d22)", border: "1px dashed var(--border, #2c2f36)", borderRadius: 14, color: "inherit" }}
               onClick={() => { setHubName(""); setHubUrl(""); setHubModalOpen(true); }}>+</button>
