@@ -208,12 +208,7 @@ async function probeLiveness(baseUrl, token) {
 
 async function list({ refresh = false } = {}) {
   if (!refresh && _cache && Date.now() < _cacheUntil) return _cache;
-  // 首页刷新时顺带拉一次云端自定义团队(节流 20s):别的设备加的 / 改址的 custom 团队,刷新
-  // 首页就能反映,不必重启。pull 内部 reconcile(增 + 改址),已同步的不动;登出则 no-op。
-  if (refresh && Date.now() - _lastCustomPull > 20000) {
-    _lastCustomPull = Date.now();
-    try { await pullCustomTeams(); } catch {}
-  }
+  // 自定义团队**只存本地、不上云** → 不再从云端 pull(别的设备加的 custom 也不下行)。
   const nodes = readNodes();
   const avatars = readAvatars();
   const slugs = Object.keys(nodes);
@@ -483,16 +478,10 @@ async function syncNameToCloud(id) {
     if (!cc.loginToken || !cc.loginToken()) return; // not logged in
     const node = readNodes()[id];
     if (!node) return;
-    // 自定义(远程 URL)团队:同步 {title, host_url} 到云端(kind=custom,复用 /api/teams)。
-    // docker 节点是 localhost(local-origin),不会进这;custom = 非 local-origin 的远程节点。
-    if (node.base_url && !isLocalOrigin(node.base_url)) {
-      const reg = await cc.registerCustomTeam({ teamId: node.cloud_team_id || null, title: node.name || "", hostUrl: node.base_url });
-      if (reg && reg.ok && reg.teamId && reg.teamId !== node.cloud_team_id) {
-        await writeNodes((nodes) => { if (nodes[id]) nodes[id].cloud_team_id = reg.teamId; return nodes; });
-        log.info(`[local-teams] custom team synced ${id} → cloud teamId=${reg.teamId}`);
-      }
-      return;
-    }
+    // 自定义(远程 URL)团队:**只存本地,不上云**。custom 团队的 host_url(含 ?token=)是
+    // 敏感数据,不推到云端(不 registerCustomTeam)。docker 节点是 localhost(local-origin),
+    // 不会进这;custom = 非 local-origin 的远程节点 → 直接返回,不做任何云同步。
+    if (node.base_url && !isLocalOrigin(node.base_url)) return;
     if (!isLocalOrigin(node.base_url || "")) return;
     // Docker 节点有自己独立的云端 team(POST /api/teams,sidecar ensureDockerTeam 管),
     // 绝不走这里的 device-register —— 否则会按本机 deviceId 复用回 8008 那个 team(40),
@@ -626,7 +615,7 @@ async function syncAllLocalTeams() {
       try { await syncNameToCloud(id); } catch {}
     }
     if (ids.length) log.info(`[local-teams] startup cloud-sync of ${ids.length} team(s)`);
-    try { await pullCustomTeams(); } catch {}
+    // 自定义团队只本地,不再 pullCustomTeams。
   } catch (e) { log.warn(`[local-teams] startup cloud-sync failed: ${e.message}`); }
 }
 

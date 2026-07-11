@@ -999,10 +999,27 @@ export default function App() {
               data-id="AddTeamButton"
               className="app__add-team"
               title={tr("teams.addHint", "添加团队")}
-              onClick={() => openCloudPage("?tab=private")}
+              onClick={() => setAddMenuOpen((v) => !v)}
             >
               + {tr("teams.add", "新加团队")}
             </button>
+            {addMenuOpen && (
+              <>
+                <div onClick={() => setAddMenuOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+                <div data-id="AddTeamMenu" role="menu" style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 41, minWidth: 240, background: "var(--card, #1b1d22)", border: "1px solid var(--border, #2c2f36)", borderRadius: 10, boxShadow: "0 10px 30px rgba(0,0,0,.45)", overflow: "hidden" }}>
+                  <button type="button" data-id="AddTeamMenu-custom" className="bcard__menu-item" style={{ display: "block", width: "100%", textAlign: "left", padding: "11px 14px", border: "none", background: "transparent", cursor: "pointer", color: "inherit" }}
+                    onClick={() => { setAddMenuOpen(false); setCustomErr(""); setCustomOpen(true); }}>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{tr("teams.addCustom", "自定义团队")}</div>
+                    <div style={{ fontSize: 11, opacity: .6, marginTop: 2 }}>{tr("teams.addCustomSub", "手动输入地址和名称(只存本地)")}</div>
+                  </button>
+                  <button type="button" data-id="AddTeamMenu-private" className="bcard__menu-item" style={{ display: "block", width: "100%", textAlign: "left", padding: "11px 14px", border: "none", borderTop: "1px solid var(--border, #2c2f36)", background: "transparent", cursor: "pointer", color: "inherit" }}
+                    onClick={() => { setAddMenuOpen(false); openCloudPage("?tab=private"); }}>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{tr("teams.addPrivate", "私有云团队")}</div>
+                    <div style={{ fontSize: 11, opacity: .6, marginTop: 2 }}>{tr("teams.addPrivateSub", "去云端团队中心添加")}</div>
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
 
