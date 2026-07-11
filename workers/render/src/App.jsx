@@ -557,7 +557,9 @@ export default function App() {
     if (!window.cicy?.localTeams?.list) return;
     setLocalTeamsLoading(true);
     try {
-      const list = await window.cicy.localTeams.list({ refresh: true });
+      // 把**当前登录账号**(渲染层持久化的权威 userId)传给 main 的 list() —— 让它按这个账号
+      // backfill 老团队归属 + 过滤,而不是让 main 自己去 global.json 猜(可能 stale/空 → 漏过滤)。
+      const list = await window.cicy.localTeams.list({ refresh: true, uid: safeGet(USER_ID_KEY) || "" });
       setLocalTeams(Array.isArray(list) ? list : []);
     } catch {
       setLocalTeams([]);

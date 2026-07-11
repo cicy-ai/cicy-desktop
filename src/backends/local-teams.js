@@ -89,11 +89,11 @@ function currentUid() {
 // 团队是否对"当前账号"可见(用于 list 过滤 —— **不删数据**,切回账号还在)。localhost(:8008
 // 等)是设备级、账号无关 → 恒显示;远程团队(自定义/helper/私有云)看归属 user_id:无归属=
 // 老数据 → 兼容全显;有归属 → 只当前账号(未登录 uid="" → 隐藏别人的)。
-function ownedByCurrentAccount(node) {
+function ownedByCurrentAccount(node, uid) {
   if (isLocalOrigin(node && node.base_url ? node.base_url : "")) return true;
   const owner = String((node && node.user_id) || "");
   if (!owner) return true;
-  return owner === currentUid();
+  return owner === (uid != null ? String(uid) : currentUid());
 }
 
 // 读节点在"当前账号"下的 cloud_team_id。新结构 cloud_team_ids[uid] 优先;map 已建但没有当前
@@ -235,14 +235,28 @@ async function probeLiveness(baseUrl, token) {
   return { status: classify(health), version: health.version || null, error: health.error || null };
 }
 
-async function list({ refresh = false } = {}) {
+async function list({ refresh = false, uid: uidArg } = {}) {
   if (!refresh && _cache && Date.now() < _cacheUntil) return _cache;
   // 自定义团队**只存本地、不上云** → 不再从云端 pull(别的设备加的 custom 也不下行)。
-  const nodes = readNodes();
   const avatars = readAvatars();
-  const uid = currentUid();
+  // uid:优先用调用方(渲染层)传进来的**权威登录账号**;没传才回落 global.json.desktopAuth。
+  const uid = uidArg != null ? String(uidArg) : currentUid();
+  // Backfill:老团队没有 user_id(功能上线前加的)会走"无归属=全显"分支 → 所有账号都看得到,
+  // 等于没过滤。已登录(uid 非空)时,把**无归属的远程团队**归到当前账号(一次性迁移写回),
+  // 之后 filter 才真正咬合(别的账号看不到)。localhost 的 :8008 是设备级,不 backfill。
+  let nodes = readNodes();
+  if (uid) {
+    const orphans = Object.keys(nodes).filter((s) => {
+      const n = nodes[s]; return n && !isLocalOrigin(n.base_url || "") && !String(n.user_id || "");
+    });
+    if (orphans.length) {
+      await writeNodes((nds) => { for (const s of orphans) if (nds[s] && !String(nds[s].user_id || "") && !isLocalOrigin(nds[s].base_url || "")) nds[s].user_id = uid; return nds; });
+      nodes = readNodes();
+      log.info(`[local-teams] backfilled user_id=${uid} onto ${orphans.length} legacy remote team(s)`);
+    }
+  }
   // 按当前账号过滤(不删 teams.json,只是不显示别的账号的远程团队)。localhost 的 :8008 恒显示。
-  const slugs = Object.keys(nodes).filter((s) => ownedByCurrentAccount(nodes[s]));
+  const slugs = Object.keys(nodes).filter((s) => ownedByCurrentAccount(nodes[s], uid));
   const teams = await Promise.all(slugs.map(async (slug) => {
     const node = nodes[slug] || {};
     const baseUrl = node.base_url || "";
