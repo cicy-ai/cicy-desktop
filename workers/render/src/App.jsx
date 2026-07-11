@@ -1270,13 +1270,13 @@ export default function App() {
               </div>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 18, gap: 12 }}>
                 <button type="button" data-id="HubModal-repo" title="https://github.com/cicy-ai/cicy-hub"
-                  onClick={() => window.cicy?.shell?.openExternal?.("https://github.com/cicy-ai/cicy-hub")}
-                  style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "none", background: "transparent", cursor: "pointer", color: "var(--muted, #8b949e)", fontSize: 12, fontFamily: "var(--mono)", padding: 0 }}>
-                  <GithubMark /> cicy-ai/cicy-hub
+                  onClick={() => window.cicy?.tabs?.openIn?.(CLOUD_PROFILE, "https://github.com/cicy-ai/cicy-hub", "cicy-hub")}
+                  style={{ flex: "1 1 auto", minWidth: 0, display: "inline-flex", alignItems: "center", gap: 6, border: "none", background: "transparent", cursor: "pointer", color: "var(--muted, #8b949e)", fontSize: 12, fontFamily: "var(--mono)", padding: 0, overflow: "hidden" }}>
+                  <GithubMark /><span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>cicy-ai/cicy-hub</span>
                 </button>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button type="button" className="btn-ghost" data-id="HubModal-cancel" onClick={() => setHubModalOpen(false)}>{tr("common.cancel", "取消")}</button>
-                  <button type="button" className="btn-primary" data-id="HubModal-save" disabled={!hubPaste.trim()} onClick={submitHubModal}>{tr("common.save", "保存")}</button>
+                <div style={{ flex: "none", display: "flex", gap: 8 }}>
+                  <button type="button" className="btn-ghost" data-id="HubModal-cancel" style={{ whiteSpace: "nowrap" }} onClick={() => setHubModalOpen(false)}>{tr("common.cancel", "取消")}</button>
+                  <button type="button" className="btn-primary" data-id="HubModal-save" style={{ whiteSpace: "nowrap" }} disabled={!hubPaste.trim()} onClick={submitHubModal}>{tr("common.save", "保存")}</button>
                 </div>
               </div>
             </div>
