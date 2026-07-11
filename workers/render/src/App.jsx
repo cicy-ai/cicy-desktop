@@ -383,6 +383,20 @@ export default function App() {
   // Tab state for the team grid: "all" | "local" | "cloud".
   const [tab, setTab] = useState("all");
 
+  // Hub 分区:本地存的 cicy-hub 地址列表(url),放 localStorage、**不上云**(数据在本地)。
+  const [hubs, setHubs] = useState(() => { try { return JSON.parse(localStorage.getItem("cicy_hubs") || "[]"); } catch { return []; } });
+  const [hubModalOpen, setHubModalOpen] = useState(false);
+  const [hubName, setHubName] = useState("");
+  const [hubUrl, setHubUrl] = useState("");
+  const saveHubs = (next) => { setHubs(next); try { localStorage.setItem("cicy_hubs", JSON.stringify(next)); } catch {} };
+  const addHub = () => {
+    const url = hubUrl.trim(); if (!url) return;
+    const name = hubName.trim() || `Hub${hubs.length + 1}`;
+    saveHubs([...hubs, { id: `hub-${Date.now()}`, name, url }]);
+    setHubName(""); setHubUrl(""); setHubModalOpen(false);
+  };
+  const removeHub = (id) => saveHubs(hubs.filter((h) => h.id !== id));
+
   // Pull /api/user/self + /api/teams in parallel using the access_token.
   // Goes through window.cicy.cloud.fetch — main does the actual request,
   // so we sidestep CORS (vite-dev localhost:8173 / file:// origins are
@@ -958,6 +972,8 @@ export default function App() {
         mitmTeam={localList.length > 0 ? localList[0] : null} />
       <UpdateBanner />
       <main className="main">
+        {/* 分区标题:团队 */}
+        <div data-id="SectionHead-teams" style={{ margin: "4px 0 10px", borderBottom: "2px solid currentColor", paddingBottom: 6, fontSize: 18, fontWeight: 700 }}>{tr("teams.sectionTeams", "团队")}</div>
         {/* 整行:左边 tab 药丸,右边「新加团队」顶到行尾 */}
         <div className="app__tabsrow">
           <div className="app__tabs">
@@ -1083,6 +1099,45 @@ export default function App() {
         {!profileLoading && !profileError && teams && teams.length === 0 && !localTeams?.length && (
           <div className="empty" style={{ marginTop: 14 }}>
             {tr("teams.emptyHint", "还没有团队 — 安装本地 cicy-code 起一个本地 team，或在云端创建。")}
+          </div>
+        )}
+
+        {/* 分区标题:Hub —— 本地存的 cicy-hub 地址(不上云) */}
+        <div data-id="SectionHead-hub" style={{ margin: "24px 0 10px", borderBottom: "2px solid currentColor", paddingBottom: 6, fontSize: 18, fontWeight: 700 }}>{tr("hub.section", "Hub")}</div>
+        <div className="app__grid">
+          {hubs.map((h) => (
+            <button key={h.id} type="button" data-id="HubCard" className="bcard"
+              style={{ position: "relative", textAlign: "left", cursor: "pointer", minHeight: 96, padding: 14, display: "flex", flexDirection: "column", gap: 6, background: "var(--card, #1b1d22)", border: "1px solid var(--border, #2c2f36)", borderRadius: 14, color: "inherit" }}
+              onClick={() => { if (h.url) window.cicy?.tabs?.open?.(h.url, h.name || "Hub", "", true); }}>
+              <span style={{ fontSize: 15, fontWeight: 700 }}>{h.name}</span>
+              <span style={{ fontSize: 11, opacity: .55, wordBreak: "break-all" }}>{h.url}</span>
+              <span data-id="HubCard-remove" role="button" title={tr("common.delete", "删除")}
+                onClick={(e) => { e.stopPropagation(); removeHub(h.id); }}
+                style={{ position: "absolute", top: 8, right: 11, fontSize: 16, lineHeight: 1, opacity: .5, cursor: "pointer" }}>×</span>
+            </button>
+          ))}
+          <button type="button" data-id="HubCard-add" className="bcard" title={tr("hub.add", "添加 Hub")}
+            style={{ cursor: "pointer", minHeight: 96, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 30, opacity: .6, background: "var(--card, #1b1d22)", border: "1px dashed var(--border, #2c2f36)", borderRadius: 14, color: "inherit" }}
+            onClick={() => { setHubName(""); setHubUrl(""); setHubModalOpen(true); }}>+</button>
+        </div>
+
+        {/* 添加 Hub modal:名称(可选)+ 地址 URL → 存 localStorage(本地) */}
+        {hubModalOpen && (
+          <div data-id="HubModal" style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.5)" }}
+            onMouseDown={(e) => { if (e.target === e.currentTarget) setHubModalOpen(false); }}>
+            <div onClick={(e) => e.stopPropagation()} style={{ width: 400, maxWidth: "92vw", background: "var(--card, #1b1d22)", border: "1px solid var(--border, #2c2f36)", borderRadius: 14, padding: 22, boxShadow: "0 20px 60px rgba(0,0,0,.5)" }}>
+              <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{tr("hub.addTitle", "添加 Hub")}</div>
+              <div style={{ fontSize: 12, opacity: .6, marginBottom: 16 }}>{tr("hub.addSub", "填一个 Hub 地址,只存在本地(不上云)。")}</div>
+              <div style={{ fontSize: 12, opacity: .7, marginBottom: 6 }}>{tr("hub.name", "名称(可选)")}</div>
+              <input data-id="HubModal-name" className="login-email-input" style={{ width: "100%" }} value={hubName} placeholder="Hub1" onChange={(e) => setHubName(e.target.value)} />
+              <div style={{ fontSize: 12, opacity: .7, margin: "12px 0 6px" }}>{tr("hub.url", "地址 URL")}</div>
+              <input data-id="HubModal-url" className="login-email-input" style={{ width: "100%", fontFamily: "var(--mono)" }} value={hubUrl} placeholder="https://…" spellCheck={false}
+                onChange={(e) => setHubUrl(e.target.value.trim())} onKeyDown={(e) => { if (e.key === "Enter") addHub(); }} />
+              <div className="modal-actions">
+                <button type="button" className="btn-ghost" data-id="HubModal-cancel" onClick={() => setHubModalOpen(false)}>{tr("common.cancel", "取消")}</button>
+                <button type="button" className="btn-primary" data-id="HubModal-save" disabled={!hubUrl.trim()} onClick={addHub}>{tr("common.save", "保存")}</button>
+              </div>
+            </div>
           </div>
         )}
       </main>

@@ -310,7 +310,8 @@
     "badUrl": "Invalid URL (must include http(s)://)",
     "adding": "Adding…",
     "addAction": "Add",
-    "urlExists": "This address already exists"
+    "urlExists": "This address already exists",
+    "sectionTeams": "Teams"
   },
   "trustedSites": {
     "addFailed": "Add failed",
@@ -611,5 +612,13 @@
     "on": "Tunnel enabled",
     "off": "Tunnel disabled",
     "failed": "Failed to apply"
+  },
+  "hub": {
+    "section": "Hub",
+    "add": "Add Hub",
+    "addTitle": "Add Hub",
+    "addSub": "Enter a Hub URL — stored locally only (never uploaded).",
+    "name": "Name (optional)",
+    "url": "URL"
   }
 }

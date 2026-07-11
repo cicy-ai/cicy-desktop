@@ -310,7 +310,8 @@
     "badUrl": "URL invalide (http(s):// requis)",
     "adding": "Ajout…",
     "addAction": "Ajouter",
-    "urlExists": "Cette adresse existe déjà"
+    "urlExists": "Cette adresse existe déjà",
+    "sectionTeams": "Équipes"
   },
   "trustedSites": {
     "addFailed": "Add failed",
@@ -611,5 +612,13 @@
     "on": "Tunnel activé",
     "off": "Tunnel désactivé",
     "failed": "Échec de l'application"
+  },
+  "hub": {
+    "section": "Hub",
+    "add": "Ajouter un Hub",
+    "addTitle": "Ajouter un Hub",
+    "addSub": "Saisissez l'URL d'un Hub — stockée localement uniquement.",
+    "name": "Nom (optionnel)",
+    "url": "URL"
   }
 }

@@ -310,7 +310,8 @@
     "badUrl": "無効な URL(http(s):// が必要)",
     "adding": "追加中…",
     "addAction": "追加",
-    "urlExists": "このアドレスは既に存在します"
+    "urlExists": "このアドレスは既に存在します",
+    "sectionTeams": "チーム"
   },
   "trustedSites": {
     "addFailed": "Add failed",
@@ -611,5 +612,13 @@
     "on": "トンネルを有効化しました",
     "off": "トンネルを無効化しました",
     "failed": "設定に失敗しました"
+  },
+  "hub": {
+    "section": "Hub",
+    "add": "Hub を追加",
+    "addTitle": "Hub を追加",
+    "addSub": "Hub の URL を入力 — ローカルにのみ保存(アップロードなし)。",
+    "name": "名前(任意)",
+    "url": "URL"
   }
 }

@@ -310,7 +310,8 @@
     "badUrl": "URL 无效(需含 http(s)://)",
     "adding": "添加中…",
     "addAction": "添加",
-    "urlExists": "该地址已存在"
+    "urlExists": "该地址已存在",
+    "sectionTeams": "团队"
   },
   "trustedSites": {
     "addFailed": "添加失败",
@@ -611,5 +612,13 @@
     "on": "隧道已开启",
     "off": "隧道已关闭",
     "failed": "设置失败"
+  },
+  "hub": {
+    "section": "Hub",
+    "add": "添加 Hub",
+    "addTitle": "添加 Hub",
+    "addSub": "填一个 Hub 地址,只存在本地(不上云)。",
+    "name": "名称(可选)",
+    "url": "地址 URL"
   }
 }
