@@ -979,6 +979,7 @@ export default function App() {
               { k: "all",    label: tr("teamFilter.all", "全部"),   n: localCount + customCount + cloudCount },
               { k: "local",  label: tr("teamFilter.local", "本地"),   n: localCount },
               { k: "cloud",  label: tr("teamFilter.cloud", "私有云"), n: cloudCount },
+              { k: "custom", label: tr("teamFilter.custom", "自定义"), n: customCount },
             ].map(({ k, label, n }) => (
               <button
                 key={k}
@@ -1101,7 +1102,7 @@ export default function App() {
         )}
 
         {/* 分区标题:Hub —— 本地存的 cicy-hub 地址(不上云) */}
-        <div data-id="SectionHead-hub" style={{ margin: "24px 0 10px", borderBottom: "2px solid currentColor", paddingBottom: 6, fontSize: 18, fontWeight: 700 }}>{tr("hub.section", "Hub")}</div>
+        <div data-id="SectionHead-hub" style={{ margin: "26px 0 12px", borderBottom: "1px solid var(--border, rgba(255,255,255,.08))", paddingBottom: 8, fontSize: 13, fontWeight: 600, letterSpacing: .3, opacity: .8 }}>{tr("hub.section", "Hub")}</div>
         <div className="app__grid">
           {hubs.map((h) => (
             <button key={h.id} type="button" data-id="HubCard" className="bcard"
