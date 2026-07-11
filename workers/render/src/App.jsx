@@ -438,6 +438,8 @@ export default function App() {
       if (teamsRes?.ok) {
         const teamsBody = JSON.parse(teamsRes.body || "{}"); // bare: { teams: [...] }
         setTeams(Array.isArray(teamsBody?.teams) ? teamsBody.teams : []);
+      } else {
+        setTeams((t) => (t === null ? [] : t)); // 非 ok:首次加载也要 resolve,skeleton 才收场
       }
       // /api/user/self is best-effort: it only fills the profile display name.
       // A 404 / failure here must NOT block login or the team list (the cloud
@@ -455,6 +457,7 @@ export default function App() {
       // 不把报错显示给用户 —— 一个瞬时的云端/网络失败不该让首页飘红;后台
       // refreshCloudTeams 会按周期静默重试。清掉任何残留的错误态。
       setProfileError("");
+      setTeams((t) => (t === null ? [] : t)); // 首次加载失败也让 teams resolve → skeleton 收场
     } finally {
       setProfileLoading(false);
     }
@@ -961,8 +964,9 @@ export default function App() {
   const showLocal = tab === "all" || tab === "local";
   const showCustom = tab === "all" || tab === "custom";
   const showCloud = tab === "all" || tab === "cloud";
-  // 首次打开:本地团队与云端团队都还没拉到(都为 null)→ grid 显示 skeleton 占位卡。
-  const firstLoading = localTeams === null && teams === null;
+  // 首次打开:本地或云端团队任一还没拉到(为 null)→ grid 显示 skeleton 占位卡,直到两边都
+  // resolve(出错也 resolve 成 []),再显示真实内容 —— 避免一个先回来另一个还空的露馅。
+  const firstLoading = localTeams === null || teams === null;
 
   return (
     <div className="shell shell--app">
