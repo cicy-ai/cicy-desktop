@@ -36,6 +36,7 @@ jobs:
           default = root
           [automount]
           enabled = true
+          options = "metadata"
           EOS
           cat > ctx/Dockerfile <<'EOF'
           FROM ubuntu:22.04
