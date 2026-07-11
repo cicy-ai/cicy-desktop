@@ -998,15 +998,16 @@ electronApp.whenReady().then(async () => {
     // renderer. A completed email login is thus indistinguishable downstream.
     const onAuthResult = (payload) => {
       if (payload && payload.token) {
-        // Account isolation: if a DIFFERENT user is signing in, drop the previous
-        // account's cloud/remote teams so they don't leak onto this account. The
-        // login below re-pulls this account's own teams fresh. Local machine
-        // teams (localhost) are kept — they belong to the device.
+        // Account switch: a DIFFERENT user is signing in. **Do NOT delete** the
+        // previous account's teams — they stay in teams.json (switch back = still
+        // there). Just invalidate the list cache so the next list() re-filters by
+        // the new account's uid (device-level :8008 stays; the other account's
+        // remote/private-cloud teams are hidden, not removed).
         try {
           const prevUid = String((readGlobalConfig(GLOBAL_JSON)?.desktopAuth?.userId) || "");
           const nextUid = payload.userId != null ? String(payload.userId) : "";
           if (prevUid && nextUid && prevUid !== nextUid) {
-            require("./backends/local-teams").purgeAccountTeams().catch(() => {});
+            try { require("./backends/local-teams").invalidateForAccountChange(); } catch {}
           }
         } catch {}
         saveDesktopAuth(payload);
@@ -1078,8 +1079,10 @@ electronApp.whenReady().then(async () => {
     __ipcMainAuth.handle("auth:logout", () => {
       try {
         updateGlobalConfig(GLOBAL_JSON, (c) => { delete c.desktopAuth; return c; });
-        // Drop this account's cloud/remote teams on logout (local machines stay).
-        require("./backends/local-teams").purgeAccountTeams().catch(() => {});
+        // Logout: **don't delete** teams — they stay in teams.json. Just invalidate the
+        // list cache so the next list() re-filters (logged-out uid="" → device-level
+        // :8008 + untagged teams show; account-tagged remote teams hidden until re-login).
+        try { require("./backends/local-teams").invalidateForAccountChange(); } catch {}
         log.info("[auth] desktop login cleared (explicit logout)");
       } catch (e) { log.warn(`[auth] logout clear failed: ${e.message}`); }
       return { ok: true };

@@ -80,6 +80,35 @@ function readGlobal() {
   }
 }
 
+// 当前登录账号 userId(desktopAuth.userId);未登录 → ""。团队按账号 filter + cloud_team_id
+// 按账号 scope 都用它。
+function currentUid() {
+  return String(readGlobal()?.desktopAuth?.userId || "");
+}
+
+// 团队是否对"当前账号"可见(用于 list 过滤 —— **不删数据**,切回账号还在)。localhost(:8008
+// 等)是设备级、账号无关 → 恒显示;远程团队(自定义/helper/私有云)看归属 user_id:无归属=
+// 老数据 → 兼容全显;有归属 → 只当前账号(未登录 uid="" → 隐藏别人的)。
+function ownedByCurrentAccount(node) {
+  if (isLocalOrigin(node && node.base_url ? node.base_url : "")) return true;
+  const owner = String((node && node.user_id) || "");
+  if (!owner) return true;
+  return owner === currentUid();
+}
+
+// 读节点在"当前账号"下的 cloud_team_id。新结构 cloud_team_ids[uid] 优先;map 已建但没有当前
+// 账号那格 → null(别把别的账号的 teamid 当成自己的);map 还没建 → 回落老的单 cloud_team_id
+// (仅老数据迁移窗口,首次 sync 会迁进 map 并清掉)。这样 :8008 这种设备级团队在 A/B 两个账号
+// 下各记各的 teamid,不再互相覆盖 / 抖动 / 反复重 mint。
+function cloudTeamIdFor(node, uid) {
+  const map = node && node.cloud_team_ids;
+  if (map && typeof map === "object") {
+    if (map[uid]) return String(map[uid]);
+    if (Object.keys(map).length) return null;
+  }
+  return node && node.cloud_team_id ? String(node.cloud_team_id) : null;
+}
+
 // The team map, from teams.json. One-time migration: if teams.json is absent
 // but the legacy global.json.cicyDesktopNodes still has teams, seed teams.json
 // from it (global.json is left untouched). Returns a { "<id>": {node} } map.
@@ -211,7 +240,9 @@ async function list({ refresh = false } = {}) {
   // 自定义团队**只存本地、不上云** → 不再从云端 pull(别的设备加的 custom 也不下行)。
   const nodes = readNodes();
   const avatars = readAvatars();
-  const slugs = Object.keys(nodes);
+  const uid = currentUid();
+  // 按当前账号过滤(不删 teams.json,只是不显示别的账号的远程团队)。localhost 的 :8008 恒显示。
+  const slugs = Object.keys(nodes).filter((s) => ownedByCurrentAccount(nodes[s]));
   const teams = await Promise.all(slugs.map(async (slug) => {
     const node = nodes[slug] || {};
     const baseUrl = node.base_url || "";
@@ -227,7 +258,8 @@ async function list({ refresh = false } = {}) {
       // Cloud-issued teamId (from name-sync register). The renderer maps it to
       // the team's sk-cicy- gateway apiKey (via /api/teams) for the 账单 link —
       // the local api_token is an MCP token the cloud can't bill on.
-      cloud_team_id: node.cloud_team_id || null,
+      cloud_team_id: cloudTeamIdFor(node, uid) || null,
+      user_id: node.user_id || null,
       port,
       install_source: node.install_source || null,
       install_os: node.install_os || null,
@@ -478,6 +510,7 @@ async function syncNameToCloud(id) {
     if (!cc.loginToken || !cc.loginToken()) return; // not logged in
     const node = readNodes()[id];
     if (!node) return;
+    const uid = currentUid(); // :8008 的云端 team 按账号存(cloud_team_ids[uid]),A/B 各记各的
     // 自定义(远程 URL)团队:**只存本地,不上云**。custom 团队的 host_url(含 ?token=)是
     // 敏感数据,不推到云端(不 registerCustomTeam)。docker 节点是 localhost(local-origin),
     // 不会进这;custom = 非 local-origin 的远程节点 → 直接返回,不做任何云同步。
@@ -495,15 +528,15 @@ async function syncNameToCloud(id) {
       try { if (process.platform === "win32" && new URL(node.base_url).port === DOCKER_PORT) isDockerNode = true; } catch {}
       if (isDockerNode) return;
     }
-    let reg = await cc.registerTeam({ teamId: node.cloud_team_id || null, title: node.name || "", titleVersion: node.titleVersion || 0 });
+    let reg = await cc.registerTeam({ teamId: cloudTeamIdFor(node, uid) || null, title: node.name || "", titleVersion: node.titleVersion || 0 });
     // Self-heal a STALE cached cloud_team_id: if we presented a cached id but the
     // cloud returned ok WITHOUT an apiKey (team deleted / rotated / no longer owned
     // cloud-side — e.g. after a cloud wipe), the cached id is dead. Re-register with
     // teamId=null to mint a FRESH team+key instead of silently leaving the gateway
     // key empty (the "apiKey stays empty after a cloud wipe → requests 发不出去" bug).
     // The teamId-changed branch below persists the new id back into teams.json.
-    if (reg && reg.ok && !reg.apiKey && node.cloud_team_id) {
-      log.warn(`[local-teams] cached cloud_team_id=${node.cloud_team_id} returned no gateway key — re-creating a fresh team`);
+    if (reg && reg.ok && !reg.apiKey && cloudTeamIdFor(node, uid)) {
+      log.warn(`[local-teams] cached cloud_team_id=${cloudTeamIdFor(node, uid)} (uid=${uid}) returned no gateway key — re-creating a fresh team`);
       reg = await cc.registerTeam({ teamId: null, title: node.name || "", titleVersion: node.titleVersion || 0 });
     }
     // The cloud assigns this team a sk-cicy- gateway apiKey on register — wire
@@ -524,11 +557,18 @@ async function syncNameToCloud(id) {
       const respVer = Number(reg.titleVersion) || 0;
       const localVer = Number(node.titleVersion) || 0;
       const adopt = respVer > localVer;
-      const teamIdChanged = reg.teamId && reg.teamId !== node.cloud_team_id;
-      if (teamIdChanged || adopt) {
+      const teamIdChanged = reg.teamId && reg.teamId !== cloudTeamIdFor(node, uid);
+      const needSeed = reg.teamId && !(node.cloud_team_ids && node.cloud_team_ids[uid]); // 当前账号那格还没写过
+      if (teamIdChanged || adopt || needSeed) {
         await writeNodes((nodes) => {
           if (nodes[id]) {
-            if (teamIdChanged) nodes[id].cloud_team_id = reg.teamId;
+            if (reg.teamId) {
+              // 按账号存:A/B 各记各的 teamid,绝不互相覆盖。
+              if (!nodes[id].cloud_team_ids || typeof nodes[id].cloud_team_ids !== "object") nodes[id].cloud_team_ids = {};
+              nodes[id].cloud_team_ids[uid] = reg.teamId;
+              // 老的单字段迁移完清掉(避免以后被别的账号误当自己的 id 复用)。
+              if (nodes[id].cloud_team_id) delete nodes[id].cloud_team_id;
+            }
             if (adopt) { if (reg.title) nodes[id].name = reg.title; nodes[id].titleVersion = respVer; }
           }
           return nodes;
@@ -710,6 +750,9 @@ async function addTeam(spec) {
       // one. Everything else (token, install meta) DOES refresh. Only a brand-
       // new team takes the provided title, falling back to the i18n Unnamed.
       name: prev.name || patch.name || unnamedName(),
+      // 归属账号:远程团队(自定义/私有云)记下"谁加的",list() 按当前账号过滤;localhost 的
+      // :8008 是设备级、账号无关 → 不打。已有归属不覆盖(upsert 保持原主)。未登录则留空(=兼容全显)。
+      user_id: prev.user_id || (isLocalUrl ? undefined : (currentUid() || undefined)),
       added_at: prev.added_at || now,
       updated_at: now,
     };
@@ -1101,21 +1144,12 @@ function avatarForUrl(url) {
 // doesn't leak them onto the next user. LOCAL machine teams on THIS device
 // (localhost base_url) are kept — they belong to the box, not the account. The
 // next login re-pulls the new account's own teams fresh.
-async function purgeAccountTeams() {
-  let removed = 0;
-  try {
-    await writeNodes((nodes) => {
-      for (const id of Object.keys(nodes)) {
-        let host = "";
-        try { host = new URL(String(nodes[id]?.base_url || "")).hostname.toLowerCase(); } catch {}
-        const isLocal = host === "" || host === "127.0.0.1" || host === "localhost" || host === "::1";
-        if (!isLocal) { delete nodes[id]; removed++; }
-      }
-      return nodes;
-    });
-  } catch (e) { log.warn(`[local-teams] purgeAccountTeams failed: ${e.message}`); }
-  if (removed) { _cache = null; _cacheUntil = 0; log.info(`[local-teams] purged ${removed} account team(s) (login/logout)`); }
-  return removed;
+// 换账号 / 登出:**不删任何团队**(数据留在 teams.json,切回账号还在),只清 list() 缓存 →
+// 下次 list 用新账号的 uid 重新 filter(设备级 :8008 恒显示;别的账号的远程/私有云团队隐藏,
+// 不是删除)。cloud_team_id 也按账号 scope(cloud_team_ids[uid]),切号不覆盖。
+function invalidateForAccountChange() {
+  _cache = null; _cacheUntil = 0;
+  log.info("[local-teams] account changed → team-list cache invalidated (no delete; filter by user_id)");
 }
 
-module.exports = { list, openTeam, reloadTeam, closeLocalWindows, addTeam, removeTeam, updateTeam, upgradeTeam, syncAllLocalTeams, purgeAccountTeams, setAvatar, getAvatars, avatarForUrl };
+module.exports = { list, openTeam, reloadTeam, closeLocalWindows, addTeam, removeTeam, updateTeam, upgradeTeam, syncAllLocalTeams, invalidateForAccountChange, setAvatar, getAvatars, avatarForUrl };
