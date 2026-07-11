@@ -83,6 +83,7 @@ jobs:
         shell: powershell
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CICY_OBFUSCATE: "1"   # 发版混淆 JS(prebuild 主进程 + Vite 渲染层),仅 release CI
         run: |
           if (Test-Path dist) { Remove-Item -Recurse -Force dist }
           if (Test-Path "build\logo.ico") {

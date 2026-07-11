@@ -1,6 +1,6 @@
 {
   "name": "cicy-desktop",
-  "version": "2.1.248",
+  "version": "2.1.249",
   "description": "CiCy - AI-powered operating system browser",
   "main": "src/main.js",
   "bin": {
@@ -13,9 +13,9 @@
     "format:check": "prettier --check \"src/**/*.js\"",
     "build": "electron-builder --publish never",
     "build:homepage": "node scripts/build-homepage.cjs",
-    "prebuild:win": "node scripts/build-homepage.cjs",
-    "prebuild:mac": "node scripts/build-homepage.cjs",
-    "prebuild:linux": "node scripts/build-homepage.cjs",
+    "prebuild:win": "node scripts/build-homepage.cjs && node scripts/obfuscate.cjs",
+    "prebuild:mac": "node scripts/build-homepage.cjs && node scripts/obfuscate.cjs",
+    "prebuild:linux": "node scripts/build-homepage.cjs && node scripts/obfuscate.cjs",
     "prepublishOnly": "node scripts/build-homepage.cjs",
     "build:win": "electron-builder --win",
     "build:mac": "electron-builder --mac",
@@ -154,6 +154,7 @@
   "devDependencies": {
     "electron": "41.0.3",
     "electron-builder": "^26.7.0",
+    "javascript-obfuscator": "^5.4.7",
     "prettier": "^3.8.1"
   }
 }
