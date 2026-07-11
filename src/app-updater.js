@@ -19,18 +19,7 @@ const path = require("path");
 const fs = require("fs");
 const https = require("https");
 const log = require("electron-log");
-const { OSS_RELEASES_BASE, MIRRORS, mirrorUrl } = require("./sidecar/mirrors");
-
-const REPO = "cicy-ai/cicy-desktop";
-const GH_DL = (ver) => `https://github.com/${REPO}/releases/download/v${ver}`;
-
-// ── 网络判定(缓存)──────────────────────────────────────────────────────────
-let _network = null;
-async function detectNetwork() {
-  if (_network) return _network;
-  try { _network = await require("./sidecar/net-detect")(); } catch { _network = "unknown"; }
-  return _network;
-}
+const { OSS_RELEASES_BASE } = require("./sidecar/mirrors");
 
 // ── 版本比较:>0 a 新于 b ─────────────────────────────────────────────────────
 function cmpVer(a, b) {
@@ -61,12 +50,6 @@ function getText(url, redirects = 0) {
   });
 }
 
-// CN 走 ghproxy 兜底(OSS 没有 mac/linux 包)。
-function mirrored(githubUrl) {
-  const m = MIRRORS[0];
-  return m ? mirrorUrl(githubUrl, m) : githubUrl;
-}
-
 // HEAD 探测 URL 是否可下(200/206 = ok)。跟随重定向(GitHub release 会 302 到 CDN)。
 // 用于「先出包再更新版本」的客户端保险:版本号涨了但包还没传 → HEAD 404 → 先不报更新。
 function headOk(url, redirects = 0) {
@@ -89,40 +72,25 @@ function headOk(url, redirects = 0) {
 }
 
 // ── 最新版本号 ────────────────────────────────────────────────────────────────
-async function fetchLatestVersion(network) {
-  // **Windows 包只在 OSS(GitHub 不发 win),版本清单也一律读 OSS —— 与网络判定无关。**
-  // 否则 net=unknown(启动探测超时会被缓存成 unknown 整个会话)或 global 时去读 GitHub,CN
-  // 用户读不到 → 更新提示整段会话都不出现(用户报的「更新 banner 没出现」)。win→win-latest。
-  if (process.platform === "win32") {
-    return (await getText(`${OSS_RELEASES_BASE}/win-latest-version.txt`)).trim().replace(/^v/, "");
-  }
-  // mac/linux:net-detect 契约是「cn 和 unknown 都优先镜像」—— 只有确认可达 GitHub(global)
-  // 才走 GitHub;cn/unknown 一律读 OSS。按平台读各自指针(win/mac 两条独立 CI、版本可能不
-  // 同步,读错平台会 404);linux 无独立 OSS 指针、沿用裸名(与 win 同 tag、走 GitHub 下载)。
-  if (network !== "global") {
-    const file = process.platform === "darwin" ? "mac-latest-version.txt" : "latest-version.txt";
-    return (await getText(`${OSS_RELEASES_BASE}/${file}`)).trim().replace(/^v/, "");
-  }
-  // 确认可达 GitHub:releases/latest 的 tag_name。
-  const j = JSON.parse(await getText(`https://api.github.com/repos/${REPO}/releases/latest`));
-  return String(j.tag_name || "").trim().replace(/^v/, "");
+async function fetchLatestVersion() {
+  // 版本清单**一律读 OSS**(win/mac/linux 各自指针),与网络判定无关 —— 彻底不碰 GitHub,
+  // 这样 cicy-desktop 仓库私有也不影响更新检查。win/mac 是两条独立 CI、版本可能不同步,读错
+  // 平台会 404,所以各读各的指针文件。
+  const file = process.platform === "win32" ? "win-latest-version.txt"
+    : process.platform === "darwin" ? "mac-latest-version.txt"
+    : "linux-latest-version.txt";
+  return (await getText(`${OSS_RELEASES_BASE}/${file}`)).trim().replace(/^v/, "");
 }
 
 // ── 安装包 URL(分平台 + 分网络)+ 本地文件名 ────────────────────────────────
-function assetFor(version, network) {
+function assetFor(version) {
   const plat = process.platform;
   const arch = process.arch === "arm64" ? "arm64" : "x64";
-  if (plat === "win32") {
-    // win 包只在 OSS(GitHub 不发);CN/非 CN 都用 OSS。
-    return { url: `${OSS_RELEASES_BASE}/cicy-desktop-${version}.exe`, file: `cicy-desktop-${version}.exe` };
-  }
-  if (plat === "darwin") {
-    const gh = `${GH_DL(version)}/cicy-desktop-${version}-${arch}.pkg`;
-    return { url: network === "global" ? gh : mirrored(gh), file: `cicy-desktop-${version}-${arch}.pkg` };
-  }
-  // linux
-  const gh = `${GH_DL(version)}/CiCy-Desktop-${version}.AppImage`;
-  return { url: network === "global" ? gh : mirrored(gh), file: `CiCy-Desktop-${version}.AppImage` };
+  // 三端安装包**全部从 OSS 拉**,与网络无关 —— 不再拼 GitHub 下载 URL,仓库私有也能更新。
+  const file = plat === "win32" ? `cicy-desktop-${version}.exe`
+    : plat === "darwin" ? `cicy-desktop-${version}-${arch}.pkg`
+    : `CiCy-Desktop-${version}.AppImage`;
+  return { url: `${OSS_RELEASES_BASE}/${file}`, file };
 }
 
 // ── 下载(带进度,跟随重定向)──────────────────────────────────────────────────
@@ -187,13 +155,12 @@ function init(mainWin) {
 async function check() {
   try {
     broadcast({ status: "checking", error: null });
-    const net = await detectNetwork();
-    const latest = await fetchLatestVersion(net);
+    const latest = await fetchLatestVersion();
     const current = app.getVersion();
     if (latest && cmpVer(latest, current) > 0) {
       // 「先出包再更新版本」客户端保险:版本号涨了不代表包传完了。先 HEAD 确认本平台安装包
       // 真能下(200),否则当成「还没就绪」继续显已是最新,避免用户点下载 404。
-      const { url } = assetFor(latest, net);
+      const { url } = assetFor(latest);
       const ready = await headOk(url);
       if (ready) broadcast({ status: "available", version: latest, current, progress: null, filePath: null });
       else { log.info(`[app-updater] ${latest} 版本号已更新但安装包未就位(HEAD 非 200):${url} — 暂不提示更新`); broadcast({ status: "up-to-date", version: current, current }); }
@@ -215,8 +182,7 @@ async function downloadUpdate() {
   if (!version) { broadcast({ status: "error", error: "no version" }); return _state; }
   _downloading = true;
   try {
-    const net = await detectNetwork();
-    const { url, file } = assetFor(version, net);
+    const { url, file } = assetFor(version);
     // 下到 ~/Downloads(用户能直接找到安装包);目录不存在则建。
     const dir = app.getPath("downloads");
     try { fs.mkdirSync(dir, { recursive: true }); } catch {}

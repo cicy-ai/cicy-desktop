@@ -76,3 +76,31 @@ jobs:
             dist/*.deb
             dist/*.AppImage
             dist/latest-linux.yml
+
+      # AppImage + 版本指针传到 OSS —— app-updater 现已全走 OSS(不碰 GitHub),linux 也要在
+      # OSS 上有 versioned AppImage(CiCy-Desktop-<ver>.AppImage)和自己的指针 linux-latest-version.txt。
+      # 和 mac/win 同一 bucket/凭证。electron-builder 默认产物名含空格,重命名成代码约定的连字符名。
+      - name: Upload AppImage to OSS (versioned + latest pointer)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          OSS_AK: ${{ secrets.OSS_ACCESS_KEY_ID }}
+          OSS_SK: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+        run: |
+          set -e
+          if [ -z "${OSS_AK:-}" ] || [ -z "${OSS_SK:-}" ]; then echo "::warning::OSS creds missing — skip"; exit 0; fi
+          VER="${GITHUB_REF_NAME#v}"
+          curl -sL https://gosspublic.alicdn.com/ossutil/1.7.18/ossutil64 -o ossutil && chmod +x ossutil
+          test -s ossutil && head -c4 ossutil | grep -q ELF || { echo "ossutil download bad"; exit 1; }
+          ./ossutil config -e oss-cn-shanghai.aliyuncs.com -i "$OSS_AK" -k "$OSS_SK"
+          BASE="oss://cicy-1372193042-cn/releases"
+          HOST="https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/releases"
+          APP=$(ls dist/*.AppImage 2>/dev/null | head -1)
+          [ -n "$APP" ] && [ -f "$APP" ] || { echo "::error::no AppImage built"; exit 1; }
+          DEST="CiCy-Desktop-$VER.AppImage"
+          ./ossutil cp "$APP" "$BASE/$DEST" -f --acl public-read
+          ./ossutil cp "$APP" "$BASE/CiCy-Desktop-latest.AppImage" -f --acl public-read || true
+          # 版本指针最后写(包传完再更新),避免版本号涨了但包还没就位。
+          printf '%s' "$VER" > linux-latest-version.txt
+          ./ossutil cp linux-latest-version.txt "$BASE/linux-latest-version.txt" -f --acl public-read
+          echo "OSS linux: $HOST/$DEST"
