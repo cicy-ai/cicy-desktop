@@ -619,6 +619,9 @@
     "addTitle": "Ajouter un Hub",
     "addSub": "Saisissez l'URL d'un Hub — stockée localement uniquement.",
     "name": "Nom (optionnel)",
-    "url": "URL"
+    "url": "URL",
+    "editUrl": "Modifier l'URL",
+    "deleteTitle": "Supprimer le Hub",
+    "deleteConfirm": "Supprimer"
   }
 }

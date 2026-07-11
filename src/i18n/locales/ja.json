@@ -619,6 +619,9 @@
     "addTitle": "Hub を追加",
     "addSub": "Hub の URL を入力 — ローカルにのみ保存(アップロードなし)。",
     "name": "名前(任意)",
-    "url": "URL"
+    "url": "URL",
+    "editUrl": "URL を変更",
+    "deleteTitle": "Hub を削除",
+    "deleteConfirm": "削除しますか"
   }
 }

@@ -383,18 +383,24 @@ export default function App() {
   // Tab state for the team grid: "all" | "local" | "cloud".
   const [tab, setTab] = useState("all");
 
-  // Hub 分区:本地存的 cicy-hub 地址列表(url),放 localStorage、**不上云**(数据在本地)。
+  // Hub 分区:本地存的 Hub 地址列表(放 localStorage、**不上云**,数据全在本地)。每条
+  // { id, name, url, avatar? }。卡片与 team 完全一致:头像 + 行内改名 + ⋯ 菜单(改地址/删除),
+  // tab 打开方式也和 team 相同(tabs.open(..., team=true, colorKey))。
   const [hubs, setHubs] = useState(() => { try { return JSON.parse(localStorage.getItem("cicy_hubs") || "[]"); } catch { return []; } });
+  const [hubsLoading, setHubsLoading] = useState(true);   // 首屏 skeleton(与团队一致的加载体验)
+  useEffect(() => { const t = setTimeout(() => setHubsLoading(false), 260); return () => clearTimeout(t); }, []);
   const [hubModalOpen, setHubModalOpen] = useState(false);
   const [hubName, setHubName] = useState("");
   const [hubUrl, setHubUrl] = useState("");
   const saveHubs = (next) => { setHubs(next); try { localStorage.setItem("cicy_hubs", JSON.stringify(next)); } catch {} };
   const addHub = () => {
     const url = hubUrl.trim(); if (!url) return;
+    try { new URL(url); } catch { return; }
     const name = hubName.trim() || `Hub${hubs.length + 1}`;
-    saveHubs([...hubs, { id: `hub-${Date.now()}`, name, url }]);
+    saveHubs([...hubs, { id: `hub-${Date.now()}`, name, url, avatar: "" }]);
     setHubName(""); setHubUrl(""); setHubModalOpen(false);
   };
+  const updateHub = (id, patch) => saveHubs(hubs.map((h) => (h.id === id ? { ...h, ...patch } : h)));
   const removeHub = (id) => saveHubs(hubs.filter((h) => h.id !== id));
 
   // Pull /api/user/self + /api/teams in parallel using the access_token.
@@ -1125,20 +1131,24 @@ export default function App() {
         {/* 分区标题:Hub —— 本地存的 cicy-hub 地址(不上云) */}
         <div data-id="SectionHead-hub" style={{ margin: "26px 0 12px", borderBottom: "1px solid var(--border, rgba(255,255,255,.08))", paddingBottom: 8, fontSize: 13, fontWeight: 600, letterSpacing: .3, opacity: .8 }}>{tr("hub.section", "Hub")}</div>
         <div className="app__grid">
-          {hubs.map((h) => (
-            <button key={h.id} type="button" data-id="HubCard" className="bcard"
-              style={{ position: "relative", textAlign: "left", cursor: "pointer", minHeight: 96, padding: 14, display: "flex", flexDirection: "column", gap: 6, background: "var(--card, #1b1d22)", border: "1px solid var(--border, #2c2f36)", borderRadius: 14, color: "inherit" }}
-              onClick={() => { if (h.url) window.cicy?.tabs?.open?.(h.url, h.name || "Hub", "", true); }}>
-              <span style={{ fontSize: 15, fontWeight: 700 }}>{h.name}</span>
-              <span style={{ fontSize: 11, opacity: .55, wordBreak: "break-all" }}>{h.url}</span>
-              <span data-id="HubCard-remove" role="button" title={tr("common.delete", "删除")}
-                onClick={(e) => { e.stopPropagation(); removeHub(h.id); }}
-                style={{ position: "absolute", top: 8, right: 11, fontSize: 16, lineHeight: 1, opacity: .5, cursor: "pointer" }}>×</span>
-            </button>
-          ))}
-          <button type="button" data-id="HubCard-add" className="bcard" title={tr("hub.add", "添加 Hub")}
-            style={{ cursor: "pointer", minHeight: 96, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 30, opacity: .6, background: "var(--card, #1b1d22)", border: "1px dashed var(--border, #2c2f36)", borderRadius: 14, color: "inherit" }}
-            onClick={() => { setHubName(""); setHubUrl(""); setHubModalOpen(true); }}>+</button>
+          {hubsLoading
+            ? [0, 1, 2].map((i) => <SkeletonCard key={"hubskel" + i} />)
+            : hubs.map((h) => (
+              <HubCard
+                key={h.id}
+                hub={h}
+                onOpen={() => { if (h.url) window.cicy?.tabs?.open?.(h.url, h.name || "Hub", h.avatar || "", true, h.id); }}
+                onRename={(name) => updateHub(h.id, { name })}
+                onEditUrl={(url) => updateHub(h.id, { url })}
+                onAvatar={(avatar) => updateHub(h.id, { avatar })}
+                onRemove={() => removeHub(h.id)}
+              />
+            ))}
+          {!hubsLoading && (
+            <button type="button" data-id="HubCard-add" className="bcard" title={tr("hub.add", "添加 Hub")}
+              style={{ cursor: "pointer", minHeight: 96, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 30, opacity: .6, background: "var(--card, #1b1d22)", border: "1px dashed var(--border, #2c2f36)", borderRadius: 14, color: "inherit" }}
+              onClick={() => { setHubName(""); setHubUrl(""); setHubModalOpen(true); }}>+</button>
+          )}
         </div>
 
         {/* 添加 Hub modal:名称(可选)+ 地址 URL → 存 localStorage(本地) */}
@@ -3623,6 +3633,176 @@ function TeamAvatar({ avatar, name, teamId, onChanged, size = 34 }) {
       style={{ width: size, height: size, borderRadius: 9, flex: "none", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", cursor: teamId ? "pointer" : "default", background: avatar ? "#0d1117" : bg, color: "#fff", fontWeight: 700, fontSize: Math.round(size * 0.42), userSelect: "none" }}>
       {avatar ? <img src={avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : initial}
       {teamId && <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={pick} />}
+    </div>
+  );
+}
+// Hub 卡片 —— 视觉/交互与 TeamCard 完全一致:方头像 + 行内改名(双击/✎)+ ⋯ 菜单(刷新窗口 /
+// 更改地址 / 删除)+「打开」CTA。打开走 tabs.open(team=true, colorKey) —— 和团队 tab 一模一样。
+// 数据全在 localStorage,头像存进 hub 对象(客户端缩到 64px),不进 teams.json、不上云。
+function HubCard({ hub, onOpen, onRename, onEditUrl, onAvatar, onRemove }) {
+  const name = hub.name || "Hub";
+  const url = hub.url || "";
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(name);
+  const startEdit = (e) => { e?.stopPropagation?.(); setDraft(name); setEditing(true); };
+  const commitName = () => {
+    setEditing(false);
+    const next = String(draft || "").trim();
+    if (!next || next === name) return;
+    onRename?.(next);
+  };
+  // ⋯ 菜单(portal,和 TeamCard 同款:避免被卡片 overflow:hidden 裁掉)
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
+  const menuWrap = useRef(null); const kebabRef = useRef(null); const menuRef = useRef(null);
+  const MENU_W = 184;
+  const toggleMenu = () => {
+    if (!menuOpen && kebabRef.current) {
+      const r = kebabRef.current.getBoundingClientRect();
+      const left = Math.max(8, Math.min(r.right - MENU_W, window.innerWidth - MENU_W - 8));
+      setMenuPos({ top: Math.round(r.bottom + 4), left: Math.round(left) });
+    }
+    setMenuOpen((v) => !v);
+  };
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDoc = (e) => { if (kebabRef.current?.contains(e.target)) return; if (menuRef.current?.contains(e.target)) return; setMenuOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [menuOpen]);
+  // 改地址 modal
+  const [editingUrl, setEditingUrl] = useState(false);
+  const [urlDraft, setUrlDraft] = useState("");
+  const [urlErr, setUrlErr] = useState("");
+  const startEditUrl = () => { setUrlDraft(url); setUrlErr(""); setEditingUrl(true); setMenuOpen(false); };
+  const commitUrl = () => {
+    const next = String(urlDraft || "").trim();
+    if (!next || next === url) { setEditingUrl(false); return; }
+    try { new URL(next); } catch { setUrlErr(tr("teams.badUrl", "URL 无效(需含 http(s)://)")); return; }
+    onEditUrl?.(next); setEditingUrl(false);
+  };
+  const [confirmDel, setConfirmDel] = useState(false);
+  const doReload = (e) => { e?.stopPropagation?.(); if (!url) return; setMenuOpen(false); window.cicy?.tabs?.reloadIfOpen?.(url, name); };
+  return (
+    <>
+    <div data-id="HubCard" className="bcard bcard--cloud">
+      <div className="bcard__accent" />
+      <div className="bcard__top">
+        <div className="bcard__pill">
+          <span className="bcard__dot" data-tone="off" />
+          <GlobeIcon />
+        </div>
+        <div className="bcard__top-right">
+          <div className="bcard__menuwrap" ref={menuWrap} onClick={(e) => e.stopPropagation()}>
+            <button type="button" ref={kebabRef} data-id="HubCard-menu-btn" className="bcard__kebab" title={tr("localTeams.more", "更多")} onClick={toggleMenu}>
+              <KebabIcon />
+            </button>
+            {menuOpen && createPortal(
+              <div className="bcard__menu bcard__menu--portal" data-id="HubCard-menu" role="menu" ref={menuRef}
+                style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: MENU_W }} onClick={(e) => e.stopPropagation()}>
+                <button type="button" data-id="HubCard-reload" className="bcard__menu-item" onClick={doReload}>{tr("localTeams.reloadWindow", "刷新窗口")}</button>
+                <button type="button" data-id="HubCard-edit-url" className="bcard__menu-item" onClick={(e) => { e.stopPropagation(); startEditUrl(); }}>{tr("hub.editUrl", "更改地址")}</button>
+                <button type="button" data-id="HubCard-delete" className="bcard__menu-item is-danger" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); setConfirmDel(true); }}>{tr("common.delete", "删除")}</button>
+              </div>,
+              document.body,
+            )}
+          </div>
+        </div>
+      </div>
+      <div className="bcard__body">
+        <div style={{ height: 28, display: "flex", alignItems: "center", gap: 8 }}>
+          <HubAvatar size={24} avatar={hub.avatar} name={name} hubId={hub.id} onChanged={onAvatar} />
+          {editing ? (
+            <input data-id="HubCard-rename-input" autoFocus value={draft}
+              onChange={(e) => setDraft(e.target.value)} onFocus={(e) => e.target.select()} onBlur={commitName}
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => { if (e.nativeEvent.isComposing) return; if (e.key === "Enter") commitName(); else if (e.key === "Escape") setEditing(false); }}
+              style={{ flex: 1, width: "100%", font: "inherit", fontWeight: 600, padding: "2px 6px", border: "1px solid #3b82f6", borderRadius: 6, background: "#0d1117", color: "#e6edf3", boxSizing: "border-box" }} />
+          ) : (
+            <h3 className="bcard__name" title={tr("localTeams.renameHint", "点名字或 ✎ 改名")} style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0, margin: 0 }} onDoubleClick={startEdit}>
+              <span onClick={startEdit} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "text" }}>{name}</span>
+              <button type="button" data-id="HubCard-rename-btn" title={tr("localTeams.rename", "重命名")} onClick={startEdit} style={{ flex: "none", cursor: "pointer", border: "none", background: "transparent", color: "#8b949e", fontSize: 13, padding: 0, lineHeight: 1 }}>✎</button>
+            </h3>
+          )}
+        </div>
+        <div className="bcard__meta">
+          <span className="bcard__chip" style={{ maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "var(--mono)" }} title={url}>{url}</span>
+        </div>
+      </div>
+      <button type="button" className="bcard__cta" onClick={onOpen} disabled={!url}>
+        <ArrowIcon />
+        <span>{tr("localTeams.open", "打开")}</span>
+      </button>
+    </div>
+    {editingUrl && createPortal(
+      <div data-id="HubCard-url-modal" style={{ position: "fixed", inset: 0, zIndex: 65, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.5)" }}
+        onMouseDown={(e) => { if (e.target === e.currentTarget) setEditingUrl(false); }}>
+        <div onClick={(e) => e.stopPropagation()} style={{ width: 400, maxWidth: "92vw", background: "var(--card, #1b1d22)", border: "1px solid var(--border, #2c2f36)", borderRadius: 14, padding: 22, boxShadow: "0 20px 60px rgba(0,0,0,.5)" }}>
+          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>{tr("hub.editUrl", "更改地址")}</div>
+          <input data-id="HubCard-url-input" className="login-email-input" style={{ width: "100%", fontFamily: "var(--mono)" }} value={urlDraft} placeholder="https://…" spellCheck={false} autoFocus
+            onChange={(e) => { setUrlDraft(e.target.value.trim()); setUrlErr(""); }}
+            onKeyDown={(e) => { if (e.key === "Enter") commitUrl(); else if (e.key === "Escape") setEditingUrl(false); }} />
+          {urlErr && <div className="error" style={{ marginTop: 8, fontSize: 12 }}>{urlErr}</div>}
+          <div className="modal-actions">
+            <button type="button" className="btn-ghost" onClick={() => setEditingUrl(false)}>{tr("common.cancel", "取消")}</button>
+            <button type="button" className="btn-primary" disabled={!urlDraft.trim()} onClick={commitUrl}>{tr("common.save", "保存")}</button>
+          </div>
+        </div>
+      </div>,
+      document.body,
+    )}
+    {confirmDel && createPortal(
+      <div data-id="HubCard-del-modal" style={{ position: "fixed", inset: 0, zIndex: 65, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.5)" }}
+        onMouseDown={(e) => { if (e.target === e.currentTarget) setConfirmDel(false); }}>
+        <div onClick={(e) => e.stopPropagation()} style={{ width: 360, maxWidth: "92vw", background: "var(--card, #1b1d22)", border: "1px solid var(--border, #2c2f36)", borderRadius: 14, padding: 22, boxShadow: "0 20px 60px rgba(0,0,0,.5)" }}>
+          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{tr("hub.deleteTitle", "删除 Hub")}</div>
+          <div style={{ fontSize: 13, opacity: .7, marginBottom: 16 }}>{tr("hub.deleteConfirm", "确定删除")} “{name}”?</div>
+          <div className="modal-actions">
+            <button type="button" className="btn-ghost" onClick={() => setConfirmDel(false)}>{tr("common.cancel", "取消")}</button>
+            <button type="button" className="btn-primary" style={{ background: "#b42318" }} onClick={() => { setConfirmDel(false); onRemove?.(); }}>{tr("common.delete", "删除")}</button>
+          </div>
+        </div>
+      </div>,
+      document.body,
+    )}
+    </>
+  );
+}
+
+// Hub 头像 —— 与 TeamAvatar 视觉一致,但 hub 不在 teams.json,头像存进 localStorage 的 hub 对象。
+// 上传时用 canvas 缩到 64px(cover 居中,JPEG q0.85)省 localStorage 空间;失败回落原图。
+function HubAvatar({ avatar, name, hubId, onChanged, size = 34 }) {
+  const fileRef = useRef(null);
+  const initial = ((name || "?").trim()[0] || "?").toUpperCase();
+  const bg = avatarBg(hubId || name || "");
+  const pick = (e) => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const S = 64; const c = document.createElement("canvas"); c.width = S; c.height = S;
+          const ctx = c.getContext("2d");
+          const scale = Math.max(S / img.width, S / img.height);
+          const w = img.width * scale, h = img.height * scale;
+          ctx.drawImage(img, (S - w) / 2, (S - h) / 2, w, h);
+          onChanged?.(c.toDataURL("image/jpeg", 0.85));
+        } catch { onChanged?.(String(r.result || "")); }
+      };
+      img.onerror = () => onChanged?.(String(r.result || ""));
+      img.src = String(r.result || "");
+    };
+    r.readAsDataURL(f);
+  };
+  return (
+    <div data-id="HubAvatar" className="team-avatar" title={tr("teamCard.changeAvatar", "点击更换头像")}
+      onClick={(e) => { e.stopPropagation(); fileRef.current && fileRef.current.click(); }}
+      style={{ width: size, height: size, borderRadius: 9, flex: "none", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", background: avatar ? "#0d1117" : bg, color: "#fff", fontWeight: 700, fontSize: Math.round(size * 0.42), userSelect: "none" }}>
+      {avatar ? <img src={avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : initial}
+      <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={pick} />
     </div>
   );
 }

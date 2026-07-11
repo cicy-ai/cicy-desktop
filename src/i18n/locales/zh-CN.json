@@ -619,6 +619,9 @@
     "addTitle": "添加 Hub",
     "addSub": "填一个 Hub 地址,只存在本地(不上云)。",
     "name": "名称(可选)",
-    "url": "地址 URL"
+    "url": "地址 URL",
+    "editUrl": "更改地址",
+    "deleteTitle": "删除 Hub",
+    "deleteConfirm": "确定删除"
   }
 }

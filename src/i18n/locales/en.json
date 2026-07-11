@@ -619,6 +619,9 @@
     "addTitle": "Add Hub",
     "addSub": "Enter a Hub URL — stored locally only (never uploaded).",
     "name": "Name (optional)",
-    "url": "URL"
+    "url": "URL",
+    "editUrl": "Change URL",
+    "deleteTitle": "Delete Hub",
+    "deleteConfirm": "Delete"
   }
 }
