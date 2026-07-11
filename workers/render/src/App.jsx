@@ -958,8 +958,25 @@ export default function App() {
         mitmTeam={localList.length > 0 ? localList[0] : null} />
       <UpdateBanner />
       <main className="main">
-        {/* filter tab 条已删除,直接展示全部团队;行尾保留「新加团队」 */}
-        <div className="app__tabsrow" style={{ justifyContent: "flex-end" }}>
+        {/* 整行:左边 tab 药丸,右边「新加团队」顶到行尾 */}
+        <div className="app__tabsrow">
+          <div className="app__tabs">
+            {[
+              { k: "all",    label: tr("teamFilter.all", "全部"),   n: localCount + customCount + cloudCount },
+              { k: "local",  label: tr("teamFilter.local", "本地"),   n: localCount },
+              { k: "cloud",  label: tr("teamFilter.cloud", "私有云"), n: cloudCount },
+            ].map(({ k, label, n }) => (
+              <button
+                key={k}
+                type="button"
+                className={`app__tab ${tab === k ? "is-active" : ""}`}
+                onClick={() => setTab(k)}
+              >
+                {label}
+                <span className="app__tab-count">{n}</span>
+              </button>
+            ))}
+          </div>
           {/* 行尾:新加团队 → 直接去云端团队中心添加(私有云)。自定义入口已删。 */}
           <div data-id="AddTeamWrap" style={{ position: "relative" }}>
             <button
