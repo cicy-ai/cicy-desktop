@@ -15,7 +15,7 @@ async function ensureGeminiWindow(win_id, accountIdx = 0) {
     if (win_id) {
       throw new Error(`Window ${win_id} not found`);
     }
-    win = createWindow({ url: GEMINI_URL }, accountIdx, false);
+    win = createWindow({ url: GEMINI_URL, background: true }, accountIdx, false); // agent 驱动:后台开,不抢用户焦点
     await new Promise((r) => setTimeout(r, 3000));
     return win;
   }

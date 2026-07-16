@@ -134,17 +134,22 @@ function registerTools(registerTool) {
         .optional()
         .default(true)
         .describe("是否复用现有窗口。true=复用(默认)，false=创建新窗口"),
+      background: z
+        .boolean()
+        .optional()
+        .default(true)
+        .describe("后台打开(默认 true):窗口不夺焦点、不把 cicy-desktop 激活到用户当前应用之前 —— agent 干活不打扰用户。要弹到前台给用户看传 false。"),
       options: z.object({}).optional().describe("Electron BrowserWindow options"),
     }),
-    async ({ url, accountIdx, reuseWindow, options }) => {
+    async ({ url, accountIdx, reuseWindow, background, options }) => {
       // Determine if we should create a new window
       const forceNew = reuseWindow === false;
 
       // Get existing windows count before creating
       const existingCount = BrowserWindow.getAllWindows().length;
 
-      // Create or reuse window
-      const win = createWindow({ url, ...options }, accountIdx, forceNew);
+      // Create or reuse window (agent 默认后台开,不抢用户焦点)
+      const win = createWindow({ url, background: background !== false, ...options }, accountIdx, forceNew);
 
       // Check if window was reused (count didn't change)
       const newCount = BrowserWindow.getAllWindows().length;

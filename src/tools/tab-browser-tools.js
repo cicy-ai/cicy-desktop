@@ -208,7 +208,10 @@ class TabManager {
         if (opts.navigate && ex.url !== target) {
           try { ex.view.webContents.loadURL(target); ex.url = target; } catch (e) {}
         }
-        this.activate(ex.id); return ex.id;
+        // activate:false(agent 后台开 tab)→ 命中已有 tab 也不切视图,绝不打断用户正看的 tab。
+        if (opts.activate !== false || this.activeId == null) this.activate(ex.id);
+        else this.pushState(); // 列表里仍要出现/更新这个 tab
+        return ex.id;
       }
     }
     // Privilege gate: only the system profile (accountIdx 0) may get a Node-capable
@@ -282,7 +285,10 @@ class TabManager {
       });
     }
     wc.loadURL(target);
-    this.activate(id);
+    // activate:false(agent/程序化后台开 tab)→ 新 tab 在后台加载,**不切走用户当前 tab**
+    // (BrowserView 不挂上也照常加载)。没有任何 active tab 时仍激活,否则窗口空白。
+    if (opts.activate !== false || this.activeId == null) this.activate(id);
+    else this.pushState(); // tab 条上要出现新 tab(非激活态)
     return id;
   }
 
@@ -384,7 +390,7 @@ function findManagerByTab(webContentsId) {
 // button / electron_tab_open / the panel can add tabs to profile 0 too.
 async function openTab(accountIdx, url, opts = {}) {
   const m = ensureManager(accountIdx);
-  const id = m.addTab(url, { trusted: !!opts.trusted, home: !!opts.home, title: opts.title || "", navigate: !!opts.navigate, avatar: opts.avatar || "", team: !!opts.team, colorKey: opts.colorKey || "" });
+  const id = m.addTab(url, { trusted: !!opts.trusted, home: !!opts.home, title: opts.title || "", navigate: !!opts.navigate, avatar: opts.avatar || "", team: !!opts.team, colorKey: opts.colorKey || "", activate: opts.activate });
   try { m.surfaceQuiet(); } catch (e) {}
   // 记下这个团队 tab 的 webContentsId(打开 → set;关闭/销毁 → delete)。
   try {
@@ -486,15 +492,16 @@ function registerTabBrowserTools(registerTool) {
 
   registerTool(
     "electron_tab_open",
-    "在某 profile 的标签窗口新开一个标签（窗口不在则先建）。打开=开 tab,不弹新窗口。trusted=true 给 cicy-code 等受信任页注入 electronRPC 桥。",
+    "在某 profile 的标签窗口新开一个标签（窗口不在则先建）。打开=开 tab,不弹新窗口。**默认后台打开**:不切走用户正在看的 tab、不抢焦点(agent 干活不打扰用户);要立即展示给用户传 activate:true。trusted=true 给 cicy-code 等受信任页注入 electronRPC 桥。",
     z.object({
       accountIdx: z.number().describe("账户索引（profile）"),
       url: z.string().optional().describe("网址；省略则起始页"),
       trusted: z.boolean().optional().describe("受信任页面才注入桥；默认 false"),
+      activate: z.boolean().optional().describe("true=切到该标签并置前;默认 false(后台开,不打扰用户)"),
     }),
-    async ({ accountIdx, url, trusted }) => {
+    async ({ accountIdx, url, trusted, activate }) => {
       try {
-        const r = await openTab(accountIdx, url, { trusted: !!trusted });
+        const r = await openTab(accountIdx, url, { trusted: !!trusted, activate: activate === true });
         return ok({ success: true, accountIdx, winId: r.winId, tabId: r.tabId, tabs: ensureManager(accountIdx).list() });
       } catch (e) { return ok({ error: e.message }, true); }
     },

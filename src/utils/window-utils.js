@@ -250,8 +250,10 @@ function isTrustedUrl(url) {
 // platform's own/system windows; callers that want the system slot pass 0
 // explicitly (e.g. local-teams). Agents opening windows should use >0.
 function createWindow(options = {}, accountIdx = 1, forceNew = false) {
-  const { width = 1200, height = 800, url, webPreferences = {}, x, y } = options;
-  console.log("[createWindow] url:", url, "isTrusted:", isTrustedUrl(url));
+  // background:true(agent/程序化开窗)→ 窗口后台出现:不抢焦点、mac 上不激活 app、不把
+  // cicy-desktop 拉到用户正用的应用前面。用户主动点开的路径不传 → 行为不变(照常置前)。
+  const { width = 1200, height = 800, url, webPreferences = {}, x, y, background = false } = options;
+  console.log("[createWindow] url:", url, "isTrusted:", isTrustedUrl(url), "background:", background);
 
   // Check if oneWindow mode is enabled - execute before coordinate logic
   if (config.oneWindow && !forceNew) {
@@ -262,8 +264,10 @@ function createWindow(options = {}, accountIdx = 1, forceNew = false) {
         `[WindowUtils] Single window mode enabled. Reusing existing window ${existingWin.id}`
       );
 
-      if (existingWin.isMinimized()) existingWin.restore();
-      existingWin.focus();
+      if (!background) {
+        if (existingWin.isMinimized()) existingWin.restore();
+        existingWin.focus();
+      }
 
       if (url) {
         const currentUrl = existingWin.webContents.getURL();
@@ -311,6 +315,8 @@ function createWindow(options = {}, accountIdx = 1, forceNew = false) {
     height: winHeight,
     x: posX,
     y: posY,
+    // 后台开窗:先不显示,渲染好后 showInactive(可见但不夺焦点、不激活 app)。
+    show: !background,
     icon: require("./app-icon").appIconPath(), // npx/unpackaged → set our own icon
     // (Windows has no built .exe to embed it; default electron icon otherwise).
     // Native menu bar collapses by default on win/linux; press Alt to
@@ -348,6 +354,15 @@ function createWindow(options = {}, accountIdx = 1, forceNew = false) {
   // deterministically — session.partition/getWebPreferences().partition are not
   // reliably readable back.
   try { win.cicyAccountIdx = accountIdx; win.webContents.cicyAccountIdx = accountIdx; } catch (e) {}
+
+  // 后台开窗:渲染好再 showInactive(不夺焦点/不激活 app)。ready-to-show 偶发不触发
+  // (页面挂了等)→ 3s 兜底照样 showInactive,窗口绝不会永远隐身。
+  if (background) {
+    let shown = false;
+    const quiet = () => { if (shown || win.isDestroyed()) return; shown = true; try { win.showInactive(); } catch (e) {} };
+    try { win.once("ready-to-show", quiet); } catch (e) {}
+    setTimeout(quiet, 3000);
+  }
 
   // 监听窗口状态变化并自动保存（基于URL）
   watchWindowState(win, accountIdx);
