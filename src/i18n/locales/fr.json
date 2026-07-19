@@ -577,7 +577,8 @@
   },
   "tabShell": {
     "myTeam": "Mon équipe",
-    "newTabBtn": "Nouvel onglet"
+    "newTabBtn": "Nouvel onglet",
+    "newPanel": "Nouveau panneau"
   },
   "dood": {
     "menu": "Utiliser Docker dans le conteneur",

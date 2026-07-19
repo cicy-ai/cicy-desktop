@@ -38,7 +38,17 @@ function stripVol(u) { try { const x = new URL(u); return x.origin + x.pathname;
 // 键 = stripVol(打开时传入的 url);open 与 reload 两端 stripVol 一致(token 被剥掉)。
 const openedWc = new Map(); // stripVol(url) -> webContentsId
 
-const { NEWTAB_URL, ensureForPartition } = require("../tabbrowser/newtab-protocol");
+const { NEWTAB_URL, PANEL_URL_BASE, ensureForPartition } = require("../tabbrowser/newtab-protocol");
+
+// 新建一个 split-webview 面板 tab(tab 条右上角 "+")。仅 profile 0:面板页要用
+// <webview>,而 webviewTag 只授予系统 profile(见 buildTabWebPreferences 的安全模型);
+// 沙箱 profile 里开出来的面板格子会渲染不出内容,所以干脆不提供入口。
+// URL 带唯一 id → addTab 的 origin+pathname 复用判断不会把两个面板并成一个,
+// 面板页也按这个 path 分别持久化各自的布局。
+function openPanelTab(m) {
+  if (!m || m.accountIdx !== 0) return null;
+  return m.addTab(PANEL_URL_BASE + Date.now().toString(36), {});
+}
 
 // ── Per-profile privilege gate ────────────────────────────────────────────────
 // Security model: accountIdx 0 is the SYSTEM profile (homepage + team apps) and
@@ -443,6 +453,7 @@ function installIpc() {
     try { e.sender.send("window:fullscreen", !!m.win.isFullScreen()); } catch (err) {}
   });
   ipcMain.on("tabwin:new", (e, { url }) => { const m = mgr(e); if (m) m.addTab(url || ""); });
+  ipcMain.on("tabwin:panel", (e) => { const m = mgr(e); if (m) openPanelTab(m); });
   ipcMain.on("tabwin:activate", (e, { id }) => { const m = mgr(e); if (m) m.activate(id); });
   ipcMain.on("tabwin:close", (e, { id }) => { const m = mgr(e); if (m) m.close(id); });
   ipcMain.on("tabwin:reorder", (e, { ids }) => { const m = mgr(e); if (m) m.reorder(ids); });

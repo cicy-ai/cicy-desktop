@@ -577,7 +577,8 @@
   },
   "tabShell": {
     "myTeam": "My Team",
-    "newTabBtn": "New tab"
+    "newTabBtn": "New tab",
+    "newPanel": "New panel"
   },
   "dood": {
     "menu": "Use Docker in container",

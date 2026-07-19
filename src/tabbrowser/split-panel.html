@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>面板</title>
+<!-- tab favicon: a 2x2 grid mark so the panel tab reads as "面板" at a glance -->
+<link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="2" y="2" width="9" height="9" rx="2" fill="%233b82f6"/><rect x="13" y="2" width="9" height="9" rx="2" fill="%238b5cf6"/><rect x="2" y="13" width="9" height="9" rx="2" fill="%238b5cf6"/><rect x="13" y="13" width="9" height="9" rx="2" fill="%233b82f6"/></svg>'>
+<style>
+  /* Panel page — a split canvas of <webview> cells. Layout is a binary split
+     tree rendered with ABSOLUTE rects (not nested flex): cells are never
+     re-parented on split/close, so their <webview> guests never reload. */
+  :root{
+    --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08);
+    --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;background:var(--bg);color:var(--fg);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;overflow:hidden}
+  svg{display:block}
+
+  #stage{position:absolute;inset:0;padding:8px}
+
+  /* ── cell ── */
+  .cell{position:absolute;display:flex;flex-direction:column;background:var(--cell);border:1px solid var(--line);border-radius:10px;overflow:hidden;transition:top .16s ease,left .16s ease,width .16s ease,height .16s ease;box-shadow:0 2px 10px rgba(0,0,0,.35)}
+  .cell.dragging-layout{transition:none}
+  .cell__head{flex:0 0 34px;display:flex;align-items:center;gap:6px;padding:0 6px 0 10px;background:var(--head);border-bottom:1px solid var(--line);-webkit-user-select:none;user-select:none}
+  .cell__spin{flex:0 0 12px;width:12px;height:12px;border:2px solid rgba(255,255,255,.18);border-top-color:var(--accent);border-radius:50%;animation:sp .7s linear infinite;display:none}
+  .cell.loading .cell__spin{display:block}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .cell__url{flex:1;min-width:0;height:24px;padding:0 10px;background:#101012;border:1px solid var(--line);border-radius:12px;color:var(--fg);font-size:12px;outline:none;-webkit-user-select:text;user-select:text}
+  .cell__url:focus{border-color:var(--accent);background:#0d0d10}
+  .cell__url::placeholder{color:var(--muted)}
+  .cbtn{flex:0 0 24px;width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--muted);cursor:default}
+  .cbtn:hover{background:rgba(255,255,255,.10);color:#fff}
+  .cbtn.close:hover{background:rgba(249,112,102,.18);color:#f97066}
+  .cell__body{position:relative;flex:1;min-height:0;background:#0d0d0f}
+  .cell__body webview{position:absolute;inset:0;width:100%;height:100%}
+  /* while dragging a divider, a transparent shield stops webviews from
+     swallowing pointermove (webview = separate guest, events die inside it) */
+  .cell__body .shield{position:absolute;inset:0;display:none;z-index:5}
+  body.resizing .cell__body .shield{display:block}
+  /* empty cell (no url yet) */
+  .cell__hint{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:var(--muted);font-size:13px;pointer-events:none}
+  .cell__hint .big{font-size:26px;opacity:.4}
+
+  /* ── divider ── */
+  .divider{position:absolute;z-index:10;display:flex;align-items:center;justify-content:center;transition:top .16s ease,left .16s ease,width .16s ease,height .16s ease}
+  .divider.v{cursor:col-resize}
+  .divider.h{cursor:row-resize}
+  .divider::after{content:"";border-radius:2px;background:transparent;transition:background .12s}
+  .divider.v::after{width:3px;height:34px}
+  .divider.h::after{width:34px;height:3px}
+  .divider:hover::after,.divider.active::after{background:var(--accent)}
+  body.resizing .divider{transition:none}
+
+  /* ── empty panel ── */
+  #empty{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:16px}
+  #empty.on{display:flex}
+  #empty .logo{width:52px;height:52px;border-radius:14px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;opacity:.9}
+  #empty h1{font-size:15px;font-weight:600}
+  #empty p{font-size:12.5px;color:var(--muted)}
+  #addfirst{display:flex;align-items:center;gap:8px;margin-top:6px;padding:9px 22px;border-radius:10px;background:var(--accent);color:#fff;font-size:13px;font-weight:600;cursor:default;-webkit-user-select:none;user-select:none}
+  #addfirst:hover{background:#2f6fe0}
+
+  /* ── floating add (＋ webview) ── */
+  #fab{position:absolute;right:18px;bottom:18px;z-index:20;width:40px;height:40px;border-radius:50%;background:var(--accent);color:#fff;display:none;align-items:center;justify-content:center;box-shadow:0 4px 14px rgba(59,130,246,.45);cursor:default;-webkit-user-select:none;user-select:none;transition:transform .12s}
+  #fab:hover{transform:scale(1.08)}
+  #fab.on{display:flex}
+</style>
+</head>
+<body>
+  <div id="stage"></div>
+
+  <div id="empty" class="on">
+    <div class="logo"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/></svg></div>
+    <h1>空白面板</h1>
+    <p>把多个页面拼在一个视图里,自由分屏</p>
+    <div id="addfirst"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>添加 WebView</div>
+  </div>
+
+  <div id="fab" title="添加 WebView"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></div>
+
+<script>
+  // ── state ──────────────────────────────────────────────────────────────────
+  // tree: null | {type:'leaf', id, url} | {type:'split', dir:'row'|'col', ratio, a, b}
+  // 'row' = a|b side by side (vertical divider), 'col' = a over b.
+  const PANEL_ID = (location.pathname || '/').replace(/[^\w-]/g, '') || 'default';
+  const LS_KEY = 'cicy_panel_' + PANEL_ID;
+  const GUT = 8;        // px gap between cells (the divider lives in it)
+  const MIN_PX = 140;   // a cell never shrinks below this
+  let root = null;
+  let seq = 1;
+  const cells = new Map(); // leafId -> {el, urlEl, hintEl, body, wv}
+
+  const stage = document.getElementById('stage');
+  const emptyEl = document.getElementById('empty');
+  const fabEl = document.getElementById('fab');
+
+  const newLeaf = (url) => ({ type: 'leaf', id: seq++, url: url || '' });
+
+  // ── tree helpers ───────────────────────────────────────────────────────────
+  function leaves(node, out = []) {
+    if (!node) return out;
+    if (node.type === 'leaf') out.push(node);
+    else { leaves(node.a, out); leaves(node.b, out); }
+    return out;
+  }
+  function findParent(node, leafId, parent = null) {
+    if (!node) return null;
+    if (node.type === 'leaf') return node.id === leafId ? { parent, node } : null;
+    return findParent(node.a, leafId, node) || findParent(node.b, leafId, node);
+  }
+
+  // ── persistence ────────────────────────────────────────────────────────────
+  function serialize(node) {
+    if (!node) return null;
+    if (node.type === 'leaf') return { type: 'leaf', url: node.url || '' };
+    return { type: 'split', dir: node.dir, ratio: node.ratio, a: serialize(node.a), b: serialize(node.b) };
+  }
+  function deserialize(node) {
+    if (!node) return null;
+    if (node.type === 'leaf') return newLeaf(node.url);
+    return { type: 'split', dir: node.dir === 'col' ? 'col' : 'row', ratio: Math.min(.88, Math.max(.12, +node.ratio || .5)), a: deserialize(node.a), b: deserialize(node.b) };
+  }
+  function save() { try { localStorage.setItem(LS_KEY, JSON.stringify(serialize(root))); } catch (e) {} }
+  function restore() { try { root = deserialize(JSON.parse(localStorage.getItem(LS_KEY) || 'null')); } catch (e) { root = null; } }
+
+  // ── layout (absolute rects; cells are never re-parented) ───────────────────
+  let dividerPool = [];
+  function assign(node, x, y, w, h, out) {
+    node._rect = { x, y, w, h };
+    if (node.type === 'leaf') { out.rects.set(node.id, { x, y, w, h }); return; }
+    if (node.dir === 'row') {
+      const aw = Math.max(0, (w - GUT) * node.ratio);
+      assign(node.a, x, y, aw, h, out);
+      out.divs.push({ node, x: x + aw, y, w: GUT, h, vert: true });
+      assign(node.b, x + aw + GUT, y, w - aw - GUT, h, out);
+    } else {
+      const ah = Math.max(0, (h - GUT) * node.ratio);
+      assign(node.a, x, y, w, ah, out);
+      out.divs.push({ node, x, y: y + ah, w, h: GUT, vert: false });
+      assign(node.b, x, y + ah + GUT, w, h - ah - GUT, out);
+    }
+  }
+  function layout() {
+    const n = leaves(root).length;
+    emptyEl.classList.toggle('on', n === 0);
+    fabEl.classList.toggle('on', n > 0);
+    document.title = n > 1 ? `面板 (${n})` : '面板';
+    if (!root) { for (const d of dividerPool) d.el.style.display = 'none'; return; }
+    const P = 8;
+    const W = Math.max(0, stage.clientWidth - P * 2);
+    const H = Math.max(0, stage.clientHeight - P * 2);
+    const out = { rects: new Map(), divs: [] };
+    assign(root, P, P, W, H, out);
+    for (const [id, r] of out.rects) {
+      const c = cells.get(id);
+      if (!c) continue;
+      c.el.style.left = r.x + 'px'; c.el.style.top = r.y + 'px';
+      c.el.style.width = Math.max(0, r.w) + 'px'; c.el.style.height = Math.max(0, r.h) + 'px';
+    }
+    // divider elements are pooled + reused so hover state survives re-layout
+    while (dividerPool.length < out.divs.length) {
+      const el = document.createElement('div');
+      attachDividerDrag(el);
+      stage.appendChild(el);
+      dividerPool.push({ el });
+    }
+    dividerPool.forEach((d, i) => {
+      const spec = out.divs[i];
+      if (!spec) { d.el.style.display = 'none'; d.node = null; return; }
+      d.node = spec.node;
+      d.el.className = 'divider ' + (spec.vert ? 'v' : 'h');
+      d.el.style.display = 'flex';
+      d.el.style.left = spec.x + 'px'; d.el.style.top = spec.y + 'px';
+      d.el.style.width = spec.w + 'px'; d.el.style.height = spec.h + 'px';
+      d.el._node = spec.node;
+    });
+  }
+
+  // ── divider drag ───────────────────────────────────────────────────────────
+  function attachDividerDrag(el) {
+    el.addEventListener('pointerdown', (e) => {
+      const node = el._node;
+      if (!node || !node._rect) return;
+      e.preventDefault();
+      el.setPointerCapture(e.pointerId);
+      el.classList.add('active');
+      document.body.classList.add('resizing');
+      for (const c of cells.values()) c.el.classList.add('dragging-layout');
+      const move = (ev) => {
+        const r = node._rect;
+        let ratio;
+        if (node.dir === 'row') {
+          const usable = r.w - GUT;
+          ratio = (ev.clientX - r.x - GUT / 2) / usable;
+          const min = Math.min(.45, MIN_PX / usable);
+          node.ratio = Math.min(1 - min, Math.max(min, ratio));
+        } else {
+          const usable = r.h - GUT;
+          ratio = (ev.clientY - r.y - GUT / 2) / usable;
+          const min = Math.min(.45, MIN_PX / usable);
+          node.ratio = Math.min(1 - min, Math.max(min, ratio));
+        }
+        layout();
+      };
+      const up = (ev) => {
+        el.releasePointerCapture(ev.pointerId);
+        el.classList.remove('active');
+        document.body.classList.remove('resizing');
+        for (const c of cells.values()) c.el.classList.remove('dragging-layout');
+        el.removeEventListener('pointermove', move);
+        el.removeEventListener('pointerup', up);
+        save();
+      };
+      el.addEventListener('pointermove', move);
+      el.addEventListener('pointerup', up);
+    });
+  }
+
+  // ── cell DOM ───────────────────────────────────────────────────────────────
+  const I = {
+    reload: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>',
+    splitR: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="12" y1="4" x2="12" y2="20"/></svg>',
+    splitD: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="12" x2="21" y2="12"/></svg>',
+    close: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg>',
+  };
+  function btn(icon, title, cls, onClick) {
+    const b = document.createElement('div');
+    b.className = 'cbtn' + (cls ? ' ' + cls : '');
+    b.title = title; b.innerHTML = icon;
+    b.onclick = onClick;
+    return b;
+  }
+  function normalizeUrl(v) {
+    v = (v || '').trim();
+    if (!v) return '';
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(v) || /^about:/i.test(v)) return v;
+    return (/\.\w/.test(v) && !/\s/.test(v)) ? 'https://' + v : 'https://www.google.com/search?q=' + encodeURIComponent(v);
+  }
+  function mountCell(leaf) {
+    const el = document.createElement('div');
+    el.className = 'cell';
+    const head = document.createElement('div');
+    head.className = 'cell__head';
+    const spin = document.createElement('span'); spin.className = 'cell__spin';
+    const url = document.createElement('input');
+    url.className = 'cell__url'; url.placeholder = '输入网址或搜索'; url.spellcheck = false;
+    url.value = leaf.url || '';
+    url.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      const u = normalizeUrl(url.value);
+      if (u) { setCellUrl(leaf.id, u); url.blur(); }
+    });
+    url.addEventListener('focus', () => url.select());
+    head.appendChild(spin);
+    head.appendChild(url);
+    head.appendChild(btn(I.reload, '刷新', '', () => { const c = cells.get(leaf.id); try { c && c.wv && c.wv.reload(); } catch (e) {} }));
+    head.appendChild(btn(I.splitR, '右分屏', '', () => splitLeaf(leaf.id, 'row')));
+    head.appendChild(btn(I.splitD, '下分屏', '', () => splitLeaf(leaf.id, 'col')));
+    head.appendChild(btn(I.close, '关闭', 'close', () => closeLeaf(leaf.id)));
+    const body = document.createElement('div');
+    body.className = 'cell__body';
+    const shield = document.createElement('div'); shield.className = 'shield';
+    const hint = document.createElement('div');
+    hint.className = 'cell__hint';
+    hint.innerHTML = '<div class="big">🌐</div><div>在上方输入网址,回车加载</div>';
+    body.appendChild(hint);
+    body.appendChild(shield);
+    el.appendChild(head);
+    el.appendChild(body);
+    stage.appendChild(el);
+    const cell = { el, urlEl: url, hintEl: hint, body, wv: null };
+    cells.set(leaf.id, cell);
+    if (leaf.url) createWebview(leaf.id, leaf.url);
+    return cell;
+  }
+  function createWebview(leafId, url) {
+    const c = cells.get(leafId);
+    if (!c || c.wv) return;
+    const wv = document.createElement('webview');
+    // share the profile-0 session (this page runs in persist:sandbox-0) so team
+    // logins/cookies work inside panel cells exactly like team tabs.
+    wv.setAttribute('partition', 'persist:sandbox-0');
+    wv.setAttribute('src', url);
+    wv.addEventListener('did-start-loading', () => c.el.classList.add('loading'));
+    wv.addEventListener('did-stop-loading', () => c.el.classList.remove('loading'));
+    wv.addEventListener('did-navigate', (e) => syncUrl(leafId, e.url));
+    wv.addEventListener('did-navigate-in-page', (e) => syncUrl(leafId, e.url));
+    c.hintEl.style.display = 'none';
+    c.body.insertBefore(wv, c.body.firstChild);
+    c.wv = wv;
+  }
+  function syncUrl(leafId, u) {
+    const hit = findParent(root, leafId);
+    if (!hit || !u || u.startsWith('about:blank')) return;
+    hit.node.url = u;
+    const c = cells.get(leafId);
+    if (c && document.activeElement !== c.urlEl) c.urlEl.value = u;
+    save();
+  }
+  function setCellUrl(leafId, url) {
+    const hit = findParent(root, leafId);
+    if (!hit) return;
+    hit.node.url = url;
+    const c = cells.get(leafId);
+    // reflect immediately — did-navigate can be seconds away on a slow page and
+    // the input would sit empty-looking until then.
+    if (c && document.activeElement !== c.urlEl) c.urlEl.value = url;
+    if (c.wv) { try { c.wv.src = url; } catch (e) {} }
+    else createWebview(leafId, url);
+    save();
+  }
+  function unmountCell(leafId) {
+    const c = cells.get(leafId);
+    if (!c) return;
+    try { c.el.remove(); } catch (e) {}
+    cells.delete(leafId);
+  }
+
+  // ── structural ops ─────────────────────────────────────────────────────────
+  function splitLeaf(leafId, dir) {
+    const hit = findParent(root, leafId);
+    if (!hit) return;
+    const fresh = newLeaf('');
+    const split = { type: 'split', dir, ratio: .5, a: hit.node, b: fresh };
+    if (!hit.parent) root = split;
+    else if (hit.parent.a === hit.node) hit.parent.a = split;
+    else hit.parent.b = split;
+    mountCell(fresh);
+    layout(); save();
+    const c = cells.get(fresh.id);
+    if (c) setTimeout(() => { try { c.urlEl.focus(); } catch (e) {} }, 180);
+  }
+  function closeLeaf(leafId) {
+    const hit = findParent(root, leafId);
+    if (!hit) return;
+    unmountCell(leafId);
+    if (!hit.parent) { root = null; }
+    else {
+      const sibling = hit.parent.a === hit.node ? hit.parent.b : hit.parent.a;
+      const gp = findSplitParent(root, hit.parent);
+      if (!gp) root = sibling;
+      else if (gp.a === hit.parent) gp.a = sibling;
+      else gp.b = sibling;
+    }
+    layout(); save();
+  }
+  function findSplitParent(node, target, parent = null) {
+    if (!node || node.type === 'leaf') return null;
+    if (node === target) return parent;
+    return findSplitParent(node.a, target, node) || findSplitParent(node.b, target, node);
+  }
+  // ＋: split the LARGEST cell along its longer edge → keeps the grid balanced.
+  function addCell() {
+    const ls = leaves(root);
+    if (!ls.length) { root = newLeaf(''); mountCell(root); layout(); save(); focusLeaf(root.id); return; }
+    let best = ls[0], bestA = -1;
+    for (const l of ls) {
+      const r = l._rect || { w: 0, h: 0 };
+      const a = r.w * r.h;
+      if (a > bestA) { bestA = a; best = l; }
+    }
+    const r = best._rect || { w: 1, h: 0 };
+    splitLeaf(best.id, r.w >= r.h ? 'row' : 'col');
+  }
+  function focusLeaf(id) { const c = cells.get(id); if (c) setTimeout(() => { try { c.urlEl.focus(); } catch (e) {} }, 180); }
+
+  // ── boot ───────────────────────────────────────────────────────────────────
+  document.getElementById('addfirst').onclick = addCell;
+  fabEl.onclick = addCell;
+  window.addEventListener('resize', layout);
+  restore();
+  for (const l of leaves(root)) mountCell(l);
+  layout();
+</script>
+</body>
+</html>

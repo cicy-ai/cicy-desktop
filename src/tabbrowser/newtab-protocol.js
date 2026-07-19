@@ -12,7 +12,15 @@
 // If cicy-code is momentarily unreachable we fall back to a minimal inline page so
 // a fresh tab is never blank.
 const { protocol, session } = require("electron");
+const fs = require("fs");
+const path = require("path");
 const _handled = new WeakSet(); // sessions that already have the cicyui handler
+
+// cicyui://panel/<id> — the split-webview panel page (opened by the tab strip's
+// top-right "+"). <id> keeps each panel tab's URL unique so addTab's
+// origin+pathname reuse never collapses two panels into one; the page keys its
+// persisted layout off the same path.
+const PANEL_HTML = path.join(__dirname, "split-panel.html");
 
 // NOTE: scheme is "cicyui", NOT "cicy" — "cicy" is already an OS deep-link
 // protocol client (setAsDefaultProtocolClient), so navigating a webContents to
@@ -59,6 +67,14 @@ function handlerFor(ses, partition) {
     ses.protocol.handle("cicyui", async (request) => {
       let host = "";
       try { host = new URL(request.url).hostname; } catch (e) {}
+      if (host === "panel") {
+        // read per request (not cached) so dev edits to split-panel.html land on
+        // a simple tab reload, no Electron restart.
+        try {
+          const html = await fs.promises.readFile(PANEL_HTML, "utf8");
+          return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } });
+        } catch (e) { return new Response("panel page missing", { status: 500 }); }
+      }
       if (host !== "newtab") return new Response("not found", { status: 404 });
       // Fetch the single-source page from cicy-code; fall back to the inline page.
       try {
@@ -83,4 +99,5 @@ function ensureForPartition(partition) {
   try { handlerFor(session.fromPartition(partition), partition); } catch (e) {}
 }
 
-module.exports = { NEWTAB_URL, registerScheme, installHandler, ensureForPartition, startPageHtml };
+const PANEL_URL_BASE = "cicyui://panel/";
+module.exports = { NEWTAB_URL, PANEL_URL_BASE, registerScheme, installHandler, ensureForPartition, startPageHtml };

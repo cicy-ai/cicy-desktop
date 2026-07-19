@@ -577,7 +577,8 @@
   },
   "tabShell": {
     "myTeam": "我的团队",
-    "newTabBtn": "新建标签"
+    "newTabBtn": "新建标签",
+    "newPanel": "新建面板"
   },
   "dood": {
     "menu": "容器内使用 Docker",

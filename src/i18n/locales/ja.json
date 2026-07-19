@@ -577,7 +577,8 @@
   },
   "tabShell": {
     "myTeam": "マイチーム",
-    "newTabBtn": "新しいタブ"
+    "newTabBtn": "新しいタブ",
+    "newPanel": "新しいパネル"
   },
   "dood": {
     "menu": "コンテナ内で Docker を使う",

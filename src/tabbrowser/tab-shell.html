@@ -86,6 +86,20 @@
   /* vertical insertion bar shown between tabs while dragging */
   #dropmarker{position:fixed;width:2px;background:var(--accent);border-radius:1px;pointer-events:none;z-index:20;display:none;box-shadow:0 0 4px var(--accent)}
 
+  /* ── 右上角「新建面板」＋ (profile 0 only) ──
+     Pinned to the strip's top-right, outside the scrolling #tabs flow. On win the
+     native min/max/close overlay owns the rightmost 140px of the strip, so the
+     button sits left of it (fullscreen hides the overlay → reclaim). */
+  #panelbtn{position:fixed;top:5px;right:8px;z-index:30;width:30px;height:30px;border-radius:8px;display:none;align-items:center;justify-content:center;color:var(--muted);-webkit-app-region:no-drag;cursor:default}
+  body.has-panel #panelbtn{display:flex}
+  #panelbtn:hover{background:rgba(255,255,255,.08);color:#fff}
+  body.is-win #panelbtn{right:148px}
+  body.is-win.is-fullscreen #panelbtn{right:8px}
+  /* keep tabs from sliding under the pinned button */
+  body.has-panel #tabs{padding-right:48px}
+  body.is-win.has-panel #tabs{padding-right:188px}
+  body.is-win.is-fullscreen.has-panel #tabs{padding-right:48px}
+
   /* ── toolbar ── */
   #bar{position:relative;height:40px;display:flex;align-items:center;gap:4px;padding:0 8px;background:var(--toolbar)}
   .nav{width:32px;height:32px;flex:0 0 32px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--fg);cursor:default}
@@ -106,6 +120,9 @@
 </head>
 <body>
   <div id="tabs"></div>
+  <div id="panelbtn">
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="3"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+  </div>
   <div id="bar">
     <div class="nav off" id="back" title="后退">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
@@ -139,8 +156,16 @@
   const progEl = document.getElementById('prog');
   const NO_NEW = new URLSearchParams(location.search).get('noNew') === '1'; // profile 0
   const PLAT = new URLSearchParams(location.search).get('plat') || '';      // darwin|win32|linux
+  const PROFILE = new URLSearchParams(location.search).get('p') || '';
   if (PLAT === 'darwin') document.body.classList.add('is-mac');
   else if (PLAT === 'win32') document.body.classList.add('is-win');
+  // 「新建面板」＋ 只在 profile 0 出现:面板页依赖 <webview>,只有系统 profile 有 webviewTag。
+  if (PROFILE === '0') {
+    document.body.classList.add('has-panel');
+    const pb = document.getElementById('panelbtn');
+    try { pb.title = window.tabAPI.t('tabShell.newPanel', '新建面板'); } catch (e) { pb.title = '新建面板'; }
+    pb.onclick = () => window.tabAPI.newPanel();
+  }
   try { window.tabAPI.onFullscreen((fs) => document.body.classList.toggle('is-fullscreen', !!fs)); } catch (e) {}
   let state = { tabs: [], nav: {} };
   let urlFocused = false;
