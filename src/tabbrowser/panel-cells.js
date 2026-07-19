@@ -12,9 +12,33 @@
 // body rect and syncs [{id,url,rect}] here over IPC. Bonus: each cell has a
 // webContentsId, so the electron_tab_* tools (eval/screenshot/navigate) work
 // on panel cells exactly like tabs.
-const { BrowserView, ipcMain, webContents } = require("electron");
+const { BrowserView, ipcMain, webContents, session } = require("electron");
 
 const CHROME_H = 80; // must match tab-browser-tools CHROME_H (panel is a normal tab)
+
+// Cells run in PROFILE 1's session, NOT profile 0: account 0 is hard-forced
+// DIRECT (no proxy — the gotty terminal ws must never route into mihomo), so
+// x.com / accounts.google.com would be unreachable from CN inside a cell.
+// Profile 1 is the standard browsing profile: per-profile proxy from
+// account-1.json (fallback config.proxy) with localhost ALWAYS bypassed, so
+// team pages (127.0.0.1:8008) in cells stay direct. Team auth is token-in-URL,
+// so not sharing profile-0 cookies costs nothing.
+const CELL_PARTITION = "persist:sandbox-1";
+let cellProxyApplied = false;
+function ensureCellSessionProxy() {
+  if (cellProxyApplied) return;
+  cellProxyApplied = true;
+  try {
+    const profileStore = require("../profiles/profile-store");
+    let rules = "";
+    try { rules = profileStore.proxyRules(profileStore.getProfile("electron", 1) && profileStore.getProfile("electron", 1).proxy) || ""; } catch (e) {}
+    if (!rules) { try { rules = require("../config").config.proxy || ""; } catch (e) {} }
+    if (!rules) return;
+    session.fromPartition(CELL_PARTITION)
+      .setProxy({ proxyRules: rules, proxyBypassRules: "127.0.0.1,localhost,[::1]" })
+      .catch(() => {});
+  } catch (e) {}
+}
 
 // tab webContents.id -> PanelCells
 const registry = new Map();
@@ -40,11 +64,12 @@ class PanelCells {
   sendState(payload) { const wc = this.tabWc(); if (wc && !wc.isDestroyed()) { try { wc.send("panelcells:state", payload); } catch (e) {} } }
 
   create(cellId) {
+    ensureCellSessionProxy();
     const view = new BrowserView({
       webPreferences: {
-        // same session as profile-0 tabs → team/site logins shared with the rest
-        // of the tab window. Plain sandboxed web content: no preload, no Node.
-        partition: "persist:sandbox-0",
+        // profile 1's session (see CELL_PARTITION above): proxied external web,
+        // localhost bypassed. Plain sandboxed web content: no preload, no Node.
+        partition: CELL_PARTITION,
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
@@ -52,7 +77,7 @@ class PanelCells {
     });
     const wc = view.webContents;
     try { view.setBackgroundColor("#0d0d0f"); } catch (e) {}
-    try { wc.cicyAccountIdx = 0; } catch (e) {}
+    try { wc.cicyAccountIdx = 1; } catch (e) {}
     scrubUA(wc);
     try { require("../utils/context-menu-options").attachContextMenu(wc); } catch (e) {}
     try { require("../utils/window-monitor").attachTabConsole(wc); } catch (e) {}
