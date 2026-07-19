@@ -329,13 +329,15 @@
     }
     return cell;
   }
+  // URL → profile 路由(与 panel-cells.js 一致): localhost → profile 0(直连),
+  // 其余 → profile 1(走代理)。
+  const isLocalUrl = (u) => { try { const h = new URL(u).hostname; return h === '127.0.0.1' || h === 'localhost' || h === '[::1]'; } catch (e) { return false; } };
   function createWebview(leafId, url) {
     const c = cells.get(leafId);
     if (!c || c.wv) return;
     const wv = document.createElement('webview');
-    // profile 1's session — matches the NATIVE cells (panel-cells.js): proxied
-    // external web, localhost bypassed. (profile 0 is hard-forced DIRECT.)
-    wv.setAttribute('partition', 'persist:sandbox-1');
+    wv._local = isLocalUrl(url);
+    wv.setAttribute('partition', 'persist:sandbox-' + (wv._local ? 0 : 1));
     // popups must work (OAuth 登录弹窗 = window.open);main 的 guest open-handler
     // 对 panel 格子放行为应用内子窗口(共享会话 + window.opener)。
     wv.setAttribute('allowpopups', 'true');
@@ -368,6 +370,12 @@
     // the input would sit empty-looking until then.
     if (c && document.activeElement !== c.urlEl) c.urlEl.value = url;
     if (NATIVE) { if (c) c.hintEl.style.display = 'none'; pushCells(); }
+    else if (c.wv && isLocalUrl(url) !== c.wv._local) {
+      // locality change → partition must change → rebuild the webview
+      try { c.wv.remove(); } catch (e) {}
+      c.wv = null;
+      createWebview(leafId, url);
+    }
     else if (c.wv) { try { c.wv.src = url; } catch (e) {} }
     else createWebview(leafId, url);
     save();

@@ -16,25 +16,36 @@ const { BrowserView, ipcMain, webContents, session } = require("electron");
 
 const CHROME_H = 80; // must match tab-browser-tools CHROME_H (panel is a normal tab)
 
-// Cells run in PROFILE 1's session, NOT profile 0: account 0 is hard-forced
-// DIRECT (no proxy — the gotty terminal ws must never route into mihomo), so
-// x.com / accounts.google.com would be unreachable from CN inside a cell.
-// Profile 1 is the standard browsing profile: per-profile proxy from
-// account-1.json (fallback config.proxy) with localhost ALWAYS bypassed, so
-// team pages (127.0.0.1:8008) in cells stay direct. Team auth is token-in-URL,
-// so not sharing profile-0 cookies costs nothing.
-const CELL_PARTITION = "persist:sandbox-1";
-let cellProxyApplied = false;
-function ensureCellSessionProxy() {
-  if (cellProxyApplied) return;
-  cellProxyApplied = true;
+// Each cell picks its PROFILE (accountIdx → persist:sandbox-N), default 1.
+// Profile 0 is hard-forced DIRECT (no proxy — the gotty terminal ws must never
+// route into mihomo), so external sites (x.com / accounts.google.com) belong in
+// profile ≥1: per-profile proxy from account-N.json (fallback config.proxy)
+// with localhost ALWAYS bypassed — team pages (127.0.0.1:8008) stay direct in
+// every profile. Team auth is token-in-URL, so cookie isolation costs nothing.
+const DEFAULT_PROFILE = 1;
+const partitionFor = (idx) => `persist:sandbox-${idx}`;
+// URL → profile routing (用户定的规则): localhost/127.0.0.1 → profile 0(直连、
+// 与团队 tab 同会话);其余一律 profile 1(走代理)。按格子的目标 URL 定,变更时重建视图。
+function profileForUrl(url) {
+  try {
+    const h = new URL(url).hostname;
+    if (h === "127.0.0.1" || h === "localhost" || h === "[::1]" || h === "::1") return 0;
+  } catch (e) {}
+  return DEFAULT_PROFILE;
+}
+const appliedProxy = new Set(); // partitions whose proxy is already configured
+function ensureCellSessionProxy(idx) {
+  const part = partitionFor(idx);
+  if (appliedProxy.has(part)) return;
+  appliedProxy.add(part);
+  if (idx === 0) return; // profile 0 stays direct — managed by window-utils, don't touch
   try {
     const profileStore = require("../profiles/profile-store");
     let rules = "";
-    try { rules = profileStore.proxyRules(profileStore.getProfile("electron", 1) && profileStore.getProfile("electron", 1).proxy) || ""; } catch (e) {}
+    try { const p = profileStore.getProfile("electron", idx); rules = profileStore.proxyRules(p && p.proxy) || ""; } catch (e) {}
     if (!rules) { try { rules = require("../config").config.proxy || ""; } catch (e) {} }
     if (!rules) return;
-    session.fromPartition(CELL_PARTITION)
+    session.fromPartition(part)
       .setProxy({ proxyRules: rules, proxyBypassRules: "127.0.0.1,localhost,[::1]" })
       .catch(() => {});
   } catch (e) {}
@@ -63,13 +74,13 @@ class PanelCells {
   tabWc() { try { return webContents.fromId(this.tabId); } catch (e) { return null; } }
   sendState(payload) { const wc = this.tabWc(); if (wc && !wc.isDestroyed()) { try { wc.send("panelcells:state", payload); } catch (e) {} } }
 
-  create(cellId) {
-    ensureCellSessionProxy();
+  create(cellId, profileIdx) {
+    ensureCellSessionProxy(profileIdx);
     const view = new BrowserView({
       webPreferences: {
-        // profile 1's session (see CELL_PARTITION above): proxied external web,
+        // the cell's chosen profile session: proxied external web (profile ≥1),
         // localhost bypassed. Plain sandboxed web content: no preload, no Node.
-        partition: CELL_PARTITION,
+        partition: partitionFor(profileIdx),
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
@@ -77,7 +88,7 @@ class PanelCells {
     });
     const wc = view.webContents;
     try { view.setBackgroundColor("#0d0d0f"); } catch (e) {}
-    try { wc.cicyAccountIdx = 1; } catch (e) {}
+    try { wc.cicyAccountIdx = profileIdx; } catch (e) {}
     scrubUA(wc);
     try { require("../utils/context-menu-options").attachContextMenu(wc); } catch (e) {}
     try { require("../utils/window-monitor").attachTabConsole(wc); } catch (e) {}
@@ -122,7 +133,7 @@ class PanelCells {
     wc.on("did-navigate-in-page", push);
     wc.on("page-title-updated", push);
 
-    const rec = { view, url: "" };
+    const rec = { view, url: "", profile: profileIdx };
     this.views.set(String(cellId), rec);
     return rec;
   }
@@ -146,9 +157,12 @@ class PanelCells {
       if (c == null || c.id == null) continue;
       const key = String(c.id);
       seen.add(key);
-      let rec = this.views.get(key);
-      if (!rec) rec = this.create(c.id);
       const url = (c.url && String(c.url)) || "";
+      const prof = profileForUrl(url);
+      let rec = this.views.get(key);
+      // locality change (localhost ↔ external) → partition must change → rebuild
+      if (rec && rec.profile !== prof) { this.destroyCell(key); rec = null; }
+      if (!rec) rec = this.create(c.id, prof);
       if (url && rec.url !== url) {
         rec.url = url;
         try { rec.view.webContents.loadURL(url); } catch (e) {}
