@@ -21,6 +21,9 @@
 
   /* ── cell ── */
   .cell{position:absolute;display:flex;flex-direction:column;background:var(--cell);border:1px solid var(--line);border-radius:10px;overflow:hidden;transition:top .16s ease,left .16s ease,width .16s ease,height .16s ease;box-shadow:0 2px 10px rgba(0,0,0,.35)}
+  /* native (BrowserView) cells: the content view jumps instantly to its new
+     bounds — animating the frame underneath would visibly desync, so don't. */
+  .native-cells .cell,.native-cells .divider{transition:none}
   .cell.dragging-layout{transition:none}
   .cell__head{flex:0 0 34px;display:flex;align-items:center;gap:6px;padding:0 6px 0 10px;background:var(--head);border-bottom:1px solid var(--line);-webkit-user-select:none;user-select:none}
   .cell__spin{flex:0 0 12px;width:12px;height:12px;border:2px solid rgba(255,255,255,.18);border-top-color:var(--accent);border-radius:50%;animation:sp .7s linear infinite;display:none}
@@ -87,6 +90,12 @@
   const LS_KEY = 'cicy_panel_' + PANEL_ID;
   const GUT = 8;        // px gap between cells (the divider lives in it)
   const MIN_PX = 140;   // a cell never shrinks below this
+  // NATIVE mode: cells are main-process BrowserViews (panel-cells.js) — real
+  // webContents, popups keep window.opener so OAuth login works. This page is
+  // then pure chrome (headers/dividers); it syncs [{id,url,rect}] over panelAPI.
+  // Fallback (no panelAPI, e.g. opened via file:// in dev): inline <webview>s.
+  const NATIVE = !!window.panelAPI;
+  if (NATIVE) document.documentElement.classList.add('native-cells');
   let root = null;
   let seq = 1;
   const cells = new Map(); // leafId -> {el, urlEl, hintEl, body, wv}
@@ -144,7 +153,9 @@
   function layout() {
     const n = leaves(root).length;
     emptyEl.classList.toggle('on', n === 0);
-    fabEl.classList.toggle('on', n > 0);
+    // NATIVE: cell views float above the page and would cover the FAB — hide it;
+    // the per-cell header split buttons are the add affordance instead.
+    fabEl.classList.toggle('on', n > 0 && !NATIVE);
     document.title = n > 1 ? `面板 (${n})` : '面板';
     if (!root) { for (const d of dividerPool) d.el.style.display = 'none'; return; }
     const P = 8;
@@ -175,6 +186,42 @@
       d.el.style.width = spec.w + 'px'; d.el.style.height = spec.h + 'px';
       d.el._node = spec.node;
     });
+    pushCells();
+  }
+
+  // ── native cells sync (BrowserView mode) ───────────────────────────────────
+  // Send the full desired state (id/url/body-rect) to main; it reconciles views.
+  // Cells WITHOUT a url are not synced — they stay pure DOM so the hint shows.
+  let pushQueued = false;
+  function pushCells() {
+    if (!NATIVE || pushQueued) return;
+    pushQueued = true;
+    requestAnimationFrame(() => {
+      pushQueued = false;
+      const arr = [];
+      for (const l of leaves(root)) {
+        if (!l.url) continue;
+        const c = cells.get(l.id);
+        if (!c) continue;
+        const r = c.body.getBoundingClientRect();
+        arr.push({ id: l.id, url: l.url, rect: { x: r.x, y: r.y, w: r.width, h: r.height } });
+      }
+      try { window.panelAPI.sync(arr); } catch (e) {}
+    });
+  }
+  if (NATIVE) {
+    window.panelAPI.onCellState((s) => {
+      if (!s || s.id == null) return;
+      const hit = findParent(root, s.id);
+      const c = cells.get(s.id);
+      if (!hit || !c) return;
+      if (typeof s.loading === 'boolean') c.el.classList.toggle('loading', s.loading);
+      if (s.url && !s.url.startsWith('about:blank') && s.url !== hit.node.url) {
+        hit.node.url = s.url;
+        if (document.activeElement !== c.urlEl) c.urlEl.value = s.url;
+        save();
+      }
+    });
   }
 
   // ── divider drag ───────────────────────────────────────────────────────────
@@ -186,6 +233,7 @@
       el.setPointerCapture(e.pointerId);
       el.classList.add('active');
       document.body.classList.add('resizing');
+      if (NATIVE) { try { window.panelAPI.dragging(true); } catch (err) {} }
       for (const c of cells.values()) c.el.classList.add('dragging-layout');
       const move = (ev) => {
         const r = node._rect;
@@ -207,6 +255,7 @@
         el.releasePointerCapture(ev.pointerId);
         el.classList.remove('active');
         document.body.classList.remove('resizing');
+        if (NATIVE) { try { window.panelAPI.dragging(false); } catch (err) {} pushCells(); }
         for (const c of cells.values()) c.el.classList.remove('dragging-layout');
         el.removeEventListener('pointermove', move);
         el.removeEventListener('pointerup', up);
@@ -254,7 +303,10 @@
     url.addEventListener('focus', () => url.select());
     head.appendChild(spin);
     head.appendChild(url);
-    head.appendChild(btn(I.reload, '刷新', '', () => { const c = cells.get(leaf.id); try { c && c.wv && c.wv.reload(); } catch (e) {} }));
+    head.appendChild(btn(I.reload, '刷新', '', () => {
+      if (NATIVE) { try { window.panelAPI.reload(leaf.id); } catch (e) {} return; }
+      const c = cells.get(leaf.id); try { c && c.wv && c.wv.reload(); } catch (e) {}
+    }));
     head.appendChild(btn(I.splitR, '右分屏', '', () => splitLeaf(leaf.id, 'row')));
     head.appendChild(btn(I.splitD, '下分屏', '', () => splitLeaf(leaf.id, 'col')));
     head.appendChild(btn(I.close, '关闭', 'close', () => closeLeaf(leaf.id)));
@@ -271,7 +323,10 @@
     stage.appendChild(el);
     const cell = { el, urlEl: url, hintEl: hint, body, wv: null };
     cells.set(leaf.id, cell);
-    if (leaf.url) createWebview(leaf.id, leaf.url);
+    if (leaf.url) {
+      if (NATIVE) hint.style.display = 'none'; // the BrowserView covers the body
+      else createWebview(leaf.id, leaf.url);
+    }
     return cell;
   }
   function createWebview(leafId, url) {
@@ -312,7 +367,8 @@
     // reflect immediately — did-navigate can be seconds away on a slow page and
     // the input would sit empty-looking until then.
     if (c && document.activeElement !== c.urlEl) c.urlEl.value = url;
-    if (c.wv) { try { c.wv.src = url; } catch (e) {} }
+    if (NATIVE) { if (c) c.hintEl.style.display = 'none'; pushCells(); }
+    else if (c.wv) { try { c.wv.src = url; } catch (e) {} }
     else createWebview(leafId, url);
     save();
   }

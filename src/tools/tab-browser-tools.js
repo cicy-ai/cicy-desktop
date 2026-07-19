@@ -22,6 +22,8 @@ const { attachContextMenu } = require("../utils/context-menu-options");
 
 const SHELL_HTML = path.join(__dirname, "..", "tabbrowser", "tab-shell.html");
 const SHELL_PRELOAD = path.join(__dirname, "..", "tabbrowser", "tab-shell-preload.js");
+const PANEL_PRELOAD = path.join(__dirname, "..", "tabbrowser", "panel-preload.js");
+const panelCells = require("../tabbrowser/panel-cells");
 const HOMEPAGE_PRELOAD = path.join(__dirname, "..", "backends", "homepage-preload.js");
 const WEBVIEW_PRELOAD = path.join(__dirname, "..", "backends", "webview-preload.js");
 const CHROME_H = 80;  // tab strip (40) + toolbar (40) — must match tab-shell.html
@@ -68,6 +70,10 @@ function buildTabWebPreferences(accountIdx, partition, target, opts = {}) {
   // home is system-driven (openHomeWindow), never caller-URL-reachable, so it
   // keeps its privileges without a URL check.
   if (opts.home) { wp.preload = HOMEPAGE_PRELOAD; wp.webviewTag = true; wp.allowRunningInsecureContent = true; wp.sandbox = false; }
+  // split panel page: its cells are main-managed BrowserViews (panel-cells.js),
+  // driven over panelAPI IPC. No webviewTag needed (that path is the file://-dev
+  // fallback below). Sandbox stays ON — the preload only uses contextBridge/ipc.
+  else if (typeof target === "string" && target.startsWith("cicyui://panel")) { wp.preload = PANEL_PRELOAD; }
   // Every other profile-0 tab carries the electronRPC bridge (WEBVIEW_PRELOAD),
   // but the bridge is INERT until the page's origin is authorized: the first
   // rpc:guarded call from a non-allowlisted origin pops a consent modal
@@ -307,10 +313,14 @@ class TabManager {
     if (!t) return false;
     if (this.activeId != null && this.activeId !== id) {
       const cur = this.tabs.find((x) => x.id === this.activeId);
-      if (cur) { try { this.win.removeBrowserView(cur.view); } catch (e) {} }
+      if (cur) {
+        try { this.win.removeBrowserView(cur.view); } catch (e) {}
+        panelCells.onTabHidden(this, cur.id); // panel tab going background → detach its cell views
+      }
     }
     this.activeId = id;
     try { this.win.addBrowserView(t.view); } catch (e) {}
+    panelCells.onTabShown(this, t.id); // panel tab coming forward → re-attach its cell views on top
     this.layout();
     this.pushState();
     return true;
@@ -454,6 +464,14 @@ function installIpc() {
   });
   ipcMain.on("tabwin:new", (e, { url }) => { const m = mgr(e); if (m) m.addTab(url || ""); });
   ipcMain.on("tabwin:panel", (e) => { const m = mgr(e); if (m) openPanelTab(m); });
+  // panel cells IPC: sender = the panel PAGE's webContents → resolve its (manager, tab)
+  panelCells.installIpc((senderWcId) => {
+    for (const m of managers.values()) {
+      const tab = m.tabs.find((t) => t.id === senderWcId);
+      if (tab) return { manager: m, tab };
+    }
+    return null;
+  });
   ipcMain.on("tabwin:activate", (e, { id }) => { const m = mgr(e); if (m) m.activate(id); });
   ipcMain.on("tabwin:close", (e, { id }) => { const m = mgr(e); if (m) m.close(id); });
   ipcMain.on("tabwin:reorder", (e, { ids }) => { const m = mgr(e); if (m) m.reorder(ids); });
