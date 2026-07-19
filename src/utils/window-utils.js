@@ -542,7 +542,38 @@ if (app) {
         // NOTE: do NOT attach contextMenu here — the global contextMenu() in
         // main.js now also auto-attaches to <webview> guests, so an explicit
         // attach made them get TWO right-click menus (双重弹窗). Global covers it.
+        // Panel cells (split-panel.html / cicyui://panel) are a browser-like
+        // surface: their popups must stay IN-APP as real child windows —
+        // cross-origin OAuth popups (accounts.google.com from x.com) need the
+        // shared session + window.opener to complete; shell.openExternal would
+        // orphan the flow in the system browser.
+        const isPanelGuest = () => {
+          try {
+            const hu = contents.hostWebContents ? contents.hostWebContents.getURL() : "";
+            return hu.startsWith("cicyui://panel") || hu.includes("/tabbrowser/split-panel.html");
+          } catch (_e) { return false; }
+        };
+        // OAuth providers (Google) reject UAs carrying Electron — scrub the popup's
+        // UA to plain Chrome before its first paint finishes. (The <webview> itself
+        // already carries a scrubbed `useragent` attr; popups don't inherit it.)
+        contents.on("did-create-window", (win) => {
+          if (!isPanelGuest()) return;
+          try {
+            const wc2 = win.webContents;
+            wc2.setUserAgent(wc2.getUserAgent().replace(/\s(CiCyDesktop|Electron)\/\S+/g, ""));
+          } catch (_e) {}
+        });
         contents.setWindowOpenHandler(({ url }) => {
+          if (isPanelGuest()) {
+            return {
+              action: "allow",
+              overrideBrowserWindowOptions: {
+                autoHideMenuBar: true,
+                // plain sandboxed web window — no webviewTag, no preload, webSecurity on
+                webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+              },
+            };
+          }
           // External (cross-origin http/https) links opened from a <webview> guest
           // — e.g. the gotty terminal's "打开链接" confirm button — go to the user's
           // SYSTEM browser instead of a new in-app window. Same-origin popups (a

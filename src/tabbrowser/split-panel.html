@@ -281,6 +281,12 @@
     // share the profile-0 session (this page runs in persist:sandbox-0) so team
     // logins/cookies work inside panel cells exactly like team tabs.
     wv.setAttribute('partition', 'persist:sandbox-0');
+    // popups must work (OAuth 登录弹窗 = window.open);main 的 guest open-handler
+    // 对 panel 格子放行为应用内子窗口(共享会话 + window.opener)。
+    wv.setAttribute('allowpopups', 'true');
+    // strip Electron/CiCyDesktop tokens — Google OAuth 等站点会拒绝带 Electron 的 UA
+    // ("this browser may not be secure")。
+    wv.setAttribute('useragent', navigator.userAgent.replace(/\s(CiCyDesktop|Electron)\/\S+/g, ''));
     wv.setAttribute('src', url);
     wv.addEventListener('did-start-loading', () => c.el.classList.add('loading'));
     wv.addEventListener('did-stop-loading', () => c.el.classList.remove('loading'));
