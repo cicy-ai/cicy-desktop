@@ -16,6 +16,8 @@
 //   • per-tab preload: home → homepage-preload (window.cicy bridges),
 //     trusted (team) → webview-preload (electronRPC), plain site → none.
 const path = require("path");
+const fs = require("fs");
+const os = require("os");
 const { z } = require("zod");
 const { app, BrowserWindow, BrowserView, webContents, ipcMain } = require("electron");
 const { attachContextMenu } = require("../utils/context-menu-options");
@@ -41,6 +43,78 @@ function stripVol(u) { try { const x = new URL(u); return x.origin + x.pathname;
 const openedWc = new Map(); // stripVol(url) -> webContentsId
 
 const { NEWTAB_URL, PANEL_URL_BASE, ensureForPartition } = require("../tabbrowser/newtab-protocol");
+const PANEL_STATE_PATH = path.join(os.homedir(), "cicy-ai", "db", "last-panel.json");
+const CICY_CODE_TAB_STATE_PATH = path.join(os.homedir(), "cicy-ai", "db", "cicy-code-tab.json");
+let lastPanelRestored = false;
+let cicyCodeTabRestored = false;
+
+function isLocalCicyCodeUrl(url) {
+  try {
+    const u = new URL(String(url || ""));
+    return (u.hostname === "127.0.0.1" || u.hostname === "localhost" || u.hostname === "::1")
+      && (u.port || (u.protocol === "https:" ? "443" : "80")) === "8008";
+  } catch (e) { return false; }
+}
+
+function rememberCicyCodeTab(url) {
+  if (!isLocalCicyCodeUrl(url)) return;
+  try {
+    fs.mkdirSync(path.dirname(CICY_CODE_TAB_STATE_PATH), { recursive: true });
+    const tmp = CICY_CODE_TAB_STATE_PATH + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify({ opened: true, savedAt: new Date().toISOString() }, null, 2));
+    fs.renameSync(tmp, CICY_CODE_TAB_STATE_PATH);
+  } catch (e) {}
+}
+
+function shouldRestoreCicyCodeTab() {
+  try {
+    if (JSON.parse(fs.readFileSync(CICY_CODE_TAB_STATE_PATH, "utf8")).opened === true) return true;
+  } catch (e) {}
+  // One-time compatibility with installs that opened :8008 before this
+  // dedicated tab-state file existed. windows.json is the old window session
+  // store; recognize any historical local CiCy Code URL and migrate it.
+  try {
+    const legacy = JSON.parse(fs.readFileSync(
+      path.join(os.homedir(), "cicy-ai", "db", "windows.json"), "utf8"));
+    const rows = Array.isArray(legacy)
+      ? legacy
+      : (Array.isArray(legacy.windows)
+          ? legacy.windows
+          : (legacy.windows && typeof legacy.windows === "object" ? Object.values(legacy.windows) : []));
+    if (rows.some((row) => isLocalCicyCodeUrl(row && row.url))) {
+      rememberCicyCodeTab("http://127.0.0.1:8008/");
+      return true;
+    }
+  } catch (e) {}
+  return false;
+}
+
+function localCicyCodeHomeUrl() {
+  let token = "";
+  try {
+    const cfg = JSON.parse(fs.readFileSync(path.join(os.homedir(), "cicy-ai", "global.json"), "utf8"));
+    token = String(cfg.api_token || "");
+  } catch (e) {}
+  return `http://127.0.0.1:8008/${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+}
+
+function saveLastPanelState(url, name = "面板") {
+  try {
+    fs.mkdirSync(path.dirname(PANEL_STATE_PATH), { recursive: true });
+    const tmp = PANEL_STATE_PATH + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify({ url, name, savedAt: new Date().toISOString() }, null, 2));
+    fs.renameSync(tmp, PANEL_STATE_PATH);
+  } catch (e) {}
+}
+
+function readLastPanelState() {
+  try {
+    const data = JSON.parse(fs.readFileSync(PANEL_STATE_PATH, "utf8"));
+    const url = typeof data.url === "string" ? data.url : "";
+    if (!url.startsWith(PANEL_URL_BASE)) return null;
+    return { url, name: String(data.name || "面板").trim() || "面板" };
+  } catch (e) { return null; }
+}
 
 // 新建一个 split-webview 面板 tab(tab 条右上角 "+")。仅 profile 0:面板页要用
 // <webview>,而 webviewTag 只授予系统 profile(见 buildTabWebPreferences 的安全模型);
@@ -49,7 +123,11 @@ const { NEWTAB_URL, PANEL_URL_BASE, ensureForPartition } = require("../tabbrowse
 // 面板页也按这个 path 分别持久化各自的布局。
 function openPanelTab(m) {
   if (!m || m.accountIdx !== 0) return null;
-  return m.addTab(PANEL_URL_BASE + Date.now().toString(36), {});
+  const url = PANEL_URL_BASE + Date.now().toString(36);
+  const name = "面板";
+  const id = m.addTab(url, { title: name });
+  saveLastPanelState(url, name);
+  return id;
 }
 
 // ── Per-profile privilege gate ────────────────────────────────────────────────
@@ -188,6 +266,7 @@ class TabManager {
         team: !!t.team,           // 团队 tab:icon 只用 avatar,禁用页面 favicon
         colorKey: t.colorKey || "", // 无头像时首字母色块的底色种子 = teamId(和卡片一致)
         home: !!t.home,
+        panel: typeof t.url === "string" && t.url.startsWith(PANEL_URL_BASE),
       })),
       nav: {
         canBack: wc ? wc.canGoBack() : false,
@@ -203,10 +282,10 @@ class TabManager {
     const t = this.tabs.find((x) => x.id === this.activeId);
     if (!t) return;
     const [w, h] = this.win.getContentSize();
-    // Hide the toolbar (address bar) ONLY on the homepage tab — its full-page UI
-    // covers y=40 down. Every other tab, INCLUDING profile 0's team tabs, keeps
-    // the address bar (profile 0 的地址栏不再隐藏 / 不限制).
-    const top = t.home ? STRIP_H : CHROME_H;
+    // Profile 0 is the system/team workspace: its URL toolbar is hidden for every
+    // tab, so all content starts immediately below the tab strip. Sandboxed
+    // profiles keep the full tab strip + address bar chrome.
+    const top = this.accountIdx === 0 ? STRIP_H : CHROME_H;
     try { t.view.setBounds({ x: 0, y: top, width: w, height: Math.max(0, h - top) }); } catch (e) {}
   }
 
@@ -217,6 +296,14 @@ class TabManager {
     if (key) {
       const ex = this.tabs.find((t) => stripVol(t.url) === key);
       if (ex) {
+        // Reconcile canonical team identity on reuse. A tab may have been
+        // restored before team metadata was resolved; opening its team card
+        // must update it to the same title/avatar/colorKey instead of keeping a
+        // stale initial and unrelated color.
+        if (opts.team) ex.team = true;
+        if (opts.title) ex.fixedTitle = opts.title;
+        if (opts.avatar) ex.avatar = opts.avatar;
+        if (opts.colorKey) ex.colorKey = opts.colorKey;
         // navigate-on-reuse:同 origin+pathname 但完整 URL(含 query)不同时,把已有 tab
         // 导航过去。cicy-ai 的 我的钱包/我的帐单/团队帐单 都在 /dash、只差 query —— 不导航
         // 就会命中同一个 /dash tab 却不切视图(点了帐单还显示钱包)。仅 navigate 选项启用,
@@ -410,6 +497,19 @@ function findManagerByTab(webContentsId) {
 // button / electron_tab_open / the panel can add tabs to profile 0 too.
 async function openTab(accountIdx, url, opts = {}) {
   const m = ensureManager(accountIdx);
+  if (accountIdx === 0) rememberCicyCodeTab(url);
+  if (accountIdx === 0 && url) {
+    try {
+      const team = require("../backends/local-teams").teamIdentityForUrl(url);
+      if (team) opts = {
+        ...opts,
+        team: true,
+        title: opts.title || team.title,
+        avatar: opts.avatar || team.avatar,
+        colorKey: opts.colorKey || team.id,
+      };
+    } catch (e) {}
+  }
   const id = m.addTab(url, { trusted: !!opts.trusted, home: !!opts.home, title: opts.title || "", navigate: !!opts.navigate, avatar: opts.avatar || "", team: !!opts.team, colorKey: opts.colorKey || "", activate: opts.activate });
   try { m.surfaceQuiet(); } catch (e) {}
   // 记下这个团队 tab 的 webContentsId(打开 → set;关闭/销毁 → delete)。
@@ -440,6 +540,32 @@ function openHomeWindow(accountIdx, homeUrl, opts = {}) {
   } else {
     const id = m.addTab(homeUrl, { home: true }); tab = m.tabs.find((t) => t.id === id);
   }
+  // A panel's split tree + cell URLs already persist in its page localStorage,
+  // keyed by the unique panel URL. Recreate the most recently added panel tab
+  // once per process with that SAME URL so the page restores the saved layout.
+  if (accountIdx === 0 && !lastPanelRestored) {
+    lastPanelRestored = true;
+    const panel = readLastPanelState();
+    if (panel) m.addTab(panel.url, { title: panel.name });
+  }
+  // CiCy Code is a resident local workspace. Once the user has opened :8008,
+  // restore it on the next desktop launch. Always enter at the root with the
+  // current token instead of reviving a stale #/agent/... route.
+  if (accountIdx === 0 && !cicyCodeTabRestored) {
+    cicyCodeTabRestored = true;
+    if (shouldRestoreCicyCodeTab()) {
+      const restoredUrl = localCicyCodeHomeUrl();
+      let team = null;
+      try { team = require("../backends/local-teams").teamIdentityForUrl(restoredUrl); } catch (e) {}
+      m.addTab(restoredUrl, {
+        trusted: true,
+        title: team ? team.title : "CiCy Code",
+        team: true,
+        avatar: team ? team.avatar : "",
+        colorKey: team ? team.id : "local-cicy-code-8008",
+      });
+    }
+  }
   // 只有明确要求(tray「打开首页」/ 启动,activate!==false)才把窗口抢到前台;deeplink /
   // second-instance 顺带触发(activate:false)只静默显示,绝不从用户当前 app 抢焦点。
   if (opts.activate !== false) { try { m.win.show(); m.win.focus(); } catch (e) {} } else m.surfaceQuiet();
@@ -464,6 +590,16 @@ function installIpc() {
   });
   ipcMain.on("tabwin:new", (e, { url }) => { const m = mgr(e); if (m) m.addTab(url || ""); });
   ipcMain.on("tabwin:panel", (e) => { const m = mgr(e); if (m) openPanelTab(m); });
+  ipcMain.on("tabwin:rename", (e, { id, name }) => {
+    const m = mgr(e);
+    if (!m || m.accountIdx !== 0) return;
+    const tab = m.tabs.find((t) => t.id === id);
+    if (!tab || !String(tab.url || "").startsWith(PANEL_URL_BASE)) return;
+    const next = String(name || "").trim().slice(0, 80) || "面板";
+    tab.fixedTitle = next;
+    saveLastPanelState(tab.url, next);
+    m.pushState();
+  });
   // panel cells IPC: sender = the panel PAGE's webContents → resolve its (manager, tab)
   panelCells.installIpc((senderWcId) => {
     for (const m of managers.values()) {
@@ -601,7 +737,16 @@ function registerTabBrowserTools(registerTool) {
       try {
         const m = findManagerByTab(webContentsId);
         if (!m) throw new Error(`tab ${webContentsId} not found`);
-        return ok({ success: m.activate(webContentsId), webContentsId });
+        const success = m.activate(webContentsId);
+        if (success) {
+          try {
+            if (process.platform === "darwin") app.focus({ steal: true });
+            if (m.win.isMinimized()) m.win.restore();
+            m.win.show();
+            m.win.focus();
+          } catch (e) {}
+        }
+        return ok({ success, webContentsId });
       } catch (e) { return ok({ error: e.message }, true); }
     },
     { tag: "TabBrowser" }

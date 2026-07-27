@@ -1307,6 +1307,49 @@ electronApp.whenReady().then(async () => {
     }
   }
 
+  const profileStore = require("./profiles/profile-store");
+  const electronProfiles = (() => {
+    let rows = [];
+    try { rows = profileStore.listProfiles("electron"); } catch {}
+    // Profile 0 is the resident CiCy system window and must not be exposed in
+    // the macOS title/top-bar launcher. Profile 9 is Chrome's source template.
+    rows = rows.filter((p) => ![0, 9].includes(Number(p.accountIdx)));
+    return rows;
+  })();
+  const chromeProfiles = (() => {
+    try { return profileStore.listProfiles("chrome"); } catch { return []; }
+  })();
+  const showProfileError = (kind, e) => {
+    dialog.showMessageBox({
+      type: "error",
+      message: `${kind} profile 打开失败`,
+      detail: String((e && e.message) || e),
+      buttons: ["OK"],
+    });
+  };
+  const openElectronProfile = async (accountIdx) => {
+    try {
+      const tabs = require("./tools/tab-browser-tools");
+      await tabs.openTab(accountIdx, undefined, { activate: true });
+      const m = tabs.ensureManager(accountIdx);
+      if (m.win.isMinimized()) m.win.restore();
+      m.win.show();
+      m.win.focus();
+    } catch (e) { showProfileError("Electron", e); }
+  };
+  const openChromeProfile = async (accountIdx) => {
+    try {
+      await require("./tools/chrome-tools").launchOrActivateProfile({
+        accountIdx,
+        activateIfRunning: true,
+      });
+    } catch (e) { showProfileError("Chrome", e); }
+  };
+  const openNativeChrome = () => {
+    try { require("./tools/chrome-tools").launchNativeChrome(); }
+    catch (e) { showProfileError("Chrome", e); }
+  };
+
   const menuTemplate = [
     ...(process.platform === "darwin" ? [{ role: "appMenu" }] : []),
     {
@@ -1342,6 +1385,24 @@ electronApp.whenReady().then(async () => {
         { label: i18n.t("menu.zoomOut"), role: "zoomOut" },
         { type: "separator" },
         { label: i18n.t("menu.toggleFullscreen"), role: "togglefullscreen" },
+      ],
+    },
+    {
+      label: "Electron",
+      submenu: electronProfiles.map((p) => ({
+        label: `Profile ${p.accountIdx}${p.name ? ` · ${p.name}` : ""}`,
+        click: () => openElectronProfile(Number(p.accountIdx)),
+      })),
+    },
+    {
+      label: "Chrome",
+      submenu: [
+        { label: "原生 Chrome", click: openNativeChrome },
+        { type: "separator" },
+        ...chromeProfiles.map((p) => ({
+          label: `Profile ${p.accountIdx}${p.gmail ? ` · ${p.gmail}` : p.note ? ` · ${p.note}` : ""}`,
+          click: () => openChromeProfile(Number(p.accountIdx)),
+        })),
       ],
     },
     {

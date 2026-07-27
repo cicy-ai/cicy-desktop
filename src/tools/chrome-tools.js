@@ -5,6 +5,7 @@ const { z } = require("zod");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const { execFileSync } = require("child_process");
 
 const { getChromeRuntimeRegistry } = require("../chrome/runtime-registry");
 const {
@@ -82,6 +83,28 @@ function canonicalChromeProxy(proxyUrl) {
     if (isLocal && port >= 20000 && port <= 20099) return SHARED_CHROME_PROXY;
   } catch {}
   return proxyUrl;
+}
+
+function launchNativeChrome() {
+  if (process.platform === "darwin") {
+    // Native/default Chrome: launch the standard system install directly.
+    // Deliberately pass no --user-data-dir / --profile-directory, so Chrome uses
+    // its own default ~/Library/Application Support/Google/Chrome data.
+    const systemChrome = "/Applications/Google Chrome.app";
+    if (!fs.existsSync(systemChrome)) {
+      throw new Error(`Google Chrome.app not found at ${systemChrome}`);
+    }
+    execFileSync("/usr/bin/open", [systemChrome], { stdio: "ignore" });
+  } else if (process.platform === "win32") {
+    execFileSync("cmd.exe", ["/d", "/s", "/c", "start", "", "chrome"], { stdio: "ignore", windowsHide: true });
+  } else {
+    let opened = false;
+    for (const bin of ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"]) {
+      try { execFileSync(bin, [], { stdio: "ignore" }); opened = true; break; } catch {}
+    }
+    if (!opened) throw new Error("Chrome executable not found");
+  }
+  return { success: true, native: true };
 }
 
 function readPrivateChromeConfig() {
@@ -518,6 +541,20 @@ async function launchOrActivateProfile({
 }
 
 function registerChromeTools(registerTool) {
+  registerTool(
+    "chrome_launch_native",
+    "启动系统原生 Google Chrome（不使用 cicy 托管 profile）",
+    z.object({}),
+    async () => {
+      try {
+        return toToolResult(launchNativeChrome());
+      } catch (error) {
+        return toToolResult({ error: error.message }, { isError: true });
+      }
+    },
+    { tag: "Chrome" }
+  );
+
   registerTool(
     "chrome_list_profiles",
     "列出 ~/cicy-ai/db/chrome.json 中全部 Chrome profiles，并附带 runtime + live 状态",
@@ -1091,3 +1128,5 @@ module.exports = registerChromeTools;
 module.exports.__testables = {
   ensurePageTargets,
 };
+module.exports.launchOrActivateProfile = launchOrActivateProfile;
+module.exports.launchNativeChrome = launchNativeChrome;

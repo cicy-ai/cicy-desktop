@@ -32,6 +32,34 @@
   .cell__url{flex:1;min-width:0;height:24px;padding:0 10px;background:#101012;border:1px solid var(--line);border-radius:12px;color:var(--fg);font-size:12px;outline:none;-webkit-user-select:text;user-select:text}
   .cell__url:focus{border-color:var(--accent);background:#0d0d10}
   .cell__url::placeholder{color:var(--muted)}
+  .service-trigger{flex:0 0 30px;width:30px;height:28px;border:1px solid var(--line);border-radius:8px;background:#101012;display:flex;align-items:center;justify-content:center;cursor:pointer}
+  .service-trigger:hover,.service-trigger.open{border-color:var(--accent);background:#17171b}
+  .service-trigger.image-logo{background:#fff}
+  .service-trigger.image-logo:hover,.service-trigger.image-logo.open{background:#fff}
+  .service-trigger svg,.service-trigger img{width:21px;height:21px;object-fit:contain}
+  .profile-trigger{flex:0 0 32px;height:28px;padding:0;border:1px solid var(--line);border-radius:8px;background:#101012;color:#aeb4c0;font-size:11px;font-weight:700;cursor:pointer}
+  .profile-trigger:hover,.profile-trigger.open{border-color:var(--accent);color:#fff}
+  .profile-trigger:disabled{opacity:.55;border-color:var(--line);cursor:default}
+  .profile-pop{position:fixed;z-index:1001;min-width:180px;max-height:300px;overflow:auto;padding:6px;background:#1b1b20;border:1px solid rgba(255,255,255,.14);border-radius:10px;box-shadow:0 18px 50px rgba(0,0,0,.65)}
+  .profile-item{width:100%;height:36px;padding:0 10px;border:0;border-radius:7px;background:transparent;color:var(--fg);display:flex;align-items:center;gap:9px;text-align:left;cursor:pointer}
+  .profile-item:hover,.profile-item.active{background:rgba(59,130,246,.15)}
+  .profile-item b{font-size:11px;color:#93b4f8}
+  .profile-item span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+  .service-pop{position:fixed;z-index:1000;width:340px;max-width:calc(100vw - 16px);max-height:430px;padding:8px;background:#1b1b20;border:1px solid rgba(255,255,255,.14);border-radius:12px;box-shadow:0 18px 50px rgba(0,0,0,.65);display:none}
+  .service-pop.open{display:block}
+  .service-search{width:100%;height:34px;padding:0 11px;border:1px solid var(--line);border-radius:8px;background:#101012;color:var(--fg);font-size:13px;outline:none;-webkit-user-select:text;user-select:text}
+  .service-search:focus{border-color:var(--accent)}
+  .service-list{max-height:360px;margin-top:7px;overflow:auto}
+  .service-section{padding:7px 8px 4px;color:#777783;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+  .service-item{width:100%;height:44px;padding:0 9px;border:0;border-radius:8px;background:transparent;color:var(--fg);display:flex;align-items:center;gap:11px;text-align:left;cursor:pointer}
+  .service-item:hover,.service-item.active{background:rgba(59,130,246,.15)}
+  .service-icon{flex:0 0 28px;width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.06)}
+  .service-icon.image-logo{background:#fff}
+  .service-icon svg,.service-icon img{width:24px;height:24px;object-fit:contain}
+  .service-copy{min-width:0;display:flex;flex-direction:column;gap:2px}
+  .service-name{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .service-meta{font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .service-empty{padding:22px;text-align:center;color:var(--muted);font-size:12px}
   .cbtn{flex:0 0 24px;width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--muted);cursor:default}
   .cbtn:hover{background:rgba(255,255,255,.10);color:#fff}
   .cbtn.close:hover{background:rgba(249,112,102,.18);color:#f97066}
@@ -84,7 +112,7 @@
 
 <script>
   // ── state ──────────────────────────────────────────────────────────────────
-  // tree: null | {type:'leaf', id, url} | {type:'split', dir:'row'|'col', ratio, a, b}
+  // tree: null | {type:'leaf', id, url, profile} | {type:'split', dir:'row'|'col', ratio, a, b}
   // 'row' = a|b side by side (vertical divider), 'col' = a over b.
   const PANEL_ID = (location.pathname || '/').replace(/[^\w-]/g, '') || 'default';
   const LS_KEY = 'cicy_panel_' + PANEL_ID;
@@ -103,8 +131,37 @@
   const stage = document.getElementById('stage');
   const emptyEl = document.getElementById('empty');
   const fabEl = document.getElementById('fab');
+  let suspendVersion = 0;
+  async function suspendNativeViews() {
+    if (!NATIVE) return;
+    const version = ++suspendVersion;
+    try {
+      const shots = await window.panelAPI.snapshots();
+      if (version !== suspendVersion) return;
+      for (const shot of shots || []) {
+        const cell = cells.get(Number(shot.id)) || cells.get(shot.id);
+        if (!cell || !shot.dataUrl) continue;
+        cell.body.style.backgroundImage = `url("${shot.dataUrl}")`;
+        cell.body.style.backgroundSize = 'cover';
+        cell.body.style.backgroundPosition = 'center top';
+      }
+      window.panelAPI.dragging(true);
+    } catch (e) {
+      try { window.panelAPI.dragging(true); } catch (_) {}
+    }
+  }
+  function resumeNativeViews() {
+    if (!NATIVE) return;
+    suspendVersion++;
+    try { window.panelAPI.dragging(false); } catch (e) {}
+    for (const cell of cells.values()) {
+      cell.body.style.backgroundImage = '';
+      cell.body.style.backgroundSize = '';
+      cell.body.style.backgroundPosition = '';
+    }
+  }
 
-  const newLeaf = (url) => ({ type: 'leaf', id: seq++, url: url || '' });
+  const newLeaf = (url, profile = 1) => ({ type: 'leaf', id: seq++, url: url || '', profile: Number(profile) > 0 ? Number(profile) : 1 });
 
   // ── tree helpers ───────────────────────────────────────────────────────────
   function leaves(node, out = []) {
@@ -122,12 +179,12 @@
   // ── persistence ────────────────────────────────────────────────────────────
   function serialize(node) {
     if (!node) return null;
-    if (node.type === 'leaf') return { type: 'leaf', url: node.url || '' };
+    if (node.type === 'leaf') return { type: 'leaf', url: node.url || '', profile: Number(node.profile) > 0 ? Number(node.profile) : 1 };
     return { type: 'split', dir: node.dir, ratio: node.ratio, a: serialize(node.a), b: serialize(node.b) };
   }
   function deserialize(node) {
     if (!node) return null;
-    if (node.type === 'leaf') return newLeaf(node.url);
+    if (node.type === 'leaf') return newLeaf(node.url, node.profile);
     return { type: 'split', dir: node.dir === 'col' ? 'col' : 'row', ratio: Math.min(.88, Math.max(.12, +node.ratio || .5)), a: deserialize(node.a), b: deserialize(node.b) };
   }
   function save() { try { localStorage.setItem(LS_KEY, JSON.stringify(serialize(root))); } catch (e) {} }
@@ -204,7 +261,7 @@
         const c = cells.get(l.id);
         if (!c) continue;
         const r = c.body.getBoundingClientRect();
-        arr.push({ id: l.id, url: l.url, rect: { x: r.x, y: r.y, w: r.width, h: r.height } });
+        arr.push({ id: l.id, url: l.url, profile: isLocalCicyCode(l.url) ? 0 : l.profile, rect: { x: r.x, y: r.y, w: r.width, h: r.height } });
       }
       try { window.panelAPI.sync(arr); } catch (e) {}
     });
@@ -273,6 +330,201 @@
     splitD: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="12" x2="21" y2="12"/></svg>',
     close: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg>',
   };
+  const ICONS = {
+    apps: '<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="7" height="7" rx="2" fill="#3b82f6"/><rect x="14" y="3" width="7" height="7" rx="2" fill="#8b5cf6"/><rect x="3" y="14" width="7" height="7" rx="2" fill="#8b5cf6"/><rect x="14" y="14" width="7" height="7" rx="2" fill="#3b82f6"/></svg>',
+    gmail: '<img src="https://www.gstatic.com/images/branding/product/2x/gmail_2020q4_48dp.png" alt="">',
+    gemini: '<img src="http://127.0.0.1:8008/gemini.svg" alt="">',
+    claudeai: '<img src="http://127.0.0.1:8008/claude-symbol.svg" alt="">',
+    aistudio: '<img src="https://www.gstatic.com/images/branding/productlogos/ai_studio/v1/web-64dp/logo_ai_studio_color_1x_web_64dp.png" alt="">',
+    grok: '<img src="https://upload.wikimedia.org/wikipedia/commons/f/f4/Grok_logo_without_text.svg" alt="">',
+    chatgpt: '<img src="http://127.0.0.1:8008/openai.svg" alt="">',
+    agent: '<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="16" rx="5" fill="#2563eb"/><path d="M9 2h6M12 2v3M8 12h.01M16 12h.01M8 16c2.5 1.7 5.5 1.7 8 0" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  };
+  const AGENT_LOGOS = {
+    claude: 'http://127.0.0.1:8008/claude-symbol.svg',
+    codex: 'http://127.0.0.1:8008/openai.svg',
+    cicy: 'http://127.0.0.1:8008/assets/logos/cicy-logo.svg?v=2',
+  };
+  function agentIcon(type) {
+    const t = String(type || '').toLowerCase();
+    const key = t === 'codex' ? 'codex' : (t === 'cicy' ? 'cicy' : (t === 'claude' ? 'claude' : ''));
+    return key ? `<img src="${AGENT_LOGOS[key]}" alt="">` : ICONS.agent;
+  }
+  const SERVICES = [
+    { id: 'gmail', name: 'Gmail', meta: 'Google Mail', url: 'https://mail.google.com/' },
+    { id: 'gemini', name: 'Gemini', meta: 'Google AI', url: 'https://gemini.google.com/app' },
+    { id: 'claudeai', name: 'Claude.ai', meta: 'Anthropic', url: 'https://claude.ai/' },
+    { id: 'aistudio', name: 'Google AI Studio', meta: 'Google AI', url: 'https://aistudio.google.com/' },
+    { id: 'grok', name: 'Grok', meta: 'xAI', url: 'https://grok.com/' },
+    { id: 'chatgpt', name: 'ChatGPT', meta: 'OpenAI', url: 'https://chatgpt.com/' },
+  ];
+  let agentList = [];
+  let agentsPromise = null;
+  function loadAgents() {
+    if (!agentsPromise) agentsPromise = (NATIVE && window.panelAPI.agents
+      ? window.panelAPI.agents().then((r) => {
+          agentList = r?.agents || [];
+          for (const cell of cells.values()) {
+            if (cell.serviceEl) setTriggerIcon(cell.serviceEl, iconForUrl(cell.urlEl.value));
+          }
+          return agentList;
+        }).catch(() => [])
+      : Promise.resolve([]));
+    return agentsPromise;
+  }
+  function agentUrl(id) { return 'http://127.0.0.1:8008/#/agent/' + encodeURIComponent(id); }
+  function selectedServiceValue(url) {
+    try {
+      const u = new URL(url);
+      if ((u.hostname === '127.0.0.1' || u.hostname === 'localhost') && +u.port === 8008) {
+        const m = u.hash.match(/^#\/agent\/([^/]+)/);
+        if (m) return agentUrl(decodeURIComponent(m[1]));
+      }
+      const h = u.hostname.replace(/^www\./, '');
+      const s = SERVICES.find((x) => h === new URL(x.url).hostname.replace(/^www\./, ''));
+      return s ? s.url : '';
+    } catch (e) { return ''; }
+  }
+  function iconForUrl(url) {
+    const selected = selectedServiceValue(url);
+    const service = SERVICES.find((s) => s.url === selected);
+    if (service) return ICONS[service.id];
+    if (selected && selected.startsWith('http://127.0.0.1:8008/')) {
+      const id = decodeURIComponent(selected.split('/').pop() || '');
+      const agent = agentList.find((a) => a.id === id);
+      return agent ? agentIcon(agent.type) : ICONS.agent;
+    }
+    return ICONS.apps;
+  }
+  let picker = null;
+  let pickerState = null;
+  function ensurePicker() {
+    if (picker) return picker;
+    picker = document.createElement('div'); picker.className = 'service-pop';
+    picker.innerHTML = '<input class="service-search" placeholder="搜索应用、Agent ID、名称或类型…"><div class="service-list"></div>';
+    document.body.appendChild(picker);
+    const search = picker.querySelector('.service-search');
+    search.oninput = () => renderPicker(search.value);
+    search.onkeydown = (e) => { if (e.key === 'Escape') closePicker(); };
+    document.addEventListener('pointerdown', (e) => {
+      if (pickerState && !picker.contains(e.target) && !pickerState.trigger.contains(e.target)) closePicker();
+    });
+    return picker;
+  }
+  function pickerItem(icon, name, meta, url, active) {
+    const b = document.createElement('button'); b.type = 'button';
+    b.className = 'service-item' + (active ? ' active' : '');
+    b.innerHTML = '<span class="service-icon' + (icon.includes('<img') ? ' image-logo' : '') + '">' + icon + '</span><span class="service-copy"><span class="service-name"></span><span class="service-meta"></span></span>';
+    b.querySelector('.service-name').textContent = name;
+    b.querySelector('.service-meta').textContent = meta || '';
+    b.onclick = () => { const id = pickerState && pickerState.leafId; closePicker(); if (id != null) setCellUrl(id, url); };
+    return b;
+  }
+  function renderPicker(query = '') {
+    if (!pickerState) return;
+    const list = ensurePicker().querySelector('.service-list');
+    list.innerHTML = '';
+    const q = String(query || '').trim().toLowerCase();
+    const current = selectedServiceValue(pickerState.url);
+    const services = SERVICES.filter((s) => !q || `${s.name} ${s.meta}`.toLowerCase().includes(q));
+    const agents = agentList.filter((a) => !q || `${a.id} ${a.title} ${a.type}`.toLowerCase().includes(q));
+    const addSection = (label) => { const d = document.createElement('div'); d.className = 'service-section'; d.textContent = label; list.appendChild(d); };
+    if (services.length) {
+      addSection('应用');
+      for (const s of services) list.appendChild(pickerItem(ICONS[s.id], s.name, s.meta, s.url, current === s.url));
+    }
+    if (agents.length) {
+      addSection('CiCy Code Agents');
+      for (const a of agents) {
+        const url = agentUrl(a.id);
+        list.appendChild(pickerItem(agentIcon(a.type), a.title || a.id, `${a.id} · ${a.type || 'agent'}`, url, current === url));
+      }
+    }
+    if (!services.length && !agents.length) list.innerHTML = '<div class="service-empty">没有匹配结果</div>';
+  }
+  function openPicker(leafId, trigger, url) {
+    if (pickerState) closePicker();
+    const pop = ensurePicker();
+    pickerState = { leafId, trigger, url: url || '' };
+    trigger.classList.add('open');
+    suspendNativeViews();
+    pop.classList.add('open');
+    const r = trigger.getBoundingClientRect();
+    const left = Math.max(8, Math.min(r.left, innerWidth - Math.min(340, innerWidth - 16) - 8));
+    const below = r.bottom + 6;
+    pop.style.left = left + 'px';
+    pop.style.top = Math.min(below, innerHeight - Math.min(430, innerHeight - 16) - 8) + 'px';
+    const search = pop.querySelector('.service-search'); search.value = '';
+    loadAgents().then(() => { if (pickerState && pickerState.leafId === leafId) renderPicker(search.value); });
+    renderPicker('');
+    setTimeout(() => search.focus(), 0);
+  }
+  function closePicker() {
+    if (!pickerState) return;
+    pickerState.trigger.classList.remove('open');
+    pickerState = null;
+    if (picker) picker.classList.remove('open');
+    resumeNativeViews();
+  }
+  function setTriggerIcon(el, icon) {
+    if (!el) return;
+    el.innerHTML = icon;
+    el.classList.toggle('image-logo', icon.includes('<img'));
+  }
+  let profileListPromise = null;
+  let profilePop = null;
+  function loadProfiles() {
+    if (!profileListPromise) profileListPromise = (NATIVE && window.panelAPI.profiles
+      ? window.panelAPI.profiles().catch(() => [])
+      : Promise.resolve([{ accountIdx: 1, name: '' }]));
+    return profileListPromise;
+  }
+  function closeProfilePicker() {
+    if (!profilePop) return;
+    try { profilePop.trigger.classList.remove('open'); profilePop.el.remove(); } catch (e) {}
+    profilePop = null;
+    resumeNativeViews();
+  }
+  async function openProfilePicker(leafId, trigger) {
+    closeProfilePicker();
+    const hit = findParent(root, leafId);
+    if (!hit || isLocalCicyCode(hit.node.url)) return;
+    const profiles = await loadProfiles();
+    if (!findParent(root, leafId)) return;
+    const pop = document.createElement('div'); pop.className = 'profile-pop';
+    const rows = profiles.length ? profiles : [{ accountIdx: 1, name: '' }];
+    for (const p of rows) {
+      const b = document.createElement('button'); b.type = 'button';
+      b.className = 'profile-item' + (Number(hit.node.profile) === Number(p.accountIdx) ? ' active' : '');
+      b.innerHTML = '<b></b><span></span>';
+      b.querySelector('b').textContent = 'P' + p.accountIdx;
+      b.querySelector('span').textContent = p.name || `Profile ${p.accountIdx}`;
+      b.onclick = () => {
+        const current = findParent(root, leafId);
+        if (!current) return closeProfilePicker();
+        current.node.profile = Number(p.accountIdx);
+        trigger.textContent = 'P' + p.accountIdx;
+        closeProfilePicker(); save();
+        if (NATIVE) pushCells();
+        else {
+          const cell = cells.get(leafId);
+          if (cell && cell.wv) { try { cell.wv.remove(); } catch (e) {} cell.wv = null; }
+          if (current.node.url) createWebview(leafId, current.node.url);
+        }
+      };
+      pop.appendChild(b);
+    }
+    document.body.appendChild(pop);
+    const r = trigger.getBoundingClientRect();
+    pop.style.left = Math.max(8, Math.min(r.left, innerWidth - 188)) + 'px';
+    pop.style.top = Math.min(r.bottom + 6, innerHeight - Math.min(300, pop.offsetHeight) - 8) + 'px';
+    trigger.classList.add('open');
+    profilePop = { el: pop, trigger };
+    suspendNativeViews();
+  }
+  document.addEventListener('pointerdown', (e) => {
+    if (profilePop && !profilePop.el.contains(e.target) && !profilePop.trigger.contains(e.target)) closeProfilePicker();
+  });
   function btn(icon, title, cls, onClick) {
     const b = document.createElement('div');
     b.className = 'cbtn' + (cls ? ' ' + cls : '');
@@ -292,6 +544,15 @@
     const head = document.createElement('div');
     head.className = 'cell__head';
     const spin = document.createElement('span'); spin.className = 'cell__spin';
+    const service = document.createElement('button');
+    service.type = 'button'; service.className = 'service-trigger'; service.title = '选择应用或 Agent';
+    setTriggerIcon(service, iconForUrl(leaf.url));
+    service.onclick = () => openPicker(leaf.id, service, leaf.url);
+    const profile = document.createElement('button');
+    profile.type = 'button'; profile.className = 'profile-trigger'; profile.title = '选择 Electron Profile';
+    profile.textContent = isLocalCicyCode(leaf.url) ? 'P0' : 'P' + (leaf.profile || 1);
+    profile.disabled = isLocalCicyCode(leaf.url);
+    profile.onclick = () => openProfilePicker(leaf.id, profile);
     const url = document.createElement('input');
     url.className = 'cell__url'; url.placeholder = '输入网址或搜索'; url.spellcheck = false;
     url.value = leaf.url || '';
@@ -302,6 +563,8 @@
     });
     url.addEventListener('focus', () => url.select());
     head.appendChild(spin);
+    head.appendChild(service);
+    head.appendChild(profile);
     head.appendChild(url);
     head.appendChild(btn(I.reload, '刷新', '', () => {
       if (NATIVE) { try { window.panelAPI.reload(leaf.id); } catch (e) {} return; }
@@ -321,7 +584,7 @@
     el.appendChild(head);
     el.appendChild(body);
     stage.appendChild(el);
-    const cell = { el, urlEl: url, hintEl: hint, body, wv: null };
+    const cell = { el, urlEl: url, serviceEl: service, profileEl: profile, hintEl: hint, body, wv: null };
     cells.set(leaf.id, cell);
     if (leaf.url) {
       if (NATIVE) hint.style.display = 'none'; // the BrowserView covers the body
@@ -331,13 +594,20 @@
   }
   // URL → profile 路由(与 panel-cells.js 一致): localhost → profile 0(直连),
   // 其余 → profile 1(走代理)。
-  const isLocalUrl = (u) => { try { const h = new URL(u).hostname; return h === '127.0.0.1' || h === 'localhost' || h === '[::1]'; } catch (e) { return false; } };
+  function isLocalCicyCode(u) {
+    try {
+      const x = new URL(u);
+      return (x.hostname === '127.0.0.1' || x.hostname === 'localhost' || x.hostname === '[::1]' || x.hostname === '::1')
+        && (x.port || '80') === '8008';
+    } catch (e) { return false; }
+  }
   function createWebview(leafId, url) {
     const c = cells.get(leafId);
     if (!c || c.wv) return;
     const wv = document.createElement('webview');
-    wv._local = isLocalUrl(url);
-    wv.setAttribute('partition', 'persist:sandbox-' + (wv._local ? 0 : 1));
+    const hit = findParent(root, leafId);
+    wv._profile = isLocalCicyCode(url) ? 0 : Number(hit?.node?.profile || 1);
+    wv.setAttribute('partition', 'persist:sandbox-' + wv._profile);
     // popups must work (OAuth 登录弹窗 = window.open);main 的 guest open-handler
     // 对 panel 格子放行为应用内子窗口(共享会话 + window.opener)。
     wv.setAttribute('allowpopups', 'true');
@@ -359,6 +629,11 @@
     hit.node.url = u;
     const c = cells.get(leafId);
     if (c && document.activeElement !== c.urlEl) c.urlEl.value = u;
+    if (c && c.serviceEl) setTriggerIcon(c.serviceEl, iconForUrl(u));
+    if (c && c.profileEl) {
+      c.profileEl.disabled = isLocalCicyCode(u);
+      c.profileEl.textContent = isLocalCicyCode(u) ? 'P0' : 'P' + (hit.node.profile || 1);
+    }
     save();
   }
   function setCellUrl(leafId, url) {
@@ -369,9 +644,14 @@
     // reflect immediately — did-navigate can be seconds away on a slow page and
     // the input would sit empty-looking until then.
     if (c && document.activeElement !== c.urlEl) c.urlEl.value = url;
+    if (c && c.serviceEl) setTriggerIcon(c.serviceEl, iconForUrl(url));
+    if (c && c.profileEl) {
+      c.profileEl.disabled = isLocalCicyCode(url);
+      c.profileEl.textContent = isLocalCicyCode(url) ? 'P0' : 'P' + (hit.node.profile || 1);
+    }
     if (NATIVE) { if (c) c.hintEl.style.display = 'none'; pushCells(); }
-    else if (c.wv && isLocalUrl(url) !== c.wv._local) {
-      // locality change → partition must change → rebuild the webview
+    else if (c.wv && (isLocalCicyCode(url) ? 0 : Number(hit.node.profile || 1)) !== c.wv._profile) {
+      // selected profile changed → partition must change → rebuild the webview
       try { c.wv.remove(); } catch (e) {}
       c.wv = null;
       createWebview(leafId, url);

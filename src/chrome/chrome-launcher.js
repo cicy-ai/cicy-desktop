@@ -255,7 +255,7 @@ function closeChromeProcess(pid) {
 
 // macOS / Windows focus-stealing prevention keeps the spawning Electron
 // app on top after we launch Chrome, so the user's keystrokes go into
-// Electron. Nudge the OS to bring Chrome forward.
+// Electron. Nudge the OS to bring Chrome forward without opening it again.
 function bringChromeAppToForeground(binaryPath) {
   try {
     if (process.platform === "darwin") {
@@ -265,7 +265,15 @@ function bringChromeAppToForeground(binaryPath) {
       }
       const match = resolved && resolved.match(/^(.+\.app)\//);
       if (!match) return;
-      spawn("open", ["-a", match[1]], { stdio: "ignore", detached: true }).unref();
+      // `open -a <bundle>` sends an OPEN event. With a managed Chrome already
+      // running under --user-data-dir, LaunchServices may handle that event by
+      // opening the default, argument-less Chrome too — one click then produces
+      // two Chrome windows. AppleScript `activate` only raises the running app.
+      const appName = path.basename(match[1], ".app").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+      spawn("/usr/bin/osascript", ["-e", `tell application "${appName}" to activate`], {
+        stdio: "ignore",
+        detached: true,
+      }).unref();
       return;
     }
     if (process.platform === "win32") {

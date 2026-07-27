@@ -61,6 +61,7 @@ const OPTIONS = {
     const wcId = wc && wc.id != null ? wc.id : "?";
     const url = (() => { try { return wc && wc.getURL ? wc.getURL() : ""; } catch (e) { return ""; } })();
     const title = (() => { try { return wc && wc.getTitle ? wc.getTitle() : ""; } catch (e) { return ""; } })();
+    const isTabShell = /\/tab-shell\.html(?:[?#]|$)/.test(url);
     // profile id = 它所在 session 的 accountIdx:partition `persist:sandbox-<N>` → N,否则 0(系统槽)。
     // profile id = the webContents' account. Tab-browser BrowserView guests do NOT
     // expose a readable partition (session.partition AND getWebPreferences().partition
@@ -86,10 +87,10 @@ const OPTIONS = {
     const goForward = () => { try { nav ? nav.goForward() : (wc && wc.goForward && wc.goForward()); } catch (e) {} };
     return [
       { label: t("ctxMenu.webviewId", { id: wcId }), enabled: false },
-      { label: t("ctxMenu.copySkillCmd"), click: () => {
+      ...(!isTabShell ? [{ label: t("ctxMenu.copySkillCmd"), click: () => {
         try { require("electron").clipboard.writeText(skillPrompt); } catch (e) {}
         injectToast(wc, t("ctxMenu.copied"));
-      } },
+      } }] : []),
       { type: "separator" },
       { label: t("ctxMenu.goBack"), enabled: !!canBack, click: goBack },
       { label: t("ctxMenu.goForward"), enabled: !!canFwd, click: goForward },

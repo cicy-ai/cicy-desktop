@@ -76,6 +76,7 @@
   .spin{width:14px;height:14px;border:2px solid rgba(255,255,255,.25);border-top-color:var(--accent);border-radius:50%;animation:sp .7s linear infinite}
   @keyframes sp{to{transform:rotate(360deg)}}
   .ttl{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ttl-edit{flex:1;min-width:0;height:22px;padding:0 5px;border:1px solid var(--accent);border-radius:5px;outline:none;background:#111113;color:#fff;font-size:12.5px;-webkit-user-select:text;user-select:text}
   .cls{flex:0 0 16px;width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;opacity:0;color:var(--muted);transition:opacity .1s,background .1s}
   .tab:hover .cls,.tab.active .cls{opacity:.85}
   .cls:hover{background:rgba(255,255,255,.16);color:#fff;opacity:1}
@@ -102,6 +103,9 @@
 
   /* ── toolbar ── */
   #bar{position:relative;height:40px;display:flex;align-items:center;gap:4px;padding:0 8px;background:var(--toolbar)}
+  /* profile 0 is the system/team workspace: hide its URL toolbar for every tab.
+     The main process also moves its BrowserView content up to STRIP_H. */
+  body.profile-0 #bar{display:none}
   .nav{width:32px;height:32px;flex:0 0 32px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--fg);cursor:default}
   .nav:hover{background:rgba(255,255,255,.10)}
   .nav.off{color:var(--muted);opacity:.35;pointer-events:none}
@@ -140,8 +144,11 @@
     <div id="prog"></div>
   </div>
 <script>
-  // 禁止 tab-shell 的右键菜单(标签栏/地址栏 chrome 不弹系统 contextmenu)。
-  window.addEventListener('contextmenu', (e) => e.preventDefault());
+  // 标签栏 chrome 不弹右键菜单；但所有可见的 URL 输入框保留 Electron
+  // context menu（剪切/复制/粘贴/全选）。
+  window.addEventListener('contextmenu', (e) => {
+    if (!(e.target instanceof HTMLInputElement && e.target.id === 'url')) e.preventDefault();
+  });
   const ICON_GLOBE ='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9aa0a6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>';
   // 「我的团队」标签的品牌标识 = 与首页 brand-mark 同款 BrandGlyph(白色六芒星)在蓝→紫渐变方块上。
   const CICY_LOGO = '<span class="cicy-logo"><svg width="12" height="12" viewBox="0 0 96 96" fill="none"><path d="M48 11L39.5 33.3L16 29.5L31 48L16 66.5L39.5 62.7L48 85L56.5 62.7L80 66.5L65 48L80 29.5L56.5 33.3Z" fill="white" stroke="white" stroke-width="8" stroke-linejoin="round" stroke-linecap="round"/></svg></span>';
@@ -157,6 +164,7 @@
   const NO_NEW = new URLSearchParams(location.search).get('noNew') === '1'; // profile 0
   const PLAT = new URLSearchParams(location.search).get('plat') || '';      // darwin|win32|linux
   const PROFILE = new URLSearchParams(location.search).get('p') || '';
+  if (PROFILE === '0') document.body.classList.add('profile-0');
   if (PLAT === 'darwin') document.body.classList.add('is-mac');
   else if (PLAT === 'win32') document.body.classList.add('is-win');
   // 「新建面板」＋ 只在 profile 0 出现:面板页依赖 <webview>,只有系统 profile 有 webviewTag。
@@ -259,7 +267,7 @@
     // 只在 tab 条「显示内容」(id/title/active/loading/favicon/home)变化时才重建。
     // 跳过 pushState 突发(SPA in-page 导航 / 重复标题推送)带来的冗余重建——那正是
     // tab 一直闪 + 点击丢失(mousedown 到 click 之间 DOM 被清空,要点很多次)的根因。
-    const sig = JSON.stringify(state.tabs.map((t) => [t.id, t.home ? 1 : 0, t.active ? 1 : 0, t.loading ? 1 : 0, t.team ? 1 : 0, t.favicon || '', t.avatar || '', t.home ? '' : (t.title || '')]));
+    const sig = JSON.stringify(state.tabs.map((t) => [t.id, t.home ? 1 : 0, t.active ? 1 : 0, t.loading ? 1 : 0, t.team ? 1 : 0, t.favicon || '', t.avatar || '', t.url || '', t.home ? '' : (t.title || '')]));
     if (sig !== lastTabsSig) {
     lastTabsSig = sig;
     tabsEl.innerHTML = '';
@@ -288,6 +296,27 @@
       const ttl = document.createElement('span');
       ttl.className = 'ttl'; ttl.textContent = t.title || '新标签页';
       d.appendChild(ttl);
+      if (t.panel) {
+        d.ondblclick = (e) => {
+          e.preventDefault(); e.stopPropagation();
+          d.draggable = false;
+          const input = document.createElement('input');
+          input.className = 'ttl-edit'; input.value = t.title || '面板';
+          let cancelled = false;
+          const finish = () => {
+            if (cancelled) { lastTabsSig = null; render(); return; }
+            window.tabAPI.rename(t.id, input.value);
+          };
+          input.onpointerdown = (ev) => ev.stopPropagation();
+          input.onblur = finish;
+          input.onkeydown = (ev) => {
+            if (ev.key === 'Enter') input.blur();
+            else if (ev.key === 'Escape') { cancelled = true; input.blur(); }
+          };
+          ttl.replaceWith(input);
+          input.focus(); input.select();
+        };
+      }
       // closable unless it's the only tab and there's no resident homepage to
       // keep the window alive (don't let the user empty a plain browser window).
       if (hasHome || nonHome > 1) {

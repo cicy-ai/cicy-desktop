@@ -1153,6 +1153,28 @@ function avatarForUrl(url) {
   return "";
 }
 
+// Resolve the canonical team identity for a URL so every surface (team card,
+// normal open, restored tab) uses the same title/avatar/color seed.
+function teamIdentityForUrl(url) {
+  const key = stripVolatile(url);
+  try {
+    const avatars = readAvatars();
+    for (const [id, node] of Object.entries(readNodes())) {
+      const base = node && node.base_url;
+      if (!base) continue;
+      const teamKey = stripVolatile(base);
+      if (teamKey === key || key.startsWith(teamKey)) {
+        return {
+          id,
+          title: localizedTeamName(node.name) || id,
+          avatar: avatars[id] || node.avatar || "",
+        };
+      }
+    }
+  } catch (e) {}
+  return null;
+}
+
 // Remove teams tied to a cloud ACCOUNT (remote base_url — pulled from the cloud
 // via pullCustomTeams, or user-added remote nodes) so switching/leaving an account
 // doesn't leak them onto the next user. LOCAL machine teams on THIS device
@@ -1166,4 +1188,4 @@ function invalidateForAccountChange() {
   log.info("[local-teams] account changed → team-list cache invalidated (no delete; filter by user_id)");
 }
 
-module.exports = { list, openTeam, reloadTeam, closeLocalWindows, addTeam, removeTeam, updateTeam, upgradeTeam, syncAllLocalTeams, invalidateForAccountChange, setAvatar, getAvatars, avatarForUrl };
+module.exports = { list, openTeam, reloadTeam, closeLocalWindows, addTeam, removeTeam, updateTeam, upgradeTeam, syncAllLocalTeams, invalidateForAccountChange, setAvatar, getAvatars, avatarForUrl, teamIdentityForUrl };

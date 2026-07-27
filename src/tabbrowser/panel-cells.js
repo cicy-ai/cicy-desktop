@@ -13,8 +13,13 @@
 // webContentsId, so the electron_tab_* tools (eval/screenshot/navigate) work
 // on panel cells exactly like tabs.
 const { BrowserView, ipcMain, webContents, session } = require("electron");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
 
-const CHROME_H = 80; // must match tab-browser-tools CHROME_H (panel is a normal tab)
+// Panel tabs only exist in profile 0, whose URL toolbar is hidden. Their page
+// starts immediately below the 40px tab strip, so native cell BrowserViews do too.
+const CHROME_H = 40;
 
 // Each cell picks its PROFILE (accountIdx → persist:sandbox-N), default 1.
 // Profile 0 is hard-forced DIRECT (no proxy — the gotty terminal ws must never
@@ -26,12 +31,18 @@ const DEFAULT_PROFILE = 1;
 const partitionFor = (idx) => `persist:sandbox-${idx}`;
 // URL → profile routing (用户定的规则): localhost/127.0.0.1 → profile 0(直连、
 // 与团队 tab 同会话);其余一律 profile 1(走代理)。按格子的目标 URL 定,变更时重建视图。
-function profileForUrl(url) {
+function isLocalCicyCode(url) {
   try {
-    const h = new URL(url).hostname;
-    if (h === "127.0.0.1" || h === "localhost" || h === "[::1]" || h === "::1") return 0;
+    const u = new URL(url);
+    const local = u.hostname === "127.0.0.1" || u.hostname === "localhost" || u.hostname === "[::1]" || u.hostname === "::1";
+    return local && (u.port || "80") === "8008";
   } catch (e) {}
-  return DEFAULT_PROFILE;
+  return false;
+}
+function profileForCell(url, requested) {
+  if (isLocalCicyCode(url)) return 0;
+  const idx = Number(requested);
+  return Number.isInteger(idx) && idx > 0 ? idx : DEFAULT_PROFILE;
 }
 const appliedProxy = new Set(); // partitions whose proxy is already configured
 function ensureCellSessionProxy(idx) {
@@ -158,7 +169,7 @@ class PanelCells {
       const key = String(c.id);
       seen.add(key);
       const url = (c.url && String(c.url)) || "";
-      const prof = profileForUrl(url);
+      const prof = profileForCell(url, c.profile);
       let rec = this.views.get(key);
       // locality change (localhost ↔ external) → partition must change → rebuild
       if (rec && rec.profile !== prof) { this.destroyCell(key); rec = null; }
@@ -176,6 +187,17 @@ class PanelCells {
   reload(cellId) {
     const rec = this.views.get(String(cellId));
     if (rec) { try { rec.view.webContents.reload(); } catch (e) {} }
+  }
+
+  async snapshots() {
+    const out = [];
+    for (const [id, rec] of this.views) {
+      try {
+        const image = await rec.view.webContents.capturePage();
+        if (!image.isEmpty()) out.push({ id, dataUrl: image.toDataURL() });
+      } catch (e) {}
+    }
+    return out;
   }
 
   updateAttach() {
@@ -226,6 +248,42 @@ function installIpc(findTab) {
   };
   ipcMain.on("panelcells:sync", (e, { cells }) => { const pc = ctx(e); if (pc) pc.sync(cells); });
   ipcMain.on("panelcells:reload", (e, { id }) => { const pc = ctx(e); if (pc) pc.reload(id); });
+  ipcMain.handle("panelcells:profiles", (e) => {
+    if (!ctx(e)) return [];
+    try {
+      return require("../profiles/profile-store").listProfiles("electron")
+        .filter((p) => Number.isInteger(Number(p.accountIdx)) && Number(p.accountIdx) > 0 && Number(p.accountIdx) !== 9)
+        .map((p) => ({ accountIdx: Number(p.accountIdx), name: String(p.name || "") }));
+    } catch (err) { return []; }
+  });
+  ipcMain.handle("panelcells:snapshots", async (e) => {
+    const pc = ctx(e);
+    return pc ? pc.snapshots() : [];
+  });
+  ipcMain.handle("panelcells:agents", async (e) => {
+    if (!ctx(e)) return { ok: false, agents: [], error: "invalid panel" };
+    try {
+      const cfg = JSON.parse(fs.readFileSync(path.join(os.homedir(), "cicy-ai", "global.json"), "utf8"));
+      const token = String(cfg.api_token || "");
+      const r = await fetch("http://127.0.0.1:8008/api/tmux/panes", {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = await r.json();
+      const panes = data?.panes || data?.data?.panes || [];
+      return {
+        ok: true,
+        agents: panes.map((p) => ({
+          id: String(p.pane_id || "").replace(/:.*$/, ""),
+          title: String(p.title || p.pane_id || ""),
+          type: String(p.agent_type || ""),
+        })).filter((p) => p.id),
+      };
+    } catch (err) {
+      return { ok: false, agents: [], error: err.message || String(err) };
+    }
+  });
   // divider drag in the panel page: views would swallow pointer events — detach
   // during the drag (page shows frame-only preview), reattach + re-place on up.
   ipcMain.on("panelcells:drag", (e, { on }) => { const pc = ctx(e); if (pc) { if (on) pc.hide(); else pc.show(); } });
