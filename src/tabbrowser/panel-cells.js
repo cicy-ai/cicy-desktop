@@ -98,7 +98,7 @@ class PanelCells {
       },
     });
     const wc = view.webContents;
-    try { view.setBackgroundColor("#0d0d0f"); } catch (e) {}
+    try { view.setBackgroundColor("#ffffff"); } catch (e) {}
     try { wc.cicyAccountIdx = profileIdx; } catch (e) {}
     scrubUA(wc);
     try { require("../utils/context-menu-options").attachContextMenu(wc); } catch (e) {}

@@ -63,8 +63,8 @@
   .cbtn{flex:0 0 24px;width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--muted);cursor:default}
   .cbtn:hover{background:rgba(255,255,255,.10);color:#fff}
   .cbtn.close:hover{background:rgba(249,112,102,.18);color:#f97066}
-  .cell__body{position:relative;flex:1;min-height:0;background:#0d0d0f}
-  .cell__body webview{position:absolute;inset:0;width:100%;height:100%}
+  .cell__body{position:relative;flex:1;min-height:0;background:#fff}
+  .cell__body webview{position:absolute;inset:0;width:100%;height:100%;background:#fff}
   /* while dragging a divider, a transparent shield stops webviews from
      swallowing pointermove (webview = separate guest, events die inside it) */
   .cell__body .shield{position:absolute;inset:0;display:none;z-index:5}
@@ -132,11 +132,23 @@
   const emptyEl = document.getElementById('empty');
   const fabEl = document.getElementById('fab');
   let suspendVersion = 0;
+  const nextFrame = () => new Promise((resolve) => requestAnimationFrame(resolve));
   async function suspendNativeViews() {
     if (!NATIVE) return;
     const version = ++suspendVersion;
     try {
       const shots = await window.panelAPI.snapshots();
+      if (version !== suspendVersion) return;
+      // Decode every data URL before detaching the BrowserViews. Setting a
+      // background-image and detaching in the same frame exposes the black cell
+      // background while Chromium is still decoding the snapshot.
+      await Promise.all((shots || []).map((shot) => new Promise((resolve) => {
+        if (!shot.dataUrl) return resolve();
+        const image = new Image();
+        image.onload = image.onerror = resolve;
+        image.src = shot.dataUrl;
+        if (image.complete) resolve();
+      })));
       if (version !== suspendVersion) return;
       for (const shot of shots || []) {
         const cell = cells.get(Number(shot.id)) || cells.get(shot.id);
@@ -145,20 +157,32 @@
         cell.body.style.backgroundSize = 'cover';
         cell.body.style.backgroundPosition = 'center top';
       }
+      // Let the decoded backgrounds paint before removing the native views.
+      await nextFrame();
+      await nextFrame();
+      if (version !== suspendVersion) return;
       window.panelAPI.dragging(true);
     } catch (e) {
-      try { window.panelAPI.dragging(true); } catch (_) {}
+      if (version === suspendVersion) {
+        try { window.panelAPI.dragging(true); } catch (_) {}
+      }
     }
   }
   function resumeNativeViews() {
     if (!NATIVE) return;
-    suspendVersion++;
+    const version = ++suspendVersion;
     try { window.panelAPI.dragging(false); } catch (e) {}
-    for (const cell of cells.values()) {
-      cell.body.style.backgroundImage = '';
-      cell.body.style.backgroundSize = '';
-      cell.body.style.backgroundPosition = '';
-    }
+    // Keep the snapshot behind the reattached BrowserView for a couple frames;
+    // clearing synchronously can reveal black before its compositor surface is
+    // visible again.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (version !== suspendVersion) return;
+      for (const cell of cells.values()) {
+        cell.body.style.backgroundImage = '';
+        cell.body.style.backgroundSize = '';
+        cell.body.style.backgroundPosition = '';
+      }
+    }));
   }
 
   const newLeaf = (url, profile = 1) => ({ type: 'leaf', id: seq++, url: url || '', profile: Number(profile) > 0 ? Number(profile) : 1 });
@@ -338,6 +362,9 @@
     aistudio: '<img src="https://www.gstatic.com/images/branding/productlogos/ai_studio/v1/web-64dp/logo_ai_studio_color_1x_web_64dp.png" alt="">',
     grok: '<img src="https://upload.wikimedia.org/wikipedia/commons/f/f4/Grok_logo_without_text.svg" alt="">',
     chatgpt: '<img src="http://127.0.0.1:8008/openai.svg" alt="">',
+    myip: '<svg viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.4 2.5 3.6 5.5 3.6 9S14.4 18.5 12 21M12 3C9.6 5.5 8.4 8.5 8.4 12S9.6 18.5 12 21"/></svg>',
+    colab: '<img src="https://ssl.gstatic.com/colaboratory-static/common/52d6fb476890a764bd46064a9a454157/img/favicon.ico" alt="">',
+    drive: '<img src="https://ssl.gstatic.com/images/branding/product/2x/drive_2020q4_48dp.png" alt="">',
     agent: '<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="16" rx="5" fill="#2563eb"/><path d="M9 2h6M12 2v3M8 12h.01M16 12h.01M8 16c2.5 1.7 5.5 1.7 8 0" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/></svg>',
   };
   const AGENT_LOGOS = {
@@ -357,7 +384,25 @@
     { id: 'aistudio', name: 'Google AI Studio', meta: 'Google AI', url: 'https://aistudio.google.com/' },
     { id: 'grok', name: 'Grok', meta: 'xAI', url: 'https://grok.com/' },
     { id: 'chatgpt', name: 'ChatGPT', meta: 'OpenAI', url: 'https://chatgpt.com/' },
+    { id: 'myip', name: 'My IP', meta: 'api.myip.com', url: 'https://api.myip.com/' },
+    { id: 'colab', name: 'Google Colab', meta: 'Google Research', url: 'https://colab.research.google.com/' },
+    { id: 'drive', name: 'Google Drive', meta: 'Google Workspace', url: 'https://drive.google.com/' },
   ];
+  const CUSTOM_SERVICES_KEY = 'cicy_panel_custom_services';
+  function readCustomServices() {
+    try {
+      const rows = JSON.parse(localStorage.getItem(CUSTOM_SERVICES_KEY) || '[]');
+      return Array.isArray(rows) ? rows.filter((x) => x && x.name && x.url).slice(0, 50) : [];
+    } catch (e) { return []; }
+  }
+  let customServices = readCustomServices();
+  function saveCustomService(url) {
+    let name = url;
+    try { name = new URL(url).hostname || url; } catch (e) {}
+    const old = customServices.find((x) => x.url === url);
+    if (!old) customServices.push({ name, url });
+    try { localStorage.setItem(CUSTOM_SERVICES_KEY, JSON.stringify(customServices)); } catch (e) {}
+  }
   let agentList = [];
   let agentsPromise = null;
   function loadAgents() {
@@ -405,7 +450,17 @@
     document.body.appendChild(picker);
     const search = picker.querySelector('.service-search');
     search.oninput = () => renderPicker(search.value);
-    search.onkeydown = (e) => { if (e.key === 'Escape') closePicker(); };
+    search.onkeydown = (e) => {
+      if (e.key === 'Escape') closePicker();
+      if (e.key === 'Enter') {
+        const custom = customUrlFromQuery(search.value);
+        if (!custom || !pickerState) return;
+        e.preventDefault();
+        const id = pickerState.leafId;
+        closePicker();
+        setCellUrl(id, custom);
+      }
+    };
     document.addEventListener('pointerdown', (e) => {
       if (pickerState && !picker.contains(e.target) && !pickerState.trigger.contains(e.target)) closePicker();
     });
@@ -426,12 +481,18 @@
     list.innerHTML = '';
     const q = String(query || '').trim().toLowerCase();
     const current = selectedServiceValue(pickerState.url);
+    const custom = customUrlFromQuery(query);
     const services = SERVICES.filter((s) => !q || `${s.name} ${s.meta}`.toLowerCase().includes(q));
+    const customs = customServices.filter((s) => !q || `${s.name} ${s.url}`.toLowerCase().includes(q));
     const agents = agentList.filter((a) => !q || `${a.id} ${a.title} ${a.type}`.toLowerCase().includes(q));
     const addSection = (label) => { const d = document.createElement('div'); d.className = 'service-section'; d.textContent = label; list.appendChild(d); };
     if (services.length) {
       addSection('应用');
       for (const s of services) list.appendChild(pickerItem(ICONS[s.id], s.name, s.meta, s.url, current === s.url));
+    }
+    if (customs.length) {
+      addSection('自定义');
+      for (const s of customs) list.appendChild(pickerItem(ICONS.apps, s.name, s.url, s.url, pickerState.url === s.url));
     }
     if (agents.length) {
       addSection('CiCy Code Agents');
@@ -440,14 +501,24 @@
         list.appendChild(pickerItem(agentIcon(a.type), a.title || a.id, `${a.id} · ${a.type || 'agent'}`, url, current === url));
       }
     }
-    if (!services.length && !agents.length) list.innerHTML = '<div class="service-empty">没有匹配结果</div>';
+    if (custom) {
+      addSection('自定义 URL');
+      list.appendChild(pickerItem(ICONS.apps, query.trim(), custom, custom, pickerState.url === custom));
+      if (!customServices.some((x) => x.url === custom)) {
+        const add = pickerItem(ICONS.apps, '保存为自定义条目', custom, custom, false);
+        add.onclick = () => { saveCustomService(custom); renderPicker(query); };
+        list.appendChild(add);
+      }
+    }
+    if (!services.length && !customs.length && !agents.length && !custom) list.innerHTML = '<div class="service-empty">没有匹配结果</div>';
   }
-  function openPicker(leafId, trigger, url) {
+  async function openPicker(leafId, trigger, url) {
     if (pickerState) closePicker();
     const pop = ensurePicker();
     pickerState = { leafId, trigger, url: url || '' };
+    await suspendNativeViews();
+    if (!pickerState || pickerState.leafId !== leafId) return;
     trigger.classList.add('open');
-    suspendNativeViews();
     pop.classList.add('open');
     const r = trigger.getBoundingClientRect();
     const left = Math.max(8, Math.min(r.left, innerWidth - Math.min(340, innerWidth - 16) - 8));
@@ -491,6 +562,8 @@
     if (!hit || isLocalCicyCode(hit.node.url)) return;
     const profiles = await loadProfiles();
     if (!findParent(root, leafId)) return;
+    await suspendNativeViews();
+    if (!findParent(root, leafId)) { resumeNativeViews(); return; }
     const pop = document.createElement('div'); pop.className = 'profile-pop';
     const rows = profiles.length ? profiles : [{ accountIdx: 1, name: '' }];
     for (const p of rows) {
@@ -520,7 +593,6 @@
     pop.style.top = Math.min(r.bottom + 6, innerHeight - Math.min(300, pop.offsetHeight) - 8) + 'px';
     trigger.classList.add('open');
     profilePop = { el: pop, trigger };
-    suspendNativeViews();
   }
   document.addEventListener('pointerdown', (e) => {
     if (profilePop && !profilePop.el.contains(e.target) && !profilePop.trigger.contains(e.target)) closeProfilePicker();
@@ -537,6 +609,15 @@
     if (!v) return '';
     if (/^[a-z][a-z0-9+.-]*:\/\//i.test(v) || /^about:/i.test(v)) return v;
     return (/\.\w/.test(v) && !/\s/.test(v)) ? 'https://' + v : 'https://www.google.com/search?q=' + encodeURIComponent(v);
+  }
+  function customUrlFromQuery(v) {
+    const raw = String(v || '').trim();
+    if (!raw || /\s/.test(raw)) return '';
+    const looksLikeUrl = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw)
+      || /^localhost(?::\d+)?(?:\/|$)/i.test(raw)
+      || /^(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?(?:\/|$)/.test(raw)
+      || /^[\w-]+(?:\.[\w-]+)+(?:\/|$)/.test(raw);
+    return looksLikeUrl ? normalizeUrl(raw) : '';
   }
   function mountCell(leaf) {
     const el = document.createElement('div');
