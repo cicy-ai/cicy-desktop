@@ -9,6 +9,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: cicy-desktop-release-windows
+  cancel-in-progress: true
+
 jobs:
   build-windows-exe:
     runs-on: windows-latest
@@ -92,13 +96,6 @@ jobs:
             Write-Host "::warning::no icon, using default"
             npm run build:win -- --publish always
           }
-
-      - name: Upload EXE artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: cicy-desktop-windows-exe
-          path: dist/*.exe
-          if-no-files-found: error
 
       # 推 exe 到 OSS。三件事(不再是"永远一个版本"):
       #   1) 带版本号的永久副本 releases/cicy-desktop-<version>.exe — 历史 / 指定版本 / 回滚

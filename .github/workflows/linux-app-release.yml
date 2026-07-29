@@ -9,6 +9,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: cicy-desktop-release-linux
+  cancel-in-progress: true
+
 jobs:
   build-linux-app:
     runs-on: ubuntu-latest
@@ -60,23 +64,14 @@ jobs:
       # hook (scripts/build-homepage.cjs) right before `npm run build:linux` below,
       # so the AppImage can never ship a stale homepage. No explicit step needed.
 
-      - name: Build Linux app (deb + AppImage)
+      - name: Build Linux AppImage
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CICY_OBFUSCATE: "1"   # 发版混淆 JS(prebuild 主进程 + Vite 渲染层),仅 release CI
         run: |
           set -euo pipefail
-          npm run build:linux -- --publish always
-
-      - name: Upload Linux artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: cicy-desktop-linux
-          path: |
-            dist/*.deb
-            dist/*.AppImage
-            dist/latest-linux.yml
+          npm run build:linux -- --x64 --config.linux.target=AppImage --publish always
 
       # AppImage + 版本指针传到 OSS —— app-updater 现已全走 OSS(不碰 GitHub),linux 也要在
       # OSS 上有 versioned AppImage(CiCy-Desktop-<ver>.AppImage)和自己的指针 linux-latest-version.txt。
