@@ -26,8 +26,12 @@
   .native-cells .cell,.native-cells .divider{transition:none}
   .cell.dragging-layout{transition:none}
   .cell__head{flex:0 0 34px;display:flex;align-items:center;gap:6px;padding:0 6px 0 10px;background:var(--head);border-bottom:1px solid var(--line);-webkit-user-select:none;user-select:none}
-  .cell__spin{flex:0 0 12px;width:12px;height:12px;border:2px solid rgba(255,255,255,.18);border-top-color:var(--accent);border-radius:50%;animation:sp .7s linear infinite;display:none}
-  .cell.loading .cell__spin{display:block}
+  /* Reload and loading share one fixed button slot: loading swaps the glyph in
+     place, so no toolbar element moves and no extra padding is needed. */
+  .reload-btn{position:relative}
+  .reload-btn .cell__spin{position:absolute;width:12px;height:12px;border:2px solid rgba(255,255,255,.18);border-top-color:var(--accent);border-radius:50%;animation:sp .7s linear infinite;visibility:hidden}
+  .cell.loading .reload-btn>svg{visibility:hidden}
+  .cell.loading .reload-btn .cell__spin{visibility:visible}
   @keyframes sp{to{transform:rotate(360deg)}}
   .cell__url{flex:1;min-width:0;height:24px;padding:0 10px;background:#101012;border:1px solid var(--line);border-radius:12px;color:var(--fg);font-size:12px;outline:none;-webkit-user-select:text;user-select:text}
   .cell__url:focus{border-color:var(--accent);background:#0d0d10}
@@ -639,18 +643,25 @@
     url.value = leaf.url || '';
     url.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter') return;
+      // Enter during an IME composition commits the composing text; navigating
+      // and blurring in that same event makes Chromium commit it a second time
+      // (e.g. "chatgpt" → "chatgptchatgpt"). Let the IME finish first; the
+      // following Enter performs navigation, matching a normal browser omnibox.
+      if (e.isComposing || e.keyCode === 229) return;
+      e.preventDefault();
       const u = normalizeUrl(url.value);
       if (u) { setCellUrl(leaf.id, u); url.blur(); }
     });
     url.addEventListener('focus', () => url.select());
-    head.appendChild(spin);
     head.appendChild(service);
     head.appendChild(profile);
     head.appendChild(url);
-    head.appendChild(btn(I.reload, '刷新', '', () => {
+    const reload = btn(I.reload, '刷新', 'reload-btn', () => {
       if (NATIVE) { try { window.panelAPI.reload(leaf.id); } catch (e) {} return; }
       const c = cells.get(leaf.id); try { c && c.wv && c.wv.reload(); } catch (e) {}
-    }));
+    });
+    reload.appendChild(spin);
+    head.appendChild(reload);
     head.appendChild(btn(I.splitR, '右分屏', '', () => splitLeaf(leaf.id, 'row')));
     head.appendChild(btn(I.splitD, '下分屏', '', () => splitLeaf(leaf.id, 'col')));
     head.appendChild(btn(I.close, '关闭', 'close', () => closeLeaf(leaf.id)));

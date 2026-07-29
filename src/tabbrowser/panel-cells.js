@@ -136,10 +136,16 @@ class PanelCells {
     const push = () => {
       let url = "", title = "";
       try { url = wc.getURL(); title = wc.getTitle(); } catch (e) {}
-      this.sendState({ id: cellId, url, title, loading: false, wcId: wc.id });
+      // did-navigate / page-title-updated commonly fire while the document is
+      // still loading. Hard-coding false here hid the spinner immediately after
+      // did-start-loading; report the BrowserView's actual state instead.
+      let loading = false;
+      try { loading = wc.isLoading(); } catch (e) {}
+      this.sendState({ id: cellId, url, title, loading, wcId: wc.id });
     };
     wc.on("did-start-loading", () => this.sendState({ id: cellId, loading: true, wcId: wc.id }));
     wc.on("did-stop-loading", push);
+    wc.on("did-fail-load", push);
     wc.on("did-navigate", push);
     wc.on("did-navigate-in-page", push);
     wc.on("page-title-updated", push);
