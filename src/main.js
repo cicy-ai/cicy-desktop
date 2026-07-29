@@ -939,30 +939,39 @@ electronApp.whenReady().then(async () => {
     const lt = require("./backends/local-teams");
 
     // 占位卡("先有一个 :8008 占位"): 开机**立刻无条件**注册本地团队,homepage 永远有
-    // 这张卡 —— :8008 没起来时显示「未运行」+ 启动/安装入口(不会再空首页);起来后下面的
-    // probe 循环 upsert 一次,状态翻 running + 触发 gateway key/teamId 注入。addTeam 幂等。
+    // 这张卡 —— :8008 启动期间显示「未运行」;起来后下面的自动启动流程 upsert 一次,
+    // 状态翻 running + 触发 gateway key/teamId 注入。addTeam 幂等。
     lt.addTeam({ base_url: `http://127.0.0.1:${sidecarPort}`, name: i18n.t("localTeams.defaultName") })
       .then((r) => { if (r && r.id) log.info(`[Sidecar] local team placeholder registered (${r.id})`); })
       .catch((e) => log.warn(`[Sidecar] placeholder register failed: ${e.message}`));
 
-    // **不在 boot 静默 start**(bug 修复): 首次启动要装 Node/brew/tmux 等依赖,必须让
-    // 用户在点「启动并打开」时**看着 drawer 装**(命令/进度/错误/重试)。boot 静默装会:① 用户
-    // 看不到卡在哪 ② 和用户点击重复 spawn 抢锁。所以这里只:① 注册占位卡 ② 若 cicy-code 已在
-    // 跑(上次保活留下的)就 adopt 刷新状态 + 拿 key/teamId。真正的启动/安装由 sidecar:start
-    // (点「启动并打开」)驱动,带 drawer。
+    // 打开 cicy-desktop 就保证本地 :8008 自动启动。start() 自带 child 去重:
+    // 自动启动仍在准备依赖时,用户点击「启动并打开」只会复用同一个 child,不会重复
+    // spawn 或抢安装锁。若上次退出后 daemon 仍在,则直接 adopt,不启动第二份。
     (async () => {
-      for (let i = 0; i < 40; i++) {
-        try {
-          if (await cicyCodeSidecar.probeExisting(sidecarPort)) {
-            const r = await lt.addTeam({ base_url: `http://127.0.0.1:${sidecarPort}`, name: i18n.t("localTeams.defaultName") });
-            if (r && r.id) log.info(`[Sidecar] adopted running cicy-code → local team ready (${r.id})`);
-            startSidecarWatchdog(); // 已在跑 → 起 watchdog 保活(崩了重起,此时依赖已装、起得快)
-            return;
+      try {
+        let running = await cicyCodeSidecar.probeExisting(sidecarPort);
+        if (!running) {
+          log.info(`[Sidecar] :${sidecarPort} 未运行 — 随 cicy-desktop 自动启动`);
+          await cicyCodeSidecar.start({
+            logPath: path.join(os.homedir(), "logs", "cicy-code-sidecar.log"),
+          });
+          // 首次启动可能要准备运行环境和恢复 agent 面板;等待端口真正监听。
+          for (let i = 0; i < 360 && !running; i++) {
+            await new Promise((res) => setTimeout(res, 500));
+            running = await cicyCodeSidecar.probeExisting(sidecarPort);
           }
-        } catch (e) { log.warn(`[Sidecar] adopt probe error: ${e.message}`); }
-        await new Promise((res) => setTimeout(res, 3000));
+        }
+        if (!running) {
+          log.warn(`[Sidecar] 自动启动后 :${sidecarPort} 在 180s 内仍未就绪`);
+          return;
+        }
+        const r = await lt.addTeam({ base_url: `http://127.0.0.1:${sidecarPort}`, name: i18n.t("localTeams.defaultName") });
+        if (r && r.id) log.info(`[Sidecar] running cicy-code adopted → local team ready (${r.id})`);
+        startSidecarWatchdog();
+      } catch (e) {
+        log.warn(`[Sidecar] 自动启动失败: ${e.message}`);
       }
-      log.info(`[Sidecar] :${sidecarPort} 未在跑 — 占位卡显示「未运行」,等用户点「启动并打开」(带安装 drawer)`);
     })();
   }
 

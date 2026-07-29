@@ -150,13 +150,24 @@ function register({ sidecarLogPath } = {}) {
     _dockerDaemonBusy = true;
     try {
       const s = await refreshDockerStatus();
-      // 没启动的给我启动: distro installed but :8008 not healthy (and WSL not unknown)
-      // → bring it up. bootstrap is idempotent: it skips done steps and just runs
-      // startEngine + the container. Skip when not installed (would silently pull
-      // the 444MB rootfs) or unknown (WSL not answering — let the next tick retry).
-      if (s.installed && !s.running && !s.unknown) {
-        log.info("[docker-daemon] installed but :8008 down → auto-starting (bootstrap idempotent)");
-        try { await appDocker.bootstrap(await appOpts()); } catch (e) { log.warn(`[docker-daemon] auto-start failed: ${e.message}`); }
+      // 打开 cicy-desktop 就保证 Windows/WSL 的 :8008 可用:
+      //   - 已安装但停止 → 启动 WSL、dockerd 和容器;
+      //   - 从未安装 → bootstrap 自动启用 WSL2、导入专用 distro、安装 Docker
+      //     Engine、拉取镜像并启动 cicy-code。
+      // bootstrap 幂等且可续跑;首次启用 WSL 若要求重启 Windows,下次登录 Desktop
+      // 会再次进入这里并从已完成的步骤继续。unknown 表示 WSL 正卡住/未响应,
+      // 此时不并发安装,留给下一轮检测或显式「修复 WSL」。
+      if (!s.running && !s.unknown) {
+        log.info(`[docker-daemon] :8008 down (${s.installed ? "installed" : "not installed"}) → auto-bootstrapping WSL cicy-code`);
+        try {
+          await ensureDockerTeam().catch(() => {});
+          const result = await appDocker.bootstrap(await appOpts());
+          if (result && result.ok) {
+            try { await registerAppTeam(); } catch {}
+          } else if (result && result.reason) {
+            log.warn(`[docker-daemon] auto-bootstrap paused: ${result.reason}`);
+          }
+        } catch (e) { log.warn(`[docker-daemon] auto-bootstrap failed: ${e.message}`); }
         await refreshDockerStatus();
       } else if (s.running) {
         // 自愈:容器在跑,但很可能是「首次启动时还没登录 / key 还没就位就建好了」的没 key 容器
