@@ -1317,17 +1317,17 @@ electronApp.whenReady().then(async () => {
   }
 
   const profileStore = require("./profiles/profile-store");
-  const electronProfiles = (() => {
+  const electronProfiles = () => {
     let rows = [];
     try { rows = profileStore.listProfiles("electron"); } catch {}
     // Profile 0 is the resident CiCy system window and must not be exposed in
     // the macOS title/top-bar launcher. Profile 9 is Chrome's source template.
     rows = rows.filter((p) => ![0, 9].includes(Number(p.accountIdx)));
     return rows;
-  })();
-  const chromeProfiles = (() => {
+  };
+  const chromeProfiles = () => {
     try { return profileStore.listProfiles("chrome"); } catch { return []; }
-  })();
+  };
   const showProfileError = (kind, e) => {
     dialog.showMessageBox({
       type: "error",
@@ -1336,16 +1336,17 @@ electronApp.whenReady().then(async () => {
       buttons: ["OK"],
     });
   };
-  const openElectronProfile = async (accountIdx) => {
+  const openElectronProfile = async (accountIdx, url) => {
     try {
       const tabs = require("./tools/tab-browser-tools");
-      await tabs.openTab(accountIdx, undefined, { activate: true });
+      await tabs.openTab(accountIdx, url, { activate: true });
       const m = tabs.ensureManager(accountIdx);
       if (m.win.isMinimized()) m.win.restore();
       m.win.show();
       m.win.focus();
     } catch (e) { showProfileError("Electron", e); }
   };
+  const openCicyAi = () => openElectronProfile(1, "https://cicy-ai.com");
   const openChromeProfile = async (accountIdx) => {
     try {
       await require("./tools/chrome-tools").launchOrActivateProfile({
@@ -1359,8 +1360,49 @@ electronApp.whenReady().then(async () => {
     catch (e) { showProfileError("Chrome", e); }
   };
 
-  const menuTemplate = [
-    ...(process.platform === "darwin" ? [{ role: "appMenu" }] : []),
+  let installApplicationMenu = () => {};
+  const addProfileFromMenu = async (kind) => {
+    try {
+      const result = await executeTool(kind === "Electron" ? "electron_add_profile" : "chrome_add_profile", {});
+      const text = result && result.content && result.content[0] && result.content[0].text;
+      let data = {};
+      try { data = JSON.parse(text || "{}"); } catch {}
+      if (result && result.isError) throw new Error(data.error || text || "unknown error");
+      const accountIdx = Number(data.accountIdx ?? (data.created && data.created.accountIdx));
+      installApplicationMenu(); // the new profile appears immediately in the native menu
+      if (Number.isFinite(accountIdx)) {
+        if (kind === "Electron") await openElectronProfile(accountIdx);
+        else await openChromeProfile(accountIdx);
+      }
+    } catch (e) {
+      dialog.showMessageBox({
+        type: "error",
+        message: `新增 ${kind} Profile 失败`,
+        detail: String((e && e.message) || e),
+        buttons: ["OK"],
+      });
+    }
+  };
+
+  installApplicationMenu = () => {
+    const electronRows = electronProfiles();
+    const chromeRows = chromeProfiles();
+    const menuTemplate = [
+    ...(process.platform === "darwin" ? [{
+      label: electronApp.name,
+      submenu: [
+        { role: "about" },
+        { label: "打开 cicy-ai.com", click: openCicyAi },
+        { type: "separator" },
+        { role: "services" },
+        { type: "separator" },
+        { role: "hide" },
+        { role: "hideOthers" },
+        { role: "unhide" },
+        { type: "separator" },
+        { role: "quit" },
+      ],
+    }] : []),
     {
       label: i18n.t("menu.file"),
       submenu: [
@@ -1398,17 +1440,22 @@ electronApp.whenReady().then(async () => {
     },
     {
       label: "Electron",
-      submenu: electronProfiles.map((p) => ({
-        label: `Profile ${p.accountIdx}${p.name ? ` · ${p.name}` : ""}`,
-        click: () => openElectronProfile(Number(p.accountIdx)),
-      })),
+      submenu: [
+        { label: "新增 Profile", click: () => addProfileFromMenu("Electron") },
+        ...(electronRows.length ? [{ type: "separator" }] : []),
+        ...electronRows.map((p) => ({
+          label: `Profile ${p.accountIdx}${p.name ? ` · ${p.name}` : ""}`,
+          click: () => openElectronProfile(Number(p.accountIdx)),
+        })),
+      ],
     },
     {
       label: "Chrome",
       submenu: [
+        { label: "新增 Profile", click: () => addProfileFromMenu("Chrome") },
         { label: "原生 Chrome", click: openNativeChrome },
-        { type: "separator" },
-        ...chromeProfiles.map((p) => ({
+        ...(chromeRows.length ? [{ type: "separator" }] : []),
+        ...chromeRows.map((p) => ({
           label: `Profile ${p.accountIdx}${p.gmail ? ` · ${p.gmail}` : p.note ? ` · ${p.note}` : ""}`,
           click: () => openChromeProfile(Number(p.accountIdx)),
         })),
@@ -1423,8 +1470,16 @@ electronApp.whenReady().then(async () => {
           : [{ label: i18n.t("menu.close"), role: "close" }]),
       ],
     },
-  ];
-  Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate));
+    ...(process.platform !== "darwin" ? [{
+      label: i18n.t("menu.help"),
+      submenu: [
+        { label: "打开 cicy-ai.com", click: openCicyAi },
+      ],
+    }] : []),
+    ];
+    Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate));
+  };
+  installApplicationMenu();
 
   // Always open the homepage unless launched at login with --hidden.
   const hidden = process.argv.includes("--hidden");
