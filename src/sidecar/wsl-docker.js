@@ -37,6 +37,32 @@ const ROOTFS_URL = process.env.CICY_WSL_ROOTFS_URL ||
   "https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/rootfs/cicy-wsl-latest.tar.gz";
 
 function rootfsPath() { return path.join(docker.downloadsDir(), "cicy-wsl-rootfs.tar.gz"); }
+function shellQuote(value) { return `'${String(value).replace(/'/g, "'\\''")}'`; }
+
+// `docker info`/Windows device detection is not enough: the NVIDIA Container
+// Runtime may be missing even when Windows itself has an NVIDIA card. Prove that
+// this Docker Engine can actually expose the GPU to the workload image. Cache
+// briefly so a bootstrap/recreate flow does not launch repeated probe containers.
+const gpuProbeCache = new Map();
+async function dockerGpuAvailable({ image = IMAGE, force = false } = {}) {
+  const cacheKey = String(image);
+  const cached = gpuProbeCache.get(cacheKey);
+  if (!force && cached && Date.now() - cached.ts < 30000) return cached.value;
+
+  let value = false;
+  try {
+    await wslRun(
+      `docker run --rm --gpus all --entrypoint sh ${shellQuote(image)} -lc ` +
+      shellQuote("if command -v nvidia-smi >/dev/null 2>&1; then nvidia-smi -L >/dev/null; else test -c /dev/nvidiactl; fi"),
+      { timeout: 30000 }
+    );
+    value = true;
+  } catch (e) {
+    log.info(`[wsl-docker] NVIDIA GPU unavailable for ${cacheKey}: ${String(e.stderr || e.message || "").trim().slice(-300)}`);
+  }
+  gpuProbeCache.set(cacheKey, { ts: Date.now(), value });
+  return value;
+}
 // WSL2 kernel update package (the small ~17MB MSI behind aka.ms/wsl2kernel).
 const KERNEL_MSI_URL = process.env.CICY_WSL_KERNEL_URL || "https://wslstorestorage.blob.core.windows.net/wslblob/wsl_update_x64.msi";
 
@@ -251,7 +277,45 @@ function wslTerminate() {
   });
 }
 
-async function installDistro({ emit } = {}) {
+function largestFixedDrive() {
+  return new Promise((resolve) => {
+    const script = [
+      "Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3'",
+      "| Where-Object { $_.FreeSpace -gt 0 }",
+      "| Sort-Object FreeSpace -Descending",
+      "| Select-Object -First 1 -ExpandProperty DeviceID",
+    ].join(" ");
+    execFile(
+      "powershell",
+      ["-NoProfile", "-NonInteractive", "-Command", script],
+      { timeout: 15000, windowsHide: true },
+      (err, stdout) => {
+        const drive = String(stdout || "").trim().toUpperCase();
+        resolve(!err && /^[A-Z]:$/.test(drive) ? drive : "");
+      },
+    );
+  });
+}
+
+async function resolveWslInstallDir(requested) {
+  const fallback = path.join(
+    process.env["LOCALAPPDATA"] || path.join(os.homedir(), "AppData", "Local"),
+    "cicy-code-wsl",
+  );
+  const raw = String(requested || process.env.CICY_WSL_INSTALL_DIR || "").trim();
+  if (!raw) {
+    const drive = await largestFixedDrive();
+    return drive ? path.win32.join(`${drive}\\`, "CiCy", "cicy-code-wsl") : fallback;
+  }
+  // This runs on Windows, but win32.isAbsolute also makes the validation
+  // deterministic in CI on other platforms.
+  if (!path.win32.isAbsolute(raw)) {
+    throw new Error("WSL 安装目录必须是绝对路径，例如 D:\\CiCy\\wsl");
+  }
+  return path.win32.normalize(raw);
+}
+
+async function installDistro({ emit, installDir: requestedInstallDir } = {}) {
   // 1) Download the PRE-BAKED rootfs (Ubuntu+Docker+image baked in, ~122MB) with
   //    a real progress bar. curl is ~10× faster than node's downloader on OSS.
   const dest = rootfsPath();
@@ -279,7 +343,7 @@ async function installDistro({ emit } = {}) {
   //    distro to v2 — we do NOT run `--set-default-version` (that would change the
   //    user's global default). The WSL2 kernel is shared; we install it ONLY when
   //    import actually fails for lack of it (never downgrade an existing kernel).
-  const installDir = path.join(process.env["LOCALAPPDATA"] || path.join(os.homedir(), "AppData", "Local"), "cicy-code-wsl");
+  const installDir = await resolveWslInstallDir(requestedInstallDir);
   try { fs.mkdirSync(installDir, { recursive: true }); } catch {}
   emit && emit({ phase: "container", status: "running", message: `$ wsl --import ${DISTRO} "${installDir}" "${dest}" --version 2（1-4 分钟,无实时进度,请耐心）` });
   try {
@@ -601,7 +665,7 @@ function publishArgs(port, extraPorts = []) {
   return args;
 }
 
-async function runContainer({ port = 8008, container = "cicy-code-docker", volume = "cicy-team-8008", env = {}, extraPorts = [], dockerSock = false, emit } = {}) {
+async function runContainer({ port = 8008, container = "cicy-code-docker", volume = "cicy-team-8008", env = {}, extraPorts = [], dockerSock = false, gpu = false, gpuProbeImage = IMAGE, emit } = {}) {
   // 每次容器"启动"(含已在跑被 adopt)都确保桌面快捷方式存在 —— 不存在就建,坏了就修。
   if (await probeHealth(port)) { ensureDesktopShortcut(volume, port).catch(() => {}); return { adopted: true }; }
   // Replace any stale same-named container.
@@ -626,7 +690,14 @@ async function runContainer({ port = 8008, container = "cicy-code-docker", volum
   let doodOn = dockerSock;
   if (!doodOn) { try { doodOn = require("./cicy-code").isDood(); } catch {} }
   const sockArg = doodOn ? await dockerSockMountArg() : "";
-  const cmd = `docker run -d --name ${container} --restart unless-stopped --dns 223.5.5.5 --dns 8.8.8.8 ${publishArgs(port, extraPorts)} -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${projectsMountArg()} ${drivesArg} ${sockArg} ${envArgs} ${IMAGE}`;
+  const gpuEnabled = (gpu === true || gpu === "auto")
+    ? await dockerGpuAvailable({ image: gpuProbeImage })
+    : false;
+  const gpuArg = gpuEnabled ? "--gpus all" : "";
+  if (gpu && !gpuEnabled && emit) {
+    emit({ phase: "container", status: "running", message: "未检测到可用的 NVIDIA Container Runtime，按 CPU 模式启动" });
+  }
+  const cmd = `docker run -d --name ${container} --restart unless-stopped ${gpuArg} --dns 223.5.5.5 --dns 8.8.8.8 ${publishArgs(port, extraPorts)} -e CICY_PUBLIC=1 -v ${volume}:/home/cicy ${projectsMountArg()} ${drivesArg} ${sockArg} ${envArgs} ${IMAGE}`;
   emit && emit({ phase: "container", status: "running", message: `$ ${cmd.length > 220 ? cmd.slice(0, 220) + " …" : cmd}` });
   await wslRun(cmd, { timeout: 60000 }); // 失败时 err.stderr 带 docker 真错误 → _bootstrap 的 errTail 显示
   ensureDesktopShortcut(volume, port).catch(() => {});
@@ -791,7 +862,7 @@ async function bootstrap(opts = {}) {
 // 注意: 默认容器/卷名保持 cicy-team / cicy-code-docker(回退实测"现在不行了"的改动)。
 // live 路径(docker:app-bootstrap)始终传显式 APP_*(cicy-team-8008)名,不靠这里的默认;
 // 改默认会让既有 cicy-team 卷的装机对不上 → 退回原值。
-async function _bootstrap({ onProgress, port = 8008, container = "cicy-code-docker", volume = "cicy-team", env = {}, extraPorts = [], dockerSock = false } = {}) {
+async function _bootstrap({ onProgress, port = 8008, container = "cicy-code-docker", volume = "cicy-team", env = {}, extraPorts = [], dockerSock = false, gpu = false, gpuProbeImage = IMAGE, wslInstallDir } = {}) {
   const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
 
   // Structured, PERSISTED trace of the whole run (electron-log → main.log) so a
@@ -859,7 +930,7 @@ async function _bootstrap({ onProgress, port = 8008, container = "cicy-code-dock
   // 2) Ubuntu distro
   begin("ensure-distro");
   if (!(await distroInstalled())) {
-    try { await installDistro({ emit }); } catch (e) { fail("distro_install_failed", e.message); emit({ phase: "install-docker", status: "error", message: `Ubuntu 安装失败：${e.message}（点重试）${errTail(e)}` }); finish(false, "distro_install_failed"); return { ok: false, reason: "distro_install_failed" }; }
+    try { await installDistro({ emit, installDir: wslInstallDir }); } catch (e) { fail("distro_install_failed", e.message); emit({ phase: "install-docker", status: "error", message: `Ubuntu 安装失败：${e.message}（点重试）${errTail(e)}` }); finish(false, "distro_install_failed"); return { ok: false, reason: "distro_install_failed" }; }
     const t0 = Date.now();
     const ok = await docker.waitUntil(() => distroInstalled(), { totalMs: 600000, everyMs: 5000, onTick: () => emit({ phase: "install-docker", status: "running", message: `正在下载/注册 Ubuntu…（已 ${Math.round((Date.now() - t0) / 1000)}s,首次较慢请耐心）` }) });
     if (!ok) { fail("distro_not_ready"); emit({ phase: "install-docker", status: "error", message: "Ubuntu 还没装好——稍等或点「重试」" }); finish(false, "distro_not_ready"); return { ok: false, reason: "distro_not_ready" }; }
@@ -902,7 +973,7 @@ async function _bootstrap({ onProgress, port = 8008, container = "cicy-code-dock
   begin("run-container");
   if (!(await probeHealth(port))) {
     emit({ phase: "container", status: "running", message: "启动 cicy-code 服务…" });
-    try { await runContainer({ port, container, volume, env, extraPorts, dockerSock, emit }); }
+    try { await runContainer({ port, container, volume, env, extraPorts, dockerSock, gpu, gpuProbeImage, emit }); }
     catch (e) { fail("container_start_failed", e.message); emit({ phase: "container", status: "error", message: `服务启动失败：${e.message}（点重试）${errTail(e)}` }); finish(false, "container_start_failed"); return { ok: false, reason: "container_start_failed" }; }
     done();
   } else done(true);
@@ -1055,14 +1126,14 @@ async function dockerRestart({ container = "cicy-code-docker-8008" } = {}) {
 // 重建容器:docker rm -f 旧容器 + docker run 新容器(用新 env,如新的 docker team 网关
 // key)。**保留 volume**(数据/api_token/deviceId 不丢),只是换掉容器本身 + env。
 // 破坏性(短暂中断 + 换 key)→ 调用方要 confirm。
-async function recreate({ onProgress, port = 8008, container = "cicy-code-docker-8008", volume = "cicy-team-8008", env = {}, extraPorts = [], dockerSock = false } = {}) {
+async function recreate({ onProgress, port = 8008, container = "cicy-code-docker-8008", volume = "cicy-team-8008", env = {}, extraPorts = [], dockerSock = false, gpu = false, gpuProbeImage = IMAGE } = {}) {
   const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
   // 重建 = 用最新镜像重建。OSS 有更新版先刷新(非破坏性,不删发行版/volume),再 rm + run。
   try { await ensureFreshImage({ emit }); } catch (e) { emit({ phase: "image", status: "running", message: `镜像刷新跳过(${e.message}),用现有镜像重建` }); }
   // 强删占用该端口的**任何**容器(含老名字 cicy-code-docker)+ 目标容器 —— 否则
   // runContainer 开头的 probeHealth 看到旧容器还健康会 adopt 它、不重建,key 就换不了。
   try { await wslRun(`docker ps -aq --filter publish=${port} | xargs -r docker rm -f 2>/dev/null; docker rm -f ${container} 2>/dev/null; true`, { timeout: 30000 }); } catch {}
-  const r = await runContainer({ port, container, volume, env, extraPorts, dockerSock, emit });
+  const r = await runContainer({ port, container, volume, env, extraPorts, dockerSock, gpu, gpuProbeImage, emit });
   try { await ensureDesktopShortcut(volume, port); } catch {}
   // 等 :8008 真正起来再返回——否则 docker run 一返回卡片就探测「没运行」,显示「启动」让
   // 用户再点一下(实测:端口保存后重建,drawer 关了还要手动点启动)。
@@ -1085,13 +1156,13 @@ function unregisterDistro() {
 // downloader, which copes with the flaky CN DNS that bare curl can't) is the
 // only reliable CN update path. This RESETS the distro: the cicy-team volume is
 // re-created and the instance re-seeds (new token) on next boot.
-async function upgrade({ onProgress, port = 8008, container = "cicy-code-docker", volume = "cicy-team", env = {} } = {}) {
+async function upgrade({ onProgress, port = 8008, container = "cicy-code-docker", volume = "cicy-team", env = {}, extraPorts = [], dockerSock = false, gpu = false, gpuProbeImage = IMAGE, wslInstallDir } = {}) {
   const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
   emit({ phase: "install-docker", status: "running", message: "升级 = 拉取最新运行环境并重装（会重置容器数据）…" });
   try { await stop({ container }); } catch {}
   try { await unregisterDistro(); } catch {}
   // Reuse the robust one-shot install flow (download → import → dockerd → run).
-  return await _bootstrap({ onProgress, port, container, volume, env, dockerSock });
+  return await _bootstrap({ onProgress, port, container, volume, env, extraPorts, dockerSock, gpu, gpuProbeImage, wslInstallDir });
 }
 
 // 容器里有没有注入网关 key(reconcile 自愈用):printenv 看 CICY_AI_GATEWAY_LLM_API_KEY。
@@ -1109,5 +1180,5 @@ async function readMihomoConfig(container = "cicy-code-docker-8008") {
 module.exports = {
   bootstrap, status, restart, stop, dockerRestart, recreate, update, upgrade, runContainer, readContainerToken,
   distroInstalled, dockerInstalled, dockerEngineUp, imagePresent, probeHealth, wslRun, hasGatewayKey,
-  readMihomoConfig, repairWsl, lxssWedged,
+  readMihomoConfig, repairWsl, lxssWedged, dockerGpuAvailable, resolveWslInstallDir,
 };

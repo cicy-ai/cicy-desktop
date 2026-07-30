@@ -52,10 +52,12 @@ const APP_PORT = Number(process.env.CICY_DOCKER_APP_PORT || 8008);
 // (含 port)区分。
 const APP_CONTAINER = process.env.CICY_DOCKER_APP_CONTAINER || `cicy-code-docker-${APP_PORT}`;
 const APP_VOLUME = process.env.CICY_DOCKER_APP_VOLUME || `cicy-team-${APP_PORT}`;
+const KOUBO_PORT = 8770;
 
 // 用户自定义的额外发布端口(除 :8008 外,给容器内 agent 服务从 Windows 直达用)。
 // 持久化在 userData/docker-ports.json,bootstrap/recreate 都会带上 -p。lazy 取
-// 路径(app 未 ready 时不取)。
+// 路径(app 未 ready 时不取)。口播在这个容器内按需启动，因此容器创建时必须
+// 预先发布 :8770；服务未启动时映射保持空闲，不会额外启动 koubo。
 function portsFile() { return path.join(require("electron").app.getPath("userData"), "docker-ports.json"); }
 function sanitizePorts(arr) {
   const out = [], seen = new Set([APP_PORT, 8008]);
@@ -67,7 +69,12 @@ function sanitizePorts(arr) {
   return out;
 }
 function readExtraPorts() {
-  try { const j = JSON.parse(fs.readFileSync(portsFile(), "utf8")); return sanitizePorts(j && j.ports); } catch { return []; }
+  try {
+    const j = JSON.parse(fs.readFileSync(portsFile(), "utf8"));
+    return sanitizePorts([KOUBO_PORT, ...((j && Array.isArray(j.ports)) ? j.ports : [])]);
+  } catch {
+    return sanitizePorts([KOUBO_PORT]);
+  }
 }
 function writeExtraPorts(ports) {
   try { fs.writeFileSync(portsFile(), JSON.stringify({ ports: sanitizePorts(ports) }, null, 2), "utf8"); } catch (e) { log.warn("[docker-ports] write failed:", e.message); }

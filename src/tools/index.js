@@ -14,6 +14,7 @@ module.exports = [
   require("./exec-tools"),
   require("./file-tools"),
   require("./system-tools"),
+  require("./notify-tools"),
   require("./automation-tools"),
   require("./account-tools"),
   require("./device-tools"),
