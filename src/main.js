@@ -1470,12 +1470,6 @@ electronApp.whenReady().then(async () => {
           : [{ label: i18n.t("menu.close"), role: "close" }]),
       ],
     },
-    ...(process.platform !== "darwin" ? [{
-      label: i18n.t("menu.help"),
-      submenu: [
-        { label: "打开 cicy-ai.com", click: openCicyAi },
-      ],
-    }] : []),
     ];
     Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate));
   };
