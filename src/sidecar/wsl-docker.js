@@ -675,7 +675,7 @@ async function runContainer({ port = 8008, container = "cicy-code-docker", volum
   // Without this, Desktop starts a healthy cicy-code that never registers the
   // requested Cloud account/team even though the variables exist on Windows.
   const inheritedCloudEnv = {};
-  for (const key of ["CICY_CLOUD_EMAIL", "CICY_CLOUD_TEAM_ID"]) {
+  for (const key of ["CICY_CLOUD_EMAIL", "CICY_CLOUD_TEAM_ID", "CICY_CFT"]) {
     if (process.env[key]) inheritedCloudEnv[key] = process.env[key];
   }
   const envArgs = Object.entries({ ...inheritedCloudEnv, ...(env || {}) })
