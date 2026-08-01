@@ -32,7 +32,11 @@ const DOCKER_DESKTOP_URL = process.env.CICY_DOCKER_DESKTOP_URL
 const DOCKER_DESKTOP_MIRROR = process.env.CICY_DOCKER_DESKTOP_MIRROR
   || "https://cicy-1372193042.cos.ap-shanghai.myqcloud.com/binaries/DockerDesktopInstaller.exe";
 // CICY_* env vars forwarded into the container (team onboarding, version pin…).
-const PASS_ENV = ["CICY_TEAM_TOKEN", "CICY_CODE_VERSION", "NPM_REGISTRY", "CICY_NPM_REGISTRY", "CICY_AGENTS", "ENABLE_CDN", "CICY_CLOUDFLARED_TOKEN"];
+const PASS_ENV = [
+  "CICY_TEAM_TOKEN", "CICY_CODE_VERSION", "NPM_REGISTRY", "CICY_NPM_REGISTRY",
+  "CICY_AGENTS", "ENABLE_CDN", "CICY_CLOUDFLARED_TOKEN",
+  "CICY_CLOUD_EMAIL", "CICY_CLOUD_TEAM_ID",
+];
 
 // Resolve the docker CLI. CRITICAL on Windows: right after Docker Desktop
 // installs, it adds `...\Docker\resources\bin` to the SYSTEM PATH — but the

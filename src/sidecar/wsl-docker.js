@@ -670,7 +670,15 @@ async function runContainer({ port = 8008, container = "cicy-code-docker", volum
   if (await probeHealth(port)) { ensureDesktopShortcut(volume, port).catch(() => {}); return { adopted: true }; }
   // Replace any stale same-named container.
   try { await wslRun(`docker rm -f ${container}`, { timeout: 20000 }); } catch {}
-  const envArgs = Object.entries(env || {})
+  // Windows workflow/user-level environment is inherited by cicy-desktop, then
+  // explicitly forwarded across both boundaries: Windows → WSL → container.
+  // Without this, Desktop starts a healthy cicy-code that never registers the
+  // requested Cloud account/team even though the variables exist on Windows.
+  const inheritedCloudEnv = {};
+  for (const key of ["CICY_CLOUD_EMAIL", "CICY_CLOUD_TEAM_ID"]) {
+    if (process.env[key]) inheritedCloudEnv[key] = process.env[key];
+  }
+  const envArgs = Object.entries({ ...inheritedCloudEnv, ...(env || {}) })
     .filter(([, v]) => v != null && v !== "")
     .map(([k, v]) => `-e ${k}='${String(v).replace(/'/g, "'\\''")}'`)
     .join(" ");
