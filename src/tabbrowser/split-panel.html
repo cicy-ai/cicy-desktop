@@ -707,6 +707,19 @@
     // ("this browser may not be secure")。
     wv.setAttribute('useragent', navigator.userAgent.replace(/\s(CiCyDesktop|Electron)\/\S+/g, ''));
     wv.setAttribute('src', url);
+    // file:// dev fallback uses a real <webview> instead of PanelCells. Match
+    // the native BrowserView behavior for transparent/un-styled pages.
+    wv.addEventListener('dom-ready', () => {
+      wv.executeJavaScript(`(() => {
+        const transparent = (el) => {
+          const c = getComputedStyle(el).backgroundColor;
+          return c === 'transparent' || /rgba\\([^)]*,\\s*0(?:\\.0+)?\\)$/.test(c);
+        };
+        if (transparent(document.documentElement) && transparent(document.body)) {
+          document.documentElement.style.backgroundColor = '#fff';
+        }
+      })()`).catch(() => {});
+    });
     wv.addEventListener('did-start-loading', () => c.el.classList.add('loading'));
     wv.addEventListener('did-stop-loading', () => c.el.classList.remove('loading'));
     wv.addEventListener('did-navigate', (e) => syncUrl(leafId, e.url));

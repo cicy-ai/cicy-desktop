@@ -99,6 +99,20 @@ class PanelCells {
     });
     const wc = view.webContents;
     try { view.setBackgroundColor("#ffffff"); } catch (e) {}
+    // Chromium uses a dark canvas for transparent/un-styled documents when the
+    // app theme is dark (for example a plain `Not Found` response). Keep real
+    // site backgrounds intact, but give transparent pages a white fallback.
+    wc.on("dom-ready", () => {
+      wc.executeJavaScript(`(() => {
+        const transparent = (el) => {
+          const c = getComputedStyle(el).backgroundColor;
+          return c === 'transparent' || /rgba\\([^)]*,\\s*0(?:\\.0+)?\\)$/.test(c);
+        };
+        if (transparent(document.documentElement) && transparent(document.body)) {
+          document.documentElement.style.backgroundColor = '#fff';
+        }
+      })()`).catch(() => {});
+    });
     try { wc.cicyAccountIdx = profileIdx; } catch (e) {}
     scrubUA(wc);
     try { require("../utils/context-menu-options").attachContextMenu(wc); } catch (e) {}
