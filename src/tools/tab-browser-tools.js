@@ -36,6 +36,33 @@ const managerByHost = new Map(); // shell webContents.id -> TabManager
 
 function stripVol(u) { try { const x = new URL(u); return x.origin + x.pathname; } catch (e) { return u || ""; } }
 
+const INSTANCE_HOST_RE = /^(team-[a-z0-9][a-z0-9-]{0,30}-[0-9]+-[0-9a-f]{8})\.cicy-ai\.com$/;
+
+// Keep the fixed Instance authentication shuttle in the current team tab.
+// This is deliberately narrower than trusting *.cicy-ai.com: only the exact
+// Instance → Cloud connect route and Cloud → same Instance one-time grant route
+// are allowed to cross origins. Every other profile-0 cross-origin navigation
+// still gets moved to the hard-sandboxed browser profile below.
+function isInstanceAuthNavigation(currentUrl, targetUrl) {
+  let current; let target;
+  try { current = new URL(currentUrl); target = new URL(targetUrl); } catch (e) { return false; }
+  if (current.protocol !== "https:" || target.protocol !== "https:") return false;
+
+  const currentInstance = current.hostname.match(INSTANCE_HOST_RE);
+  if (currentInstance && target.hostname === "cicy-ai.com") {
+    return target.pathname === "/instance-connect"
+      && target.searchParams.get("slug") === currentInstance[1];
+  }
+
+  const targetInstance = target.hostname.match(INSTANCE_HOST_RE);
+  if (current.hostname === "cicy-ai.com" && targetInstance) {
+    const grant = target.searchParams.get("grant") || "";
+    return target.pathname === "/_proxy/login"
+      && /^[A-Za-z0-9_-]{40,64}$/.test(grant);
+  }
+  return false;
+}
+
 // 团队 tab 的 webContentsId 状态表:openTab 时记入、对应 webContents destroy 时删除
 // (打开/关闭都更新)。刷新窗口据此按 wcId 强制 reload(reloadIgnoringCache),避开
 // "tab 打开后 URL 漂移(登录跳转 / token / 重定向)→ 按 URL 匹配失败"的 bug。
@@ -383,7 +410,10 @@ class TabManager {
           let tgt; try { tgt = new URL(u); } catch { return; }
           if (tgt.protocol === "about:") return;
           let curOrigin = ""; try { curOrigin = new URL(wc.getURL()).origin; } catch {}
-          if (tgt.origin !== curOrigin) { e.preventDefault(); openTab(1, u); }
+          if (tgt.origin !== curOrigin && !(tab.team && isInstanceAuthNavigation(wc.getURL(), u))) {
+            e.preventDefault();
+            openTab(1, u);
+          }
         } catch (err) {}
       });
     }
