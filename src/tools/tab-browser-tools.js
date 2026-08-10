@@ -349,6 +349,21 @@ class TabManager {
     const wp = buildTabWebPreferences(this.accountIdx, this.partition, target, opts);
     const view = new BrowserView({ webPreferences: wp });
     const wc = view.webContents;
+    // Transparent/un-styled responses (for example a plain-text tunnel error)
+    // otherwise inherit Electron's dark canvas while keeping black default text.
+    // Only fill fully transparent documents; never override a site's own theme.
+    try { view.setBackgroundColor("#ffffff"); } catch (e) {}
+    wc.on("dom-ready", () => {
+      wc.executeJavaScript(`(() => {
+        const transparent = (el) => {
+          const c = getComputedStyle(el).backgroundColor;
+          return c === 'transparent' || /rgba\\([^)]*,\\s*0(?:\\.0+)?\\)$/.test(c);
+        };
+        if (transparent(document.documentElement) && transparent(document.body)) {
+          document.documentElement.style.backgroundColor = '#fff';
+        }
+      })()`).catch(() => {});
+    });
     const id = wc.id;
     // Tag the tab's webContents with its profile so anything holding just the wc
     // (context menu, window helpers) can resolve the REAL profile deterministically.
