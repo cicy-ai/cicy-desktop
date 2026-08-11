@@ -4,17 +4,8 @@
       <stop stop-color="#7772D8"/>
       <stop offset="1" stop-color="#3F82B8"/>
     </linearGradient>
-    <filter id="shadow" x="8" y="12" width="496" height="500" filterUnits="userSpaceOnUse">
-      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#111827" flood-opacity="0.18"/>
-    </filter>
   </defs>
-
-  <!-- White rounded application tile; transparent corners preserve the native
-       macOS/Windows icon silhouette. -->
-  <rect x="32" y="26" width="448" height="448" rx="104" fill="#FFFFFF"
-        stroke="#E5E7EB" stroke-width="4" filter="url(#shadow)"/>
-
-  <!-- CiCy mark from the supplied logo.svg, kept geometrically unchanged. -->
+  <!-- Colored transparent tray variant for Windows/Linux. -->
   <path d="M256 68
            311 161
            419 162

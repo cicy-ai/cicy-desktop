@@ -3835,13 +3835,13 @@ function GithubMark({ size = 14 }) {
   );
 }
 function BrandGlyph() {
-  // New CiCy mark (六芒星). Rendered white here because it sits on the brand
-  // chip's blue→violet gradient square; the full-color gradient version is the
-  // app/favicon icon. Path matches build/icon.svg (viewBox 0 0 96 96).
+  // CiCy outline mark. Rendered white because it sits on the brand chip's
+  // blue→violet gradient square.
   return (
     <svg width="22" height="22" viewBox="0 0 96 96" fill="none">
       <path d="M48 11L39.5 33.3L16 29.5L31 48L16 66.5L39.5 62.7L48 85L56.5 62.7L80 66.5L65 48L80 29.5L56.5 33.3Z"
-        fill="white" stroke="white" strokeWidth="8" strokeLinejoin="round" strokeLinecap="round" />
+        stroke="white" strokeWidth="10" strokeLinejoin="round" strokeLinecap="round" />
+      <circle cx="48" cy="48" r="6" fill="white" />
     </svg>
   );
 }

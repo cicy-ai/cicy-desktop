@@ -59,6 +59,10 @@
         "to": "build/trayTemplate@2x.png"
       },
       {
+        "from": "build/trayIcon.png",
+        "to": "build/trayIcon.png"
+      },
+      {
         "from": "build/icon.ico",
         "to": "build/icon.ico"
       },

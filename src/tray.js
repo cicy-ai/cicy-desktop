@@ -177,9 +177,11 @@ function setupTray() {
       // macOS: template image (auto-adapts to light/dark menu bar)
       iconPath = resolveAsset("trayTemplate.png");
     } else if (process.platform === "win32") {
-      iconPath = resolveAsset("icon.ico");
+      // Keep the white app/window tile out of the notification area: Windows
+      // tray uses the colored transparent logo instead.
+      iconPath = resolveAsset("trayIcon.png");
     } else {
-      iconPath = resolveAsset("icons/icon-32.png");
+      iconPath = resolveAsset("trayIcon.png");
     }
 
     const img = nativeImage.createFromPath(iconPath);
