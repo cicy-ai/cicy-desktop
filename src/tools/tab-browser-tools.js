@@ -332,8 +332,8 @@ class TabManager {
         if (opts.avatar) ex.avatar = opts.avatar;
         if (opts.colorKey) ex.colorKey = opts.colorKey;
         // navigate-on-reuse:同 origin+pathname 但完整 URL(含 query)不同时,把已有 tab
-        // 导航过去。cicy-ai 的 我的钱包/我的帐单/团队帐单 都在 /dash、只差 query —— 不导航
-        // 就会命中同一个 /dash tab 却不切视图(点了帐单还显示钱包)。仅 navigate 选项启用,
+        // 导航过去。cicy-ai 的 我的钱包/团队帐单 都在 /dash 下 —— 不导航就会命中
+        // 已有 tab 却不切视图。仅 navigate 选项启用,
         // 团队 tab(stripVol 防 token 漂移、不重载)行为不变。
         if (opts.navigate && ex.url !== target) {
           try { ex.view.webContents.loadURL(target); ex.url = target; } catch (e) {}

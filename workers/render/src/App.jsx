@@ -27,11 +27,11 @@ const ACCESS_TOKEN_KEY = "cicy_access_token";
 const USER_ID_KEY = "cicy_user_id";
 const CLOUD_BASE = "https://cicy-ai.com";
 
-// cicy-ai 云端页面(我的钱包/我的帐单/团队帐单/新加团队)统一开在 **profile 1** 的
+// cicy-ai 云端页面(我的钱包/团队帐单/新加团队)统一开在 **profile 1** 的
 // app 内标签里(profile 1 走 proxy),不再用系统外部浏览器。URL 保持 CLEAN —— 不带任何
-// token(钱包/账单/团队账单 URL 不要带 token,连一次性票据 ?t 也不要)。dash 用
+// token(钱包/团队账单 URL 不要带 token,连一次性票据 ?t 也不要)。dash 用
 // profile 1 自己的 cicy-ai.com 会话鉴权;没登录会跳 /login 再回来。`query` 是 /dash 之后
-// 的部分,如 "?view=wallet" / "?team=14"。
+// 的部分,如 "/wallet" / "?team=14"。
 const CLOUD_PROFILE = 1; // cicy-ai 云端页面用的 profile(走 proxy)
 async function openCloudPage(query) {
   const url = `${CLOUD_BASE}/dash${query}`;
@@ -1609,6 +1609,18 @@ function Header({ me, welcome, onLogout, mitmTeam }) {
   // Cloud dash pages: query-param routed, opened via a one-time handoff ticket
   // (no long-term token in the URL — see openCloudPage).
   const goDash = (query) => { openCloudPage(query); setOpen(false); };
+  const copyEmail = async () => {
+    const email = String(me?.email || "").trim();
+    if (!email) return;
+    try {
+      if (window.cicy?.clipboard?.write) await window.cicy.clipboard.write(email);
+      else await navigator.clipboard.writeText(email);
+      setOpen(false);
+      toast.show({ message: tr("userMenu.emailCopied", "邮箱已复制"), status: "done", ttl: 2500 });
+    } catch {
+      toast.show({ message: tr("userMenu.emailCopyFailed", "邮箱复制失败"), status: "error", ttl: 3500 });
+    }
+  };
   // 主动检查更新:有新版 → updater 广播 → 顶部 banner 出现;最新/出错 → toast 反馈。
   const checkUpdate = async () => {
     setOpen(false); setCheckingUpd(true);
@@ -1662,11 +1674,14 @@ function Header({ me, welcome, onLogout, mitmTeam }) {
         )}
         {open && (
           <div className="user-chip__menu" data-id="UserChip-menu" role="menu">
-            <button type="button" data-id="UserChip-wallet" className="user-chip__menu-item" onClick={() => goDash("?view=wallet")}>
+            {me?.email && (
+              <button type="button" data-id="UserChip-email-copy" className="user-chip__menu-item" title={tr("userMenu.copyEmail", "点击复制邮箱")} onClick={copyEmail}
+                style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {me.email}
+              </button>
+            )}
+            <button type="button" data-id="UserChip-wallet" className="user-chip__menu-item" onClick={() => goDash("/wallet")}>
               {tr("userMenu.wallet", "我的钱包")}
-            </button>
-            <button type="button" data-id="UserChip-billing" className="user-chip__menu-item" onClick={() => goDash("?view=usage")}>
-              {tr("userMenu.billing", "我的账单")}
             </button>
             <button type="button" data-id="UserChip-trusted-sites" className="user-chip__menu-item" onClick={() => { setOpen(false); setTrustOpen(true); }}>
               {tr("trustedSites.menu", "受信任站点")}
@@ -3884,4 +3899,3 @@ function humanError(s) {
   if (/bridge missing/i.test(s))  return "无法连接到登录服务（preload 未就绪）。";
   return s;
 }
-

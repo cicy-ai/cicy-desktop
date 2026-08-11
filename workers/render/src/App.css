@@ -216,7 +216,7 @@ body {
 }
 .user-name { font-size: 13px; color: #c7cdd6; }
 
-/* user-chip dropdown (我的钱包 / 我的订单 / HTTPS tip / 退出) */
+/* user-chip dropdown (我的钱包 / HTTPS tip / 退出) */
 .user-chip { position: relative; }
 .user-chip__trigger {
   -webkit-app-region: no-drag;
