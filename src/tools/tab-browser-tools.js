@@ -21,6 +21,7 @@ const os = require("os");
 const { z } = require("zod");
 const { app, BrowserWindow, BrowserView, webContents, ipcMain } = require("electron");
 const { attachContextMenu } = require("../utils/context-menu-options");
+const { sendCDP } = require("../utils/cdp-utils");
 
 const SHELL_HTML = path.join(__dirname, "..", "tabbrowser", "tab-shell.html");
 const SHELL_PRELOAD = path.join(__dirname, "..", "tabbrowser", "tab-shell-preload.js");
@@ -246,6 +247,10 @@ class TabManager {
       } catch (e) {}
     }
     this.win = new BrowserWindow(winOpts);
+    try {
+      this.win.cicyAccountIdx = accountIdx;
+      this.win.webContents.cicyAccountIdx = accountIdx;
+    } catch (e) {}
     // profile 0 is the system tab window (teams only) — no manual "+" new tab.
     this.win.loadFile(SHELL_HTML, { query: { p: String(accountIdx), noNew: accountIdx === 0 ? "1" : "0", plat: process.platform } });
     managerByHost.set(this.win.webContents.id, this);
@@ -536,6 +541,33 @@ function findManagerByTab(webContentsId) {
   return null;
 }
 
+function listTabsForAccount(accountIdx) {
+  const m = managers.get(accountIdx);
+  const known = new Map(m && !m.win.isDestroyed()
+    ? m.list().map((tab) => [tab.webContentsId, tab]) : []);
+  // Recover BrowserViews that survived a tool-module hot reload. The account
+  // tag is stamped in addTab and is also present on split-panel cells.
+  for (const wc of webContents.getAllWebContents()) {
+    if (wc.isDestroyed() || wc.cicyAccountIdx !== accountIdx || known.has(wc.id)) continue;
+    known.set(wc.id, {
+      webContentsId: wc.id, title: wc.getTitle(), url: wc.getURL(), active: false,
+    });
+  }
+  return [...known.values()];
+}
+
+function profileIdOfWebContents(wc) {
+  if (Number.isInteger(wc.cicyAccountIdx)) return wc.cicyAccountIdx;
+  try {
+    const url = new URL(wc.getURL());
+    if (url.pathname.endsWith("/tab-shell.html")) {
+      const id = Number(url.searchParams.get("p"));
+      if (Number.isInteger(id)) return id;
+    }
+  } catch (e) {}
+  return null;
+}
+
 // ── programmatic API (team-open reroute / homepage) ──────────────────────────
 // profile 0 is the system tab window. It used to accept tabs ONLY from the
 // homepage (team open, systemOpen:true); that restriction is lifted so the "+"
@@ -679,6 +711,57 @@ async function tabScreenshot(webContentsId, format) {
   }
 }
 
+async function tabSnapshot(webContentsId, maxElements = 20, showOverlays = false) {
+  const wc = webContents.fromId(webContentsId);
+  if (!wc) throw new Error(`tab ${webContentsId} not found`);
+  const result = await wc.executeJavaScript(`
+    (() => {
+      const info = (el) => {
+        const rect = el.getBoundingClientRect();
+        return {
+          tag: el.tagName.toLowerCase(),
+          text: (el.textContent || '').substring(0, 100).trim(),
+          x: Math.round(rect.x), y: Math.round(rect.y),
+          width: Math.round(rect.width), height: Math.round(rect.height)
+        };
+      };
+      const interactive = [];
+      document.querySelectorAll('a, button, input, select, textarea, [onclick], [role="button"], [role="link"]').forEach((el) => {
+        if (el.offsetParent !== null) interactive.push(info(el));
+      });
+      return {
+        url: location.href, title: document.title,
+        viewportWidth: innerWidth, viewportHeight: innerHeight,
+        scrollX, scrollY, interactive
+      };
+    })()
+  `, true);
+  if (showOverlays) {
+    await wc.executeJavaScript(`
+      (() => {
+        const elements = ${JSON.stringify(result.interactive)};
+        elements.forEach((el, i) => {
+          const overlay = document.createElement('div');
+          overlay.style.cssText = \`position:fixed;left:\${el.x}px;top:\${el.y}px;width:\${el.width}px;height:\${el.height}px;background:rgba(255,0,0,.2);border:2px solid red;z-index:999999;pointer-events:none;box-sizing:border-box\`;
+          const label = document.createElement('div');
+          label.textContent = i + 1;
+          label.style.cssText = 'position:absolute;top:2px;left:2px;background:red;color:white;padding:2px 6px;font-size:12px;font-weight:bold;font-family:monospace;line-height:1';
+          overlay.appendChild(label); document.body.appendChild(overlay);
+          setTimeout(() => overlay.remove(), 5000);
+        });
+      })()
+    `, true);
+  }
+  const shown = result.interactive.slice(0, maxElements || 20);
+  return "Page Snapshot\n"
+    + `url: ${result.url}\n`
+    + `title: ${result.title}\n`
+    + `viewport: ${result.viewportWidth}x${result.viewportHeight}\n`
+    + `scroll: (${result.scrollX}, ${result.scrollY})\n`
+    + `Interactive Elements (${result.interactive.length}):\n`
+    + shown.map((el, i) => `${i + 1}. [${el.tag}] ${el.text || "(no text)"} @ (${el.x}, ${el.y}) ${el.width}x${el.height}`).join("\n");
+}
+
 function registerTabBrowserTools(registerTool) {
   const ok = (obj, isErr = false) => ({
     content: [{ type: "text", text: JSON.stringify(obj, null, 2) }],
@@ -724,8 +807,31 @@ function registerTabBrowserTools(registerTool) {
     z.object({ accountIdx: z.number().describe("账户索引（profile）") }),
     async ({ accountIdx }) => {
       try {
-        const m = managers.get(accountIdx);
-        return ok({ accountIdx, tabs: m && !m.win.isDestroyed() ? m.list() : [] });
+        return ok({ accountIdx, tabs: listTabsForAccount(accountIdx) });
+      } catch (e) { return ok({ error: e.message }, true); }
+    },
+    { tag: "TabBrowser" }
+  );
+
+  registerTool(
+    "electron_webcontents",
+    "列出 cicy-desktop 当前所有 WebContents（窗口、BrowserView 标签页、webview 等）。",
+    z.object({}),
+    async () => {
+      try {
+        const items = webContents.getAllWebContents()
+          .filter((wc) => !wc.isDestroyed())
+          .map((wc) => ({
+            webContentsId: wc.id,
+            url: wc.getURL(),
+            profileId: profileIdOfWebContents(wc),
+            type: wc.getType(),
+            title: wc.getTitle(),
+            loading: wc.isLoading(),
+            crashed: wc.isCrashed(),
+          }))
+          .sort((a, b) => a.webContentsId - b.webContentsId);
+        return ok(items);
       } catch (e) { return ok({ error: e.message }, true); }
     },
     { tag: "TabBrowser" }
@@ -757,6 +863,44 @@ function registerTabBrowserTools(registerTool) {
         const result = await wc.executeJavaScript(String(code), true);
         return ok({ success: true, webContentsId, result });
       } catch (e) { return ok({ error: e.message }, true); }
+    },
+    { tag: "TabBrowser" }
+  );
+
+  registerTool(
+    "electron_tab_cdp",
+    "对某个标签（按 webContentsId）发送任意 Chrome DevTools Protocol 命令。",
+    z.object({
+      webContentsId: z.number(),
+      method: z.string(),
+      params: z.record(z.any()).optional().default({}),
+    }),
+    async ({ webContentsId, method, params }) => {
+      try {
+        const wc = webContents.fromId(webContentsId);
+        if (!wc) throw new Error(`tab ${webContentsId} not found`);
+        const result = await sendCDP(wc, method, params);
+        return ok({ success: true, webContentsId, result });
+      } catch (e) { return ok({ error: e.message }, true); }
+    },
+    { tag: "TabBrowser" }
+  );
+
+  registerTool(
+    "electron_tab_snapshot",
+    "捕获某个标签（按 webContentsId）的结构快照和交互元素。",
+    z.object({
+      webContentsId: z.number(),
+      max_elements: z.number().optional().default(20),
+      show_overlays: z.boolean().optional().default(false),
+    }),
+    async ({ webContentsId, max_elements, show_overlays }) => {
+      try {
+        const text = await tabSnapshot(webContentsId, max_elements, show_overlays);
+        return { content: [{ type: "text", text }] };
+      } catch (e) {
+        return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+      }
     },
     { tag: "TabBrowser" }
   );
