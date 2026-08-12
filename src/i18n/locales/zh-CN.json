@@ -495,7 +495,7 @@
     "reload": "重新加载",
     "webviewId": "WebviewId: {{id}}",
     "copySkillCmd": "复制 Skill 指令",
-    "skillPrompt": "请用 agent-electron 帮我操作这个 webview:webContent id={{id}},profile id={{profile}},url={{url}},title={{title}}",
+    "skillPrompt": "请使用 agent-electron Skill 帮我操作这个 webview：webContent id={{id}}，profile id={{profile}}，url={{url}}，title={{title}}",
     "cut": "剪切",
     "copy": "复制",
     "paste": "粘贴",

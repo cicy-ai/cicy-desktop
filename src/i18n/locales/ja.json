@@ -495,7 +495,7 @@
     "reload": "再読み込み",
     "webviewId": "WebviewId: {{id}}",
     "copySkillCmd": "Skill コマンドをコピー",
-    "skillPrompt": "agent-electron でこの webview を操作してください:webContent id={{id}}、profile id={{profile}}、url={{url}}、title={{title}}",
+    "skillPrompt": "agent-electron Skill を使ってこの webview を操作してください：webContent id={{id}}、profile id={{profile}}、url={{url}}、title={{title}}",
     "cut": "切り取り",
     "copy": "コピー",
     "paste": "貼り付け",

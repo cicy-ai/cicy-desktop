@@ -495,7 +495,7 @@
     "reload": "Reload",
     "webviewId": "WebviewId: {{id}}",
     "copySkillCmd": "Copy Skill Command",
-    "skillPrompt": "Use agent-electron to operate this webview for me: webContent id={{id}}, profile id={{profile}}, url={{url}}, title={{title}}",
+    "skillPrompt": "Use the agent-electron skill to operate this webview for me: webContent id={{id}}, profile id={{profile}}, url={{url}}, title={{title}}",
     "cut": "Cut",
     "copy": "Copy",
     "paste": "Paste",
