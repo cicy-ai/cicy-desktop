@@ -72,10 +72,10 @@ jobs:
         # uploaded. Promoted to non-draft + latest in the final step.
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.CICY_RELEASE_GH_TOKEN }}
         run: |
           gh release create "${{ steps.meta.outputs.tag }}" \
-            --repo "$GITHUB_REPOSITORY" \
+            --repo "cicy-ai/cicy-desktop" \
             --title "CiCy Desktop v${{ steps.meta.outputs.version }}" \
             --target "$GITHUB_SHA" \
             --generate-notes \
@@ -86,7 +86,7 @@ jobs:
         # --publish always uploads .exe + latest.yml to the release created above.
         shell: powershell
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.CICY_RELEASE_GH_TOKEN }}
           CICY_OBFUSCATE: "1"   # 发版混淆 JS(prebuild 主进程 + Vite 渲染层),仅 release CI
         run: |
           if (Test-Path dist) { Remove-Item -Recurse -Force dist }
@@ -177,9 +177,9 @@ jobs:
         # existing clients will pick up the new version on its next poll.
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.CICY_RELEASE_GH_TOKEN }}
         run: |
           gh release edit "${{ steps.meta.outputs.tag }}" \
-            --repo "$GITHUB_REPOSITORY" \
+            --repo "cicy-ai/cicy-desktop" \
             --draft=false \
             --latest

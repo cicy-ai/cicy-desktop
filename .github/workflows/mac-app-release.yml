@@ -110,7 +110,7 @@ jobs:
         shell: bash
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.CICY_RELEASE_GH_TOKEN }}
           CICY_OBFUSCATE: "1"   # 发版混淆 JS(prebuild 主进程 + Vite 渲染层),仅 release CI
         run: |
           set -euo pipefail
@@ -136,10 +136,10 @@ jobs:
       - name: Ensure draft GitHub release exists
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.CICY_RELEASE_GH_TOKEN }}
         run: |
           gh release create "${{ steps.meta.outputs.tag }}" \
-            --repo "$GITHUB_REPOSITORY" \
+            --repo "cicy-ai/cicy-desktop" \
             --title "CiCy Desktop v${{ steps.meta.outputs.version }}" \
             --target "$GITHUB_SHA" \
             --generate-notes \
@@ -149,7 +149,7 @@ jobs:
       - name: Build and publish PKG installers
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.CICY_RELEASE_GH_TOKEN }}
         run: |
           set -euo pipefail
           VER="${{ steps.meta.outputs.version }}"
@@ -184,7 +184,7 @@ jobs:
             pkgbuild --root "$ROOT" --component-plist "$PLIST" --scripts "$SCR" \
               --identifier com.cicy.desktop --version "$VER" --install-location / "$PKG"
             gh release upload "${{ steps.meta.outputs.tag }}" "$PKG" \
-              --repo "$GITHUB_REPOSITORY" --clobber
+              --repo "cicy-ai/cicy-desktop" --clobber
             echo "uploaded $PKG ($(du -h "$PKG" | cut -f1))"
           done
 
