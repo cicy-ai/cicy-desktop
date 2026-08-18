@@ -141,7 +141,6 @@ jobs:
           gh release create "${{ steps.meta.outputs.tag }}" \
             --repo "cicy-ai/cicy-desktop" \
             --title "CiCy Desktop v${{ steps.meta.outputs.version }}" \
-            --target "$GITHUB_SHA" \
             --generate-notes \
             --draft \
             2>/dev/null || echo "release already exists, continuing"
