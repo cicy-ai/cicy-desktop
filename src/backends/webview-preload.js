@@ -24,6 +24,48 @@
 //   webview gets the awaited promise
 
 const { contextBridge, ipcRenderer } = require("electron");
+const { resolveReportedCicyTheme } = require("../tabbrowser/tab-theme");
+
+// cicy-code owns the theme preference (`cicy_theme`) and publishes the applied
+// value on <html data-theme>. Report that contract to the owning tab window so
+// its native tab strip can use the same light/dark palette. The main process
+// accepts this signal only from a registered team tab, so other pages carrying
+// this preload cannot recolor Desktop chrome.
+let lastReportedTheme = "";
+function reportCicyTheme() {
+  let documentTheme = "";
+  let savedTheme = "";
+  try { documentTheme = document.documentElement?.dataset?.theme || ""; } catch (_) {}
+  try { savedTheme = localStorage.getItem("cicy_theme") || ""; } catch (_) {}
+  const theme = resolveReportedCicyTheme(documentTheme, savedTheme);
+  if (theme === lastReportedTheme) return;
+  lastReportedTheme = theme;
+  try { ipcRenderer.send("tab-content:cicy-theme", { theme }); } catch (_) {}
+}
+
+function watchCicyTheme() {
+  reportCicyTheme();
+  try {
+    const root = document.documentElement;
+    if (root) {
+      new MutationObserver(reportCicyTheme).observe(root, {
+        attributes: true,
+        attributeFilter: ["data-theme"],
+      });
+    }
+  } catch (_) {}
+  try { window.addEventListener("cicy-theme-change", reportCicyTheme); } catch (_) {}
+}
+
+// The saved preference is already available at preload time, which prevents a
+// dark-strip flash while a light cicy-code page mounts. DOMContentLoaded then
+// installs the live observer for changes made from Settings.
+reportCicyTheme();
+if (document.readyState === "loading") {
+  window.addEventListener("DOMContentLoaded", watchCicyTheme, { once: true });
+} else {
+  watchCicyTheme();
+}
 
 const relay = (type, payload) =>
   ipcRenderer.invoke("webview:relay", { type, ...(payload || {}) });

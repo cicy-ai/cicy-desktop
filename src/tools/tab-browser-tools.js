@@ -27,13 +27,30 @@ const SHELL_HTML = path.join(__dirname, "..", "tabbrowser", "tab-shell.html");
 const SHELL_PRELOAD = path.join(__dirname, "..", "tabbrowser", "tab-shell-preload.js");
 const PANEL_PRELOAD = path.join(__dirname, "..", "tabbrowser", "panel-preload.js");
 const panelCells = require("../tabbrowser/panel-cells");
+const { normalizeCicyTheme, resolveTabChromeTheme } = require("../tabbrowser/tab-theme");
 const HOMEPAGE_PRELOAD = path.join(__dirname, "..", "backends", "homepage-preload.js");
 const WEBVIEW_PRELOAD = path.join(__dirname, "..", "backends", "webview-preload.js");
 const CHROME_H = 80;  // tab strip (40) + toolbar (40) — must match tab-shell.html
 const STRIP_H = 40;   // tab strip only; the homepage tab hides the toolbar (no address bar)
+const TAB_CHROME_COLORS = {
+  dark: { background: "#1c1c20", symbols: "#e8eaed" },
+  light: { background: "#e4e4e7", symbols: "#27272a" },
+};
 
-const managers = new Map();      // accountIdx -> TabManager
-const managerByHost = new Map(); // shell webContents.id -> TabManager
+// `r-reset` deliberately evicts tool modules from require.cache. BrowserWindows
+// and BrowserViews outlive that reload, so their manager registry must outlive
+// it too. A module-local Map made ensureManager(0) think no profile-0 window
+// existed after a tool refresh; the next homepage "Open" click then created a
+// second BrowserWindow instead of adding a tab to the current one.
+const sharedState = globalThis.__cicyTabBrowserState || (globalThis.__cicyTabBrowserState = {
+  managers: new Map(),
+  managerByHost: new Map(),
+  openedWc: new Map(),
+  ipcInstalled: false,
+  themeIpcInstalled: false,
+});
+const managers = sharedState.managers;           // accountIdx -> TabManager
+const managerByHost = sharedState.managerByHost; // shell webContents.id -> TabManager
 
 function stripVol(u) { try { const x = new URL(u); return x.origin + x.pathname; } catch (e) { return u || ""; } }
 
@@ -68,7 +85,7 @@ function isInstanceAuthNavigation(currentUrl, targetUrl) {
 // (打开/关闭都更新)。刷新窗口据此按 wcId 强制 reload(reloadIgnoringCache),避开
 // "tab 打开后 URL 漂移(登录跳转 / token / 重定向)→ 按 URL 匹配失败"的 bug。
 // 键 = stripVol(打开时传入的 url);open 与 reload 两端 stripVol 一致(token 被剥掉)。
-const openedWc = new Map(); // stripVol(url) -> webContentsId
+const openedWc = sharedState.openedWc; // stripVol(url) -> webContentsId
 
 const { NEWTAB_URL, PANEL_URL_BASE, ensureForPartition } = require("../tabbrowser/newtab-protocol");
 const PANEL_STATE_PATH = path.join(os.homedir(), "cicy-ai", "db", "last-panel.json");
@@ -206,7 +223,7 @@ class TabManager {
     this.activeId = null;
     // profile 0 is the primary window (its first tab is the resident homepage),
     // so give it the app title/icon; other profiles are sandbox browsers.
-    const STRIP_BG = "#1c1c20"; // matches tab-shell.html --strip so the titlebar merges in
+    const STRIP_BG = TAB_CHROME_COLORS.dark.background; // matches tab-shell.html --strip
     const winOpts = {
       width: 1180,
       height: 820,
@@ -285,21 +302,25 @@ class TabManager {
     const active = this.tabs.find((t) => t.id === this.activeId);
     let wc = null;
     try { wc = active ? active.view.webContents : null; } catch (e) {}
+    const tabs = this.tabs.map((t) => ({
+      id: t.id,
+      // fixedTitle (team title / homepage) wins over the page's own document.title
+      title: t.fixedTitle || t.title || "新标签页",
+      url: t.url || "",
+      active: t.id === this.activeId,
+      loading: !!t.loading,
+      favicon: t.favicon || "",
+      avatar: t.avatar || "",   // team 自定义头像 → tab icon 用它(优先于页面 favicon)
+      team: !!t.team,           // 团队 tab:icon 只用 avatar,禁用页面 favicon
+      colorKey: t.colorKey || "", // 无头像时首字母色块的底色种子 = teamId(和卡片一致)
+      home: !!t.home,
+      panel: typeof t.url === "string" && t.url.startsWith(PANEL_URL_BASE),
+      cicyTheme: t.cicyTheme || "",
+    }));
+    const chromeTheme = resolveTabChromeTheme(tabs);
     const s = {
-      tabs: this.tabs.map((t) => ({
-        id: t.id,
-        // fixedTitle (team title / homepage) wins over the page's own document.title
-        title: t.fixedTitle || t.title || "新标签页",
-        url: t.url || "",
-        active: t.id === this.activeId,
-        loading: !!t.loading,
-        favicon: t.favicon || "",
-        avatar: t.avatar || "",   // team 自定义头像 → tab icon 用它(优先于页面 favicon)
-        team: !!t.team,           // 团队 tab:icon 只用 avatar,禁用页面 favicon
-        colorKey: t.colorKey || "", // 无头像时首字母色块的底色种子 = teamId(和卡片一致)
-        home: !!t.home,
-        panel: typeof t.url === "string" && t.url.startsWith(PANEL_URL_BASE),
-      })),
+      tabs,
+      theme: chromeTheme,
       nav: {
         canBack: wc ? wc.canGoBack() : false,
         canFwd: wc ? wc.canGoForward() : false,
@@ -307,6 +328,20 @@ class TabManager {
         url: active ? active.url || "" : "",
       },
     };
+    if (this.chromeTheme !== chromeTheme) {
+      this.chromeTheme = chromeTheme;
+      const colors = TAB_CHROME_COLORS[chromeTheme];
+      try { this.win.setBackgroundColor(colors.background); } catch (e) {}
+      if (process.platform === "win32") {
+        try {
+          this.win.setTitleBarOverlay({
+            color: colors.background,
+            symbolColor: colors.symbols,
+            height: STRIP_H,
+          });
+        } catch (e) {}
+      }
+    }
     try { this.win.webContents.send("tabwin:state", s); } catch (e) {}
   }
 
@@ -387,7 +422,7 @@ class TabManager {
     // home = the resident homepage tab (pinned, first, user-icon, no close).
     // fixedTitle = a caller-supplied tab name (e.g. the team title) that the
     // page's own document.title must NOT override.
-    const tab = { id, view, title: "", url: target, home: !!opts.home, fixedTitle: opts.title || "", avatar: opts.avatar || "", team: !!opts.team, colorKey: opts.colorKey || "" };
+    const tab = { id, view, title: "", url: target, home: !!opts.home, fixedTitle: opts.title || "", avatar: opts.avatar || "", team: !!opts.team, colorKey: opts.colorKey || "", cicyTheme: "" };
     // team tab 用团队自定义头像做 icon:调用方没给就按 URL 反查 teams.json(覆盖所有打开路径)。
     if (!tab.avatar && !opts.home) { try { tab.avatar = require("../backends/local-teams").avatarForUrl(target) || ""; } catch (e) {} }
     if (opts.home) this.tabs.unshift(tab); else this.tabs.push(tab);
@@ -651,10 +686,9 @@ function openHomeWindow(accountIdx, homeUrl, opts = {}) {
 }
 
 // ── shell IPC (registered once) ──────────────────────────────────────────────
-let ipcInstalled = false;
 function installIpc() {
-  if (ipcInstalled) return;
-  ipcInstalled = true;
+  if (sharedState.ipcInstalled) return;
+  sharedState.ipcInstalled = true;
   const mgr = (e) => managerByHost.get(e.sender.id);
   ipcMain.on("tabwin:ready", (e) => {
     const m = mgr(e);
@@ -693,7 +727,25 @@ function installIpc() {
   ipcMain.on("tabwin:fwd", (e) => { const m = mgr(e); const wc = m && m.activeWc(); if (wc && wc.canGoForward()) wc.goForward(); });
   ipcMain.on("tabwin:reload", (e) => { const m = mgr(e); const wc = m && m.activeWc(); if (wc) wc.reload(); });
 }
+
+function installThemeIpc() {
+  if (sharedState.themeIpcInstalled) return;
+  sharedState.themeIpcInstalled = true;
+  ipcMain.on("tab-content:cicy-theme", (e, payload) => {
+    const theme = normalizeCicyTheme(payload && payload.theme);
+    if (!theme) return;
+    const m = findManagerByTab(e.sender.id);
+    if (!m) return;
+    const tab = m.tabs.find((candidate) => candidate.id === e.sender.id);
+    // Only cicy-code/team tabs own the Desktop chrome theme. A normal page can
+    // carry the guarded preload, but it must never be able to repaint the shell.
+    if (!tab || !tab.team || tab.cicyTheme === theme) return;
+    tab.cicyTheme = theme;
+    m.pushState();
+  });
+}
 installIpc();
+installThemeIpc();
 
 // CDP captureScreenshot — works for background tabs (capturePage blanks when the
 // BrowserView isn't the attached/visible one).

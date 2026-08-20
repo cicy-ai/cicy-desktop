@@ -12,9 +12,21 @@
        the same color as the toolbar/content (#0A0A0A) so it merges into the
        page, carved out of the lighter strip with outward bottom curves.
        (content is near-black, so a darker strip would be invisible → go lighter.) */
+    color-scheme:dark;
     --bg:#0A0A0A; --strip:#1c1c20; --toolbar:#0A0A0A;
     --fg:#e6e6e9; --muted:#8b8b92; --line:rgba(255,255,255,.06);
     --accent:#3b82f6; --omni:#1a1a1c;
+    --hover:rgba(255,255,255,.06); --hover-strong:rgba(255,255,255,.16);
+    --active-fg:#fff; --separator:rgba(255,255,255,.12);
+    --edit-bg:#111113; --focus-bg:#111113; --spinner-track:rgba(255,255,255,.25);
+  }
+  html[data-theme="light"]{
+    color-scheme:light;
+    --bg:#f4f4f5; --strip:#e4e4e7; --toolbar:#f4f4f5;
+    --fg:#27272a; --muted:#71717a; --line:rgba(39,39,42,.14);
+    --omni:#fff; --hover:rgba(39,39,42,.07); --hover-strong:rgba(39,39,42,.13);
+    --active-fg:#18181b; --separator:rgba(39,39,42,.16);
+    --edit-bg:#fff; --focus-bg:#fff; --spinner-track:rgba(39,39,42,.22);
   }
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--fg);overflow:hidden;-webkit-user-select:none;user-select:none}
@@ -39,7 +51,7 @@
   .tab,#newtab{-webkit-app-region:no-drag}
   #tabs::-webkit-scrollbar{height:0}
   .tab{position:relative;display:flex;align-items:center;gap:9px;height:32px;min-width:60px;max-width:240px;padding:0 16px;border-radius:10px 10px 0 0;font-size:12.5px;color:var(--muted);background:transparent;cursor:default;flex:1 1 0;transition:background .12s,color .12s}
-  .tab:hover{background:rgba(255,255,255,.06);color:var(--fg)}
+  .tab:hover{background:var(--hover);color:var(--fg)}
   /* home = the resident homepage tab: pinned first, fixed width, user icon, no
      title text, no close — like Chrome's profile/avatar button. */
   /* start-page tab: pinned, sizes to its "我的团队" label (not a flex-grow tab) */
@@ -52,7 +64,7 @@
      so drop the outward ears — they'd otherwise meet the homepage top with a seam. */
   .tab.home.active::before,.tab.home.active::after{display:none}
   /* active tab = toolbar/content color, merged into the page, with outward bottom curves */
-  .tab.active{background:var(--toolbar);color:#fff;z-index:1}
+  .tab.active{background:var(--toolbar);color:var(--active-fg);z-index:1}
   /* outward bottom "ears" carved from the strip into the toolbar. gradient goes
      strip→toolbar (NOT transparent→toolbar): a transparent→opaque ramp passes
      through semi-transparent black and leaves a dark fringe on the lighter strip;
@@ -67,21 +79,21 @@
      first tab and around the active/hovered tab (Chrome hides the seam that would
      touch an active or hovered tab on either side). Inactive tabs don't use
      ::before (that's the active tab's ear), so it's free here. */
-  .tab:not(.active)::before{content:"";position:absolute;left:-3.5px;top:50%;transform:translateY(-50%);width:1px;height:16px;background:rgba(255,255,255,.12);pointer-events:none}
+  .tab:not(.active)::before{content:"";position:absolute;left:-3.5px;top:50%;transform:translateY(-50%);width:1px;height:16px;background:var(--separator);pointer-events:none}
   #tabs>.tab:first-child::before{display:none}                    /* nothing left of the first tab */
   .tab:hover::before{display:none}                                /* no line on the hovered tab's left */
   .tab.active+.tab::before,.tab:hover+.tab::before{display:none}  /* none on the active/hovered tab's right */
   .fav{width:16px;height:16px;flex:0 0 16px;border-radius:4px;display:flex;align-items:center;justify-content:center;overflow:hidden}
   .fav img{width:16px;height:16px;object-fit:contain}
-  .spin{width:14px;height:14px;border:2px solid rgba(255,255,255,.25);border-top-color:var(--accent);border-radius:50%;animation:sp .7s linear infinite}
+  .spin{width:14px;height:14px;border:2px solid var(--spinner-track);border-top-color:var(--accent);border-radius:50%;animation:sp .7s linear infinite}
   @keyframes sp{to{transform:rotate(360deg)}}
   .ttl{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .ttl-edit{flex:1;min-width:0;height:22px;padding:0 5px;border:1px solid var(--accent);border-radius:5px;outline:none;background:#111113;color:#fff;font-size:12.5px;-webkit-user-select:text;user-select:text}
+  .ttl-edit{flex:1;min-width:0;height:22px;padding:0 5px;border:1px solid var(--accent);border-radius:5px;outline:none;background:var(--edit-bg);color:var(--fg);font-size:12.5px;-webkit-user-select:text;user-select:text}
   .cls{flex:0 0 16px;width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;opacity:0;color:var(--muted);transition:opacity .1s,background .1s}
   .tab:hover .cls,.tab.active .cls{opacity:.85}
-  .cls:hover{background:rgba(255,255,255,.16);color:#fff;opacity:1}
+  .cls:hover{background:var(--hover-strong);color:var(--fg);opacity:1}
   #newtab{flex:0 0 30px;width:30px;height:30px;margin:2px 0 2px 2px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--muted);cursor:default}
-  #newtab:hover{background:rgba(255,255,255,.08);color:#fff}
+  #newtab:hover{background:var(--hover);color:var(--fg)}
   /* ── drag-to-reorder (Chrome-style) ── */
   .tab.dragging{opacity:.4}
   /* vertical insertion bar shown between tabs while dragging */
@@ -93,7 +105,7 @@
      button sits left of it (fullscreen hides the overlay → reclaim). */
   #panelbtn{position:fixed;top:5px;right:8px;z-index:30;width:30px;height:30px;border-radius:8px;display:none;align-items:center;justify-content:center;color:var(--muted);-webkit-app-region:no-drag;cursor:default}
   body.has-panel #panelbtn{display:flex}
-  #panelbtn:hover{background:rgba(255,255,255,.08);color:#fff}
+  #panelbtn:hover{background:var(--hover);color:var(--fg)}
   body.is-win #panelbtn{right:148px}
   body.is-win.is-fullscreen #panelbtn{right:8px}
   /* keep tabs from sliding under the pinned button */
@@ -107,10 +119,10 @@
      The main process also moves its BrowserView content up to STRIP_H. */
   body.profile-0 #bar{display:none}
   .nav{width:32px;height:32px;flex:0 0 32px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--fg);cursor:default}
-  .nav:hover{background:rgba(255,255,255,.10)}
+  .nav:hover{background:var(--hover)}
   .nav.off{color:var(--muted);opacity:.35;pointer-events:none}
   #omni{flex:1;height:30px;display:flex;align-items:center;gap:8px;margin-left:6px;padding:0 12px;background:var(--omni);border:1px solid var(--line);border-radius:16px;transition:border-color .12s,background .12s}
-  #omni.focus{background:#111113;border-color:var(--accent)}
+  #omni.focus{background:var(--focus-bg);border-color:var(--accent)}
   #lead{flex:0 0 16px;width:16px;height:16px;color:var(--muted);display:flex;align-items:center;justify-content:center}
   #url{flex:1;height:100%;background:transparent;border:none;outline:none;color:var(--fg);font-size:13px;-webkit-user-select:text;user-select:text}
   #url::placeholder{color:var(--muted)}
@@ -149,7 +161,7 @@
   window.addEventListener('contextmenu', (e) => {
     if (!(e.target instanceof HTMLInputElement && e.target.id === 'url')) e.preventDefault();
   });
-  const ICON_GLOBE ='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9aa0a6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>';
+  const ICON_GLOBE ='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>';
   // 「我的团队」标签的品牌标识 = 与首页 brand-mark 同款 BrandGlyph(白色六芒星)在蓝→紫渐变方块上。
   const CICY_LOGO = '<span class="cicy-logo"><svg width="12" height="12" viewBox="0 0 96 96" fill="none"><path d="M48 11L39.5 33.3L16 29.5L31 48L16 66.5L39.5 62.7L48 85L56.5 62.7L80 66.5L65 48L80 29.5L56.5 33.3Z" fill="white" stroke="white" stroke-width="8" stroke-linejoin="round" stroke-linecap="round"/></svg></span>';
   const ICON_LOCK = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
@@ -347,7 +359,7 @@
     const isHome = !!(activeTab && activeTab.home);
     const u = nav.url || '';
     const secure = /^https:\/\//i.test(u);
-    leadEl.style.color = secure ? '#81c995' : '#9aa0a6';
+    leadEl.style.color = secure ? '#3f8f5b' : 'var(--muted)';
     leadEl.innerHTML = secure ? ICON_LOCK : ICON_GLOBE;
     // homepage tab → empty omnibox (like Chrome's new-tab page), don't expose the file:// path
     if (!urlFocused) urlEl.value = isHome ? '' : displayUrl(u);
@@ -362,7 +374,12 @@
   // Skip re-render while a drag is in flight — rebuilding tabsEl.innerHTML mid-drag
   // would destroy the dragged element and abort the gesture. State is still stored;
   // dragend triggers a render to sync.
-  window.tabAPI.onState((s) => { state = s || { tabs: [], nav: {} }; if (dragId != null) return; render(); });
+  window.tabAPI.onState((s) => {
+    state = s || { tabs: [], nav: {} };
+    document.documentElement.dataset.theme = state.theme === 'light' ? 'light' : 'dark';
+    if (dragId != null) return;
+    render();
+  });
 
   function go() {
     let v = urlEl.value.trim(); if (!v) return;

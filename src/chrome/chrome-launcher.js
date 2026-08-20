@@ -160,7 +160,14 @@ function resolveChromeBinary(binaryPath) {
   );
 }
 
-function buildChromeArgs({ userDataDirRoot, profileDirectory, debuggerPort, proxy, url }) {
+function buildChromeArgs({
+  userDataDirRoot,
+  profileDirectory,
+  debuggerPort,
+  proxy,
+  url,
+  restoreLastSession = false,
+}) {
   const args = [
     `--user-data-dir=${userDataDirRoot}`,
     `--profile-directory=${profileDirectory}`,
@@ -169,6 +176,10 @@ function buildChromeArgs({ userDataDirRoot, profileDirectory, debuggerPort, prox
     "--no-first-run",
     "--no-default-browser-check",
   ];
+
+  if (restoreLastSession) {
+    args.push("--restore-last-session");
+  }
 
   if (proxy) {
     args.push(`--proxy-server=${proxy}`);
@@ -179,6 +190,18 @@ function buildChromeArgs({ userDataDirRoot, profileDirectory, debuggerPort, prox
   }
 
   return args;
+}
+
+function resolveLiveProfileAction({
+  platform = process.platform,
+  liveStatus,
+  runtime,
+  windowless = false,
+}) {
+  if (!liveStatus?.isRunning) return "launch";
+  if (windowless) return "restart-windowless";
+  if (platform === "darwin" && !runtime?.pid) return "restart-unmanaged";
+  return "reuse";
 }
 
 async function ensurePortAvailable(debuggerPort) {
@@ -206,6 +229,7 @@ async function launchChrome({
   url,
   userDataDirRoot,
   userDataBaseRoot = DEFAULT_USER_DATA_BASE_ROOT,
+  restoreLastSession = false,
 }) {
   const profileDirectory = getProfileDirectory(accountIdx);
   const effectiveUserDataDirRoot = userDataDirRoot || getDefaultUserDataDirRoot(accountIdx, userDataBaseRoot);
@@ -221,6 +245,7 @@ async function launchChrome({
     debuggerPort,
     proxy,
     url,
+    restoreLastSession,
   });
   const child = spawn(binaryPath, args, {
     detached: process.platform !== "win32",
@@ -231,7 +256,7 @@ async function launchChrome({
   child.unref();
 
   const version = await waitForDebugger(debuggerPort, "127.0.0.1", 15000);
-  bringChromeAppToForeground(binaryPath);
+  bringChromeAppToForeground(binaryPath, { pid: child.pid, debuggerPort });
 
   return {
     pid: child.pid,
@@ -256,12 +281,49 @@ function closeChromeProcess(pid) {
 // macOS / Windows focus-stealing prevention keeps the spawning Electron
 // app on top after we launch Chrome, so the user's keystrokes go into
 // Electron. Nudge the OS to bring Chrome forward without opening it again.
-function bringChromeAppToForeground(binaryPath) {
+function getListeningPid(port) {
+  if (!Number.isInteger(port) || port <= 0 || port >= 65536) return null;
+  const candidates = process.platform === "darwin" ? ["/usr/sbin/lsof", "lsof"] : ["lsof"];
+  for (const command of candidates) {
+    try {
+      const out = execFileSync(command, ["-nP", `-tiTCP:${port}`, "-sTCP:LISTEN"], {
+        encoding: "utf8",
+        timeout: 2000,
+      });
+      const pid = Number(
+        String(out || "")
+          .trim()
+          .split(/\s+/)[0]
+      );
+      if (Number.isInteger(pid) && pid > 0) return pid;
+    } catch (_) {}
+  }
+  return null;
+}
+
+function bringChromeAppToForeground(binaryPath, { pid, debuggerPort } = {}) {
   try {
     if (process.platform === "darwin") {
+      const targetPid = Number.isInteger(pid) && pid > 0 ? pid : getListeningPid(debuggerPort);
+      if (targetPid) {
+        const script =
+          "ObjC.import('AppKit'); " +
+          `const app = $.NSRunningApplication.runningApplicationWithProcessIdentifier(${targetPid}); ` +
+          "if (app) app.activateWithOptions($.NSApplicationActivateIgnoringOtherApps);";
+        spawn("/usr/bin/osascript", ["-l", "JavaScript", "-e", script], {
+          stdio: "ignore",
+          detached: true,
+        }).unref();
+        return;
+      }
+
       let resolved = binaryPath;
       if (!resolved || !fs.existsSync(resolved)) {
-        try { resolved = resolveChromeBinary(); } catch (_) { return; }
+        try {
+          resolved = resolveChromeBinary();
+        } catch (_) {
+          return;
+        }
       }
       const match = resolved && resolved.match(/^(.+\.app)\//);
       if (!match) return;
@@ -301,6 +363,7 @@ module.exports = {
   getDefaultDebuggerPort,
   resolveChromeBinary,
   buildChromeArgs,
+  resolveLiveProfileAction,
   launchChrome,
   closeChromeProcess,
   bringChromeAppToForeground,

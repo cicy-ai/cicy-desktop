@@ -37,14 +37,15 @@ function snapDir() {
 }
 
 // Is desktop screen capture allowed here? Single source of truth shared by the
-// periodic daemon (main.js) AND the on-demand `desktop_snapshot` tool's live fallback.
+// periodic daemon (main.js). One-shot `desktop_snapshot` RPC requests bypass this
+// switch: clicking “立即截图” must work without enabling background capture.
 // OFF by default on macOS AND Windows (opt in with CICY_DESKTOP_SNAPSHOT=1):
 //  - macOS: any capture trips the Screen-Recording prompt that won't persist for a
 //    non-Apple-Team-ID signature (re-prompts forever).
 //  - Windows: the periodic whole-desktop capture spawns an always-on --disable-gpu
 //    child + writes every 30s — pure overhead for users who only manage docker/teams
 //    and aren't being driven by a screen-watching cloud agent (资源占用). The on-demand
-//    `desktop_snapshot` tool still has its own live fallback when actually requested.
+//    `desktop_snapshot` still captures once when explicitly requested.
 // linux stays ON by default (no prompt, cheap scrot); opt out with =0.
 function snapshotEnabled() {
   return (process.platform === "darwin" || process.platform === "win32")

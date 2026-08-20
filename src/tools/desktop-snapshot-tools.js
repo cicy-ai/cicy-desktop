@@ -52,13 +52,11 @@ module.exports = (registerTool) => {
           return { content: [{ type: "text", text: fresh.b64 }] };
         }
 
-        // Stale/missing. mac/linux can capture live in-process; win32 cannot (needs
-        // the --disable-gpu daemon), so there we fall back to whatever file exists.
-        // BUT honor snapshotEnabled(): on macOS capture is off by default, and a live
-        // `screencapture` here is exactly what pops the Screen-Recording prompt (just
-        // less often than the daemon did) — so when disabled we must NOT live-capture.
-        // mac/linux:进程内即时抓屏(honor snapshotEnabled — mac 默认关避免授权弹窗)。
-        if (process.platform !== "win32" && snap.snapshotEnabled()) {
+        // Stale/missing. A desktop_snapshot RPC is an explicit one-shot request,
+        // so mac/linux capture immediately even when the periodic daemon is off.
+        // CICY_DESKTOP_SNAPSHOT only controls the background capture loop in
+        // main.js; it must not make the user's “立即截图” button unusable.
+        if (process.platform !== "win32") {
           try {
             const r = await snap.captureB64(maxWidth);
             return { content: [{ type: "text", text: r.b64 }] };
@@ -81,10 +79,6 @@ module.exports = (registerTool) => {
         }
 
         if (fresh) return { content: [{ type: "text", text: fresh.b64 }] }; // stale is better than nothing
-        // macOS 默认关(避免反复弹屏幕录制授权)。
-        if (process.platform === "darwin" && !snap.snapshotEnabled()) {
-          throw new Error("桌面截图在 macOS 默认关闭(避免反复弹屏幕录制授权)。需要 agent 看屏幕时,启动 app 前设环境变量 CICY_DESKTOP_SNAPSHOT=1。");
-        }
         throw new Error("no desktop snapshot yet");
       } catch (error) {
         return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };

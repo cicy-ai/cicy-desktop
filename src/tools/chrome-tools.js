@@ -16,6 +16,7 @@ const {
   launchChrome,
   closeChromeProcess,
   bringChromeAppToForeground,
+  resolveLiveProfileAction,
 } = require("../chrome/chrome-launcher");
 const { isPortOpen } = require("../utils/process-utils");
 const { getVersion, getTargets, createTarget, activateTarget, callCdp } = require("../chrome/chrome-cdp-client");
@@ -404,6 +405,7 @@ async function launchOrActivateProfile({
 
   // Script parity: if /json/version reachable => activate first page target and return reused
   const liveStatus = await probeChromeDebugger(effectivePort);
+  let restoreLastSession = false;
   if (liveStatus.isRunning) {
     // Detect a windowless Chrome — debugger up but 0 page targets. It lingers on
     // macOS after its last window is closed; reusing it is unreliable because a
@@ -419,13 +421,19 @@ async function launchOrActivateProfile({
       windowless = false;
     }
 
-    if (!windowless) {
+    const liveAction = resolveLiveProfileAction({
+      liveStatus,
+      runtime: registry.get(accountIdx),
+      windowless,
+    });
+
+    if (liveAction === "reuse") {
       const { targets, activatedTargetId } = await ensurePageTargets({
         debuggerPort: effectivePort,
         url,
         activateIfRunning,
       });
-      if (activateIfRunning) bringChromeAppToForeground();
+      if (activateIfRunning) bringChromeAppToForeground(undefined, { debuggerPort: effectivePort });
 
       const nextRuntime = registry.upsert(accountIdx, {
         status: "running",
@@ -454,13 +462,8 @@ async function launchOrActivateProfile({
       };
     }
 
-    // Windowless: tear the lingering process down (release its SingletonLock on
-    // the user-data-dir) before falling through to the fresh-launch path, which
-    // spawns Chrome with a real, persistent window.
-    const lingering = registry.get(accountIdx);
-    if (lingering?.pid) {
-      closeChromeProcess(lingering.pid);
-    } else if (liveStatus.webSocketDebuggerUrl) {
+    if (liveAction === "restart-unmanaged") {
+      restoreLastSession = true;
       try {
         await callCdp({
           debuggerPort: effectivePort,
@@ -469,8 +472,28 @@ async function launchOrActivateProfile({
           params: {},
         });
       } catch (_) {}
+      await new Promise((resolve) => setTimeout(resolve, 1000));
     }
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    // Windowless: tear the lingering process down (release its SingletonLock on
+    // the user-data-dir) before falling through to the fresh-launch path, which
+    // spawns Chrome with a real, persistent window.
+    if (liveAction === "restart-windowless") {
+      const lingering = registry.get(accountIdx);
+      if (lingering?.pid) {
+        closeChromeProcess(lingering.pid);
+      } else if (liveStatus.webSocketDebuggerUrl) {
+        try {
+          await callCdp({
+            debuggerPort: effectivePort,
+            target: liveStatus.webSocketDebuggerUrl,
+            method: "Browser.close",
+            params: {},
+          });
+        } catch (_) {}
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
   }
 
   ensureRpaProfileInitialized({
@@ -503,6 +526,7 @@ async function launchOrActivateProfile({
     chromeBinary: config.chromeBinary,
     url,
     userDataDirRoot: effectiveUserDataDirRoot,
+    restoreLastSession,
   });
 
   const nextRuntime = registry.upsert(accountIdx, {
