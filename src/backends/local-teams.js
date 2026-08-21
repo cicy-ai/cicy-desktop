@@ -843,6 +843,14 @@ async function updateTeam(id, patch) {
   // (custom 分支 PATCH host_url)。否则云端留着旧 URL,下次 pull 又把旧地址拉回来 = 改了白改。
   if (isRename || filtered.base_url) syncNameToCloud(id).catch(() => {});
   const next = readNodes()[id] || {};
+  // Keep an already-open team tab aligned with the user's custom title. Match
+  // by the stable team id, not URL, because title + URL can change atomically.
+  try {
+    require("../tools/tab-browser-tools").refreshTeamTabs(id, {
+      title: localizedTeamName(next.name) || id,
+      avatar: readAvatars()[id] || next.avatar || "",
+    });
+  } catch (e) {}
   let port = null;
   try { port = parseInt(new URL(next.base_url || "").port, 10) || null; } catch {}
   return { ok: true, id, team: { id, ...next, port } };

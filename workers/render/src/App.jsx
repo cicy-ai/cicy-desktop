@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import "./App.css";
 import { TERMS_VERSION, termsForDisplay } from "./termsText";
 import { mdToHtml } from "./mdLite";
+import { buildCustomTeamEditPatch } from "./custom-team-edit";
 
 // i18n bridge exposed by homepage-preload (window.cicyI18n.t, locale from
 // app.getLocale()). Returns the localized string, or `fallback` when the key
@@ -2747,6 +2748,7 @@ function LocalTeamCard({ team, cloudCode, onOpen, onRename, onRefresh }) {
   const [confirmDel, setConfirmDel] = useState(false);
   // 自定义团队改 URL modal
   const [editingUrl, setEditingUrl] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
   const [urlDraft, setUrlDraft] = useState("");
   const [urlBusy, setUrlBusy] = useState(false);
   const [urlErr, setUrlErr] = useState("");
@@ -2764,15 +2766,17 @@ function LocalTeamCard({ team, cloudCode, onOpen, onRename, onRefresh }) {
     return () => document.removeEventListener("mousedown", onDoc);
   }, [menuOpen]);
 
-  // 自定义团队改 URL:调用 localTeams.update 改 base_url。
+  // 自定义团队标题 + URL 一次保存。标题是用户自定义字段,绝不从 URL 自动生成。
   const commitUrl = async () => {
     if (urlBusy) return;
-    const next = String(urlDraft || "").trim();
-    if (!next || next === (team.base_url || "")) { setEditingUrl(false); return; }
-    try { new URL(next); } catch { setUrlErr(tr("teams.badUrl", "URL 无效(需含 http(s)://)")); return; }
+    const built = buildCustomTeamEditPatch({ title: titleDraft, url: urlDraft });
+    if (!built.ok) { setUrlErr(tr("teams.titleRequired", "请输入自定义标题")); return; }
+    if (!built.patch.base_url) { setUrlErr(tr("teams.urlRequired", "请输入地址 URL")); return; }
+    try { new URL(built.patch.base_url); } catch { setUrlErr(tr("teams.badUrl", "URL 无效(需含 http(s)://)")); return; }
+    if (built.patch.name === (team.name || "") && built.patch.base_url === (team.base_url || "")) { setEditingUrl(false); return; }
     setUrlErr(""); setUrlBusy(true);
     try {
-      const r = await (window.cicy?.localTeams?.update?.(team.id, { base_url: next }));
+      const r = await (window.cicy?.localTeams?.update?.(team.id, built.patch));
       if (r?.ok) { setEditingUrl(false); onRefresh?.(); }
       else setUrlErr(humanError(r?.error || "update failed"));
     } catch (e) { setUrlErr(humanError(e?.message || String(e))); }
@@ -3011,7 +3015,7 @@ function LocalTeamCard({ team, cloudCode, onOpen, onRename, onRefresh }) {
                 {isCustom && (
                   <>
                     <button type="button" data-id="LocalTeamCard-edit-url" className="bcard__menu-item"
-                      onClick={(e) => { e.stopPropagation(); setMenuOpen(false); setEditingUrl(true); setUrlDraft(team.base_url || ""); }}>
+                      onClick={(e) => { e.stopPropagation(); setMenuOpen(false); setEditingUrl(true); setTitleDraft(team.name || ""); setUrlDraft(team.base_url || ""); setUrlErr(""); }}>
                       {tr("teamCard.editUrl", "更改访问地址")}
                     </button>
                     <button type="button" data-id="LocalTeamCard-remove"
@@ -3095,9 +3099,15 @@ function LocalTeamCard({ team, cloudCode, onOpen, onRename, onRefresh }) {
         onMouseDown={(e) => { if (!urlBusy && e.target === e.currentTarget) setEditingUrl(false); }}>
         <div onClick={(e) => e.stopPropagation()}
           style={{ width: 400, maxWidth: "92vw", background: "var(--card, #1b1d22)", border: "1px solid var(--border, #2c2f36)", borderRadius: 14, padding: 22, boxShadow: "0 20px 60px rgba(0,0,0,.5)" }}>
-          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{tr("teamCard.editUrl", "更改访问地址")}</div>
-          <div style={{ fontSize: 12, opacity: .6, marginBottom: 16 }}>{team.name}</div>
-          <textarea data-id="LocalTeamCard-url-input" autoFocus rows={3} className="login-email-input" style={{ width: "100%", resize: "vertical", lineHeight: 1.5, fontFamily: "var(--mono)" }}
+          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>{tr("teamCard.editCustom", "编辑自定义团队")}</div>
+          <label style={{ display: "block", fontSize: 12, opacity: .75, marginBottom: 6 }}>{tr("teams.customNameLabel", "自定义标题")}</label>
+          <input data-id="LocalTeamCard-title-input" autoFocus className="login-email-input" style={{ width: "100%", marginBottom: 14 }}
+            value={titleDraft} placeholder={tr("teams.customNamePlaceholder", "我的团队")} spellCheck={false}
+            disabled={urlBusy}
+            onChange={(e) => setTitleDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.nativeEvent.isComposing || e.keyCode === 229) return; if (e.key === "Enter") { e.preventDefault(); commitUrl(); } else if (e.key === "Escape") setEditingUrl(false); }} />
+          <label style={{ display: "block", fontSize: 12, opacity: .75, marginBottom: 6 }}>{tr("teams.customUrlLabel", "地址 URL")}</label>
+          <textarea data-id="LocalTeamCard-url-input" rows={3} className="login-email-input" style={{ width: "100%", resize: "vertical", lineHeight: 1.5, fontFamily: "var(--mono)" }}
             value={urlDraft} placeholder="https://example.com:8008" spellCheck={false}
             disabled={urlBusy}
             onChange={(e) => setUrlDraft(e.target.value.replace(/[\r\n]+/g, ""))}

@@ -28,6 +28,7 @@ const SHELL_PRELOAD = path.join(__dirname, "..", "tabbrowser", "tab-shell-preloa
 const PANEL_PRELOAD = path.join(__dirname, "..", "tabbrowser", "panel-preload.js");
 const panelCells = require("../tabbrowser/panel-cells");
 const { normalizeCicyTheme, resolveTabChromeTheme } = require("../tabbrowser/tab-theme");
+const { applyTeamIdentityToTab } = require("../tabbrowser/team-tab-identity");
 const HOMEPAGE_PRELOAD = path.join(__dirname, "..", "backends", "homepage-preload.js");
 const WEBVIEW_PRELOAD = path.join(__dirname, "..", "backends", "webview-preload.js");
 const CHROME_H = 80;  // tab strip (40) + toolbar (40) — must match tab-shell.html
@@ -1120,7 +1121,30 @@ function refreshTabAvatars() {
     if (changed) try { m.pushState(); } catch (e) {}
   }
 }
+
+// A team name is user-owned metadata. If it is edited while the team tab is
+// already open, update that tab immediately instead of waiting for a reopen.
+// colorKey is the canonical team id on every profile-0 team tab, so it remains
+// stable even when the team's access URL changes in the same save operation.
+function refreshTeamTabs(teamId, identity = {}) {
+  const canonical = { ...identity, id: String(teamId || identity.id || "") };
+  if (!canonical.id) return false;
+  let anyChanged = false;
+  for (const m of managers.values()) {
+    let changed = false;
+    for (const tab of m.tabs) {
+      if (String(tab.colorKey || "") !== canonical.id) continue;
+      if (applyTeamIdentityToTab(tab, canonical)) changed = true;
+    }
+    if (changed) {
+      anyChanged = true;
+      try { m.pushState(); } catch (e) {}
+    }
+  }
+  return anyChanged;
+}
 registerTabBrowserTools.refreshTabAvatars = refreshTabAvatars;
+registerTabBrowserTools.refreshTeamTabs = refreshTeamTabs;
 registerTabBrowserTools.openTab = openTab;
 registerTabBrowserTools.reloadTabByUrl = reloadTabByUrl;
 registerTabBrowserTools.reloadTabIfOpen = reloadTabIfOpen;
