@@ -75,7 +75,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ steps.meta.outputs.tag }}" \
-            --repo "cicy-ai/cicy-desktop" \
+            --repo "${{ github.repository }}" \
             --title "CiCy Desktop v${{ steps.meta.outputs.version }}" \
             --generate-notes \
             --draft \
@@ -86,14 +86,16 @@ jobs:
         shell: powershell
         env:
           GH_TOKEN: ${{ github.token }}
+          PUBLISH_OWNER: ${{ github.repository_owner }}
+          PUBLISH_REPO: ${{ github.event.repository.name }}
           CICY_OBFUSCATE: "1"   # 发版混淆 JS(prebuild 主进程 + Vite 渲染层),仅 release CI
         run: |
           if (Test-Path dist) { Remove-Item -Recurse -Force dist }
           if (Test-Path "build\logo.ico") {
-            npm run build:win -- --config.win.icon=build/logo.ico --publish always
+            npm run build:win -- --config.win.icon=build/logo.ico --config.publish.owner="$env:PUBLISH_OWNER" --config.publish.repo="$env:PUBLISH_REPO" --publish always
           } else {
             Write-Host "::warning::no icon, using default"
-            npm run build:win -- --publish always
+            npm run build:win -- --config.publish.owner="$env:PUBLISH_OWNER" --config.publish.repo="$env:PUBLISH_REPO" --publish always
           }
 
       # 推 exe 到 OSS。三件事(不再是"永远一个版本"):
@@ -179,6 +181,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release edit "${{ steps.meta.outputs.tag }}" \
-            --repo "cicy-ai/cicy-desktop" \
+            --repo "${{ github.repository }}" \
             --draft=false \
             --latest
