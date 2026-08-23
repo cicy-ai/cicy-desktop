@@ -13,6 +13,7 @@ module.exports = [
   require("./clipboard-tools"),
   require("./exec-tools"),
   require("./file-tools"),
+  require("./electron-inject-tools"),
   require("./system-tools"),
   require("./notify-tools"),
   require("./automation-tools"),

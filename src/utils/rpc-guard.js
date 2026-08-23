@@ -26,6 +26,7 @@ const DANGEROUS_TOOLS = new Set([
   "exec_shell", "exec_python", "exec_node",
   "exec_shell_file", "exec_python_file", "exec_node_file",
   "file_read", "file_write", "file_upload", "file_download",
+  "electron_inject",
 ]);
 function isDangerousTool(t) { return DANGEROUS_TOOLS.has(t); }
 
