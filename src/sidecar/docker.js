@@ -17,6 +17,7 @@ const http = require("http");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const { classifyWslPrerequisites } = require("./wsl-prerequisites");
 
 const IMAGE     = process.env.CICY_DOCKER_IMAGE || "cicybot/cicy-code:latest";
 // Image tarball on Aliyun OSS (oss-cn-shanghai, public-read) — CN-domestic and
@@ -660,7 +661,12 @@ async function dismEnableFeature(feature, label, { emit } = {}) {
 // features are verified-enabled (a Windows reboot is then needed before Docker
 // can use WSL2), or { failed } if a feature couldn't be enabled.
 async function ensureWsl({ emit } = {}) {
-  if (!(await wslMissing())) return { ok: true };
+  const executableMissing = await wslMissing();
+  const subsystemEnabled = await featureEnabled("Microsoft-Windows-Subsystem-Linux");
+  const vmPlatformEnabled = await featureEnabled("VirtualMachinePlatform");
+  const state = classifyWslPrerequisites({ executableMissing, subsystemEnabled, vmPlatformEnabled });
+  if (state.ready) return { ok: true };
+
   emit && emit({ phase: "install-docker", status: "running", message: "Docker 需要 WSL2 后端，开始启用所需的 Windows 功能…" });
   const a = await dismEnableFeature("Microsoft-Windows-Subsystem-Linux", "启用 WSL 功能 1/2 · Linux 子系统", { emit });
   const b = await dismEnableFeature("VirtualMachinePlatform", "启用 WSL 功能 2/2 · 虚拟机平台", { emit });
@@ -668,10 +674,12 @@ async function ensureWsl({ emit } = {}) {
     emit && emit({ phase: "done", status: "error", message: "WSL 功能未能全部启用——请点「重试」" });
     return { ok: false, needsReboot: false, failed: true };
   }
-  // Best-effort: also pull the WSL2 kernel/plumbing (no-op until reboot on some
-  // builds; harmless if it errors).
-  await launchElevated("wsl", ["--install", "--no-distribution"], { emit }).catch(() => {});
-  emit && emit({ phase: "install-docker", status: "running", message: "WSL2 功能已启用 ✓，需【重启 Windows】后回来点「重试」继续。" });
+  // Best-effort: also pull the WSL2 kernel/plumbing when the executable itself
+  // is missing. Feature-only repairs must stop here and wait for reboot.
+  if (state.installWsl) {
+    await launchElevated("wsl", ["--install", "--no-distribution"], { emit }).catch(() => {});
+  }
+  emit && emit({ phase: "install-docker", status: "running", message: "WSL2 功能已启用 ✓，请【重启 Windows】；重启后回来点「重试」继续。" });
   return { ok: false, needsReboot: true };
 }
 

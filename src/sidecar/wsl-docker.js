@@ -929,11 +929,10 @@ async function _bootstrap({ onProgress, port = 8008, container = "cicy-code-dock
 
   // 1) WSL2 platform
   begin("ensure-wsl");
-  if (await docker.wslMissing()) {
-    const w = await docker.ensureWsl({ emit });
-    if (w.needsReboot) { fail("wsl_reboot_required"); emit({ phase: "done", status: "reboot", message: "WSL2 正在安装——请【重启 Windows】后回来点「重试」继续。" }); finish(false, "wsl_reboot_required"); return { ok: false, reason: "wsl_reboot_required" }; }
-    done();
-  } else done(true);
+  const w = await docker.ensureWsl({ emit });
+  if (w.needsReboot) { fail("wsl_reboot_required"); emit({ phase: "done", status: "reboot", message: "WSL2 所需功能已启用——请【重启 Windows】后回来点「重试」继续。" }); finish(false, "wsl_reboot_required"); return { ok: false, reason: "wsl_reboot_required" }; }
+  if (!w.ok) { fail("wsl_enable_failed"); finish(false, "wsl_enable_failed"); return { ok: false, reason: "wsl_enable_failed" }; }
+  done(true);
 
   // 2) Ubuntu distro
   begin("ensure-distro");
