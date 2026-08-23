@@ -73,6 +73,13 @@ jobs:
           CICY_OBFUSCATE: "1"   # 发版混淆 JS(prebuild 主进程 + Vite 渲染层),仅 release CI
         run: |
           set -euo pipefail
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            for attempt in $(seq 1 60); do
+              gh release view "$GITHUB_REF_NAME" --repo "${{ github.repository }}" >/dev/null 2>&1 && break
+              [ "$attempt" -eq 60 ] && { echo "::error::release was not created by the Windows workflow within 5 minutes"; exit 1; }
+              sleep 5
+            done
+          fi
           npm run build:linux -- --x64 --config.linux.target=AppImage --config.publish.owner="$PUBLISH_OWNER" --config.publish.repo="$PUBLISH_REPO" --publish always
 
       # AppImage + 版本指针传到 OSS —— app-updater 现已全走 OSS(不碰 GitHub),linux 也要在
