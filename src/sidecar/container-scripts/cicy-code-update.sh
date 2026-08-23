@@ -71,15 +71,45 @@ fi
 [ -n "$ver" ] || { log "could not resolve cicy-code@${want}"; exit 1; }
 dest="$RT/$ver"
 
-if [ -x "$dest/bin/cicy-code" ]; then
-  log "v$ver already installed → repointing"
-else
+case "$(uname -s):$(uname -m)" in
+  Linux:x86_64) platform_pkg="cicy-code-linux-x64" ;;
+  Linux:aarch64|Linux:arm64) platform_pkg="cicy-code-linux-arm64" ;;
+  *) log "unsupported platform: $(uname -s)-$(uname -m)"; exit 1 ;;
+esac
+
+platform_installed() {
+  [ -f "$dest/lib/node_modules/$platform_pkg/package.json" ] ||
+    [ -f "$dest/lib/node_modules/cicy-code/node_modules/$platform_pkg/package.json" ]
+}
+
+install_package() {
+  spec="$1"
+  if npm install -g "$spec" --prefix "$dest" --registry "$REG" \
+    --fetch-retries=2 --fetch-timeout=60000 --fetch-retry-maxtimeout=30000; then
+    return 0
+  fi
+  alt="$NPM_CN"; [ "$REG" = "$NPM_CN" ] && alt="$NPM_OFFICIAL"
+  log "install from $REG failed → falling back to $alt"
+  npm install -g "$spec" --prefix "$dest" --registry "$alt" \
+    --fetch-retries=2 --fetch-timeout=60000 --fetch-retry-maxtimeout=30000
+  REG="$alt"
+}
+
+if [ ! -x "$dest/bin/cicy-code" ]; then
   log "installing v$ver from $REG"
   rm -rf "$dest"
   mkdir -p "$dest"
-  npm install -g "cicy-code@$ver" --prefix "$dest" --registry "$REG" \
-    --fetch-retries=2 --fetch-timeout=60000 --fetch-retry-maxtimeout=30000
+  install_package "cicy-code@$ver"
 fi
+
+if ! platform_installed; then
+  log "repairing missing $platform_pkg@$ver"
+  install_package "$platform_pkg@$ver"
+fi
+
+[ -x "$dest/bin/cicy-code" ] || { log "incomplete runtime: missing bin/cicy-code"; exit 1; }
+platform_installed || { log "incomplete runtime: missing $platform_pkg@$ver"; exit 1; }
+log "v$ver runtime complete → repointing"
 
 mkdir -p "$(dirname "$LINK")"
 ln -sfn "$dest/bin/cicy-code" "$LINK"

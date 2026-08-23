@@ -68,10 +68,12 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          PUBLISH_OWNER: ${{ github.repository_owner }}
+          PUBLISH_REPO: ${{ github.event.repository.name }}
           CICY_OBFUSCATE: "1"   # 发版混淆 JS(prebuild 主进程 + Vite 渲染层),仅 release CI
         run: |
           set -euo pipefail
-          npm run build:linux -- --x64 --config.linux.target=AppImage --publish always
+          npm run build:linux -- --x64 --config.linux.target=AppImage --config.publish.owner="$PUBLISH_OWNER" --config.publish.repo="$PUBLISH_REPO" --publish always
 
       # AppImage + 版本指针传到 OSS —— app-updater 现已全走 OSS(不碰 GitHub),linux 也要在
       # OSS 上有 versioned AppImage(CiCy-Desktop-<ver>.AppImage)和自己的指针 linux-latest-version.txt。

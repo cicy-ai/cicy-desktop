@@ -139,7 +139,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ steps.meta.outputs.tag }}" \
-            --repo "cicy-ai/cicy-desktop" \
+            --repo "${{ github.repository }}" \
             --title "CiCy Desktop v${{ steps.meta.outputs.version }}" \
             --generate-notes \
             --draft \
@@ -183,7 +183,7 @@ jobs:
             pkgbuild --root "$ROOT" --component-plist "$PLIST" --scripts "$SCR" \
               --identifier com.cicy.desktop --version "$VER" --install-location / "$PKG"
             gh release upload "${{ steps.meta.outputs.tag }}" "$PKG" \
-              --repo "cicy-ai/cicy-desktop" --clobber
+              --repo "${{ github.repository }}" --clobber
             echo "uploaded $PKG ($(du -h "$PKG" | cut -f1))"
           done
 

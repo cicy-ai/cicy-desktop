@@ -21,6 +21,7 @@ const fs = require("fs");
 const docker = require("./docker"); // shared: downloads, waitUntil, probeHealth, launchElevated, ensureWsl…
 const log = require("electron-log"); // persisted main.log — bootstrap timing/failures land here
 const { t } = require("../i18n"); // 打开/读 token 的可见日志走 i18n
+const { shouldSkipCicyUpdate } = require("./cicy-runtime-health");
 
 // Dedicated distro name — NEVER reuse/clobber a user's own "Ubuntu" distro.
 const DISTRO   = process.env.CICY_WSL_DISTRO || "cicy-code-wsl";
@@ -985,13 +986,36 @@ async function _bootstrap({ onProgress, port = 8008, container = "cicy-code-dock
     done();
   } else done(true);
 
-  // 7) Health — the ONLY path to ok:true.
+  // 7) Health — the ONLY path to ok:true. A short failed probe triggers the
+  // runtime updater once: it repairs the common partial-install state where the
+  // JS launcher exists but cicy-code-linux-<arch> is missing from the volume.
   begin("wait-health");
   emit({ phase: "container", status: "running", message: "等待 cicy-code 就绪…" });
-  const healthy = await docker.waitUntil(() => probeHealth(port), { totalMs: 120000, everyMs: 3000 });
+  let healthy = await docker.waitUntil(() => probeHealth(port), { totalMs: 15000, everyMs: 3000 });
+  if (!healthy) {
+    emit({ phase: "container", status: "running", message: "服务尚未响应,正在检查并修复运行时完整性…" });
+    try {
+      const repaired = await update({ onProgress: emit, container, port });
+      healthy = Boolean(repaired && repaired.ok && await probeHealth(port));
+    } catch (e) {
+      log.warn(`[bootstrap] runtime auto-repair failed: ${e.message}`);
+    }
+  }
+  if (!healthy) healthy = await docker.waitUntil(() => probeHealth(port), { totalMs: 105000, everyMs: 3000 });
   if (healthy) { done(); await ensureAutostart(); await ensureDesktopShortcut(volume, port); } // survive reboot + desktop shortcut
   else fail("health_timeout");
-  emit({ phase: healthy ? "done" : "container", status: healthy ? "done" : "error", message: healthy ? "Docker cicy-code 已就绪 🎉" : `服务起来了但 :${port} 还没响应——稍等或点「重试」` });
+  let healthMessage = "Docker cicy-code 已就绪 🎉";
+  if (!healthy) {
+    let tail = "";
+    try {
+      const r = await wslRun(`docker logs --tail 60 ${container}`, { timeout: 15000 });
+      tail = String((r.stderr || "") + (r.stdout || "")).trim().slice(-1200);
+    } catch (e) {
+      tail = String((e && (e.stderr || e.stdout)) || "").trim().slice(-1200);
+    }
+    healthMessage = `服务未能响应 :${port}。${tail ? `\n\n容器日志：\n${tail}` : "请点「重试」。"}`;
+  }
+  emit({ phase: healthy ? "done" : "container", status: healthy ? "done" : "error", message: healthMessage });
   finish(healthy, healthy ? null : "health_timeout");
   return { ok: healthy, container };
 }
@@ -1060,6 +1084,18 @@ async function installedCicyVersion(container) {
   } catch { return null; }
 }
 
+// True only when the launcher AND this Linux architecture's optional binary
+// package are present. The version pointer alone is insufficient: npm can leave
+// a partial global install that has bin/cicy-code but cannot start.
+async function cicyRuntimePlatformReady(container) {
+  const check = `target=$(readlink -f "$HOME/.local/bin/cicy-code" 2>/dev/null || true); ` +
+    `dest=$(dirname "$(dirname "$target")" 2>/dev/null); ` +
+    `case "$(uname -m)" in x86_64) p=cicy-code-linux-x64;; aarch64|arm64) p=cicy-code-linux-arm64;; *) exit 1;; esac; ` +
+    `[ -x "$target" ] && { [ -f "$dest/lib/node_modules/$p/package.json" ] || [ -f "$dest/lib/node_modules/cicy-code/node_modules/$p/package.json" ]; }`;
+  try { await wslRun(`docker exec ${container} bash -lc '${check}'`, { timeout: 15000 }); return true; }
+  catch { return false; }
+}
+
 // Update cicy-code IN PLACE. SMART path (避免容器内 npm view 卡 ~2min):
 //  1. 在宿主机解析最新版本号(host 网络,不过容器代理/DNS)
 //  2. 和容器里已装版本比对——一样就直接「已是最新」,根本不 docker exec
@@ -1079,10 +1115,12 @@ async function update({ onProgress, container = "cicy-code-docker", port = 8008 
   emit({ phase: "image", status: "running", message: t("docker.updating.checking") });
   let net = "unknown";
   try { net = await require("./net-detect").detect(); } catch {}
-  const [latest, current] = await Promise.all([resolveLatestCicy(net), installedCicyVersion(container)]);
-  log.info(`[wsl-docker] update: net=${net} latest=${latest} current=${current}`);
+  const [latest, current, platformReady] = await Promise.all([
+    resolveLatestCicy(net), installedCicyVersion(container), cicyRuntimePlatformReady(container),
+  ]);
+  log.info(`[wsl-docker] update: net=${net} latest=${latest} current=${current} platformReady=${platformReady}`);
   // 2) 已是最新 → 秒回,根本不进容器装(你点更新等 2 分钟的就是这种「其实已最新」的空跑)。
-  if (latest && current && latest === current) {
+  if (shouldSkipCicyUpdate({ latest, current, platformReady })) {
     emit({ phase: "done", status: "done", message: t("docker.updating.alreadyLatest", { v: current }) });
     return { ok: true, alreadyLatest: true, version: current };
   }
