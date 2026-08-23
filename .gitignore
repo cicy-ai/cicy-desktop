@@ -16,6 +16,7 @@ yarn-error.log*
 .DS_Store
 .npm
 .cache/
+.worktrees/
 .ipynb_checkpoints/
 *.ipynb_checkpoints
 
