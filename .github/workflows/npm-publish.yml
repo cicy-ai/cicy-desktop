@@ -15,7 +15,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # 单元测试(node:test,零依赖)。发布前必过 —— 这些用例守的是 WSL/Docker sidecar 那条
+  # 只在 Windows 真机上才跑得到的路径,本地很难复现,只能靠断言兜住。
+  # Node 22:`node --test "<glob>"` 的 glob 展开是 node ≥21 的能力(20 只认目录参数)。
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run tests
+        run: npm test
+
   publish:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

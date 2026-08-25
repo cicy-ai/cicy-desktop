@@ -1096,6 +1096,12 @@ async function cicyRuntimePlatformReady(container) {
   catch { return false; }
 }
 
+// cp 脚本进容器要写 /usr/local/bin —— 镜像默认用户是 cicy(非 root),不带 -u root
+// 必然 EACCES,然后被 update() 的 catch 吞掉、静默回落到镜像里烘焙的旧脚本。
+function buildPushUpdateScriptCommand(encodedScript, container) {
+  return `echo ${encodedScript} | base64 -d | docker exec -u root -i ${container} bash -c 'cat > /usr/local/bin/cicy-code-update.sh && chmod 0755 /usr/local/bin/cicy-code-update.sh'`;
+}
+
 // Update cicy-code IN PLACE. SMART path (避免容器内 npm view 卡 ~2min):
 //  1. 在宿主机解析最新版本号(host 网络,不过容器代理/DNS)
 //  2. 和容器里已装版本比对——一样就直接「已是最新」,根本不 docker exec
@@ -1132,7 +1138,7 @@ async function update({ onProgress, container = "cicy-code-docker", port = 8008 
   // cp 结果出到 drawer(诊断:之前静默失败 → 回落镜像内旧脚本 → 又卡 2 分钟,看不出来)。
   try {
     const b64 = fs.readFileSync(path.join(__dirname, "container-scripts", "cicy-code-update.sh")).toString("base64");
-    await wslRun(`echo ${b64} | base64 -d | docker exec -i ${container} bash -c 'cat > /usr/local/bin/cicy-code-update.sh && chmod 0755 /usr/local/bin/cicy-code-update.sh'`, { timeout: 30000 });
+    await wslRun(buildPushUpdateScriptCommand(b64, container), { timeout: 30000 });
     emit({ phase: "image", status: "running", message: t("docker.updating.scriptReady") });
   } catch (e) {
     log.warn("[wsl-docker] push cicy-code-update.sh failed, fallback to baked:", e.message);
@@ -1225,5 +1231,5 @@ async function readMihomoConfig(container = "cicy-code-docker-8008") {
 module.exports = {
   bootstrap, status, restart, stop, dockerRestart, recreate, update, upgrade, runContainer, readContainerToken,
   distroInstalled, dockerInstalled, dockerEngineUp, imagePresent, probeHealth, wslRun, hasGatewayKey,
-  readMihomoConfig, repairWsl, lxssWedged, dockerGpuAvailable, resolveWslInstallDir,
+  readMihomoConfig, repairWsl, lxssWedged, dockerGpuAvailable, resolveWslInstallDir, buildPushUpdateScriptCommand,
 };
