@@ -44,6 +44,21 @@
     .line2 .note:hover { color: #fff; }
     /* 编辑态就地变成可输入,尺寸/位置与只读态完全一致,不发生位移 */
     .line2 .note.editing { color: var(--fg); font-style: normal; background: #111113; box-shadow: 0 0 0 1px var(--accent); text-overflow: clip; }
+    .line2 .ip { flex: none; max-width: 45%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 6px; border-radius: 999px; background: var(--head); color: #b4b4bb; font: 11px ui-monospace, monospace; line-height: 16px; cursor: pointer; }
+    .line2 .ip.none { color: #6b6b72; font-family: inherit; }
+    .line2 .ip.busy { color: #f0b429; }
+    .line2 .ip.bad { color: #ff8a8a; }
+    .line2 .ip:hover { color: #fff; }
+    .cfg { display: none; margin: 8px 0 2px 16px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--head); }
+    .row.cfg-open .cfg { display: block; }
+    .row.cfg-open .gear { color: var(--accent); }
+    .cfg .f { display: flex; align-items: center; gap: 6px; }
+    .cfg .f + .f { margin-top: 6px; }
+    .cfg label { flex: none; width: 34px; font-size: 11px; color: var(--muted); }
+    .cfg input { flex: 1; min-width: 0; height: 26px; border: 1px solid var(--line); border-radius: 6px; padding: 0 8px; background: #111113; color: var(--fg); font: 11.5px ui-monospace, monospace; outline: 0; }
+    .cfg input:focus { border-color: var(--accent); }
+    .cfg .hint { font-size: 11px; color: var(--muted); padding-left: 40px; }
+    .cfg .hint b { color: #b4b4bb; font-weight: 500; }
     .row-err { padding: 4px 0 0 16px; color: #ff8a8a; font-size: 11px; display: none; }
     .row-err.on { display: block; }
     #empty { display: none; padding: 40px 24px; color: var(--muted); text-align: center; line-height: 1.8; }
@@ -93,7 +108,7 @@
         <div>
           <h2>无法连接 Telegram</h2>
           <p id="err-detail"></p>
-          <div class="btns"><button id="err-retry">重试</button></div>
+          <div class="btns"><button id="err-retry">重试</button><button class="ghost" id="err-cfg">代理设置</button></div>
         </div>
       </div>
     </div>
@@ -121,6 +136,27 @@
     const stateOf = (idx) => cellState.get(Number(idx)) || {};
     const dotClass = (st) => st.loading ? 'loading' : st.failed ? 'failed' : (st.url ? 'ok' : '');
     const stateText = (st, opened) => st.loading ? '加载中…' : st.failed ? '连接失败' : st.url ? '已加载' : (opened ? '' : '未打开');
+    const fmtAgo = (iso) => { const t = Date.parse(iso || ''); if (!t) return ''; const m = Math.round((Date.now() - t) / 60000); return m < 1 ? '刚刚' : m < 60 ? `${m} 分钟前` : m < 1440 ? `${Math.round(m / 60)} 小时前` : `${Math.round(m / 1440)} 天前`; };
+    function renderIp(p, mode) {
+      const row = rows.get(p.accountIdx); if (!row) return;
+      const el = row.querySelector('.ip');
+      el.className = 'ip';
+      if (mode === 'busy') { el.classList.add('busy'); el.textContent = '测 IP…'; el.title = ''; return; }
+      if (mode && mode.error) { el.classList.add('bad'); el.textContent = 'IP 探测失败'; el.title = mode.error + '（点击重试）'; return; }
+      const info = p.ipInfo;
+      if (info && info.ip) {
+        el.textContent = info.area ? `${info.area} · ${info.ip}` : info.ip;
+        el.title = `出口 IP ${info.ip}${info.area ? '，' + info.area : ''}，${fmtAgo(info.probedAt) || '未知时间'}探测（点击重测）`;
+      } else { el.classList.add('none'); el.textContent = '测 IP'; el.title = '经该 Profile 的代理探测出口 IP / 地区'; }
+    }
+    async function probeIp(p) {
+      renderIp(p, 'busy');
+      try {
+        const r = await window.panelAPI.probeIp(p.accountIdx);
+        if (r && r.ipInfo) { p.ipInfo = r.ipInfo; renderIp(p); }
+        else renderIp(p, { error: (r && r.error) || '探测失败' });
+      } catch (e) { renderIp(p, { error: e.message || String(e) }); }
+    }
     // 身份:优先用本次会话探到的(cellState.identity),否则用 profile 里存的(上次登录)。
     const identityOf = (p) => stateOf(p.accountIdx).identity || p.telegram || null;
     function renderIdentity(p) {
@@ -160,8 +196,8 @@
     function describeError(p, st) {
       const e = st.error || {};
       const desc = e.description ? `<code>${esc(e.description)}</code>` : '';
-      if (p.proxy) return `代理 <code>${esc(p.proxy)}</code> 不可用或无法访问 Telegram。${desc}<br>请到代理配置页检查该代理。`;
-      return `当前为直连，网络无法访问 Telegram。${desc}<br>请到代理配置页为该 Profile 设置代理。`;
+      if (p.proxy) return `代理 <code>${esc(p.proxy)}</code> 不可用或无法访问 Telegram。${desc}<br>点 ⚙ 检查或更换该 Profile 的代理，可用「测 IP」验证。`;
+      return `当前为直连，网络无法访问 Telegram。${desc}<br>点 ⚙ 为该 Profile 设置代理。`;
     }
 
     function renderPreviewState() {
@@ -186,8 +222,12 @@
       const row = document.createElement('div');
       row.className = 'row'; row.dataset.id = String(p.accountIdx); row.title = `persist:sandbox-${p.accountIdx}`;
       row.innerHTML = `
-        <div class="line1"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="st"></span><button class="icon reload" title="重新加载">⟳</button></div>
-        <div class="line2"><span class="tg none">—</span><span class="note" data-role="note" title="点击编辑备注，Enter 保存 / Esc 取消" spellcheck="false"></span></div>
+        <div class="line1"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="st"></span><button class="icon gear" title="代理设置">⚙</button><button class="icon reload" title="重新加载">⟳</button></div>
+        <div class="line2"><span class="tg none">—</span><span class="note" data-role="note" title="点击编辑备注，Enter 保存 / Esc 取消" spellcheck="false"></span><span class="ip none" title="经该 Profile 的代理探测出口 IP / 地区">测 IP</span></div>
+        <div class="cfg">
+          <div class="f"><label>代理</label><input data-role="proxy" placeholder="留空 = 直连，例如 http://127.0.0.1:20001" spellcheck="false"><button class="sm save">保存</button><button class="sm ghost test">测 IP</button></div>
+          <div class="hint">保存后已打开的会话会重新加载；<b>测 IP</b> 经该代理访问 IP 服务，结果显示在上方。</div>
+        </div>
         <div class="row-err"></div>`;
       const errEl = row.querySelector('.row-err');
       const noteEl = row.querySelector('.note');
@@ -219,6 +259,28 @@
       noteEl.onclick = (e) => { e.stopPropagation(); startEdit(e); };
       noteEl.onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); saveNote(); } if (e.key === 'Escape') { e.preventDefault(); stopEdit(); } };
       noteEl.onblur = () => saveNote();
+      // 代理设置抽屉(⚙):不常用,默认收起,列表保持干净。
+      const proxyInput = row.querySelector('[data-role="proxy"]');
+      const saveBtn = row.querySelector('.cfg .save');
+      const toggleCfg = (e) => { e.stopPropagation(); const open = !row.classList.contains('cfg-open'); row.classList.toggle('cfg-open', open); if (open) { proxyInput.value = p.proxy || ''; proxyInput.focus(); } };
+      const saveProxy = async () => {
+        saveBtn.disabled = true; errEl.classList.remove('on');
+        try {
+          const updated = await window.panelAPI.setProfileProxy(p.accountIdx, proxyInput.value.trim());
+          p.proxy = updated.proxy; p.ipInfo = null; renderIp(p);
+          if (openedProfiles.has(p.accountIdx)) { reloadProfile(p.accountIdx); flash(`#${p.accountIdx} 代理已应用，重新加载中`); }
+          else flash(`#${p.accountIdx} 代理已保存，打开时生效`);
+          row.classList.remove('cfg-open');
+        } catch (e) { errEl.textContent = e.message || String(e); errEl.classList.add('on'); }
+        finally { saveBtn.disabled = false; }
+      };
+      row.querySelector('.gear').onclick = toggleCfg;
+      row.querySelector('.cfg').onclick = (e) => e.stopPropagation();
+      saveBtn.onclick = saveProxy;
+      proxyInput.onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Enter') saveProxy(); if (e.key === 'Escape') row.classList.remove('cfg-open'); };
+      row.querySelector('.cfg .test').onclick = () => probeIp(p);
+      row.querySelector('.ip').onclick = (e) => { e.stopPropagation(); probeIp(p); };
+      row._openCfg = () => { if (!row.classList.contains('cfg-open')) toggleCfg(new Event('click')); row.scrollIntoView({ block: 'nearest' }); };
       row.onclick = () => selectProfile(p.accountIdx);
       row.querySelector('.reload').onclick = (e) => { e.stopPropagation(); reloadProfile(p.accountIdx); };
       return row;
@@ -242,6 +304,7 @@
         rows.get(p.accountIdx).classList.toggle('active', !!selected && selected.accountIdx === p.accountIdx);
         renderRowState(p.accountIdx);
         renderIdentity(p);
+        renderIp(p);
       }
     }
 
@@ -307,6 +370,7 @@
     };
     document.getElementById('reload').onclick = () => { if (selected) reloadProfile(selected.accountIdx); };
     document.getElementById('err-retry').onclick = () => { if (selected) reloadProfile(selected.accountIdx); };
+    document.getElementById('err-cfg').onclick = () => { const row = selected && rows.get(selected.accountIdx); if (row) row._openCfg(); };
 
     new ResizeObserver(() => requestAnimationFrame(syncPreview)).observe(preview);
     window.addEventListener('resize', syncPreview);

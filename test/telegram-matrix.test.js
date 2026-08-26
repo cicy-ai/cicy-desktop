@@ -80,14 +80,16 @@ test("reloading an unopened profile creates its cell instead of a bare reload", 
   assert.match(reload, /if \(!fresh\)[^]*panelAPI\.reload/);
 });
 
-test("matrix page exposes profile table and phone preview without inline proxy editor", () => {
+test("matrix page exposes profile table, phone preview, note, proxy drawer and ip probe", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "src", "tabbrowser", "telegram-matrix.html"), "utf8");
   assert.match(html, /id="rows"/);
   assert.match(html, /id="ov-error"/);
   assert.match(html, /panelAPI\.states/);
-  assert.doesNotMatch(html, /panelAPI\.setProfileProxy/);
+  assert.match(html, /panelAPI\.setProfileProxy/);
+  assert.match(html, /panelAPI\.probeIp/);
   assert.match(html, /id="add-profile"/);
-  assert.doesNotMatch(html, /data-role="proxy"/);
+  assert.match(html, /class="cfg"[^]*data-role="proxy"/);
+  assert.match(html, /\.row\.cfg-open \.cfg \{ display: block; \}/);
   assert.match(html, /panelAPI\.setProfileNote/);
   assert.match(html, /data-role="note"/);
   assert.match(html, /class="tg none"/);

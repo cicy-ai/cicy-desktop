@@ -393,6 +393,7 @@ function installIpc(findTab) {
           proxy: p.proxy && p.proxy.enabled ? String(p.proxy.url || "") : "",
           note: String(p.note || ""),
           telegram: telegramIdentity.telegramIdentityFromProfile(p),
+          ipInfo: p.ipInfo && p.ipInfo.ip ? { ip: String(p.ipInfo.ip), area: String(p.ipInfo.area || ""), probedAt: String(p.ipInfo.probedAt || "") } : null,
         }));
     } catch (err) { return []; }
   });
@@ -409,6 +410,26 @@ function installIpc(findTab) {
     const profile = service.setTelegramProfileProxy(accountIdx, proxy);
     await applyProfileProxy(profile.accountIdx, profile.proxy);
     return { accountIdx: profile.accountIdx, name: profile.name, proxy: profile.proxy.url };
+  });
+  // 出口 IP / 地区:经该 profile 的 session(=它的代理)去问 IP 服务,结果写回 profile.ipInfo。
+  ipcMain.handle("panelcells:probe-ip", async (e, { accountIdx }) => {
+    if (!ctx(e)) throw new Error("Invalid panel");
+    const id = Number(accountIdx);
+    if (!Number.isInteger(id) || id <= 0) throw new Error("Invalid Electron profile ID");
+    const profileStore = require("../profiles/profile-store");
+    const { probeIpViaSession } = require("../utils/ip-probe");
+    const part = partitionFor(id);
+    // 没打开过的 profile 其 session 还没配代理,会探成本机 IP —— 先按存储的代理配好。
+    if (!appliedProxy.has(part)) {
+      const prof = profileStore.getProfile("electron", id);
+      const rules = profileStore.proxyRules(prof && prof.proxy);
+      await session.fromPartition(part).setProxy({ proxyRules: rules || "direct://", proxyBypassRules: "127.0.0.1,localhost,[::1]" });
+      appliedProxy.add(part);
+    }
+    const info = await probeIpViaSession(session.fromPartition(part));
+    if (!info.ip) return { accountIdx: id, ipInfo: null, error: "探测失败：代理不通或 IP 服务不可达" };
+    const view = profileStore.setIpInfo("electron", id, info);
+    return { accountIdx: id, ipInfo: view.ipInfo };
   });
   ipcMain.handle("panelcells:set-profile-note", async (e, { accountIdx, note }) => {
     if (!ctx(e)) throw new Error("Invalid panel");
