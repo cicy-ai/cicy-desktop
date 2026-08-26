@@ -168,8 +168,12 @@ if (process.platform === "win32") {
 const DEEPLINK_SCHEMES = ["cicy-desktop", "cicy"]; // primary, then legacy
 const isDeepLink = (u) =>
   typeof u === "string" && DEEPLINK_SCHEMES.some((s) => u.startsWith(`${s}://`));
+// Source/dev runs (`electron <appdir>`) must register execPath + the app dir,
+// otherwise Windows stores a bare `electron.exe "%1"` handler that launches an
+// empty Electron shell — and clobbers the installed app's registration.
+const deeplinkArgs = electronApp.isPackaged ? [] : [process.execPath, [path.resolve(process.argv[1] || electronApp.getAppPath())]];
 for (const s of DEEPLINK_SCHEMES) {
-  try { if (!electronApp.isDefaultProtocolClient(s)) electronApp.setAsDefaultProtocolClient(s); } catch {}
+  try { if (!electronApp.isDefaultProtocolClient(s, ...deeplinkArgs)) electronApp.setAsDefaultProtocolClient(s, ...deeplinkArgs); } catch {}
 }
 
 // Deep links can arrive before any BrowserWindow exists (cold start via

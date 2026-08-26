@@ -25,6 +25,8 @@ const tr = (key, fallback, params) => {
 const TOKEN_KEY = "cicy_token";
 const ACCESS_TOKEN_KEY = "cicy_access_token";
 const USER_ID_KEY = "cicy_user_id";
+// 未登录直接进入(离线/访客):只用本地能力(自定义团队、本地 Docker 团队),云端功能等登录。
+const GUEST_KEY = "cicy_guest";
 const CLOUD_BASE = "https://cicy-ai.com";
 
 // cicy-ai 云端页面(我的钱包/团队帐单/新加团队)统一开在 **profile 1** 的
@@ -343,6 +345,10 @@ export default function App() {
   // True while we ask main for a durably-saved login (origin-independent).
   // Prevents the login card from flashing on every launch before restore.
   const [authRestoring, setAuthRestoring] = useState(() => !safeGet(TOKEN_KEY));
+  // 访客模式:跳过登录进入主界面(本地功能可用)。登录成功即退出访客态。
+  const [guest, setGuest] = useState(() => safeGet(GUEST_KEY) === "1");
+  const enterGuest = () => { try { localStorage.setItem(GUEST_KEY, "1"); } catch {} setGuest(true); };
+  const leaveGuest = () => { try { localStorage.removeItem(GUEST_KEY); } catch {} setGuest(false); };
   const [loggingIn, setLoggingIn] = useState(false);
   const [loginBusy, setLoginBusy] = useState(false); // login 请求在途:按钮 disable+loading,防重复点击,出错恢复
   const [loginUrl, setLoginUrl] = useState(""); // shown as a manual fallback when the browser doesn't auto-open
@@ -718,6 +724,8 @@ export default function App() {
         setProfileError("");
         try { localStorage.setItem(TOKEN_KEY, payload.token); } catch {}
         setToken(payload.token);
+        try { localStorage.removeItem(GUEST_KEY); } catch {}
+        setGuest(false);
         if (payload.accessToken) {
           try { localStorage.setItem(ACCESS_TOKEN_KEY, payload.accessToken); } catch {}
           setAccessToken(payload.accessToken);
@@ -826,8 +834,9 @@ export default function App() {
     );
   }
 
-  // Not logged in yet → centered login card.
-  if (!token) {
+  // Not logged in yet → centered login card (unless the user chose to continue
+  // as a guest: local-only features, login available from the header).
+  if (!token && !guest) {
     return (
       <div className="shell">
         <div className="glow" aria-hidden />
@@ -866,6 +875,12 @@ export default function App() {
               <button className="btn-ghost" data-id="BrowserLoginBtn" onClick={handleLogin} disabled={loginBusy}>
                 {loginBusy ? tr("auth.opening", "打开中…") : tr("auth.browserLogin", "用浏览器登录(Google / SSO,仅同一台电脑)")}
               </button>
+              {/* 不登录也能用本地能力:自定义团队(连已有 cicy-code 地址)、本地 Docker 团队。 */}
+              <button type="button" className="btn-ghost" data-id="SkipLoginBtn" onClick={enterGuest} disabled={loginBusy}
+                style={{ marginTop: 8, opacity: .85 }}>
+                {tr("auth.skipLogin", "先不登录，添加自定义团队")}
+              </button>
+              <p className="hint" data-id="SkipLoginHint">{tr("auth.skipLoginHint", "不登录只能使用本地功能；云端团队、账单等需登录后使用")}</p>
             </>
           )}
           {emailSent && (
@@ -965,6 +980,7 @@ export default function App() {
       <div className="glow glow--app" aria-hidden />
       <div className="shell__left">
       <Header me={me} welcome={welcome} onLogout={handleLogout}
+        guest={!token && guest} onLogin={leaveGuest}
         mitmTeam={localList.length > 0 ? localList[0] : null} />
       <UpdateBanner />
       <main className="main">
@@ -1008,10 +1024,10 @@ export default function App() {
                     <div style={{ fontSize: 13, fontWeight: 600 }}>{tr("teams.addCustom", "自定义团队")}</div>
                     <div style={{ fontSize: 11, opacity: .6, marginTop: 2 }}>{tr("teams.addCustomSub", "手动输入地址和名称(只存本地)")}</div>
                   </button>
-                  <button type="button" data-id="AddTeamMenu-private" className="bcard__menu-item" style={{ display: "block", width: "100%", textAlign: "left", padding: "11px 14px", border: "none", borderTop: "1px solid var(--border, #2c2f36)", background: "transparent", cursor: "pointer", color: "inherit" }}
-                    onClick={() => { setAddMenuOpen(false); openCloudPage("?tab=private"); }}>
+                  <button type="button" data-id="AddTeamMenu-private" className="bcard__menu-item" style={{ display: "block", width: "100%", textAlign: "left", padding: "11px 14px", border: "none", borderTop: "1px solid var(--border, #2c2f36)", background: "transparent", cursor: "pointer", color: "inherit", opacity: (!token && guest) ? .55 : 1 }}
+                    onClick={() => { setAddMenuOpen(false); if (!token && guest) { leaveGuest(); return; } openCloudPage("?tab=private"); }}>
                     <div style={{ fontSize: 13, fontWeight: 600 }}>{tr("teams.addPrivate", "私有云团队")}</div>
-                    <div style={{ fontSize: 11, opacity: .6, marginTop: 2 }}>{tr("teams.addPrivateSub", "去云端团队中心添加")}</div>
+                    <div style={{ fontSize: 11, opacity: .6, marginTop: 2 }}>{(!token && guest) ? tr("teams.addPrivateNeedLogin", "需要登录") : tr("teams.addPrivateSub", "去云端团队中心添加")}</div>
                   </button>
                 </div>
               </>
@@ -1373,7 +1389,7 @@ function AuditLogModal({ onClose }) {
   );
 }
 
-function Header({ me, welcome, onLogout, mitmTeam }) {
+function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin }) {
   const name = me?.display_name || me?.username || "…";
   const initials = (name || "?").slice(0, 1).toUpperCase();
   const [open, setOpen] = useState(false);
@@ -1470,7 +1486,13 @@ function Header({ me, welcome, onLogout, mitmTeam }) {
             {planTxt}
           </span>
         )}
-        {!me ? (
+        {guest ? (
+          // 访客:没有账号可显示,给一个明显的「登录」入口(回到登录卡)
+          <button type="button" data-id="UserChip-login" className="btn-primary" onClick={onLogin}
+            style={{ padding: "6px 14px", fontSize: 13 }}>
+            {tr("auth.loginNow", "登录")}
+          </button>
+        ) : !me ? (
           // 首次打开:profile 还没拉到 → avatar/名字用 skeleton 占位
           <div className="user-chip__trigger user-chip__trigger--skel" data-id="UserChip-skeleton" aria-hidden>
             <div className="skel skel--avatar" />
