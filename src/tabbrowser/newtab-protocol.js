@@ -21,6 +21,8 @@ const _handled = new WeakSet(); // sessions that already have the cicyui handler
 // origin+pathname reuse never collapses two panels into one; the page keys its
 // persisted layout off the same path.
 const PANEL_HTML = path.join(__dirname, "split-panel.html");
+const TELEGRAM_MATRIX_HTML = path.join(__dirname, "telegram-matrix.html");
+const { panelPageForUrl } = require("./panel-page-router");
 
 // NOTE: scheme is "cicyui", NOT "cicy" — "cicy" is already an OS deep-link
 // protocol client (setAsDefaultProtocolClient), so navigating a webContents to
@@ -71,7 +73,8 @@ function handlerFor(ses, partition) {
         // read per request (not cached) so dev edits to split-panel.html land on
         // a simple tab reload, no Electron restart.
         try {
-          const html = await fs.promises.readFile(PANEL_HTML, "utf8");
+          const file = panelPageForUrl(request.url) === "telegram-matrix.html" ? TELEGRAM_MATRIX_HTML : PANEL_HTML;
+          const html = await fs.promises.readFile(file, "utf8");
           return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } });
         } catch (e) { return new Response("panel page missing", { status: 500 }); }
       }

@@ -12,6 +12,7 @@ const path = require("path");
 const fs = require("fs");
 const log = require("electron-log");
 const { openHomepage } = require("./backends/homepage-window");
+const { handleChromeLaunchError } = require("./chrome/chrome-install-navigation");
 const i18n = require("./i18n");
 
 let trayInstance = null;
@@ -75,8 +76,20 @@ async function openChromeProfile(accountIdx) {
       activateIfRunning: true,
     });
   } catch (e) {
-    showProfileError("Chrome", e);
+    await handleChromeLaunchError(e, {
+      openInstallPage: openChromeInstallPage,
+      showError: (error) => showProfileError("Chrome", error),
+    });
   }
+}
+
+async function openChromeInstallPage(url) {
+  const tabs = require("./tools/tab-browser-tools");
+  await tabs.openTab(1, url, { activate: true, title: "安装 Chrome" });
+  const manager = tabs.ensureManager(1);
+  if (manager.win.isMinimized()) manager.win.restore();
+  manager.win.show();
+  manager.win.focus();
 }
 
 function showProfileError(kind, error) {

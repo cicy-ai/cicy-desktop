@@ -23,6 +23,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const https = require("https");
+const http = require("http");
 const yaml = require("js-yaml");
 const { t } = require("../i18n"); // 进度/错误文案 i18n(drawer 里显示)
 const tt = (k, o) => t(`chromeProxy.${k}`, o);
@@ -147,6 +148,66 @@ function readPid() { try { return Number(fs.readFileSync(PID_FILE, "utf8").trim(
 function alive(pid) { if (!pid) return false; try { process.kill(pid, 0); return true; } catch { return false; } }
 function running() { return alive(readPid()); }
 
+function planSelectionUpdates(hostSnapshot, authoritativeSelections) {
+  const hostProxies = hostSnapshot && hostSnapshot.proxies;
+  if (!hostProxies || typeof hostProxies !== "object") return [];
+  const updates = [];
+  for (const [group, target] of Object.entries(authoritativeSelections || {})) {
+    const current = hostProxies[group];
+    if (!current || current.type !== "Selector" || !Array.isArray(current.all)) continue;
+    if (!current.all.includes(target) || current.now === target) continue;
+    updates.push({ group, from: current.now || "", to: target });
+  }
+  return updates;
+}
+
+function controllerRequest(method, pathname, body) {
+  return new Promise((resolve, reject) => {
+    const encoded = body == null ? null : Buffer.from(JSON.stringify(body));
+    const req = http.request({
+      hostname: "127.0.0.1", port: HOST_CTRL, method, path: pathname,
+      headers: encoded ? { "Content-Type": "application/json", "Content-Length": encoded.length } : {},
+      timeout: 3000,
+    }, (res) => {
+      const chunks = [];
+      res.on("data", (chunk) => chunks.push(chunk));
+      res.on("end", () => {
+        const text = Buffer.concat(chunks).toString("utf8");
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          reject(new Error(`host mihomo controller HTTP ${res.statusCode}: ${text}`));
+          return;
+        }
+        if (!text) { resolve({}); return; }
+        try { resolve(JSON.parse(text)); } catch { reject(new Error("invalid host mihomo controller response")); }
+      });
+    });
+    req.on("timeout", () => req.destroy(new Error("host mihomo controller timeout")));
+    req.on("error", reject);
+    if (encoded) req.write(encoded);
+    req.end();
+  });
+}
+
+async function syncSelections(authoritativeSelections = {}) {
+  let snapshot;
+  let lastError;
+  // A forced config restart briefly closes the controller; wait for it to return.
+  for (let attempt = 0; attempt < 8; attempt++) {
+    try { snapshot = await controllerRequest("GET", "/proxies"); break; }
+    catch (error) { lastError = error; await new Promise((resolve) => setTimeout(resolve, 250)); }
+  }
+  if (!snapshot) throw lastError || new Error("host mihomo controller unavailable");
+  const updates = planSelectionUpdates(snapshot, authoritativeSelections);
+  for (const update of updates) {
+    await controllerRequest(
+      "PUT",
+      `/proxies/${encodeURIComponent(update.group)}`,
+      { name: update.to },
+    );
+  }
+  return { updated: updates };
+}
+
 function stop() {
   const pid = readPid();
   if (alive(pid)) { try { process.kill(pid, "SIGKILL"); } catch {} }
@@ -172,17 +233,19 @@ function start({ force = false } = {}) {
 
 // Full enable: ensure binary → copy+adapt container config → (re)start.
 // containerYaml is fetched by the caller (sidecar-ipc) via appDocker.
-async function enable({ containerYaml, emit } = {}) {
+async function enable({ containerYaml, selections = {}, emit } = {}) {
   await ensureBinary({ emit });
   if (!containerYaml) throw new Error(tt("noContainerConfig"));
   const changed = writeConfig(containerYaml);
   const res = start({ force: changed });
+  const synced = await syncSelections(selections);
   emit && emit({ phase: "chrome-proxy", status: "running", message: tt("ready") });
-  return { ok: true, ...res };
+  return { ok: true, ...res, ...synced };
 }
 
 module.exports = {
   VER, assetUrl, binPath, binPresent, ensureBinary,
-  buildHostConfig, writeConfig, start, stop, running, enable,
+  buildHostConfig, writeConfig, planSelectionUpdates, syncSelections,
+  start, stop, running, enable,
   HOST_CONFIG, HOST_LOG,
 };

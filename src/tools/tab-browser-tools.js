@@ -19,7 +19,7 @@ const path = require("path");
 const fs = require("fs");
 const os = require("os");
 const { z } = require("zod");
-const { app, BrowserWindow, BrowserView, webContents, ipcMain } = require("electron");
+const { app, BrowserWindow, BrowserView, webContents, ipcMain, Menu } = require("electron");
 const { attachContextMenu } = require("../utils/context-menu-options");
 const { sendCDP } = require("../utils/cdp-utils");
 
@@ -27,8 +27,11 @@ const SHELL_HTML = path.join(__dirname, "..", "tabbrowser", "tab-shell.html");
 const SHELL_PRELOAD = path.join(__dirname, "..", "tabbrowser", "tab-shell-preload.js");
 const PANEL_PRELOAD = path.join(__dirname, "..", "tabbrowser", "panel-preload.js");
 const panelCells = require("../tabbrowser/panel-cells");
+const { createPanelMenuTemplate } = require("../tabbrowser/panel-menu");
+const { resolvePanelPreset } = require("../tabbrowser/panel-presets");
 const { normalizeCicyTheme, resolveTabChromeTheme } = require("../tabbrowser/tab-theme");
 const { applyTeamIdentityToTab } = require("../tabbrowser/team-tab-identity");
+const { restoredCicyCodeUrl } = require("../tabbrowser/cicy-code-tab-restore");
 const HOMEPAGE_PRELOAD = path.join(__dirname, "..", "backends", "homepage-preload.js");
 const WEBVIEW_PRELOAD = path.join(__dirname, "..", "backends", "webview-preload.js");
 const CHROME_H = 80;  // tab strip (40) + toolbar (40) — must match tab-shell.html
@@ -144,6 +147,41 @@ function localCicyCodeHomeUrl() {
   return `http://127.0.0.1:8008/${token ? `?token=${encodeURIComponent(token)}` : ""}`;
 }
 
+function addRestoredCicyCodeTab(m, restoredUrl) {
+  if (!restoredUrl || !m || m.win.isDestroyed()) return;
+  let team = null;
+  try { team = require("../backends/local-teams").teamIdentityForUrl(restoredUrl); } catch (e) {}
+  m.addTab(restoredUrl, {
+    trusted: true,
+    title: team ? team.title : "CiCy Code",
+    team: true,
+    avatar: team ? team.avatar : "",
+    colorKey: team ? team.id : "local-cicy-code-8008",
+  });
+}
+
+function restoreCicyCodeTab(m) {
+  // Windows :8008 is the Docker sidecar and has its own volume-persisted token.
+  // Never restore it with the desktop host's global.json token: the container
+  // rejects that credential and leaves the restored tab on the login screen.
+  if (process.platform === "win32") {
+    restoredCicyCodeUrl(() => require("../sidecar/wsl-docker").readContainerToken(8008))
+      .then((url) => {
+        if (!url) {
+          console.warn("[tab-browser] skipped Docker :8008 restore: container token unavailable");
+          return;
+        }
+        addRestoredCicyCodeTab(m, url);
+      })
+      .catch((error) => {
+        console.warn(`[tab-browser] skipped Docker :8008 restore: ${error.message}`);
+      });
+    return;
+  }
+
+  addRestoredCicyCodeTab(m, localCicyCodeHomeUrl());
+}
+
 function saveLastPanelState(url, name = "面板") {
   try {
     fs.mkdirSync(path.dirname(PANEL_STATE_PATH), { recursive: true });
@@ -167,10 +205,11 @@ function readLastPanelState() {
 // 沙箱 profile 里开出来的面板格子会渲染不出内容,所以干脆不提供入口。
 // URL 带唯一 id → addTab 的 origin+pathname 复用判断不会把两个面板并成一个,
 // 面板页也按这个 path 分别持久化各自的布局。
-function openPanelTab(m) {
+function openPanelTab(m, preset) {
   if (!m || m.accountIdx !== 0) return null;
-  const url = PANEL_URL_BASE + Date.now().toString(36);
-  const name = "面板";
+  const resolved = resolvePanelPreset(preset);
+  const url = PANEL_URL_BASE + Date.now().toString(36) + (resolved.query ? `?${resolved.query}` : "");
+  const name = resolved.title;
   const id = m.addTab(url, { title: name });
   saveLastPanelState(url, name);
   return id;
@@ -667,16 +706,7 @@ function openHomeWindow(accountIdx, homeUrl, opts = {}) {
   if (accountIdx === 0 && !cicyCodeTabRestored) {
     cicyCodeTabRestored = true;
     if (shouldRestoreCicyCodeTab()) {
-      const restoredUrl = localCicyCodeHomeUrl();
-      let team = null;
-      try { team = require("../backends/local-teams").teamIdentityForUrl(restoredUrl); } catch (e) {}
-      m.addTab(restoredUrl, {
-        trusted: true,
-        title: team ? team.title : "CiCy Code",
-        team: true,
-        avatar: team ? team.avatar : "",
-        colorKey: team ? team.id : "local-cicy-code-8008",
-      });
+      restoreCicyCodeTab(m);
     }
   }
   // 只有明确要求(tray「打开首页」/ 启动,activate!==false)才把窗口抢到前台;deeplink /
@@ -701,7 +731,15 @@ function installIpc() {
     try { e.sender.send("window:fullscreen", !!m.win.isFullScreen()); } catch (err) {}
   });
   ipcMain.on("tabwin:new", (e, { url }) => { const m = mgr(e); if (m) m.addTab(url || ""); });
-  ipcMain.on("tabwin:panel", (e) => { const m = mgr(e); if (m) openPanelTab(m); });
+  ipcMain.on("tabwin:panel-menu", (e) => {
+    const m = mgr(e);
+    if (!m || m.accountIdx !== 0 || !m.win || m.win.isDestroyed()) return;
+    const menu = Menu.buildFromTemplate(
+      createPanelMenuTemplate((preset) => openPanelTab(m, preset)),
+    );
+    menu.popup({ window: m.win });
+  });
+  ipcMain.on("tabwin:panel", (e, input = {}) => { const m = mgr(e); if (m) openPanelTab(m, input.preset); });
   ipcMain.on("tabwin:rename", (e, { id, name }) => {
     const m = mgr(e);
     if (!m || m.accountIdx !== 0) return;

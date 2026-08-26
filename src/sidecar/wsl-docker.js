@@ -20,8 +20,10 @@ const os = require("os");
 const fs = require("fs");
 const docker = require("./docker"); // shared: downloads, waitUntil, probeHealth, launchElevated, ensureWsl…
 const log = require("electron-log"); // persisted main.log — bootstrap timing/failures land here
+const { gatewayKeyPresentInEnv } = require("./gateway-key-health");
 const { t } = require("../i18n"); // 打开/读 token 的可见日志走 i18n
 const { shouldSkipCicyUpdate } = require("./cicy-runtime-health");
+const protect = require("./docker-protect"); // 容器保护:自动流程禁止 rm/shutdown
 
 // Dedicated distro name — NEVER reuse/clobber a user's own "Ubuntu" distro.
 const DISTRO   = process.env.CICY_WSL_DISTRO || "cicy-code-wsl";
@@ -440,13 +442,29 @@ let _keepalive = null;
 function ensureKeepalive() {
   if (process.platform !== "win32") return;
   if (_keepalive && _keepalive.exitCode == null && !_keepalive.killed) return;
+  // 优先走计划任务(隐藏、独立于 app 进程树,app 重启不掉);任务还没注册再回退到子进程。
+  runKeepaliveTask().then((ok) => { if (!ok) spawnKeepaliveChild(); }).catch(() => spawnKeepaliveChild());
+}
+function spawnKeepaliveChild() {
+  if (_keepalive && _keepalive.exitCode == null && !_keepalive.killed) return;
   try {
-    _keepalive = spawn("wsl", ["-d", DISTRO, "-u", "root", "--", "sh", "-c", "exec sleep infinity"],
+    _keepalive = spawn("wsl", ["-d", DISTRO, "-u", "root", "--", "sh", "-c", "exec flock -n /run/cicy-keepalive.lock sleep infinity"],
       { detached: true, stdio: "ignore", windowsHide: true });
     _keepalive.on("error", (e) => { log.warn(`[keepalive] ${e.message}`); _keepalive = null; });
     _keepalive.on("exit", () => { _keepalive = null; });
     _keepalive.unref();
-    log.info("[keepalive] holding distro open (sleep infinity)");
+    log.info("[keepalive] holding distro open (child sleep infinity, fallback)");
+  } catch (e) { log.warn(`[keepalive] spawn failed: ${e.message}`); }
+}
+function spawnKeepaliveChild() {
+  if (_keepalive && _keepalive.exitCode == null && !_keepalive.killed) return;
+  try {
+    _keepalive = spawn("wsl", ["-d", DISTRO, "-u", "root", "--", "sh", "-c", `exec flock -n ${KEEPALIVE_LOCK} sleep infinity`],
+      { detached: true, stdio: "ignore", windowsHide: true });
+    _keepalive.on("error", (e) => { log.warn(`[keepalive] ${e.message}`); _keepalive = null; });
+    _keepalive.on("exit", () => { _keepalive = null; });
+    _keepalive.unref();
+    log.info("[keepalive] holding distro open (child sleep infinity; hidden logon task unavailable)");
   } catch (e) { log.warn(`[keepalive] spawn failed: ${e.message}`); }
 }
 
@@ -666,9 +684,42 @@ function publishArgs(port, extraPorts = []) {
   return args;
 }
 
-async function runContainer({ port = 8008, container = "cicy-code-docker", volume = "cicy-team-8008", env = {}, extraPorts = [], dockerSock = false, gpu = false, gpuProbeImage = IMAGE, emit } = {}) {
+// 容器状态:"running" | "exited" | "created" | … ;不存在返回 null。
+async function containerState(container) {
+  try {
+    const { stdout } = await wslRun(`docker inspect --format '{{.State.Status}}' ${container} 2>/dev/null`, { timeout: 10000 });
+    const st = String(stdout || "").trim();
+    return st || null;
+  } catch { return null; }
+}
+
+// 仅启动已存在的容器(开机自启 / 掉线拉起)。引擎没起就轻量拉起(noShutdown),
+// 容器不存在返回 { ok:false, missing:true } 交给调用方决定是否 bootstrap。
+async function startExisting({ container = "cicy-code-docker-8008", port = 8008, emit } = {}) {
+  if (await probeHealth(port)) return { ok: true, adopted: true };
+  if (!(await dockerEngineUp())) { ensureKeepalive(); await startEngine({ emit, noShutdown: true }); }
+  const st = await containerState(container);
+  if (!st) return { ok: false, missing: true };
+  if (st !== "running") {
+    try { await wslRun(`docker start ${container}`, { timeout: 60000 }); }
+    catch (e) { log.warn(`[startExisting] docker start ${container} failed: ${e.message}`); return { ok: false, error: e.message }; }
+  }
+  const ok = await docker.waitUntil(() => probeHealth(port), { totalMs: 120000, everyMs: 3000 });
+  return { ok, container };
+}
+
+async function runContainer({ port = 8008, container = "cicy-code-docker", volume = "cicy-team-8008", env = {}, extraPorts = [], dockerSock = false, gpu = false, gpuProbeImage = IMAGE, emit, force = false } = {}) {
   // 每次容器"启动"(含已在跑被 adopt)都确保桌面快捷方式存在 —— 不存在就建,坏了就修。
   if (await probeHealth(port)) { ensureDesktopShortcut(volume, port).catch(() => {}); return { adopted: true }; }
+  // 容器保护:同名容器已存在 → 只 `docker start`,绝不 rm -f 重建(数据/进程/会话都保住)。
+  // 只有容器确实不存在时才走下面的 docker run。force=true(用户显式重建)才允许删。
+  const existing = await containerState(container);
+  if (existing && !protect.guard(log, `docker rm -f ${container} (state=${existing})`, { force })) {
+    emit && emit({ phase: "container", status: "running", message: `容器已存在(${existing}),受保护 → 仅 docker start` });
+    try { await wslRun(`docker start ${container}`, { timeout: 60000 }); } catch (e) { log.warn(`[runContainer] docker start failed: ${e.message}`); }
+    ensureDesktopShortcut(volume, port).catch(() => {});
+    return { started: true, reused: true };
+  }
   // Replace any stale same-named container.
   try { await wslRun(`docker rm -f ${container}`, { timeout: 20000 }); } catch {}
   // Windows workflow/user-level environment is inherited by cicy-desktop, then
@@ -757,17 +808,186 @@ async function readContainerToken(port = 8008, container = "cicy-code-docker", v
 // after a Windows reboot until the user clicks 启动. The container's
 // --restart unless-stopped then brings cicy-code back automatically. Idempotent
 // (start-dockerd.sh is `pgrep dockerd || dockerd`); /f overwrites a stale task.
-function ensureAutostart() {
-  if (process.platform !== "win32") return Promise.resolve();
-  return new Promise((res) => {
-    const tr = `wsl.exe -d ${DISTRO} -u root -e /usr/local/sbin/start-dockerd.sh`;
-    execFile("schtasks", ["/create", "/tn", "cicy-docker-autostart", "/tr", tr, "/sc", "onlogon", "/rl", "HIGHEST", "/f"],
-      { windowsHide: true }, (err, _stdout, stderr) => {
-        if (err) log.warn(`[ensureAutostart] schtasks create FAILED (dockerd won't auto-start after reboot): ${err.message}${stderr ? ` / ${String(stderr).trim()}` : ""}`);
-        else log.info("[ensureAutostart] logon task 'cicy-docker-autostart' registered → dockerd starts on next logon");
-        res();
-      });
+// ---- 保活/自启(Windows)------------------------------------------------------
+// WSL2 在最后一个会话退出后会 teardown distro(连带 dockerd + 容器)。之前的保活是 electron
+// 子进程 `wsl … sleep infinity`:重启 desktop(taskkill /T)会把它连带杀掉 → 容器跟着停。
+// 现在保活统一交给**登录计划任务** cicy-docker-autostart:
+//   • 由计划程序启动,不在 electron 进程树里,desktop 重启/崩溃都不影响;
+//   • 通过 wscript //B + VBS `Run …, 0` 启动 wsl.exe → **完全不显示窗口**;
+//   • XML 定义:Hidden、ExecutionTimeLimit=PT0S(不限 72h)、IgnoreNew(防重复)、失败自动重试;
+//   • distro 内用 flock 单例,重复启动直接退出。
+// electron 侧 ensureKeepalive() 优先 `schtasks /run` 这个任务,任务不存在才退回子进程保活。
+const KEEPALIVE_TASK = "cicy-docker-autostart";
+const KEEPALIVE_LOCK = "/run/cicy-keepalive.lock";
+function keepaliveDir() { return path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "cicy-desktop"); }
+function keepaliveShellCmd() {
+  return `/usr/local/sbin/start-dockerd.sh; exec flock -n ${KEEPALIVE_LOCK} sleep infinity`;
+}
+function keepaliveVbs() {
+  // VBS 里字符串用 "" 转义双引号。Run(cmd, 0=隐藏窗口, True=等待) → wscript 存活期间任务显示「正在运行」,
+  // IgnoreNew 才能去重;wsl.exe 是 wscript 的子进程,与 electron 无关。
+  const cmd = `wsl.exe -d ${DISTRO} -u root -e sh -c ""${keepaliveShellCmd()}""`;
+  return `Set sh = CreateObject("WScript.Shell")\r\nsh.Run "${cmd}", 0, True\r\n`;
+}
+function keepaliveTaskXml(vbsPath) {
+  const esc = (x) => String(x).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+  return `<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo><Description>CiCy Desktop: keep the WSL distro + dockerd + cicy-code container alive (hidden)</Description></RegistrationInfo>
+  <Triggers><LogonTrigger><Enabled>true</Enabled></LogonTrigger></Triggers>
+  <Principals><Principal id="Author"><LogonType>InteractiveToken</LogonType><RunLevel>HighestAvailable</RunLevel></Principal></Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings><StopOnIdleEnd>false</StopOnIdleEnd><RestartOnIdle>false</RestartOnIdle></IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>true</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>5</Priority>
+    <RestartOnFailure><Interval>PT1M</Interval><Count>999</Count></RestartOnFailure>
+  </Settings>
+  <Actions Context="Author"><Exec><Command>wscript.exe</Command><Arguments>//B //Nologo "${esc(vbsPath)}"</Arguments></Exec></Actions>
+</Task>
+`;
+}
+function schtasks(args, timeout = 30000) {
+  return new Promise((resolve) => {
+    execFile("schtasks", args, { windowsHide: true, timeout }, (err, stdout, stderr) =>
+      resolve({ ok: !err, stdout: String(stdout || ""), stderr: String(stderr || err?.message || "") }));
   });
+}
+let _keepaliveTaskKnown = null; // null=未查 | true/false
+async function keepaliveTaskExists() {
+  if (_keepaliveTaskKnown !== null) return _keepaliveTaskKnown;
+  const r = await schtasks(["/query", "/tn", KEEPALIVE_TASK], 15000);
+  _keepaliveTaskKnown = r.ok;
+  return r.ok;
+}
+// 通过计划任务(隐藏、独立进程树)拉起保活;返回是否成功触发。
+async function runKeepaliveTask() {
+  if (!(await keepaliveTaskExists())) return false;
+  const r = await schtasks(["/run", "/tn", KEEPALIVE_TASK], 15000);
+  if (!r.ok) log.warn(`[keepalive] schtasks /run failed: ${r.stderr.trim()}`);
+  return r.ok;
+}
+
+// 保活/自启任务名 + 隐藏启动器。任务 → wscript //B keepalive.vbs → (隐藏窗口) wsl.exe …
+// `sh -c "start-dockerd.sh; exec flock -n /run/cicy-keepalive.lock sleep infinity"`:
+//   • flock -n:同一时间只有一个保活占住 distro,重复触发立即退出(不堆进程);
+//   • 由计划程序而非 electron 进程树拉起 → 重启/杀掉 cicy-desktop(taskkill /T)不会连带
+//     杀掉保活 → distro 不卸载 → dockerd/容器不停(实测:旧方案 app 重启一次容器就重启一次);
+//   • XML 注册:Hidden + ExecutionTimeLimit=PT0S(schtasks /create 默认 72h 后强杀任务!)
+//     + MultipleInstancesPolicy=IgnoreNew。
+const AUTOSTART_TASK = "cicy-docker-autostart";
+function keepaliveDir() { return path.join(process.env.LOCALAPPDATA || os.homedir(), "cicy-desktop"); }
+function keepaliveShellCmd() {
+  return `/usr/local/sbin/start-dockerd.sh; exec flock -n /run/cicy-keepalive.lock sleep infinity`;
+}
+function writeKeepaliveFiles() {
+  const dir = keepaliveDir();
+  fs.mkdirSync(dir, { recursive: true });
+  const vbs = path.join(dir, "wsl-keepalive.vbs");
+  // VBS 里双引号用 "" 转义;第二参数 0 = 隐藏窗口;第三参数 True = 等待(任务保持 running,IgnoreNew 才能去重)。
+  const inner = `wsl.exe -d ${DISTRO} -u root -e sh -c ""${keepaliveShellCmd()}""`;
+  fs.writeFileSync(vbs, `Set sh = CreateObject("WScript.Shell")\r\nsh.Run "${inner}", 0, True\r\n`);
+  const xml = path.join(dir, "wsl-keepalive-task.xml");
+  const body = `<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo><Description>CiCy Desktop: keep WSL distro ${DISTRO} alive and dockerd running (hidden)</Description></RegistrationInfo>
+  <Triggers><LogonTrigger><Enabled>true</Enabled></LogonTrigger></Triggers>
+  <Principals><Principal id="Author"><LogonType>InteractiveToken</LogonType><RunLevel>HighestAvailable</RunLevel></Principal></Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings><StopOnIdleEnd>false</StopOnIdleEnd><RestartOnIdle>false</RestartOnIdle></IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>true</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+    <RestartOnFailure><Interval>PT1M</Interval><Count>999</Count></RestartOnFailure>
+  </Settings>
+  <Actions Context="Author"><Exec><Command>wscript.exe</Command><Arguments>//B //Nologo "${vbs}"</Arguments></Exec></Actions>
+</Task>
+`;
+  fs.writeFileSync(xml, "﻿" + body, { encoding: "utf16le" });
+  return { vbs, xml };
+}
+function schtasks(args, timeout = 20000) {
+  return new Promise((res) => execFile("schtasks", args, { windowsHide: true, timeout }, (err, stdout, stderr) => res({ ok: !err, stdout: String(stdout || ""), stderr: String(stderr || err?.message || "") })));
+}
+// 通过计划任务(隐藏、独立进程树)拉起保活;任务不存在返回 false 让调用方回退到子进程方案。
+let _taskKeepaliveAt = 0;
+async function runKeepaliveTask() {
+  if (process.platform !== "win32") return false;
+  if (Date.now() - _taskKeepaliveAt < 30000) return true; // 刚触发过,IgnoreNew 会去重,别刷
+  const q = await schtasks(["/query", "/tn", AUTOSTART_TASK], 10000);
+  if (!q.ok) return false;
+  const r = await schtasks(["/run", "/tn", AUTOSTART_TASK], 15000);
+  if (r.ok) { _taskKeepaliveAt = Date.now(); log.info(`[keepalive] started via task '${AUTOSTART_TASK}' (hidden, outside app process tree)`); }
+  else log.warn(`[keepalive] schtasks /run failed: ${r.stderr.trim()}`);
+  return r.ok;
+}
+// 老方案残留:计划任务/旧代码直接起的 `wsl.exe … sleep infinity` 带可见控制台窗口。新的隐藏
+// 保活拿到 flock 后再关掉它们(先确认新保活在,否则关窗 = distro 卸载 = 容器停)。
+async function closeVisibleKeepaliveWindows() {
+  const ps = `Get-CimInstance Win32_Process | Where-Object { $_.Name -ieq 'wsl.exe' -and $_.CommandLine -like '*${DISTRO}*' -and $_.CommandLine -like '*sleep infinity*' -and $_.CommandLine -notlike '*flock*' } | ForEach-Object { $p = Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue; if ($p -and $p.MainWindowHandle -ne 0) { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; 'closed ' + $_.ProcessId } }`;
+  return new Promise((res) => execFile("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps], { windowsHide: true, timeout: 20000 }, (err, stdout) => {
+    const out = String(stdout || "").trim();
+    if (out) log.info(`[keepalive] ${out.replace(/\r?\n/g, ", ")} (visible legacy wsl.exe window)`);
+    res(!err);
+  }));
+}
+
+async function ensureAutostart() {
+  if (process.platform !== "win32") return;
+  // (a) 新版 WSL 支持 /etc/wsl.conf [boot] command —— distro 一起就拉 dockerd(幂等写入)。
+  try {
+    await wslRun(
+      "touch /etc/wsl.conf; grep -q '^\\[boot\\]' /etc/wsl.conf || printf '\\n[boot]\\ncommand=/usr/local/sbin/start-dockerd.sh\\n' >> /etc/wsl.conf; " +
+      "grep -q 'start-dockerd.sh' /etc/wsl.conf || sed -i 's/^\\[boot\\]/[boot]\\ncommand=\\/usr\\/local\\/sbin\\/start-dockerd.sh/' /etc/wsl.conf",
+      { timeout: 15000 });
+  } catch (e) { log.warn(`[ensureAutostart] wsl.conf [boot] write failed: ${e.message}`); }
+  // (b) 登录计划任务(隐藏保活,见 writeKeepaliveFiles 注释)。/f 覆盖旧的可见版任务。
+  let files;
+  try { files = writeKeepaliveFiles(); }
+  catch (e) { log.warn(`[ensureAutostart] write keepalive files failed: ${e.message}`); return; }
+  // 旧版任务(直接跑 wsl.exe,可见窗口)正在运行 → 先让子进程保活顶住 distro,再 /end 掉旧实例,
+  // 否则 IgnoreNew 会让新的隐藏实例永远起不来(实测 /run 返回 0x80070420 already running)。
+  try {
+    const q = await schtasks(["/query", "/tn", AUTOSTART_TASK, "/fo", "CSV", "/v"], 10000);
+    if (q.ok && q.stdout && !/wscript\.exe/i.test(q.stdout) && /sleep infinity/.test(q.stdout)) {
+      log.info("[ensureAutostart] legacy visible keepalive task found → hold distro with child, end legacy instance");
+      spawnKeepaliveChild();
+      await new Promise((r2) => setTimeout(r2, 4000));
+      await schtasks(["/end", "/tn", AUTOSTART_TASK], 15000);
+    }
+  } catch {}
+  const r = await schtasks(["/create", "/tn", AUTOSTART_TASK, "/xml", files.xml, "/f"], 30000);
+  if (!r.ok) { log.warn(`[ensureAutostart] schtasks create FAILED (dockerd won't auto-start after reboot): ${r.stderr.trim()}`); return; }
+  log.info(`[ensureAutostart] logon task '${AUTOSTART_TASK}' registered (hidden, no time limit) → dockerd + keepalive on next logon`);
+  // 立刻用任务把隐藏保活拉起来,再关掉旧的可见窗口(顺序不能反)。
+  if (await runKeepaliveTask()) {
+    await new Promise((r2) => setTimeout(r2, 3000));
+    // 新保活是否已持有 flock(在 distro 里看 lock 文件是否被占)
+    let held = false;
+    try { await wslRun("flock -n /run/cicy-keepalive.lock true && exit 1 || exit 0", { timeout: 8000 }); held = true; } catch {}
+    if (held) await closeVisibleKeepaliveWindows();
+    else log.warn("[keepalive] hidden keepalive not holding the lock yet → leaving legacy visible window alone");
+  }
 }
 
 // Drop a desktop shortcut (folder icon) to the container's /home/cicy — i.e. the
@@ -895,7 +1115,9 @@ async function _bootstrap({ onProgress, port = 8008, container = "cicy-code-dock
   // 自愈:上次检测到 WSL 卡死(或修复流程标记了待重置)→ 此刻(重启后、未碰 wsl 前)把坏
   // distro 从注册表移除 + 文件夹改名备份(不删数据),让下面走全新导入,而不是又去碰坏 distro
   // 再次卡死。纯注册表/文件操作,不经 wsl。
-  if (process.platform === "win32" && wslResetPending()) {
+  if (process.platform === "win32" && wslResetPending() && !protect.guard(log, "reset-broken-distro (wsl --unregister)")) {
+    log.warn("[bootstrap] 容器保护已开启:跳过 reset-broken-distro,留给用户显式「修复 WSL」");
+  } else if (process.platform === "win32" && wslResetPending()) {
     begin("reset-broken-distro");
     emit({ phase: "install-docker", status: "running", message: "检测到上次 WSL 卡死,正在重置环境(旧数据已改名备份,不删)…" });
     try { const r = await resetDistroFiles(); log.info(`[bootstrap] reset-broken-distro out=${r || "(none)"}`); } catch (e) { log.warn(`[bootstrap] reset failed: ${e.message}`); }
@@ -919,6 +1141,14 @@ async function _bootstrap({ onProgress, port = 8008, container = "cicy-code-dock
     emit({ phase: "done", status: "done", message: "Docker cicy-code 已就绪 🎉" });
     finish(true);
     return { ok: true, container };
+  }
+  if (healthy0 && di0 === false && !protect.guard(log, "zombie-8008 → wsl --shutdown")) {
+    // 容器保护:distroInstalled() 误判 false(WSL 更新后孤儿化)会把健康的服务当僵尸 shutdown。
+    // 保护开启时按「健康即可用」处理,不动 WSL。
+    done();
+    emit({ phase: "done", status: "done", message: "Docker cicy-code 已就绪(WSL 管理异常,已按保护策略保留运行中的服务)" });
+    finish(true);
+    return { ok: true, container, wslUnmanaged: true };
   }
   if (healthy0 && di0 === false) {
     emit({ phase: "container", status: "running", message: "检测到 :8008 被僵尸进程占用(WSL 已无此发行版),正在清理端口 + 重置 WSL 后重装…" });
@@ -956,7 +1186,7 @@ async function _bootstrap({ onProgress, port = 8008, container = "cicy-code-dock
   begin("start-dockerd");
   if (!(await dockerEngineUp())) {
     emit({ phase: "container", status: "running", message: "启动 Docker 引擎（首次较慢，请耐心）…" });
-    const started = await startEngine({ emit }); // 3 clean attempts internally
+    const started = await startEngine({ emit, noShutdown: protect.isProtected() }); // 3 clean attempts internally;保护开启时绝不 wsl --shutdown
     const up = started || await docker.waitUntil(dockerEngineUp, { totalMs: 120000, everyMs: 3000 });
     if (!up) {
       const dlog = await dockerdLogTail();
@@ -992,6 +1222,9 @@ async function _bootstrap({ onProgress, port = 8008, container = "cicy-code-dock
   begin("wait-health");
   emit({ phase: "container", status: "running", message: "等待 cicy-code 就绪…" });
   let healthy = await docker.waitUntil(() => probeHealth(port), { totalMs: 15000, everyMs: 3000 });
+  if (!healthy && !protect.guard(log, "auto-update after health miss")) {
+    healthy = await docker.waitUntil(() => probeHealth(port), { totalMs: 120000, everyMs: 3000 }); // 保护开启:只等,不自动改容器
+  }
   if (!healthy) {
     emit({ phase: "container", status: "running", message: "服务尚未响应,正在检查并修复运行时完整性…" });
     try {
@@ -1096,17 +1329,17 @@ async function cicyRuntimePlatformReady(container) {
   catch { return false; }
 }
 
+// Update cicy-code IN PLACE. SMART path (避免容器内 npm view 卡 ~2min):
+//  1. 在宿主机解析最新版本号(host 网络,不过容器代理/DNS)
+//  2. 和容器里已装版本比对——一样就直接「已是最新」,根本不 docker exec
+//  3. 真有新版才 cp 脚本进容器,并把**已解析的具体版本**传给它(脚本跳过自己的 npm view)
+// 容器里只剩真正的 `npm install -g cicy-code@<ver>`(+ fail-fast/换源),不再有版本查询的卡顿。
 // cp 脚本进容器要写 /usr/local/bin —— 镜像默认用户是 cicy(非 root),不带 -u root
 // 必然 EACCES,然后被 update() 的 catch 吞掉、静默回落到镜像里烘焙的旧脚本。
 function buildPushUpdateScriptCommand(encodedScript, container) {
   return `echo ${encodedScript} | base64 -d | docker exec -u root -i ${container} bash -c 'cat > /usr/local/bin/cicy-code-update.sh && chmod 0755 /usr/local/bin/cicy-code-update.sh'`;
 }
 
-// Update cicy-code IN PLACE. SMART path (避免容器内 npm view 卡 ~2min):
-//  1. 在宿主机解析最新版本号(host 网络,不过容器代理/DNS)
-//  2. 和容器里已装版本比对——一样就直接「已是最新」,根本不 docker exec
-//  3. 真有新版才 cp 脚本进容器,并把**已解析的具体版本**传给它(脚本跳过自己的 npm view)
-// 容器里只剩真正的 `npm install -g cicy-code@<ver>`(+ fail-fast/换源),不再有版本查询的卡顿。
 async function update({ onProgress, container = "cicy-code-docker", port = 8008 } = {}) {
   const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
   // 更新一个 running 容器只需 docker exec——引擎必然在跑。绝不无条件 startEngine():它的
@@ -1177,14 +1410,27 @@ async function dockerRestart({ container = "cicy-code-docker-8008" } = {}) {
 // 重建容器:docker rm -f 旧容器 + docker run 新容器(用新 env,如新的 docker team 网关
 // key)。**保留 volume**(数据/api_token/deviceId 不丢),只是换掉容器本身 + env。
 // 破坏性(短暂中断 + 换 key)→ 调用方要 confirm。
-async function recreate({ onProgress, port = 8008, container = "cicy-code-docker-8008", volume = "cicy-team-8008", env = {}, extraPorts = [], dockerSock = false, gpu = false, gpuProbeImage = IMAGE } = {}) {
+async function recreate({ onProgress, port = 8008, container = "cicy-code-docker-8008", volume = "cicy-team-8008", env = {}, extraPorts = [], dockerSock = false, gpu = false, gpuProbeImage = IMAGE, force = false } = {}) {
   const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
+  // 容器保护:非用户显式(force)的 recreate 一律降级为「启动已存在的容器」。
+  if (!protect.guard(log, `recreate ${container}`, { force })) {
+    emit({ phase: "container", status: "running", message: "容器保护已开启:跳过重建,仅确保容器在运行" });
+    const r = await startExisting({ container, port, emit });
+    if (r.missing) {
+      const rr = await runContainer({ port, container, volume, env, extraPorts, dockerSock, gpu, gpuProbeImage, emit });
+      const healthy = await docker.waitUntil(() => probeHealth(port), { totalMs: 120000, everyMs: 3000 });
+      emit({ phase: "done", status: healthy ? "done" : "error", message: healthy ? t("docker.ready") : t("docker.updating.notReady") });
+      return { ...rr, ok: healthy, blocked: true };
+    }
+    emit({ phase: "done", status: r.ok ? "done" : "error", message: r.ok ? t("docker.ready") : t("docker.updating.notReady") });
+    return { ...r, blocked: true };
+  }
   // 重建 = 用最新镜像重建。OSS 有更新版先刷新(非破坏性,不删发行版/volume),再 rm + run。
   try { await ensureFreshImage({ emit }); } catch (e) { emit({ phase: "image", status: "running", message: `镜像刷新跳过(${e.message}),用现有镜像重建` }); }
   // 强删占用该端口的**任何**容器(含老名字 cicy-code-docker)+ 目标容器 —— 否则
   // runContainer 开头的 probeHealth 看到旧容器还健康会 adopt 它、不重建,key 就换不了。
   try { await wslRun(`docker ps -aq --filter publish=${port} | xargs -r docker rm -f 2>/dev/null; docker rm -f ${container} 2>/dev/null; true`, { timeout: 30000 }); } catch {}
-  const r = await runContainer({ port, container, volume, env, extraPorts, dockerSock, gpu, gpuProbeImage, emit });
+  const r = await runContainer({ port, container, volume, env, extraPorts, dockerSock, gpu, gpuProbeImage, emit, force: true });
   try { await ensureDesktopShortcut(volume, port); } catch {}
   // 等 :8008 真正起来再返回——否则 docker run 一返回卡片就探测「没运行」,显示「启动」让
   // 用户再点一下(实测:端口保存后重建,drawer 关了还要手动点启动)。
@@ -1207,8 +1453,12 @@ function unregisterDistro() {
 // downloader, which copes with the flaky CN DNS that bare curl can't) is the
 // only reliable CN update path. This RESETS the distro: the cicy-team volume is
 // re-created and the instance re-seeds (new token) on next boot.
-async function upgrade({ onProgress, port = 8008, container = "cicy-code-docker", volume = "cicy-team", env = {}, extraPorts = [], dockerSock = false, gpu = false, gpuProbeImage = IMAGE, wslInstallDir } = {}) {
+async function upgrade({ onProgress, port = 8008, container = "cicy-code-docker", volume = "cicy-team", env = {}, extraPorts = [], dockerSock = false, gpu = false, gpuProbeImage = IMAGE, wslInstallDir, force = false } = {}) {
   const emit = (ev) => { try { onProgress && onProgress(ev); } catch {} };
+  if (!protect.guard(log, "upgrade (stop + wsl --unregister)", { force })) {
+    emit({ phase: "done", status: "error", message: "容器保护已开启:升级会重置 distro,已拦截(请从卡片菜单手动升级)" });
+    return { ok: false, reason: "docker_protect", blocked: true };
+  }
   emit({ phase: "install-docker", status: "running", message: "升级 = 拉取最新运行环境并重装（会重置容器数据）…" });
   try { await stop({ container }); } catch {}
   try { await unregisterDistro(); } catch {}
@@ -1216,10 +1466,19 @@ async function upgrade({ onProgress, port = 8008, container = "cicy-code-docker"
   return await _bootstrap({ onProgress, port, container, volume, env, extraPorts, dockerSock, gpu, gpuProbeImage, wslInstallDir });
 }
 
-// 容器里有没有注入网关 key(reconcile 自愈用):printenv 看 CICY_AI_GATEWAY_LLM_API_KEY。
+// 容器配置里有没有注入网关 key(reconcile 自愈用)。查询失败返回 null，绝不能
+// 把 WSL/Docker 的瞬时故障误判为缺 key 后重建健康容器。
 async function hasGatewayKey(container = "cicy-code-docker") {
-  try { const { stdout } = await wslRun(`docker exec ${container} printenv CICY_AI_GATEWAY_LLM_API_KEY`, { timeout: 8000 }); return /sk-/.test(String(stdout || "")); }
-  catch { return false; }
+  try {
+    const { stdout } = await wslRun(
+      `docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' ${container}`,
+      { timeout: 8000 },
+    );
+    return gatewayKeyPresentInEnv(stdout);
+  } catch (err) {
+    log.warn(`[hasGatewayKey] check failed, skipping self-heal: ${err.message}`);
+    return null;
+  }
 }
 
 // 读容器里 cicy-code 生成的 mihomo.yaml(host-mihomo 用它在 Windows 宿主重建 Chrome 代理配置)。
@@ -1228,8 +1487,36 @@ async function readMihomoConfig(container = "cicy-code-docker-8008") {
   return String(stdout || "");
 }
 
+function parseMihomoSelections(payload) {
+  let parsed;
+  try { parsed = JSON.parse(String(payload || "")); }
+  catch { throw new Error("invalid mihomo controller response"); }
+  if (!parsed || !parsed.proxies || typeof parsed.proxies !== "object") {
+    throw new Error("invalid mihomo controller response: proxies missing");
+  }
+  const selections = {};
+  for (const [name, proxy] of Object.entries(parsed.proxies)) {
+    if (proxy && proxy.type === "Selector" && typeof proxy.now === "string" && proxy.now) {
+      selections[name] = proxy.now;
+    }
+  }
+  return selections;
+}
+
+// The WSL Docker controller is authoritative for runtime Selector choices.
+// Read all groups in one request so the Windows host can mirror the same state.
+async function readMihomoSelections(container = "cicy-code-docker-8008") {
+  const { stdout } = await wslRun(
+    `docker exec ${container} curl -fsS http://127.0.0.1:19001/proxies`,
+    { timeout: 15000 },
+  );
+  return parseMihomoSelections(stdout);
+}
+
 module.exports = {
   bootstrap, status, restart, stop, dockerRestart, recreate, update, upgrade, runContainer, readContainerToken,
   distroInstalled, dockerInstalled, dockerEngineUp, imagePresent, probeHealth, wslRun, hasGatewayKey,
-  readMihomoConfig, repairWsl, lxssWedged, dockerGpuAvailable, resolveWslInstallDir, buildPushUpdateScriptCommand,
+  readMihomoConfig, readMihomoSelections, parseMihomoSelections,
+  repairWsl, lxssWedged, dockerGpuAvailable, resolveWslInstallDir, buildPushUpdateScriptCommand,
+  startExisting, containerState, ensureAutostart, keepaliveShellCmd, runKeepaliveTask,
 };

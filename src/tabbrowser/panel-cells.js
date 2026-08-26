@@ -12,10 +12,12 @@
 // body rect and syncs [{id,url,rect}] here over IPC. Bonus: each cell has a
 // webContentsId, so the electron_tab_* tools (eval/screenshot/navigate) work
 // on panel cells exactly like tabs.
-const { BrowserView, ipcMain, webContents, session } = require("electron");
+const { BrowserView, ipcMain, net, webContents, session } = require("electron");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const { loadPanelCellUrl } = require("./telegram-web-preferences");
+const { shouldAttachPanelCell } = require("./panel-cell-visibility");
 
 // Panel tabs only exist in profile 0, whose URL toolbar is hidden. Their page
 // starts immediately below the 40px tab strip, so native cell BrowserViews do too.
@@ -60,6 +62,23 @@ function ensureCellSessionProxy(idx) {
       .setProxy({ proxyRules: rules, proxyBypassRules: "127.0.0.1,localhost,[::1]" })
       .catch(() => {});
   } catch (e) {}
+}
+
+async function applyProfileProxy(idx, proxy) {
+  const part = partitionFor(idx);
+  const rules = require("../profiles/profile-store").proxyRules(proxy);
+  await session.fromPartition(part).setProxy({
+    proxyRules: rules || "direct://",
+    proxyBypassRules: "127.0.0.1,localhost,[::1]",
+  });
+  appliedProxy.add(part);
+  for (const pc of registry.values()) {
+    for (const rec of pc.views.values()) {
+      if (rec.profile === idx) {
+        try { rec.view.webContents.reload(); } catch (e) {}
+      }
+    }
+  }
 }
 
 // tab webContents.id -> PanelCells
@@ -147,6 +166,9 @@ class PanelCells {
     } catch (e) {}
 
     // push nav state back to the panel chrome (url input / spinner / persistence)
+    // 最近一次加载失败(did-fail-load)——面板页据此显示「代理不通/网络错误」覆盖层,而不是
+    // 一片白(chrome-error:// 页在深色主题下就是空白)。成功导航后清空。
+    let lastError = null;
     const push = () => {
       let url = "", title = "";
       try { url = wc.getURL(); title = wc.getTitle(); } catch (e) {}
@@ -155,16 +177,62 @@ class PanelCells {
       // did-start-loading; report the BrowserView's actual state instead.
       let loading = false;
       try { loading = wc.isLoading(); } catch (e) {}
-      this.sendState({ id: cellId, url, title, loading, wcId: wc.id });
+      const failed = /^chrome-error:/.test(url) || !!lastError;
+      this.sendState({ id: cellId, url, title, loading, wcId: wc.id, failed, error: failed ? lastError : null });
     };
-    wc.on("did-start-loading", () => this.sendState({ id: cellId, loading: true, wcId: wc.id }));
-    wc.on("did-stop-loading", push);
-    wc.on("did-fail-load", push);
+    // Telegram Web 是 PWA:代理挂掉时 service worker 照样从缓存吐出 app shell,主框架
+    // 「加载成功」、did-fail-load 不触发,可页面其实一点网都没有(用户看到的就是一片白
+    // 或永远转圈)。实测:profile 代理指向一个没人监听的端口,状态仍显示「已加载」。
+    // 所以加载结束后再从 session 层探一次真实连通性 —— net.fetch 走这个 session 的代理,
+    // 且完全绕开 service worker 缓存,是唯一能分辨「真加载」和「缓存假象」的办法。
+    let probeSeq = 0;
+    const probeReachable = async () => {
+      if (profileIdx === 0) return; // 本地 cicy-code,不走代理也没 SW 缓存问题
+      const seq = ++probeSeq;
+      let target = "";
+      // 探文档本身,不探 favicon:favicon 在某些代理链路上会挂住(实测 mihomo 下
+      // ERR_CONNECTION_TIMED_OUT),而文档 URL 正是页面刚刚请求过的那一个。
+      try { const u = new URL(wc.getURL()); if (/^https?:$/.test(u.protocol)) target = `${u.origin}${u.pathname}`; } catch (e) {}
+      if (!target) return;
+      const attempt = async () => {
+        try {
+          await net.fetch(target, {
+            session: session.fromPartition(partitionFor(profileIdx)),
+            cache: "no-store",
+            signal: AbortSignal.timeout(10000),
+          });
+          return "";
+        } catch (e) { return String((e && e.message) || e) || "请求失败"; }
+      };
+      // 一次失败不算数:代理抖一下就报「连接失败」比不报还烦。两次都失败才判定。
+      let detail = await attempt();
+      if (detail) {
+        if (seq !== probeSeq) return;
+        await new Promise((r) => setTimeout(r, 2000));
+        if (seq !== probeSeq) return;
+        detail = await attempt();
+      }
+      if (seq !== probeSeq) return;       // 期间又导航了,这次结果作废
+      if (!detail) return;                 // 通了就什么都不做(别覆盖真正的 did-fail-load)
+      lastError = { code: "ERR_NO_NETWORK", description: `网络不可达（${detail}）；页面内容来自缓存`, url: target };
+      try { wc.cicyLastError = lastError; } catch (e) {}
+      push();
+    };
+
+    wc.on("did-start-loading", () => { probeSeq++; this.sendState({ id: cellId, loading: true, wcId: wc.id }); });
+    wc.on("did-stop-loading", () => { push(); probeReachable(); });
+    wc.on("did-fail-load", (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      if (isMainFrame === false || errorCode === -3) return; // 子框架 / ERR_ABORTED(用户导航打断)不算失败
+      lastError = { code: errorCode, description: String(errorDescription || ""), url: String(validatedURL || "") };
+      try { wc.cicyLastError = lastError; } catch (e) {}
+      push();
+    });
+    wc.on("did-navigate", (_e, navUrl) => { if (!/^chrome-error:/.test(String(navUrl || ""))) { lastError = null; try { wc.cicyLastError = null; } catch (e) {} } });
     wc.on("did-navigate", push);
     wc.on("did-navigate-in-page", push);
     wc.on("page-title-updated", push);
 
-    const rec = { view, url: "", profile: profileIdx };
+    const rec = { view, url: "", profile: profileIdx, visible: true };
     this.views.set(String(cellId), rec);
     return rec;
   }
@@ -194,9 +262,10 @@ class PanelCells {
       // locality change (localhost ↔ external) → partition must change → rebuild
       if (rec && rec.profile !== prof) { this.destroyCell(key); rec = null; }
       if (!rec) rec = this.create(c.id, prof);
+      rec.visible = c.visible !== false;
       if (url && rec.url !== url) {
         rec.url = url;
-        try { rec.view.webContents.loadURL(url); } catch (e) {}
+        try { loadPanelCellUrl(rec.view.webContents, url).catch(() => {}); } catch (e) {}
       }
       this.place(rec, c.rect);
     }
@@ -204,6 +273,18 @@ class PanelCells {
     this.updateAttach();
   }
 
+  // 当前所有格子的加载状态(页面刷新后重新拿一遍,否则已加载/已失败的格子不会再发事件)。
+  states() {
+    const out = [];
+    for (const [id, rec] of this.views) {
+      const wc = rec.view && rec.view.webContents;
+      if (!wc || wc.isDestroyed()) continue;
+      let url = "", title = "", loading = false;
+      try { url = wc.getURL(); title = wc.getTitle(); loading = wc.isLoading(); } catch (e) {}
+      out.push({ id, url, title, loading, wcId: wc.id, failed: /^chrome-error:/.test(url), error: wc.cicyLastError || null });
+    }
+    return out;
+  }
   reload(cellId) {
     const rec = this.views.get(String(cellId));
     if (rec) { try { rec.view.webContents.reload(); } catch (e) {} }
@@ -225,7 +306,7 @@ class PanelCells {
     if (!win || win.isDestroyed()) return;
     for (const rec of this.views.values()) {
       try {
-        if (this.visible) win.addBrowserView(rec.view);   // no-op if already attached
+        if (shouldAttachPanelCell(this.visible, rec.visible)) win.addBrowserView(rec.view);   // no-op if already attached
         else win.removeBrowserView(rec.view);
       } catch (e) {}
     }
@@ -268,13 +349,32 @@ function installIpc(findTab) {
   };
   ipcMain.on("panelcells:sync", (e, { cells }) => { const pc = ctx(e); if (pc) pc.sync(cells); });
   ipcMain.on("panelcells:reload", (e, { id }) => { const pc = ctx(e); if (pc) pc.reload(id); });
+  ipcMain.handle("panelcells:states", (e) => { const pc = ctx(e); return pc ? pc.states() : []; });
   ipcMain.handle("panelcells:profiles", (e) => {
     if (!ctx(e)) return [];
     try {
       return require("../profiles/profile-store").listProfiles("electron")
         .filter((p) => Number.isInteger(Number(p.accountIdx)) && Number(p.accountIdx) > 0 && Number(p.accountIdx) !== 9)
-        .map((p) => ({ accountIdx: Number(p.accountIdx), name: String(p.name || "") }));
+        .map((p) => ({
+          accountIdx: Number(p.accountIdx),
+          name: String(p.name || ""),
+          proxy: p.proxy && p.proxy.enabled ? String(p.proxy.url || "") : "",
+        }));
     } catch (err) { return []; }
+  });
+  ipcMain.handle("panelcells:add-profile", async (e) => {
+    if (!ctx(e)) throw new Error("Invalid panel");
+    const service = require("./telegram-matrix-profiles");
+    const profile = service.addTelegramProfile();
+    await applyProfileProxy(profile.accountIdx, profile.proxy);
+    return { accountIdx: profile.accountIdx, name: profile.name, proxy: profile.proxy.url };
+  });
+  ipcMain.handle("panelcells:set-profile-proxy", async (e, { accountIdx, proxy }) => {
+    if (!ctx(e)) throw new Error("Invalid panel");
+    const service = require("./telegram-matrix-profiles");
+    const profile = service.setTelegramProfileProxy(accountIdx, proxy);
+    await applyProfileProxy(profile.accountIdx, profile.proxy);
+    return { accountIdx: profile.accountIdx, name: profile.name, proxy: profile.proxy.url };
   });
   ipcMain.handle("panelcells:snapshots", async (e) => {
     const pc = ctx(e);

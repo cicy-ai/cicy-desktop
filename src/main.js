@@ -14,6 +14,7 @@ const { openWindowForBackend } = require("./backends/window-manager");
 const { Menu } = require("electron");
 const { dialog } = require("electron");
 const { setupAppIcons } = require("./tray");
+const { handleChromeLaunchError } = require("./chrome/chrome-install-navigation");
 const { brandHostElectron } = require("./utils/brand-host-electron");
 const appUpdater = require("./app-updater");
 
@@ -733,27 +734,54 @@ function ensureAutoLaunch() {
       // cicy-desktop bin) instead of process.execPath, which is a transient
       // electron path that breaks on every version/cache change (the old auto-
       // start bug). Skip a pure source checkout so devs aren't auto-added.
-      const installed = electronApp.isPackaged ||
-        __dirname.includes(`${path.sep}node_modules${path.sep}`);
-      if (!installed) return;
+      // 源码 checkout 也注册(要求:登录即自启 cicy-desktop → :8008)。applet 不存在时
+      // ensureMacLoginItem 自己会跳过并在下次重试。
       ensureMacLoginItem(want);
       return;
     }
 
-    // win/linux: unchanged — only manage login items for packaged builds.
-    if (!electronApp.isPackaged) return;
     if (process.platform === "win32") {
-      const cur = electronApp.getLoginItemSettings();
+      // 打包版:登录项指向自身 exe。源码运行(npm start):必须走 bin/cicy-desktop 启动器
+      // (它先起 master 再起 worker,直接起 electron.exe 会缺 master)。登录项指向一个
+      // wscript 隐藏启动的 VBS → `cmd /c node .\bin\cicy-desktop`,全程无控制台窗口。
+      const fromSource = !electronApp.isPackaged;
+      let opts;
+      if (fromSource) {
+        const vbs = writeSourceAutostartVbs();
+        opts = { openAtLogin: want, path: "wscript.exe", args: ["//B", "//Nologo", vbs] };
+      } else {
+        opts = { openAtLogin: want, args: ["--hidden"] };
+      }
+      const cur = electronApp.getLoginItemSettings(fromSource ? { path: opts.path, args: opts.args } : undefined);
       if (cur.openAtLogin !== want) {
-        electronApp.setLoginItemSettings({ openAtLogin: want, args: ["--hidden"] });
-        log.info(`[autostart] openAtLogin → ${want}`);
+        electronApp.setLoginItemSettings(opts);
+        log.info(`[autostart] openAtLogin → ${want}${fromSource ? ` (source: ${opts.path} ${opts.args.join(" ")})` : ""}`);
       }
     } else if (process.platform === "linux") {
+      if (!electronApp.isPackaged) return;
       ensureLinuxAutostart(want);
     }
   } catch (e) {
     log.warn(`[autostart] ensureAutoLaunch failed: ${e.message}`);
   }
+}
+
+// 源码模式 Windows 登录自启的隐藏启动器(VBS)。写到 %LOCALAPPDATA%\cicy-desktop,幂等覆盖。
+// 继承当前的 CICY_DEBUG(用 start-cicy-desktop-win.bat 起的就带 =1),其余环境用登录时的用户环境。
+function writeSourceAutostartVbs() {
+  const dir = path.join(process.env.LOCALAPPDATA || os.homedir(), "cicy-desktop");
+  fs.mkdirSync(dir, { recursive: true });
+  const vbs = path.join(dir, "autostart.vbs");
+  const appDir = electronApp.getAppPath();
+  const q = (s) => String(s).replace(/"/g, '""');
+  const lines = [
+    'Set sh = CreateObject("WScript.Shell")',
+    `sh.CurrentDirectory = "${q(appDir)}"`,
+  ];
+  if (process.env.CICY_DEBUG) lines.push(`sh.Environment("Process")("CICY_DEBUG") = "${q(process.env.CICY_DEBUG)}"`);
+  lines.push(`sh.Run "cmd /c node .\\bin\\cicy-desktop", 0, False`);
+  fs.writeFileSync(vbs, lines.join("\r\n") + "\r\n");
+  return vbs;
 }
 
 // mac login item pointing at the Desktop applet (~/Desktop/CiCy Desktop.app).
@@ -1353,7 +1381,12 @@ electronApp.whenReady().then(async () => {
         accountIdx,
         activateIfRunning: true,
       });
-    } catch (e) { showProfileError("Chrome", e); }
+    } catch (e) {
+      await handleChromeLaunchError(e, {
+        openInstallPage: (url) => openElectronProfile(1, url),
+        showError: (error) => showProfileError("Chrome", error),
+      });
+    }
   };
   const openNativeChrome = () => {
     try { require("./tools/chrome-tools").launchNativeChrome(); }

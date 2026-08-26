@@ -20,6 +20,9 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const log = require("electron-log");
+const { auditDestructiveIpc } = require("./docker-audit");
+const { nextGatewayKeyHealth } = require("../sidecar/gateway-key-health");
+const dockerProtect = require("../sidecar/docker-protect"); // 容器保护开关(默认开)
 // Background-computed docker status lives here; the homepage READS this (never
 // probes WSL live → never blocks the UI / strands it on 「重试检测」).
 const DOCKER_STATUS_FILE = path.join(os.homedir(), "cicy-ai", "db", "docker-status.json");
@@ -137,6 +140,8 @@ function register({ sidecarLogPath } = {}) {
   // docker:app-status handler just returns the cache — instant, never blocks.
   let _dockerStatusCache = null;
   let _dockerDaemonBusy = false;
+  let _gatewayKeyMissingChecks = 0;
+  let _autostartEnsured = false;
   async function refreshDockerStatus() {
     try {
       const s = await appDocker.status(APP_PORT); // { wsl, distro, engineUp, running, unknown }
@@ -183,14 +188,31 @@ function register({ sidecarLogPath } = {}) {
         // 数据保留)。mac/win 同一套(hasGatewayKey 两个 docker 模块都实现了)。
         try {
           const opts = await appOpts();
-          if (opts.env && opts.env.CICY_AI_GATEWAY_LLM_API_KEY && appDocker.hasGatewayKey
-              && !(await appDocker.hasGatewayKey(APP_CONTAINER))) {
-            log.info("[docker-daemon] 容器在跑但没网关 key → 带 key 重建(数据保留)");
-            await appDocker.recreate(opts);
-            try { await registerAppTeam(); } catch {}
-            await refreshDockerStatus();
+          if (opts.env && opts.env.CICY_AI_GATEWAY_LLM_API_KEY && appDocker.hasGatewayKey && dockerProtect.isProtected()) {
+            _gatewayKeyMissingChecks = 0; // 容器保护:绝不因缺 key 自动重建;用户可从卡片菜单手动「重建」
+          } else if (opts.env && opts.env.CICY_AI_GATEWAY_LLM_API_KEY && appDocker.hasGatewayKey) {
+            const keyState = await appDocker.hasGatewayKey(APP_CONTAINER);
+            const health = nextGatewayKeyHealth(_gatewayKeyMissingChecks, keyState);
+            _gatewayKeyMissingChecks = health.missingChecks;
+            if (!health.shouldRecreate) {
+              if (keyState === false) log.warn(`[docker-daemon] 网关 key 明确缺失 (${_gatewayKeyMissingChecks}/3)，暂不重建`);
+            } else {
+              log.warn("[docker-daemon] 网关 key 连续 3 次明确缺失 → 带 key 重建(数据保留)");
+              auditDestructiveIpc(log, "docker:self-heal-missing-gateway-key", null, {
+                container: APP_CONTAINER,
+                confirmedMissingChecks: 3,
+              });
+              await appDocker.recreate(opts);
+              try { await registerAppTeam(); } catch {}
+              await refreshDockerStatus();
+            }
           }
         } catch (e) { log.warn(`[docker-daemon] key self-heal failed: ${e.message}`); }
+        // 开机自启链:每次会话确认一次登录任务 + wsl.conf [boot](幂等;老装机也能补上)。
+        if (!_autostartEnsured && appDocker.ensureAutostart) {
+          _autostartEnsured = true;
+          try { await appDocker.ensureAutostart(); } catch (err) { log.warn(`[docker-daemon] ensureAutostart failed: ${err.message}`); }
+        }
         // Chrome 代理:开关开着但宿主 mihomo 没跑 → 拉起(从容器同步配置,幂等)。
         try { await maybeStartChromeProxy(); } catch (e) { log.warn(`[chrome-proxy] auto-start failed: ${e.message}`); }
       }
@@ -214,12 +236,16 @@ function register({ sidecarLogPath } = {}) {
   // 已在跑也同步一次配置(容器侧节点可能被云端更新),变了才重启。幂等。二进制不在会自动下。
   async function maybeStartChromeProxy() {
     if (!APP_DOCKER_SUPPORTED) return;
-    const yaml = await appDocker.readMihomoConfig(APP_CONTAINER);
+    const [yaml, selections] = await Promise.all([
+      appDocker.readMihomoConfig(APP_CONTAINER),
+      appDocker.readMihomoSelections(APP_CONTAINER),
+    ]);
     if (hostMihomo.binPresent() && hostMihomo.running()) {
       if (hostMihomo.writeConfig(yaml)) hostMihomo.start({ force: true });
+      await hostMihomo.syncSelections(selections);
       return;
     }
-    await hostMihomo.enable({ containerYaml: yaml });
+    await hostMihomo.enable({ containerYaml: yaml, selections });
   }
 
   ipcMain.handle("sidecar:status", async () => {
@@ -464,10 +490,12 @@ function register({ sidecarLogPath } = {}) {
   // ⋯ menu → 重建 Docker:删容器 + 用新 env(docker team 网关 key)重新 docker run(保留
   // volume 数据)。换 key 的唯一途径。渲染端已 confirm。
   ipcMain.handle("docker:app-recreate", async (e) => {
+    auditDestructiveIpc(log, "docker:app-recreate", e);
     try {
       await ensureDockerTeam();
       await appDocker.recreate({
         ...(await appOpts()),
+        force: true, // 用户在卡片菜单明确点击并 confirm → 放行
         onProgress: (ev) => { try { e.sender.send("docker:app-progress", ev); } catch {} },
       });
       await registerAppTeam();
@@ -509,11 +537,13 @@ function register({ sidecarLogPath } = {}) {
 
   // ⋯ menu → 升级: re-pull the latest R2 image, re-create the :8008 container.
   ipcMain.handle("docker:app-upgrade", async (e) => {
+    auditDestructiveIpc(log, "docker:app-upgrade", e);
     if (!APP_DOCKER_SUPPORTED) return { ok: false, error: "Docker cicy-code 仅支持 Windows" };
     try {
       await ensureDockerTeam();
       const result = await appDocker.upgrade({
         ...(await appOpts()),
+        force: true, // 用户显式升级
         onProgress: (ev) => { try { e.sender.send("docker:app-progress", ev); } catch {} },
       });
       if (result && result.ok) await registerAppTeam();
@@ -524,18 +554,27 @@ function register({ sidecarLogPath } = {}) {
   });
 
   // 端口设置:读当前已发布的额外端口(:8008 固定,不在列)。
+  // 容器保护开关:开启时任何自动流程都不得 rm/recreate 容器或 wsl --shutdown。
+  ipcMain.handle("docker:get-protect", () => ({ ok: true, enabled: dockerProtect.isProtected() }));
+  ipcMain.handle("docker:set-protect", (e, on) => {
+    auditDestructiveIpc(log, "docker:set-protect", e, { enabled: !!on });
+    try { return { ok: true, enabled: dockerProtect.setProtected(!!on) }; } catch (err) { return { ok: false, error: err.message }; }
+  });
+
   ipcMain.handle("docker:get-ports", () => {
     return { ok: true, mainPort: APP_PORT, ports: readExtraPorts() };
   });
   // 保存端口 → 持久化 → recreate 容器带上新的 -p(:8008 + 各额外端口)。volume 保留。
   ipcMain.handle("docker:set-ports", async (e, input) => {
+    auditDestructiveIpc(log, "docker:set-ports", e, { ports: input?.ports });
     if (!APP_DOCKER_SUPPORTED) return { ok: false, error: "Docker cicy-code 仅支持 Windows" };
     const ports = sanitizePorts(input && input.ports);
     writeExtraPorts(ports);
     try {
       await ensureDockerTeam();
       const result = await appDocker.recreate({
-        ...(await appOpts()), // 已含 extraPorts: readExtraPorts()(刚写入的)
+        ...(await appOpts()),
+        force: true, // 用户显式改端口 // 已含 extraPorts: readExtraPorts()(刚写入的)
         onProgress: (ev) => { try { e.sender.send("docker:app-progress", ev); } catch {} },
       });
       await registerAppTeam();
@@ -655,11 +694,12 @@ function register({ sidecarLogPath } = {}) {
     try { return { ok: true, dood: sidecar.isDood() }; } catch (e) { return { ok: false, dood: false, error: e.message }; }
   });
   ipcMain.handle("sidecar:set-dood", async (e, on) => {
+    auditDestructiveIpc(log, "sidecar:set-dood", e, { enabled: !!on });
     const emit = (ev) => { try { e.sender.send("sidecar:op-progress", { op: "restart", ...ev }); } catch {} };
     try {
       sidecar.setDood(!!on);
       emit({ phase: "swap", status: "running", message: `容器 Docker 访问已${on ? "开启" : "关闭"},正在重建容器…` });
-      try { await appDocker.recreate({ ...(await appOpts()), onProgress: emit }); }
+      try { await appDocker.recreate({ ...(await appOpts()), force: true, onProgress: emit }); }
       catch (err) { try { await appDocker.dockerRestart?.({ onProgress: emit }); } catch {} }
       let up = false;
       for (let i = 0; i < 240; i++) { if ((await appDocker.probeHealth?.(PORT)) || (await sidecar.probeExisting(PORT))) { up = true; break; } await new Promise((r) => setTimeout(r, 500)); }

@@ -184,7 +184,10 @@
     document.body.classList.add('has-panel');
     const pb = document.getElementById('panelbtn');
     try { pb.title = window.tabAPI.t('tabShell.newPanel', '新建面板'); } catch (e) { pb.title = '新建面板'; }
-    pb.onclick = () => window.tabAPI.newPanel();
+    pb.onclick = (e) => {
+      e.stopPropagation();
+      window.tabAPI.openPanelMenu();
+    };
   }
   try { window.tabAPI.onFullscreen((fs) => document.body.classList.toggle('is-fullscreen', !!fs)); } catch (e) {}
   let state = { tabs: [], nav: {} };

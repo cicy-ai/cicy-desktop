@@ -24,8 +24,9 @@ try {
 contextBridge.exposeInMainWorld("tabAPI", {
   t: (key, fallback) => { try { return __i18n ? __i18n.t(key, { defaultValue: fallback }) : fallback; } catch (e) { return fallback; } },
   newTab: (url) => ipcRenderer.send("tabwin:new", { url: url || "" }),
-  // 标签条右上角 "+":新开一个空白 split-webview 面板 tab(cicyui://panel/<id>)
-  newPanel: () => ipcRenderer.send("tabwin:panel"),
+  openPanelMenu: () => ipcRenderer.send("tabwin:panel-menu"),
+  // 标签条右上角 "+" dropdown:按 preset 新开空白 split-webview 面板。
+  newPanel: (preset) => ipcRenderer.send("tabwin:panel", { preset: preset || "blank" }),
   rename: (id, name) => ipcRenderer.send("tabwin:rename", { id, name }),
   activate: (id) => ipcRenderer.send("tabwin:activate", { id }),
   close: (id) => ipcRenderer.send("tabwin:close", { id }),

@@ -178,6 +178,8 @@ contextBridge.exposeInMainWorld("cicy", {
     appUpdate:    ()  => logInvoke("docker:app-update"),
     appStop:      ()  => logInvoke("docker:app-stop"),
     appUpgrade:   ()  => logInvoke("docker:app-upgrade"),
+    getProtect:   ()  => logInvoke("docker:get-protect"),           // 容器保护开关(默认开)
+    setProtect:   (on) => logInvoke("docker:set-protect", !!on),
     getPorts:     ()  => logInvoke("docker:get-ports"),               // 读已发布的额外端口
     setPorts:     (ports) => logInvoke("docker:set-ports", { ports }), // 存端口 + recreate 带 -p
     // Open :8008 with the live container token (refuses if it can't read it).
