@@ -104,7 +104,12 @@ async function ensureRpcGrant(event, toolName, args) {
 // trusted-origins allowlist (so it's never asked again). This replaces the old
 // "no bridge unless pre-trusted" behaviour with explicit, on-demand consent.
 const _sessionOrigins = new Set(); // origin -> "本次允许" for this process lifetime
-const _deniedOrigins = new Set();  // origin -> "拒绝" — sticky so a page can't spam modals
+// origin -> deny timestamp. A deny is sticky only for DENY_COOLDOWN_MS so a page
+// can't spam modals, but a mistaken "拒绝" (or a modal that timed out unattended)
+// no longer locks the origin out for the whole process lifetime — the user gets
+// asked again after the cooldown instead of having to find the settings page.
+const DENY_COOLDOWN_MS = 60 * 1000;
+const _deniedOrigins = new Map();
 const _pendingByOrigin = new Map(); // origin -> in-flight modal promise (dedup races)
 
 // Synchronous verdict for an origin WITHOUT prompting: "allow" | "deny" | "unknown".
@@ -119,7 +124,9 @@ function originDecision(event) {
   if (isTrustedUrl && isTrustedUrl(url)) return "allow"; // on the allowlist
   const origin = originOf(wc);
   if (_sessionOrigins.has(origin)) return "allow"; // "本次允许" earlier
-  if (_deniedOrigins.has(origin)) return "deny";   // blocked — settings = escape hatch
+  const deniedAt = _deniedOrigins.get(origin);
+  if (deniedAt && Date.now() - deniedAt < DENY_COOLDOWN_MS) return "deny"; // recently refused
+  if (deniedAt) _deniedOrigins.delete(origin);       // cooldown over → ask again
   return "unknown";
 }
 
@@ -165,15 +172,29 @@ function startOriginModal(event) {
       return true;
     }
     if (r === 2 && host) { // 加入白名单（持久）— trusted-origins-store.add() logs the allowlist change
-      try {
-        const res = require("../profiles/trusted-origins-store").add(host);
-        if (!res || res.ok === false) return false;
+      let res = null, err = "";
+      try { res = require("../profiles/trusted-origins-store").add(host); } catch (e) { err = e && e.message; }
+      if (res && res.ok !== false) {
         if (refreshTrustedOrigins) refreshTrustedOrigins();
         _sessionOrigins.add(origin);
         return true;
-      } catch { return false; }
+      }
+      // The user explicitly chose to trust the site; if persisting the allowlist
+      // failed, honour the intent for this run and SAY why — silently returning
+      // false here made the modal reappear on every call with no explanation.
+      _sessionOrigins.add(origin);
+      audit({ kind: "auth", gate: "origin", origin, decision: "session-allow", temporary: true, error: `allowlist-add-failed: ${(res && res.error) || err || "unknown"}` });
+      try {
+        dialog.showMessageBox(win, {
+          type: "error", noLink: true, buttons: ["知道了"],
+          title: "加入白名单失败",
+          message: `无法把 ${host} 加入受信任站点`,
+          detail: `${(res && res.error) || err || "未知错误"}\n\n本次已允许该站点；下次启动会再次询问。你也可以在 头像 → 受信任站点 里手动添加。`,
+        }).catch(() => {});
+      } catch {}
+      return true;
     }
-    _deniedOrigins.add(origin); // 拒绝 / 关闭 — sticky for the session
+    _deniedOrigins.set(origin, Date.now()); // 拒绝 / 关闭 — sticky for DENY_COOLDOWN_MS
     audit({ kind: "auth", gate: "origin", origin, decision: "deny", temporary: true });
     return false;
   })();
@@ -190,4 +211,4 @@ async function ensureOriginAuthorized(event) {
   return await startOriginModal(event);
 }
 
-module.exports = { DANGEROUS_TOOLS, isDangerousTool, ensureRpcGrant, ensureOriginAuthorized, originDecision, startOriginModal };
+module.exports = { DENY_COOLDOWN_MS, DANGEROUS_TOOLS, isDangerousTool, ensureRpcGrant, ensureOriginAuthorized, originDecision, startOriginModal };

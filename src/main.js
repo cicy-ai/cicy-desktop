@@ -638,7 +638,7 @@ ipcMain.handle("rpc:guarded", async (event, toolName, args) => {
     const originOk = await ensureOriginAuthorized(event);
     if (!originOk) {
       audit({ kind: "rpc", channel: "rpc:guarded", origin, tool: toolName, dangerous: danger, ok: false, error: "origin-unauthorized", args: argsPreview(toolName, args) });
-      throw new Error(`未授权站点访问桌面 RPC（rpc:guarded：域名未加入白名单）`);
+      throw new Error(`未授权站点访问桌面 RPC（${origin} 未加入白名单或刚被拒绝；请在 CiCy Desktop 头像 → 受信任站点 中添加该域名，或稍后重试并在弹框中选择允许）`);
     }
   }
   if (danger) {
