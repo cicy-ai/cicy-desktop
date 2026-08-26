@@ -35,7 +35,7 @@ function normalizeHost(input) {
   }
   s = s.split("/")[0].split("?")[0].split("#")[0]; // drop path/query/fragment
   s = s.replace(/:\d+$/, "");                       // drop :port
-  if (!/^[a-z0-9.-]+$/.test(s)) return "";          // basic host charset
+  if (!/^[a-z0-9._-]+$/.test(s)) return "";         // basic host charset (underscore is legal in real-world hostnames, e.g. xs_master.example.com)
   if (s.startsWith(".") || s.endsWith(".") || s.includes("..")) return "";
   return s;
 }
