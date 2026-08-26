@@ -39,12 +39,11 @@
     .line2 .tg { flex: none; max-width: 55%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #b4b4bb; }
     .line2 .tg b { color: var(--fg); font-weight: 600; }
     .line2 .tg.none { color: #6b6b72; }
-    .line2 .note { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #9a9aa2; cursor: text; }
+    .line2 .note { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #9a9aa2; cursor: text; outline: 0; border-radius: 4px; padding: 0 4px; margin: 0 -4px; }
     .line2 .note.empty { color: #55555c; font-style: italic; }
     .line2 .note:hover { color: #fff; }
-    .line2 input[data-role="note"] { display: none; flex: 1; min-width: 0; height: 24px; border: 1px solid var(--accent); border-radius: 6px; padding: 0 8px; background: #111113; color: var(--fg); font-size: 11.5px; outline: 0; }
-    .line2.editing .note { display: none; }
-    .line2.editing input[data-role="note"] { display: block; }
+    /* 编辑态就地变成可输入,尺寸/位置与只读态完全一致,不发生位移 */
+    .line2 .note.editing { color: var(--fg); font-style: normal; background: #111113; box-shadow: 0 0 0 1px var(--accent); text-overflow: clip; }
     .row-err { padding: 4px 0 0 16px; color: #ff8a8a; font-size: 11px; display: none; }
     .row-err.on { display: block; }
     #empty { display: none; padding: 40px 24px; color: var(--muted); text-align: center; line-height: 1.8; }
@@ -188,18 +187,28 @@
       row.className = 'row'; row.dataset.id = String(p.accountIdx); row.title = `persist:sandbox-${p.accountIdx}`;
       row.innerHTML = `
         <div class="line1"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="st"></span><button class="icon reload" title="重新加载">⟳</button></div>
-        <div class="line2"><span class="tg none">—</span><span class="note" title="点击添加备注"></span><input data-role="note" maxlength="500" placeholder="备注，Enter 保存 / Esc 取消" spellcheck="false"></div>
+        <div class="line2"><span class="tg none">—</span><span class="note" data-role="note" title="点击编辑备注，Enter 保存 / Esc 取消" spellcheck="false"></span></div>
         <div class="row-err"></div>`;
       const errEl = row.querySelector('.row-err');
-      const line2 = row.querySelector('.line2');
       const noteEl = row.querySelector('.note');
-      const input = row.querySelector('[data-role="note"]');
       const showNote = () => { noteEl.textContent = p.note || '添加备注'; noteEl.classList.toggle('empty', !p.note); };
       showNote();
-      const startEdit = (e) => { e && e.stopPropagation(); line2.classList.add('editing'); input.value = p.note || ''; input.focus(); input.select(); };
-      const stopEdit = () => { line2.classList.remove('editing'); };
+      let editing = false;
+      const startEdit = (e) => {
+        e && e.stopPropagation();
+        if (editing) return;
+        editing = true;
+        noteEl.classList.add('editing'); noteEl.classList.remove('empty');
+        noteEl.textContent = p.note || '';
+        noteEl.contentEditable = 'plaintext-only';
+        noteEl.focus();
+        const range = document.createRange(); range.selectNodeContents(noteEl);
+        const sel = getSelection(); sel.removeAllRanges(); sel.addRange(range);
+      };
+      const stopEdit = () => { editing = false; noteEl.contentEditable = 'false'; noteEl.classList.remove('editing'); showNote(); };
       const saveNote = async () => {
-        const value = input.value.trim();
+        if (!editing) return;
+        const value = noteEl.textContent.replace(/\s+/g, ' ').trim().slice(0, 500);
         stopEdit();
         if (value === (p.note || '')) return;
         try {
@@ -207,10 +216,9 @@
           p.note = updated.note; showNote();
         } catch (e) { errEl.textContent = e.message || String(e); errEl.classList.add('on'); }
       };
-      noteEl.onclick = startEdit;
-      input.onclick = (e) => e.stopPropagation();
-      input.onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Enter') saveNote(); if (e.key === 'Escape') stopEdit(); };
-      input.onblur = () => { if (line2.classList.contains('editing')) saveNote(); };
+      noteEl.onclick = (e) => { e.stopPropagation(); startEdit(e); };
+      noteEl.onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); saveNote(); } if (e.key === 'Escape') { e.preventDefault(); stopEdit(); } };
+      noteEl.onblur = () => saveNote();
       row.onclick = () => selectProfile(p.accountIdx);
       row.querySelector('.reload').onclick = (e) => { e.stopPropagation(); reloadProfile(p.accountIdx); };
       return row;
