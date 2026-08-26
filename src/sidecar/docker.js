@@ -11,6 +11,7 @@
 //   https://r2.deepfetch.de5.net/docker/cicy-code-latest.tar.gz
 //
 // The container maps :8008 and persists ~/cicy-ai in a named volume.
+const log = require("electron-log"); // bootstrap preflight failures must land in main.log
 const { execFile, execFileSync, spawn } = require("child_process");
 const https = require("https");
 const http = require("http");
@@ -660,7 +661,36 @@ async function dismEnableFeature(feature, label, { emit } = {}) {
 // { ok } when already present, { needsReboot } after the two required Windows
 // features are verified-enabled (a Windows reboot is then needed before Docker
 // can use WSL2), or { failed } if a feature couldn't be enabled.
+// CPU virtualization state (Windows). WSL2 cannot start when the firmware has
+// VT-x/AMD-V disabled — and nothing in software can flip that. Detect it up
+// front so the failure is EXPLAINED (log + card) instead of a mute install loop.
+// hypervisorPresent=true means a hypervisor already runs (Hyper-V/WSL2 active)
+// → virtualization is necessarily on, regardless of what the CPU field says.
+async function virtualizationStatus() {
+  if (process.platform !== "win32") return { known: false };
+  return new Promise((resolve) => {
+    const ps = "$cs=Get-CimInstance Win32_ComputerSystem; $cpu=Get-CimInstance Win32_Processor | Select-Object -First 1; Write-Output (\"\" + $cs.HypervisorPresent + \"|\" + $cpu.VirtualizationFirmwareEnabled + \"|\" + $cpu.VMMonitorModeExtensions + \"|\" + $cpu.Name)";
+    execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { timeout: 20000, windowsHide: true }, (err, stdout) => {
+      const line = String(stdout || "").trim().split(/\r?\n/).pop() || "";
+      const [hv, fw, vmm, ...rest] = line.split("|");
+      if (err || !line || line.split("|").length < 3) return resolve({ known: false, raw: line, error: err && err.message });
+      const b = (v) => /^true$/i.test(String(v).trim());
+      const hypervisorPresent = b(hv), firmwareEnabled = b(fw), cpuSupports = b(vmm);
+      resolve({ known: true, hypervisorPresent, firmwareEnabled, cpuSupports, cpu: rest.join("|").trim(), ok: hypervisorPresent || firmwareEnabled });
+    });
+  });
+}
+
 async function ensureWsl({ emit } = {}) {
+  const virt = await virtualizationStatus();
+  if (virt.known && !virt.ok) {
+    const why = virt.cpuSupports
+      ? `CPU 虚拟化未在 BIOS/固件中开启（Virtualization Enabled In Firmware: No，CPU: ${virt.cpu || "?"}）。请重启进 BIOS 打开 Intel VT-x / AMD SVM 后再点「重试」。`
+      : `此 CPU 不支持硬件虚拟化（VM Monitor Mode Extensions: No，CPU: ${virt.cpu || "?"}），无法运行 WSL2 / Docker。`;
+    log.error(`[bootstrap] ✗ ensure-wsl reason=virtualization_disabled hypervisorPresent=${virt.hypervisorPresent} firmwareEnabled=${virt.firmwareEnabled} cpuSupports=${virt.cpuSupports} cpu=${virt.cpu}`);
+    emit && emit({ phase: "done", status: "error", message: why });
+    return { ok: false, needsReboot: false, failed: true, reason: "virtualization_disabled", message: why };
+  }
   const executableMissing = await wslMissing();
   const subsystemEnabled = await featureEnabled("Microsoft-Windows-Subsystem-Linux");
   const vmPlatformEnabled = await featureEnabled("VirtualMachinePlatform");
@@ -671,8 +701,10 @@ async function ensureWsl({ emit } = {}) {
   const a = await dismEnableFeature("Microsoft-Windows-Subsystem-Linux", "启用 WSL 功能 1/2 · Linux 子系统", { emit });
   const b = await dismEnableFeature("VirtualMachinePlatform", "启用 WSL 功能 2/2 · 虚拟机平台", { emit });
   if (!a || !b) {
-    emit && emit({ phase: "done", status: "error", message: "WSL 功能未能全部启用——请点「重试」" });
-    return { ok: false, needsReboot: false, failed: true };
+    const message = `WSL 功能未能全部启用（Linux 子系统=${a ? "已启用" : "失败"}，虚拟机平台=${b ? "已启用" : "失败"}；通常是 UAC 被取消或当前账号无管理员权限）——请以管理员身份重试。`;
+    log.error(`[bootstrap] ✗ ensure-wsl reason=wsl_enable_failed subsystem=${a} vmPlatform=${b}`);
+    emit && emit({ phase: "done", status: "error", message });
+    return { ok: false, needsReboot: false, failed: true, reason: "wsl_enable_failed", message };
   }
   // Best-effort: also pull the WSL2 kernel/plumbing when the executable itself
   // is missing. Feature-only repairs must stop here and wait for reboot.
@@ -779,7 +811,7 @@ module.exports = {
   start, stop, stopContainer, restart, checkStatus, loadImage, loadImageFromTarball,
   downloadImageTarball, imagePresent, dockerOk, installDocker,
   bootstrap, probeHealth, readContainerToken, dockerDesktopExe, desktopDir, downloadsDir, imageTarballPath,
-  launchElevated, wslMissing, ensureWsl,
+  launchElevated, wslMissing, ensureWsl, virtualizationStatus,
   // platform-agnostic download/retry primitives, reused by native.js
   ensureDownloaded, curlDownload, withRetry, waitUntil, run, headSize,
   // image freshness (修「重建仍用旧镜像」—— 校验 OSS ETag 变了才重下重载)

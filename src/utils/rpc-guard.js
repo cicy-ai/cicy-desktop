@@ -58,6 +58,10 @@ async function ensureRpcGrant(event, toolName, args) {
   if (!wc || wc.isDestroyed()) return false;
   const origin = originOf(wc);
   if (_grants.get(wc.id) === origin) return true; // already allowed for this page
+  let host = ""; try { host = new URL(wc.getURL()).hostname; } catch {}
+  let store = null; try { store = require("../profiles/trusted-origins-store"); } catch {}
+  if (store && host && store.isDangerousAllowed(host)) return true; // 白名单站点 + 用户选过「始终允许」
+  const canAlways = !!(store && host && store.listAll().includes(host));
 
   const win = BrowserWindow.fromWebContents(wc) || BrowserWindow.getFocusedWindow() || null;
   const detail = [`来源: ${origin}`, `操作: ${toolName}`];
@@ -70,7 +74,7 @@ async function ensureRpcGrant(event, toolName, args) {
     choice = await dialog.showMessageBox(win, {
       type: "warning",
       noLink: true,
-      buttons: ["拒绝", "允许一次", "本页面内允许"],
+      buttons: canAlways ? ["拒绝", "允许一次", "本页面内允许", "此站点始终允许（不再询问）"] : ["拒绝", "允许一次", "本页面内允许"],
       defaultId: 0,
       cancelId: 0,
       title: "敏感操作请求",
@@ -80,6 +84,12 @@ async function ensureRpcGrant(event, toolName, args) {
   } catch { return false; }
 
   const response = choice && choice.response;
+  if (response === 3 && canAlways) { // persistent: allowlisted site, never ask again for dangerous tools
+    try { store.allowDangerous(host); } catch {}
+    _grants.set(wc.id, origin);
+    audit({ kind: "auth", gate: "dangerous-tool", origin, tool: toolName, decision: "always-allow", temporary: false, args: pv });
+    return true;
+  }
   if (response === 2) { // remember for this page
     _grants.set(wc.id, origin);
     if (!wc.__rpcGuardWired) {

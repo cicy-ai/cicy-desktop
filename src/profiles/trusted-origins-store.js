@@ -48,10 +48,40 @@ function readRaw() {
   } catch { return []; }
 }
 
-function writeRaw(origins) {
+function writeRaw(origins, dangerous) {
   fs.mkdirSync(path.dirname(STORE), { recursive: true });
-  fs.writeFileSync(STORE, JSON.stringify({ origins }, null, 2), { mode: 0o600 });
+  const cur = readRawObj();
+  const next = { origins, dangerous: Array.isArray(dangerous) ? dangerous : (Array.isArray(cur.dangerous) ? cur.dangerous : []) };
+  fs.writeFileSync(STORE, JSON.stringify(next, null, 2), { mode: 0o600 });
   try { fs.chmodSync(STORE, 0o600); } catch {}
+}
+function readRawObj() {
+  try { if (!fs.existsSync(STORE)) return {}; const j = JSON.parse(fs.readFileSync(STORE, "utf8")); return j && typeof j === "object" ? j : {}; } catch { return {}; }
+}
+
+// "此站点始终允许敏感操作":对已在白名单里的站点,持久跳过 exec/读写文件的逐次确认。
+// 只有白名单站点可以加入(不在白名单 → 拒绝),从白名单移除时一并撤销。
+function listDangerousAllowed() {
+  const set = new Set(listUser());
+  return (Array.isArray(readRawObj().dangerous) ? readRawObj().dangerous : []).map(normalizeHost).filter((h) => h && set.has(h));
+}
+function isDangerousAllowed(host) {
+  const h = normalizeHost(host);
+  return !!h && listDangerousAllowed().includes(h);
+}
+function allowDangerous(input) {
+  const host = normalizeHost(input);
+  if (!host) return { ok: false, error: "无效的站点地址" };
+  if (!listAll().includes(host)) return { ok: false, error: "站点不在白名单中" };
+  const cur = listDangerousAllowed();
+  if (!cur.includes(host)) { writeRaw(listUser(), [...cur, host]); _audit({ kind: "auth", gate: "allowlist", host, decision: "dangerous-always-allow" }); }
+  return { ok: true };
+}
+function revokeDangerous(input) {
+  const host = normalizeHost(input);
+  const cur = listDangerousAllowed();
+  if (cur.includes(host)) { writeRaw(listUser(), cur.filter((h) => h !== host)); _audit({ kind: "auth", gate: "allowlist", host, decision: "dangerous-revoke" }); }
+  return { ok: true };
 }
 
 // User-managed origins only (normalized, de-duped, built-ins excluded).
@@ -91,8 +121,8 @@ function remove(input) {
   const host = normalizeHost(input);
   if (BUILTIN.includes(host)) return { ok: false, error: "内置站点不可删除" };
   const cur = listUser();
-  if (cur.includes(host)) { writeRaw(cur.filter((h) => h !== host)); _audit({ kind: "auth", gate: "allowlist", host, decision: "trust-remove" }); }
+  if (cur.includes(host)) { writeRaw(cur.filter((h) => h !== host), listDangerousAllowed().filter((h) => h !== host)); _audit({ kind: "auth", gate: "allowlist", host, decision: "trust-remove" }); }
   return { ok: true, origins: listForUi() };
 }
 
-module.exports = { STORE, BUILTIN, normalizeHost, listUser, listAll, listForUi, add, remove };
+module.exports = { STORE, BUILTIN, normalizeHost, listUser, listAll, listForUi, add, remove, listDangerousAllowed, isDangerousAllowed, allowDangerous, revokeDangerous };

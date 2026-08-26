@@ -139,6 +139,9 @@ function register({ sidecarLogPath } = {}) {
   // caches it (memory + file), AND auto-starts whatever is installed-but-down. The
   // docker:app-status handler just returns the cache — instant, never blocks.
   let _dockerStatusCache = null;
+  // 最近一次安装/启动失败的原因(reason + 人话 message),写进 docker-status.json 的
+  // lastError,卡片和排障都能看到"为什么装不上",而不是只看到 installed:false。
+  let _lastBootstrapError = null;
   let _dockerDaemonBusy = false;
   let _gatewayKeyMissingChecks = 0;
   let _autostartEnsured = false;
@@ -150,7 +153,7 @@ function register({ sidecarLogPath } = {}) {
       if (s.running) { try { ver = await require("../sidecar/version").running(APP_PORT); } catch {} }
       // installed: distro 装了 OR :8008 健康(WSL 抽风查不到 distro 但容器在跑 → 也算装了,
       // 否则卡片误显「下载安装」)。wslUnmanaged: 服务在跑但 WSL 管不到 → 卡片显式提示异常。
-      _dockerStatusCache = { installed: !!s.distro || !!s.healthy, dockerRunning: !!s.engineUp || !!s.healthy, running: !!s.running, unknown: !!s.unknown, wslUnmanaged: !!s.wslUnmanaged, wslWedged: !!s.wslWedged, version: ver, port: APP_PORT, platform: process.platform, chromeProxy: chromeProxyEnabled(), chromeProxyRunning: hostMihomo.running(), ts: Date.now() };
+      _dockerStatusCache = { installed: !!s.distro || !!s.healthy, dockerRunning: !!s.engineUp || !!s.healthy, running: !!s.running, unknown: !!s.unknown, wslUnmanaged: !!s.wslUnmanaged, wslWedged: !!s.wslWedged, version: ver, port: APP_PORT, platform: process.platform, chromeProxy: chromeProxyEnabled(), chromeProxyRunning: hostMihomo.running(), lastError: (!s.running && _lastBootstrapError) ? _lastBootstrapError : null, ts: Date.now() };
     } catch (e) {
       _dockerStatusCache = { installed: false, dockerRunning: false, running: false, unknown: true, port: APP_PORT, platform: process.platform, error: e.message, ts: Date.now() };
     }
@@ -285,6 +288,11 @@ function register({ sidecarLogPath } = {}) {
         port: PORT,
         onProgress: (ev) => { try { e.sender.send("docker:bootstrap-progress", ev); } catch {} },
       });
+      if (result && result.ok) _lastBootstrapError = null;
+      else if (result) {
+        _lastBootstrapError = { reason: result.reason || result.error || "bootstrap_failed", message: result.message || "", ts: Date.now() };
+        log.error(`[docker] bootstrap failed reason=${_lastBootstrapError.reason}${_lastBootstrapError.message ? ` — ${_lastBootstrapError.message}` : ""}`);
+      }
       // Healthy local stack → make sure it shows up as a team ("本地团队就加
       // 上去了"). addTeam dedups by host:port, so re-runs are no-ops. The
       // api_token must be the CONTAINER's own (volume global.json) — the
@@ -301,6 +309,8 @@ function register({ sidecarLogPath } = {}) {
       }
       return result;
     } catch (err) {
+      _lastBootstrapError = { reason: "bootstrap_exception", message: err.message, ts: Date.now() };
+      log.error(`[docker] bootstrap threw: ${err.message}`);
       return { ok: false, error: err.message };
     }
   });
