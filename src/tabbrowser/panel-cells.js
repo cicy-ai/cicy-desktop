@@ -46,6 +46,7 @@ function profileForCell(url, requested) {
   const idx = Number(requested);
   return Number.isInteger(idx) && idx > 0 ? idx : DEFAULT_PROFILE;
 }
+const telegramIdentity = require("./telegram-identity");
 const appliedProxy = new Set(); // partitions whose proxy is already configured
 function ensureCellSessionProxy(idx) {
   const part = partitionFor(idx);
@@ -117,6 +118,7 @@ class PanelCells {
       },
     });
     const wc = view.webContents;
+    const rec = { view, url: "", profile: profileIdx, visible: true, identity: null };
     try { view.setBackgroundColor("#ffffff"); } catch (e) {}
     // Chromium uses a dark canvas for transparent/un-styled documents when the
     // app theme is dark (for example a plain `Not Found` response). Keep real
@@ -178,7 +180,7 @@ class PanelCells {
       let loading = false;
       try { loading = wc.isLoading(); } catch (e) {}
       const failed = /^chrome-error:/.test(url) || !!lastError;
-      this.sendState({ id: cellId, url, title, loading, wcId: wc.id, failed, error: failed ? lastError : null });
+      this.sendState({ id: cellId, url, title, loading, wcId: wc.id, failed, error: failed ? lastError : null, identity: rec.identity || null });
     };
     // Telegram Web 是 PWA:代理挂掉时 service worker 照样从缓存吐出 app shell,主框架
     // 「加载成功」、did-fail-load 不触发,可页面其实一点网都没有(用户看到的就是一片白
@@ -219,8 +221,38 @@ class PanelCells {
       push();
     };
 
-    wc.on("did-start-loading", () => { probeSeq++; this.sendState({ id: cellId, loading: true, wcId: wc.id }); });
-    wc.on("did-stop-loading", () => { push(); probeReachable(); });
+    // Telegram 身份:登录后从页面自己的 localStorage/IndexedDB 读出 @username,写进
+    // profile 的 logins(name=telegram),并推给面板列表。登录流程刚结束时用户表可能
+    // 还没落库,所以延迟探几次;拿到就停。
+    let identSeq = 0;
+    const detectIdentity = () => {
+      if (profileIdx === 0) return;
+      let url = ""; try { url = wc.getURL(); } catch (e) {}
+      if (!telegramIdentity.isTelegramUrl(url)) return;
+      const seq = ++identSeq;
+      const delays = [2500, 8000, 20000, 45000];
+      const tick = async (i) => {
+        if (seq !== identSeq || wc.isDestroyed()) return;
+        let raw = null;
+        try { raw = await wc.executeJavaScript(telegramIdentity.TELEGRAM_IDENTITY_SCRIPT, true); } catch (e) {}
+        const it = telegramIdentity.normalizeTelegramIdentity(raw);
+        if (seq !== identSeq) return;
+        if (it && (it.username || it.displayName || it.phone)) {
+          const prev = rec.identity;
+          rec.identity = it;
+          if (!prev || prev.username !== it.username || prev.displayName !== it.displayName || prev.phone !== it.phone) {
+            try { require("../profiles/profile-store").setLogin("electron", profileIdx, telegramIdentity.telegramLoginRecord(it)); } catch (e) {}
+            this.sendState({ id: cellId, wcId: wc.id, identity: it, loading: false, url, title: (() => { try { return wc.getTitle(); } catch (e) { return ""; } })() });
+          }
+          return;
+        }
+        if (i + 1 < delays.length) setTimeout(() => tick(i + 1), delays[i + 1]);
+      };
+      setTimeout(() => tick(0), delays[0]);
+    };
+
+    wc.on("did-start-loading", () => { probeSeq++; identSeq++; this.sendState({ id: cellId, loading: true, wcId: wc.id }); });
+    wc.on("did-stop-loading", () => { push(); probeReachable(); detectIdentity(); });
     wc.on("did-fail-load", (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
       if (isMainFrame === false || errorCode === -3) return; // 子框架 / ERR_ABORTED(用户导航打断)不算失败
       lastError = { code: errorCode, description: String(errorDescription || ""), url: String(validatedURL || "") };
@@ -232,7 +264,7 @@ class PanelCells {
     wc.on("did-navigate-in-page", push);
     wc.on("page-title-updated", push);
 
-    const rec = { view, url: "", profile: profileIdx, visible: true };
+    rec.view = view;
     this.views.set(String(cellId), rec);
     return rec;
   }
@@ -281,7 +313,7 @@ class PanelCells {
       if (!wc || wc.isDestroyed()) continue;
       let url = "", title = "", loading = false;
       try { url = wc.getURL(); title = wc.getTitle(); loading = wc.isLoading(); } catch (e) {}
-      out.push({ id, url, title, loading, wcId: wc.id, failed: /^chrome-error:/.test(url), error: wc.cicyLastError || null });
+      out.push({ id, url, title, loading, wcId: wc.id, failed: /^chrome-error:/.test(url), error: wc.cicyLastError || null, identity: rec.identity || null });
     }
     return out;
   }
@@ -359,6 +391,8 @@ function installIpc(findTab) {
           accountIdx: Number(p.accountIdx),
           name: String(p.name || ""),
           proxy: p.proxy && p.proxy.enabled ? String(p.proxy.url || "") : "",
+          note: String(p.note || ""),
+          telegram: telegramIdentity.telegramIdentityFromProfile(p),
         }));
     } catch (err) { return []; }
   });
@@ -375,6 +409,14 @@ function installIpc(findTab) {
     const profile = service.setTelegramProfileProxy(accountIdx, proxy);
     await applyProfileProxy(profile.accountIdx, profile.proxy);
     return { accountIdx: profile.accountIdx, name: profile.name, proxy: profile.proxy.url };
+  });
+  ipcMain.handle("panelcells:set-profile-note", async (e, { accountIdx, note }) => {
+    if (!ctx(e)) throw new Error("Invalid panel");
+    const id = Number(accountIdx);
+    if (!Number.isInteger(id) || id <= 0) throw new Error("Invalid Electron profile ID");
+    const text = String(note || "").trim().slice(0, 500);
+    const profile = require("../profiles/profile-store").setNote("electron", id, text);
+    return { accountIdx: id, note: String(profile.note || "") };
   });
   ipcMain.handle("panelcells:snapshots", async (e) => {
     const pc = ctx(e);

@@ -305,6 +305,14 @@ function setProxy(backend, idx, url) {
   throw new Error(`Unknown backend: ${backend}`);
 }
 
+// setNote — free-form per-profile note (both backends).
+function setNote(backend, idx, note) {
+  const text = typeof note === "string" ? note.trim() : "";
+  if (backend === "chrome") return mutateChrome(idx, (e) => ({ ...e, note: text }));
+  if (backend === "electron") return mutateElectron(idx, (d) => ({ ...d, note: text }));
+  throw new Error(`Unknown backend: ${backend}`);
+}
+
 // setLogin — upsert a rich login record (any subset of LOGIN_FIELDS). Keyed by
 // `name` (site name). Works identically for both backends.
 function setLogin(backend, idx, login) {
@@ -345,6 +353,7 @@ module.exports = {
   listProfiles,
   getProfile,
   setProxy,
+  setNote,
   setLogin,
   addLogin,
   removeLogin,

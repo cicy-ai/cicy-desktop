@@ -35,6 +35,16 @@
     .name { font-weight: 650; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
     .chip { flex: none; padding: 1px 6px; border-radius: 999px; background: var(--head); color: #b4b4bb; font: 11px ui-monospace, monospace; }
     .st { flex: none; color: var(--muted); font-size: 11px; white-space: nowrap; margin-left: auto; }
+    .line2 { display: flex; align-items: center; gap: 8px; margin-top: 4px; padding-left: 16px; font-size: 11.5px; color: var(--muted); min-width: 0; }
+    .line2 .tg { flex: none; max-width: 55%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #b4b4bb; }
+    .line2 .tg b { color: var(--fg); font-weight: 600; }
+    .line2 .tg.none { color: #6b6b72; }
+    .line2 .note { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #9a9aa2; cursor: text; }
+    .line2 .note.empty { color: #55555c; font-style: italic; }
+    .line2 .note:hover { color: #fff; }
+    .line2 input[data-role="note"] { display: none; flex: 1; min-width: 0; height: 24px; border: 1px solid var(--accent); border-radius: 6px; padding: 0 8px; background: #111113; color: var(--fg); font-size: 11.5px; outline: 0; }
+    .line2.editing .note { display: none; }
+    .line2.editing input[data-role="note"] { display: block; }
     .row-err { padding: 4px 0 0 16px; color: #ff8a8a; font-size: 11px; display: none; }
     .row-err.on { display: block; }
     #empty { display: none; padding: 40px 24px; color: var(--muted); text-align: center; line-height: 1.8; }
@@ -112,6 +122,22 @@
     const stateOf = (idx) => cellState.get(Number(idx)) || {};
     const dotClass = (st) => st.loading ? 'loading' : st.failed ? 'failed' : (st.url ? 'ok' : '');
     const stateText = (st, opened) => st.loading ? '加载中…' : st.failed ? '连接失败' : st.url ? '已加载' : (opened ? '' : '未打开');
+    // 身份:优先用本次会话探到的(cellState.identity),否则用 profile 里存的(上次登录)。
+    const identityOf = (p) => stateOf(p.accountIdx).identity || p.telegram || null;
+    function renderIdentity(p) {
+      const row = rows.get(p.accountIdx); if (!row) return;
+      const el = row.querySelector('.tg');
+      const it = identityOf(p);
+      if (it && (it.username || it.displayName || it.phone)) {
+        el.classList.remove('none');
+        el.innerHTML = (it.username ? `<b>@${esc(it.username)}</b>` : '') + (it.displayName ? `${it.username ? ' · ' : ''}${esc(it.displayName)}` : '') + (!it.username && !it.displayName && it.phone ? `+${esc(it.phone)}` : '');
+        el.title = [it.username && `@${it.username}`, it.displayName, it.phone && `+${it.phone}`].filter(Boolean).join('  ');
+      } else {
+        el.classList.add('none');
+        el.textContent = openedProfiles.has(p.accountIdx) && stateOf(p.accountIdx).url ? '未登录' : '—';
+        el.title = '';
+      }
+    }
 
     function flash(text, ms = 2500) {
       statusEl.textContent = text; statusEl.dataset.sticky = '1';
@@ -162,8 +188,29 @@
       row.className = 'row'; row.dataset.id = String(p.accountIdx); row.title = `persist:sandbox-${p.accountIdx}`;
       row.innerHTML = `
         <div class="line1"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="st"></span><button class="icon reload" title="重新加载">⟳</button></div>
+        <div class="line2"><span class="tg none">—</span><span class="note" title="点击添加备注"></span><input data-role="note" maxlength="500" placeholder="备注，Enter 保存 / Esc 取消" spellcheck="false"></div>
         <div class="row-err"></div>`;
       const errEl = row.querySelector('.row-err');
+      const line2 = row.querySelector('.line2');
+      const noteEl = row.querySelector('.note');
+      const input = row.querySelector('[data-role="note"]');
+      const showNote = () => { noteEl.textContent = p.note || '添加备注'; noteEl.classList.toggle('empty', !p.note); };
+      showNote();
+      const startEdit = (e) => { e && e.stopPropagation(); line2.classList.add('editing'); input.value = p.note || ''; input.focus(); input.select(); };
+      const stopEdit = () => { line2.classList.remove('editing'); };
+      const saveNote = async () => {
+        const value = input.value.trim();
+        stopEdit();
+        if (value === (p.note || '')) return;
+        try {
+          const updated = await window.panelAPI.setProfileNote(p.accountIdx, value);
+          p.note = updated.note; showNote();
+        } catch (e) { errEl.textContent = e.message || String(e); errEl.classList.add('on'); }
+      };
+      noteEl.onclick = startEdit;
+      input.onclick = (e) => e.stopPropagation();
+      input.onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Enter') saveNote(); if (e.key === 'Escape') stopEdit(); };
+      input.onblur = () => { if (line2.classList.contains('editing')) saveNote(); };
       row.onclick = () => selectProfile(p.accountIdx);
       row.querySelector('.reload').onclick = (e) => { e.stopPropagation(); reloadProfile(p.accountIdx); };
       return row;
@@ -186,6 +233,7 @@
         if (!rows.has(p.accountIdx)) { const row = buildRow(p); rows.set(p.accountIdx, row); rowsEl.appendChild(row); }
         rows.get(p.accountIdx).classList.toggle('active', !!selected && selected.accountIdx === p.accountIdx);
         renderRowState(p.accountIdx);
+        renderIdentity(p);
       }
     }
 
@@ -210,8 +258,10 @@
       const next = { ...prev, loading: !!state.loading };
       if (state.url !== undefined) { next.url = failed ? '' : state.url; next.title = state.title || ''; }
       if (!state.loading) { next.failed = failed; next.error = state.error || (failed ? prev.error : null); }
+      if (state.identity) next.identity = state.identity;
       cellState.set(idx, next);
       renderRowState(idx);
+      { const p = profiles.find((x) => x.accountIdx === idx); if (p) renderIdentity(p); }
       if (selected && selected.accountIdx === idx) renderPreviewState();
     }
     async function pullStates({ adopt = false } = {}) {

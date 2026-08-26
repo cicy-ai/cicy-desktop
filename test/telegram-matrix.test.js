@@ -58,7 +58,7 @@ test("a cached-but-offline cell is reported as failed, not loaded", () => {
   // service worker 会让断网的 Telegram 也「加载成功」,只能从 session 层探。
   assert.match(src, /net\.fetch\(target, \{[^]*session: session\.fromPartition\(partitionFor\(profileIdx\)\)/);
   assert.match(src, /ERR_NO_NETWORK/);
-  assert.match(src, /did-stop-loading", \(\) => \{ push\(\); probeReachable\(\); \}/);
+  assert.match(src, /did-stop-loading", \(\) => \{ push\(\); probeReachable\(\);/);
   assert.match(src, /if \(seq !== probeSeq\) return;/);
   // 一次失败不判定,避免代理抖动误报
   const probe = src.slice(src.indexOf("const probeReachable"), src.indexOf("wc.on(\"did-start-loading\""));
@@ -88,6 +88,9 @@ test("matrix page exposes profile table and phone preview without inline proxy e
   assert.doesNotMatch(html, /panelAPI\.setProfileProxy/);
   assert.match(html, /id="add-profile"/);
   assert.doesNotMatch(html, /data-role="proxy"/);
+  assert.match(html, /panelAPI\.setProfileNote/);
+  assert.match(html, /data-role="note"/);
+  assert.match(html, /class="tg none"/);
   assert.match(html, /id="phone-preview"/);
   assert.match(html, /https:\/\/web\.telegram\.org\/k\//);
   assert.match(html, /panelAPI\.sync/);
