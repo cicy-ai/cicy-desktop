@@ -9,6 +9,10 @@ function sleep(ms) {
 }
 
 function withFileLock(lockPath, fn, { timeoutMs = 5000, retryDelayMs = 50 } = {}) {
+  // The lock is a directory next to the target file; on a fresh machine the
+  // parent (~/cicy-ai) does not exist yet and mkdir(lock) fails with ENOENT,
+  // which used to make every first-run write (api_token, terms, deviceInfo) fail.
+  try { fs.mkdirSync(path.dirname(lockPath), { recursive: true }); } catch (_) {}
   const startedAt = Date.now();
   while (true) {
     try {
