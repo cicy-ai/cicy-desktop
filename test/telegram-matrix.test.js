@@ -73,25 +73,21 @@ test("panel reload adopts existing session views instead of destroying them", ()
   assert.match(pull, /if \(adopt\)[^]*openedProfiles\.add\(Number\(m\[1\]\)\)/);
 });
 
-test("saving a proxy never leaves an unopened profile stuck at loading", () => {
+test("reloading an unopened profile creates its cell instead of a bare reload", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "src", "tabbrowser", "telegram-matrix.html"), "utf8");
-  const save = html.slice(html.indexOf("const save = async"), html.indexOf("row.onclick ="));
-  // 只有已打开的会话才置 loading / 重载;未打开的没有 cell,置了就永远回不来。
-  assert.match(save, /openedProfiles\.has\(p\.accountIdx\)/);
-  assert.doesNotMatch(save, /cellState\.set\(p\.accountIdx, \{ loading: true \}\)/);
   const reload = html.slice(html.indexOf("function reloadProfile"), html.indexOf("function render()"));
   assert.match(reload, /const fresh = !openedProfiles\.has\(idx\)/);
   assert.match(reload, /if \(!fresh\)[^]*panelAPI\.reload/);
 });
 
-test("matrix page exposes profile table, proxy editor, and phone preview", () => {
+test("matrix page exposes profile table and phone preview without inline proxy editor", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "src", "tabbrowser", "telegram-matrix.html"), "utf8");
   assert.match(html, /id="rows"/);
   assert.match(html, /id="ov-error"/);
   assert.match(html, /panelAPI\.states/);
-  assert.match(html, /panelAPI\.setProfileProxy/);
+  assert.doesNotMatch(html, /panelAPI\.setProfileProxy/);
   assert.match(html, /id="add-profile"/);
-  assert.match(html, /data-role="proxy"/);
+  assert.doesNotMatch(html, /data-role="proxy"/);
   assert.match(html, /id="phone-preview"/);
   assert.match(html, /https:\/\/web\.telegram\.org\/k\//);
   assert.match(html, /panelAPI\.sync/);

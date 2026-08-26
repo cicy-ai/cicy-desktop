@@ -35,14 +35,6 @@
     .name { font-weight: 650; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
     .chip { flex: none; padding: 1px 6px; border-radius: 999px; background: var(--head); color: #b4b4bb; font: 11px ui-monospace, monospace; }
     .st { flex: none; color: var(--muted); font-size: 11px; white-space: nowrap; margin-left: auto; }
-    .line2 { display: flex; align-items: center; gap: 6px; margin-top: 5px; padding-left: 16px; font-size: 11px; color: var(--muted); min-width: 0; }
-    .line2 .val { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 11px ui-monospace, monospace; color: #b4b4bb; }
-    .line2 .val:hover { color: #fff; text-decoration: underline dotted; }
-    .line2 .pen { padding: 1px 5px; font-size: 12px; }
-    .line2 .edit { display: none; flex: 1; gap: 4px; min-width: 0; }
-    .line2.editing .edit { display: flex; }
-    .line2.editing .val, .line2.editing .pen, .line2.editing .lbl { display: none; }
-    input[data-role="proxy"] { flex: 1; min-width: 0; height: 26px; border: 1px solid var(--accent); border-radius: 6px; padding: 0 8px; background: #111113; color: var(--fg); font: 11.5px ui-monospace, monospace; outline: 0; }
     .row-err { padding: 4px 0 0 16px; color: #ff8a8a; font-size: 11px; display: none; }
     .row-err.on { display: block; }
     #empty { display: none; padding: 40px 24px; color: var(--muted); text-align: center; line-height: 1.8; }
@@ -92,7 +84,7 @@
         <div>
           <h2>无法连接 Telegram</h2>
           <p id="err-detail"></p>
-          <div class="btns"><button id="err-retry">重试</button><button class="ghost" id="err-direct">改为直连并重试</button><button class="ghost" id="err-edit">改代理</button></div>
+          <div class="btns"><button id="err-retry">重试</button></div>
         </div>
       </div>
     </div>
@@ -143,8 +135,8 @@
     function describeError(p, st) {
       const e = st.error || {};
       const desc = e.description ? `<code>${esc(e.description)}</code>` : '';
-      if (p.proxy) return `代理 <code>${esc(p.proxy)}</code> 不可用或无法访问 Telegram。${desc}<br>请确认代理已启动，或改为直连 / 换一个代理。`;
-      return `当前为直连，网络无法访问 Telegram。${desc}<br>建议设置一个可用的代理。`;
+      if (p.proxy) return `代理 <code>${esc(p.proxy)}</code> 不可用或无法访问 Telegram。${desc}<br>请到代理配置页检查该代理。`;
+      return `当前为直连，网络无法访问 Telegram。${desc}<br>请到代理配置页为该 Profile 设置代理。`;
     }
 
     function renderPreviewState() {
@@ -170,42 +162,10 @@
       row.className = 'row'; row.dataset.id = String(p.accountIdx); row.title = `persist:sandbox-${p.accountIdx}`;
       row.innerHTML = `
         <div class="line1"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="st"></span><button class="icon reload" title="重新加载">⟳</button></div>
-        <div class="line2"><span class="lbl">代理</span><span class="val" title="点击修改"></span><button class="icon pen" title="修改代理">✎</button>
-          <div class="edit"><input data-role="proxy" placeholder="留空 = 直连，例如 http://127.0.0.1:20001" spellcheck="false"><button class="sm save">保存</button><button class="sm ghost cancel">取消</button></div></div>
         <div class="row-err"></div>`;
-      const line2 = row.querySelector('.line2');
-      const val = line2.querySelector('.val');
-      const input = line2.querySelector('[data-role="proxy"]');
       const errEl = row.querySelector('.row-err');
-      const showProxy = () => { val.textContent = p.proxy || '直连'; };
-      showProxy();
-      const startEdit = (e) => { e && e.stopPropagation(); line2.classList.add('editing'); input.value = p.proxy; input.focus(); input.select(); };
-      const stopEdit = (e) => { e && e.stopPropagation(); line2.classList.remove('editing'); errEl.classList.remove('on'); };
-      const save = async (value) => {
-        const btn = line2.querySelector('.save'); btn.disabled = true; errEl.classList.remove('on');
-        try {
-          const updated = await window.panelAPI.setProfileProxy(p.accountIdx, value);
-          p.proxy = updated.proxy; showProxy(); stopEdit();
-          // 代理只在会话加载时生效,所以已打开的必须重载。**没打开过的不要**在这里置
-          // loading:主进程没有对应的 cell,既不会创建视图也不会有 panelcells:state 回来,
-          // 行会永远卡在「加载中…」(实测 bug)。保持「未打开」,下次打开自然用新代理。
-          if (openedProfiles.has(p.accountIdx)) {
-            reloadProfile(p.accountIdx);
-            flash(updated.proxy ? `#${p.accountIdx} 代理已应用，重新加载中` : `#${p.accountIdx} 已切换直连，重新加载中`);
-          } else {
-            flash(updated.proxy ? `#${p.accountIdx} 代理已保存，打开时生效` : `#${p.accountIdx} 已保存为直连，打开时生效`);
-          }
-        } catch (e) { errEl.textContent = e.message || String(e); errEl.classList.add('on'); }
-        finally { btn.disabled = false; }
-      };
       row.onclick = () => selectProfile(p.accountIdx);
-      val.onclick = startEdit; line2.querySelector('.pen').onclick = startEdit;
-      line2.querySelector('.cancel').onclick = stopEdit;
-      line2.querySelector('.save').onclick = (e) => { e.stopPropagation(); save(input.value); };
-      input.onclick = (e) => e.stopPropagation();
-      input.onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Enter') save(input.value); if (e.key === 'Escape') stopEdit(); };
       row.querySelector('.reload').onclick = (e) => { e.stopPropagation(); reloadProfile(p.accountIdx); };
-      row._save = save; row._startEdit = startEdit;
       return row;
     }
 
@@ -289,8 +249,6 @@
     };
     document.getElementById('reload').onclick = () => { if (selected) reloadProfile(selected.accountIdx); };
     document.getElementById('err-retry').onclick = () => { if (selected) reloadProfile(selected.accountIdx); };
-    document.getElementById('err-direct').onclick = () => { const row = selected && rows.get(selected.accountIdx); if (row) row._save(''); };
-    document.getElementById('err-edit').onclick = () => { const row = selected && rows.get(selected.accountIdx); if (row) { row.scrollIntoView({ block: 'nearest' }); row._startEdit(); } };
 
     new ResizeObserver(() => requestAnimationFrame(syncPreview)).observe(preview);
     window.addEventListener('resize', syncPreview);
