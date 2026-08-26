@@ -308,10 +308,24 @@ async function openTeam(id, opts = {}) {
   // 共用同一份)—— 打开时**实时读 global.json**,cicy-code 轮换 token 也立刻跟得上,绝不吃 teams.json
   // 里可能已陈旧的快照(陈旧 → ?token= 旧值 → :8008 拒 → 卡登录/白屏)。opts.token(如 :8008 容器
   // 自己实时拿的)优先级最高;非本地团队仍用存的 node.api_token。
-  let isLocalUrl = false;
-  try { const h = new URL(baseUrl).hostname; isLocalUrl = h === "127.0.0.1" || h === "localhost" || h === "::1"; } catch {}
-  const token = (opts && opts.token)
-    || (isLocalUrl ? (readGlobal()?.api_token || node.api_token || "") : (node.api_token || ""));
+  let isLocalUrl = false, localPort = null;
+  try { const u = new URL(baseUrl); isLocalUrl = u.hostname === "127.0.0.1" || u.hostname === "localhost" || u.hostname === "::1"; localPort = Number(u.port) || 8008; } catch {}
+  // Windows 的 :8008 是 WSL Docker 容器,token 存在**容器卷里的 global.json**,和主机
+  // ~/cicy-ai/global.json 是两把不同的 token —— 绝不能 fallback 到主机的那把(会被容器拒,
+  // 卡在登录/白屏)。只有 mac/linux 的 native :8008 才与主机共用同一份 global.json。
+  const isWinDockerTeam = process.platform === "win32" && isLocalUrl
+    && (node.is_docker === true || localPort === Number(process.env.CICY_DOCKER_APP_PORT || 8008));
+  let token = (opts && opts.token) || "";
+  if (!token) {
+    if (isWinDockerTeam) {
+      try { token = String(await require("../sidecar/wsl-docker").readContainerToken(localPort) || "").trim(); } catch (e) { log.warn(`[local-teams] open ${id}: container token read failed: ${e.message}`); }
+      if (!token) return { ok: false, error: "container_token_unavailable", hint: "cicy-code 容器还没就绪(读不到容器内的 token)。稍等几秒或用卡片菜单「重启」。" };
+    } else if (isLocalUrl) {
+      token = readGlobal()?.api_token || node.api_token || "";
+    } else {
+      token = node.api_token || "";
+    }
+  }
   const url = token ? `${baseUrl}/?token=${encodeURIComponent(token)}` : baseUrl;
 
   // Compare by origin+pathname only — token + hash both vary per
