@@ -431,6 +431,22 @@ function installIpc(findTab) {
     const view = profileStore.setIpInfo("electron", id, info);
     return { accountIdx: id, ipInfo: view.ipInfo };
   });
+  // 删除 profile:关掉所有面板里该 profile 的视图,清空其 session 存储(登录态、cookie),
+  // 再删记录。页面侧已二次确认。
+  ipcMain.handle("panelcells:remove-profile", async (e, { accountIdx }) => {
+    if (!ctx(e)) throw new Error("Invalid panel");
+    const id = Number(accountIdx);
+    if (!Number.isInteger(id) || id <= 0) throw new Error("Invalid Electron profile ID");
+    for (const pc of registry.values()) {
+      for (const [key, rec] of [...pc.views]) { if (rec.profile === id) pc.destroyCell(key); }
+    }
+    const part = partitionFor(id);
+    try { await session.fromPartition(part).clearStorageData(); } catch (err) {}
+    try { await session.fromPartition(part).clearCache(); } catch (err) {}
+    appliedProxy.delete(part);
+    const removed = require("../profiles/profile-store").removeProfile("electron", id);
+    return { accountIdx: id, removed };
+  });
   ipcMain.handle("panelcells:set-profile-note", async (e, { accountIdx, note }) => {
     if (!ctx(e)) throw new Error("Invalid panel");
     const id = Number(accountIdx);

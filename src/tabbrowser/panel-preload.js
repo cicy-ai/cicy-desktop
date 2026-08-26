@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld("panelAPI", {
   setProfileProxy: (accountIdx, proxy) => ipcRenderer.invoke("panelcells:set-profile-proxy", { accountIdx, proxy }),
   setProfileNote: (accountIdx, note) => ipcRenderer.invoke("panelcells:set-profile-note", { accountIdx, note }),
   probeIp: (accountIdx) => ipcRenderer.invoke("panelcells:probe-ip", { accountIdx }),
+  removeProfile: (accountIdx) => ipcRenderer.invoke("panelcells:remove-profile", { accountIdx }),
   snapshots: () => ipcRenderer.invoke("panelcells:snapshots"),
   // divider drag: BrowserViews sit ABOVE the page and would swallow pointermove —
   // detach them for the duration of the drag (frame-only preview), reattach on up.

@@ -16,6 +16,9 @@ test("setNote persists a trimmed note on electron profiles", () => {
     assert.equal(view.note, "主号，别乱动");
     assert.equal(store.getProfile("electron", 3).note, "主号，别乱动");
     assert.equal(store.setNote("electron", 3, "").note, "");
+    assert.equal(store.removeProfile("electron", 3), true);
+    assert.equal(store.getProfile("electron", 3), null);
+    assert.equal(store.removeProfile("electron", 3), false);
   } finally {
     process.env.HOME = prevHome; if (prevUp === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = prevUp;
     delete require.cache[require.resolve("../src/profiles/profile-store")];

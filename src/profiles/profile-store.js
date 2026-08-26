@@ -305,6 +305,25 @@ function setProxy(backend, idx, url) {
   throw new Error(`Unknown backend: ${backend}`);
 }
 
+// removeProfile — drop the profile record. Electron: deletes account-<N>.json
+// (the caller is responsible for the session's storage). Returns true if it existed.
+function removeProfile(backend, idx) {
+  if (backend === "electron") {
+    const f = electronFile(idx);
+    if (!fs.existsSync(f)) return false;
+    fs.unlinkSync(f);
+    return true;
+  }
+  if (backend === "chrome") {
+    const cfg = readChromeConfig();
+    if (!cfg[`profile_${idx}`]) return false;
+    delete cfg[`profile_${idx}`];
+    fs.writeFileSync(CHROME_JSON, JSON.stringify(cfg, null, 2));
+    return true;
+  }
+  throw new Error(`Unknown backend: ${backend}`);
+}
+
 // setNote — free-form per-profile note (both backends).
 function setNote(backend, idx, note) {
   const text = typeof note === "string" ? note.trim() : "";
@@ -354,6 +373,7 @@ module.exports = {
   getProfile,
   setProxy,
   setNote,
+  removeProfile,
   setLogin,
   addLogin,
   removeLogin,

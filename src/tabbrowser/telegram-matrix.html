@@ -59,6 +59,12 @@
     .cfg input:focus { border-color: var(--accent); }
     .cfg .hint { font-size: 11px; color: var(--muted); padding-left: 40px; }
     .cfg .hint b { color: #b4b4bb; font-weight: 500; }
+    .cfg .danger { display: flex; align-items: center; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); }
+    .cfg .danger .sp { flex: 1; }
+    .cfg .confirm { display: none; align-items: center; gap: 6px; margin-top: 8px; padding: 6px 8px; border-radius: 6px; background: rgba(255,92,92,.12); color: #ffb3b3; font-size: 11.5px; }
+    .cfg .confirm.on { display: flex; }
+    .cfg .confirm .sp { flex: 1; }
+    button.del { background: #b3261e; }
     .row-err { padding: 4px 0 0 16px; color: #ff8a8a; font-size: 11px; display: none; }
     .row-err.on { display: block; }
     #empty { display: none; padding: 40px 24px; color: var(--muted); text-align: center; line-height: 1.8; }
@@ -227,6 +233,8 @@
         <div class="cfg">
           <div class="f"><label>代理</label><input data-role="proxy" placeholder="留空 = 直连，例如 http://127.0.0.1:20001" spellcheck="false"><button class="sm save">保存</button><button class="sm ghost test">测 IP</button></div>
           <div class="hint">保存后已打开的会话会重新加载；<b>测 IP</b> 经该代理访问 IP 服务，结果显示在上方。</div>
+          <div class="danger"><span>删除此 Profile 会一并清除它的 Telegram 登录态和缓存。</span><span class="sp"></span><button class="sm ghost rm">删除</button></div>
+          <div class="confirm"><span>确认删除 <b>${esc(p.name)} #${p.accountIdx}</b>？不可恢复。</span><span class="sp"></span><button class="sm del rm-yes">确认删除</button><button class="sm ghost rm-no">取消</button></div>
         </div>
         <div class="row-err"></div>`;
       const errEl = row.querySelector('.row-err');
@@ -280,6 +288,14 @@
       proxyInput.onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Enter') saveProxy(); if (e.key === 'Escape') row.classList.remove('cfg-open'); };
       row.querySelector('.cfg .test').onclick = () => probeIp(p);
       row.querySelector('.ip').onclick = (e) => { e.stopPropagation(); probeIp(p); };
+      const confirmEl = row.querySelector('.cfg .confirm');
+      row.querySelector('.rm').onclick = () => { confirmEl.classList.add('on'); row.querySelector('.rm-yes').focus(); };
+      row.querySelector('.rm-no').onclick = () => confirmEl.classList.remove('on');
+      row.querySelector('.rm-yes').onclick = async () => {
+        const btn = row.querySelector('.rm-yes'); btn.disabled = true;
+        try { await removeProfile(p); }
+        catch (e) { errEl.textContent = e.message || String(e); errEl.classList.add('on'); btn.disabled = false; }
+      };
       row._openCfg = () => { if (!row.classList.contains('cfg-open')) toggleCfg(new Event('click')); row.scrollIntoView({ block: 'nearest' }); };
       row.onclick = () => selectProfile(p.accountIdx);
       row.querySelector('.reload').onclick = (e) => { e.stopPropagation(); reloadProfile(p.accountIdx); };
@@ -356,6 +372,19 @@
       const remembered = Number(localStorage.getItem('telegram-matrix-profile'));
       const target = preferredId || (profiles.some((p) => p.accountIdx === remembered) ? remembered : 0) || (profiles[0] && profiles[0].accountIdx);
       selectProfile(target);
+    }
+
+    async function removeProfile(p) {
+      const idx = p.accountIdx;
+      await window.panelAPI.removeProfile(idx);
+      openedProfiles.delete(idx); cellState.delete(idx);
+      const row = rows.get(idx); if (row) row.remove(); rows.delete(idx);
+      profiles = profiles.filter((x) => x.accountIdx !== idx);
+      if (selected && selected.accountIdx === idx) {
+        const next = profiles[0] ? profiles[0].accountIdx : 0;
+        if (next) selectProfile(next); else { selected = null; localStorage.removeItem('telegram-matrix-profile'); selectedName.textContent = '未选择 Profile'; render(); renderPreviewState(); syncPreview(); }
+      } else render();
+      flash(`Profile #${idx} 已删除`);
     }
 
     addButton.onclick = async () => {

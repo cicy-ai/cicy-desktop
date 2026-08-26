@@ -87,6 +87,11 @@ test("matrix page exposes profile table, phone preview, note, proxy drawer and i
   assert.match(html, /panelAPI\.states/);
   assert.match(html, /panelAPI\.setProfileProxy/);
   assert.match(html, /panelAPI\.probeIp/);
+  assert.match(html, /panelAPI\.removeProfile/);
+  // 删除必须二次确认:确认块默认隐藏,只有 rm-yes 才真正调用删除
+  assert.match(html, /\.cfg \.confirm \{ display: none;/);
+  assert.match(html, /querySelector\('\.rm-yes'\)\.onclick = async[^]*await removeProfile\(p\)/);
+  assert.doesNotMatch(html.slice(html.indexOf("querySelector('.rm').onclick"), html.indexOf("querySelector('.rm-no')")), /removeProfile\(/);
   assert.match(html, /id="add-profile"/);
   assert.match(html, /class="cfg"[^]*data-role="proxy"/);
   assert.match(html, /\.row\.cfg-open \.cfg \{ display: block; \}/);
