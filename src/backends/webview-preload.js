@@ -24,7 +24,16 @@
 //   webview gets the awaited promise
 
 const { contextBridge, ipcRenderer } = require("electron");
-const { resolveReportedCicyTheme } = require("../tabbrowser/tab-theme");
+// NOTE: this preload runs in sandboxed renderers (<webview>, trusted popups),
+// where `require` only resolves Electron built-ins — a relative require of
+// ../tabbrowser/tab-theme aborts the whole preload. Keep the helper inline and
+// in sync with src/tabbrowser/tab-theme.js (covered by test/webview-preload.test.js).
+function normalizeCicyTheme(theme) {
+  return theme === "light" || theme === "dark" ? theme : null;
+}
+function resolveReportedCicyTheme(documentTheme, savedTheme) {
+  return normalizeCicyTheme(documentTheme) || normalizeCicyTheme(savedTheme) || "light";
+}
 
 // cicy-code owns the theme preference (`cicy_theme`) and publishes the applied
 // value on <html data-theme>. Report that contract to the owning tab window so
