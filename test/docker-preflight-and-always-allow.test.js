@@ -29,6 +29,8 @@ test("trusted-origins: persistent dangerous-ops allow only for allowlisted hosts
   try {
     const store = require("../src/profiles/trusted-origins-store");
     assert.equal(store.allowDangerous("xs_master.cicy-ai.com").ok, false); // not allowlisted yet
+    assert.equal(store.allowDangerous("127.0.0.1").ok, true);               // built-in host works too
+    assert.equal(store.isDangerousAllowed("127.0.0.1"), true);
     assert.equal(store.add("xs_master.cicy-ai.com").ok, true);
     assert.equal(store.allowDangerous("https://xs_master.cicy-ai.com").ok, true);
     assert.equal(store.isDangerousAllowed("xs_master.cicy-ai.com"), true);

@@ -62,7 +62,7 @@ function readRawObj() {
 // "此站点始终允许敏感操作":对已在白名单里的站点,持久跳过 exec/读写文件的逐次确认。
 // 只有白名单站点可以加入(不在白名单 → 拒绝),从白名单移除时一并撤销。
 function listDangerousAllowed() {
-  const set = new Set(listUser());
+  const set = new Set(listAll()); // built-ins (localhost/127.0.0.1) included — the local team page IS 127.0.0.1
   return (Array.isArray(readRawObj().dangerous) ? readRawObj().dangerous : []).map(normalizeHost).filter((h) => h && set.has(h));
 }
 function isDangerousAllowed(host) {
