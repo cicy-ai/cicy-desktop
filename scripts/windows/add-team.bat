@@ -23,10 +23,10 @@ if not "%~2"=="" set "TEAM_TITLE=%~2"
 if not "%~3"=="" set "TEAM_TOKEN=%~3"
 
 rem URL-encode the pieces with PowerShell (handles spaces, Chinese, & etc.)
-for /f "usebackq delims=" %%E in (`powershell -NoProfile -Command "[uri]::EscapeDataString('%TEAM_URL%')"`)   set "ENC_URL=%%E"
-for /f "usebackq delims=" %%E in (`powershell -NoProfile -Command "[uri]::EscapeDataString('%TEAM_TITLE%')"`) set "ENC_TITLE=%%E"
+for /f "usebackq delims=" %%E in (`powershell -NoProfile -Command "[uri]::EscapeDataString('%TEAM_URL%')"`) do set "ENC_URL=%%E"
+for /f "usebackq delims=" %%E in (`powershell -NoProfile -Command "[uri]::EscapeDataString('%TEAM_TITLE%')"`) do set "ENC_TITLE=%%E"
 set "ENC_TOKEN="
-if not "%TEAM_TOKEN%"=="" for /f "usebackq delims=" %%E in (`powershell -NoProfile -Command "[uri]::EscapeDataString('%TEAM_TOKEN%')"`) set "ENC_TOKEN=%%E"
+if not "%TEAM_TOKEN%"=="" for /f "usebackq delims=" %%E in (`powershell -NoProfile -Command "[uri]::EscapeDataString('%TEAM_TOKEN%')"`) do set "ENC_TOKEN=%%E"
 
 set "LINK=cicy-desktop://addTeam?title=%ENC_TITLE%&url=%ENC_URL%"
 if not "%ENC_TOKEN%"=="" set "LINK=%LINK%&token=%ENC_TOKEN%"
