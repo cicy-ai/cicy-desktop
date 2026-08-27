@@ -8,6 +8,10 @@ function createPanelMenuTemplate(openPanel) {
       label: "Telegram 矩阵",
       click: () => openPanel("telegram-matrix"),
     },
+    {
+      label: "Redroid 矩阵",
+      click: () => openPanel("redroid-matrix"),
+    },
   ];
 }
 

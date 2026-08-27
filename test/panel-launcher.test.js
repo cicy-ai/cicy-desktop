@@ -18,10 +18,11 @@ test("panel menu offers blank panel and Telegram matrix actions", () => {
   const opened = [];
   const template = createPanelMenuTemplate((preset) => opened.push(preset));
 
-  assert.deepEqual(template.map((item) => item.label), ["面板", "Telegram 矩阵"]);
+  assert.deepEqual(template.map((item) => item.label), ["面板", "Telegram 矩阵", "Redroid 矩阵"]);
   template[0].click();
   template[1].click();
-  assert.deepEqual(opened, ["blank", "telegram-matrix"]);
+  template[2].click();
+  assert.deepEqual(opened, ["blank", "telegram-matrix", "redroid-matrix"]);
 });
 
 test("the panel plus button opens a native menu that cannot be covered by BrowserViews", () => {

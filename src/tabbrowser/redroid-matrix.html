@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Redroid 矩阵</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: var(--bg); color: var(--fg); font-size: 13px; }
+    body { display: grid; grid-template-columns: minmax(300px, 30%) 1fr; }
+    aside { min-width: 0; border-right: 1px solid var(--line); display: flex; flex-direction: column; }
+    header { flex: none; height: 56px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); }
+    h1 { margin: 0; font-size: 15px; display: flex; align-items: baseline; gap: 8px; }
+    h1 small { color: var(--muted); font-weight: 500; font-size: 12px; }
+    button { border: 0; border-radius: 8px; padding: 7px 12px; color: white; background: var(--accent); cursor: pointer; font-weight: 600; font-size: 13px; white-space: nowrap; line-height: 1.2; }
+    button:hover { filter: brightness(1.08); }
+    button:disabled { opacity: .55; cursor: wait; }
+    button.ghost { background: var(--head); color: var(--fg); border: 1px solid var(--line); }
+    button.sm { padding: 4px 8px; font-size: 12px; }
+    button.del { background: #b3261e; }
+    .icon { background: transparent; color: #b4b4bb; padding: 3px 6px; font-size: 13px; border-radius: 6px; }
+    .icon:hover { background: var(--hover); color: #fff; }
+    input, select { background: #0f0f11; border: 1px solid var(--line); color: var(--fg); border-radius: 6px; padding: 6px 8px; font-size: 12.5px; min-width: 0; }
+    input:focus, select:focus { outline: 1px solid var(--accent); }
+    .list { flex: 1; overflow: auto; padding: 8px; }
+    #rows { display: flex; flex-direction: column; gap: 4px; }
+    .row { padding: 9px 10px; border-radius: 10px; cursor: pointer; border: 1px solid transparent; min-width: 0; }
+    .row:hover { background: var(--hover); }
+    .row.active { background: rgba(59,130,246,.12); border-color: rgba(59,130,246,.35); }
+    .line1 { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .chip { font-size: 10.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 1px 6px; }
+    .st { color: var(--muted); font-size: 11.5px; margin-left: auto; white-space: nowrap; }
+    .line2 { display: flex; align-items: center; gap: 10px; margin-top: 4px; padding-left: 16px; font-size: 11.5px; color: var(--muted); min-width: 0; flex-wrap: wrap; }
+    .line2 .ip { cursor: pointer; }
+    .line2 .ip:hover { color: var(--fg); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #3f3f46; flex: none; }
+    .dot.ok { background: var(--ok); } .dot.booting { background: var(--warn); animation: pulse 1s infinite; } .dot.bad { background: var(--bad); } .dot.off { background: #3f3f46; }
+    @keyframes pulse { 50% { opacity: .35; } }
+    #empty { display: none; padding: 40px 24px; color: var(--muted); text-align: center; line-height: 1.8; }
+    #empty.on { display: block; }
+    .hint { flex: none; padding: 8px 16px; color: var(--muted); font-size: 11px; border-top: 1px solid var(--line); line-height: 1.5; }
+    /* create form */
+    #create { display: none; margin: 4px 8px 8px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--cell); }
+    #create.on { display: block; }
+    #create .f { display: grid; grid-template-columns: 64px 1fr; gap: 8px; align-items: center; margin-bottom: 8px; }
+    #create .f label { color: var(--muted); font-size: 12px; }
+    #create .res { display: flex; gap: 6px; }
+    #create .res input { width: 33%; }
+    #create .btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+    .err { color: #ff8a8a; font-size: 11.5px; margin-top: 6px; white-space: pre-wrap; display: none; }
+    .err.on { display: block; }
+    /* main */
+    main { min-width: 0; display: grid; grid-template-columns: minmax(300px, 420px) 1fr; grid-template-rows: auto 1fr; gap: 0 18px; padding: 14px 18px; overflow: hidden; }
+    #preview-title { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #b4b4bb; font-size: 12px; margin-bottom: 8px; }
+    #preview-title .left { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    #selected-name { color: var(--fg); font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #status { color: var(--muted); white-space: nowrap; }
+    .actions { display: flex; gap: 6px; flex: none; flex-wrap: wrap; }
+    .actions button { padding: 5px 9px; font-size: 12px; }
+    #phone-col { display: flex; flex-direction: column; align-items: center; min-height: 0; }
+    #phone { position: relative; width: 100%; aspect-ratio: 9 / 16; max-height: calc(100vh - 140px); padding: 8px; overflow: hidden; border: 1px solid var(--line); border-radius: 26px; background: var(--cell); box-shadow: 0 24px 70px rgba(0,0,0,.45); }
+    #screen { display: block; width: 100%; height: 100%; object-fit: contain; border-radius: 18px; background: #000; cursor: crosshair; user-select: none; -webkit-user-drag: none; }
+    .overlay { position: absolute; inset: 8px; border-radius: 18px; display: none; place-items: center; text-align: center; padding: 24px; color: var(--fg); background: var(--head); z-index: 2; }
+    .overlay.on { display: grid; }
+    .overlay p { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.6; }
+    .spinner { width: 28px; height: 28px; border: 3px solid rgba(255,255,255,.12); border-top-color: var(--accent); border-radius: 50%; animation: spin .9s linear infinite; margin: 0 auto 12px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #navbar { display: flex; gap: 6px; margin-top: 8px; }
+    #navbar button { flex: 1; }
+    #side { min-width: 0; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 12px; background: var(--cell); overflow: hidden; }
+    .tabs { display: flex; border-bottom: 1px solid var(--line); }
+    .tabs button { background: transparent; color: var(--muted); border-radius: 0; padding: 10px 14px; font-weight: 600; }
+    .tabs button.on { color: var(--fg); box-shadow: inset 0 -2px var(--accent); }
+    .pane { display: none; flex: 1; min-height: 0; overflow: auto; padding: 12px 14px; }
+    .pane.on { display: block; }
+    .kv { display: grid; grid-template-columns: 90px 1fr; gap: 6px 10px; align-items: center; font-size: 12.5px; }
+    .kv label { color: var(--muted); }
+    .kv .v { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+    .kv code { font: 11.5px ui-monospace, monospace; color: #c9c9d1; background: #0f0f11; padding: 2px 6px; border-radius: 4px; }
+    .badge { font-size: 11px; border-radius: 999px; padding: 2px 8px; border: 1px solid var(--line); color: var(--muted); }
+    .badge.ok { color: #86efac; border-color: rgba(34,197,94,.4); } .badge.bad { color: #fca5a5; border-color: rgba(239,68,68,.4); } .badge.warn { color: #fcd34d; border-color: rgba(245,158,11,.4); }
+    .danger { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11.5px; flex-wrap: wrap; }
+    .danger .sp { flex: 1; }
+    .confirm { display: none; margin-top: 8px; padding: 8px; border-radius: 6px; background: rgba(255,92,92,.12); color: #ffb3b3; font-size: 11.5px; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .confirm.on { display: flex; }
+    /* apps */
+    #apps-top { display: flex; gap: 6px; margin-bottom: 8px; }
+    #apps-top input { flex: 1; }
+    .app { display: flex; align-items: center; gap: 8px; padding: 6px 4px; border-bottom: 1px solid var(--line); font: 12px ui-monospace, monospace; }
+    .app span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* terminal */
+    #term { display: flex; flex-direction: column; height: 100%; }
+    #term-out { flex: 1; overflow: auto; background: #0f0f11; border: 1px solid var(--line); border-radius: 8px; padding: 8px; font: 11.5px ui-monospace, monospace; white-space: pre-wrap; word-break: break-all; color: #c9c9d1; margin-bottom: 8px; }
+    #term-in { display: flex; gap: 6px; }
+    #term-in input { flex: 1; font-family: ui-monospace, monospace; }
+    #term-out .cmd { color: #93c5fd; }
+  </style>
+</head>
+<body>
+  <aside>
+    <header>
+      <h1>Redroid 矩阵 <small id="count"></small></h1>
+      <button id="new-btn" title="新建一台 redroid Android 容器">+ 新建设备</button>
+    </header>
+    <div id="create">
+      <div class="f"><label>名称</label><input id="c-name" placeholder="例如 tg-01（生成 redroid-tg-01）" spellcheck="false"></div>
+      <div class="f"><label>Android</label><select id="c-ver"><option value="11">11（有 ARM 转译，兼容 armeabi APK，可用 ws-scrcpy）</option><option value="13" selected>13（新，仅 x86_64 APK）</option><option value="14">14</option></select></div>
+      <div class="f"><label>分辨率</label><div class="res"><input id="c-w" value="720" title="宽"><input id="c-h" value="1280" title="高"><input id="c-dpi" value="320" title="DPI"></div></div>
+      <div class="f"><label>代理</label><input id="c-proxy" placeholder="host:port，留空 = 直连" spellcheck="false"></div>
+      <div class="btns"><button class="ghost sm" id="c-cancel">取消</button><button class="sm" id="c-ok">创建</button></div>
+      <div class="err" id="c-err"></div>
+    </div>
+    <div class="list">
+      <div id="rows"></div>
+      <div id="empty">还没有设备<br>点击右上角「新建设备」创建第一台 Android</div>
+    </div>
+    <div class="hint">设备 = docker 容器（redroid），adb 端口从 15555 起分配。点击行切换预览；预览区可直接点按/滑动/打字。</div>
+  </aside>
+  <main>
+    <div id="preview-title">
+      <div class="left"><span class="dot" id="sel-dot"></span><span id="selected-name">未选择设备</span><span id="status"></span></div>
+      <div class="actions">
+        <button class="ghost" id="a-start">启动</button>
+        <button class="ghost" id="a-stop">停止</button>
+        <button class="ghost" id="a-restart">重启</button>
+        <button class="ghost" id="a-refresh" title="刷新列表与状态">刷新</button>
+      </div>
+    </div>
+    <div id="phone-col">
+      <div id="phone">
+        <img id="screen" alt="" draggable="false">
+        <div class="overlay on" id="ov-empty"><p>选择左侧一台设备</p></div>
+        <div class="overlay" id="ov-wait"><div><div class="spinner"></div><p id="ov-wait-text">连接中…</p></div></div>
+      </div>
+      <div id="navbar">
+        <button class="ghost sm" data-key="back" title="返回">◁</button>
+        <button class="ghost sm" data-key="home" title="主页">○</button>
+        <button class="ghost sm" data-key="recents" title="最近">▢</button>
+        <button class="ghost sm" data-key="power" title="电源">⏻</button>
+        <button class="ghost sm" id="live-btn" title="暂停/继续实时画面">⏸</button>
+      </div>
+    </div>
+    <div id="side">
+      <div class="tabs"><button class="on" data-pane="info">概览</button><button data-pane="apps">应用</button><button data-pane="term">终端</button></div>
+      <div class="pane on" id="pane-info">
+        <div class="kv">
+          <label>容器</label><div class="v"><code id="i-name">—</code><span id="i-status" class="badge">—</span></div>
+          <label>Android</label><div class="v"><span id="i-android">—</span></div>
+          <label>adb</label><div class="v"><code id="i-adb">—</code><span id="i-adbst" class="badge">—</span></div>
+          <label>Root</label><div class="v"><span id="i-root" class="badge">—</span><span style="color:var(--muted)">AOSP 原生 su（<code>su 0 &lt;cmd&gt;</code>）</span></div>
+          <label>Frida</label><div class="v"><span id="i-frida" class="badge">—</span><button class="ghost sm" id="frida-btn">启动 frida-server</button><code id="i-frida-addr" style="display:none"></code></div>
+          <label>代理</label><div class="v"><input id="i-proxy" placeholder="host:port，留空 = 直连" spellcheck="false" style="width:190px"><button class="sm" id="proxy-save">应用</button><button class="ghost sm" id="proxy-hint-btn" title="填入本机 mihomo 的 redroid 监听">用 mihomo</button></div>
+          <label>出口 IP</label><div class="v"><span id="i-ip">—</span><button class="ghost sm" id="ip-btn">测 IP</button></div>
+        </div>
+        <div class="err" id="i-err"></div>
+        <div class="danger"><span>删除会移除容器；勾选「连同数据」会一并删除 /data（登录态、已装应用）。</span><span class="sp"></span><label><input type="checkbox" id="rm-purge"> 连同数据</label><button class="ghost sm" id="rm-btn">删除设备</button></div>
+        <div class="confirm" id="rm-confirm"><span>确认删除 <b id="rm-name"></b>？</span><span class="sp"></span><button class="sm del" id="rm-yes">确认删除</button><button class="sm ghost" id="rm-no">取消</button></div>
+      </div>
+      <div class="pane" id="pane-apps">
+        <div id="apps-top"><input id="apps-filter" placeholder="筛选包名"><button class="sm" id="apps-install">安装 APK / XAPK…</button><button class="ghost sm" id="apps-refresh">刷新</button></div>
+        <div id="apps-list"></div>
+        <div class="err" id="apps-err"></div>
+      </div>
+      <div class="pane" id="pane-term">
+        <div id="term">
+          <div id="term-out"></div>
+          <div id="term-in"><input id="term-cmd" placeholder="adb shell 命令，例如 getprop ro.build.fingerprint" spellcheck="false"><button class="sm" id="term-run">运行</button></div>
+        </div>
+      </div>
+    </div>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const api = window.redroidAPI;
+    const rowsEl = $('rows'), empty = $('empty'), countEl = $('count'), statusEl = $('status');
+    const screen = $('screen'), ovEmpty = $('ov-empty'), ovWait = $('ov-wait'), ovWaitText = $('ov-wait-text');
+    let devices = [];        // [{name, image, state, status, version, port, running, info}]
+    let selected = null;     // device name
+    let defaults = { proxyHint: '' };
+    let live = true, shotTimer = null, shotBusy = false, shotSize = { w: 720, h: 1280 };
+    const rows = new Map();
+    const esc = (v) => String(v || '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const dev = () => devices.find((d) => d.name === selected) || null;
+
+    function flash(text, ms = 3000) { statusEl.textContent = text; clearTimeout(flash.t); flash.t = setTimeout(() => { statusEl.textContent = ''; }, ms); }
+    function showErr(el, e) { el.textContent = (e && e.message) || String(e || ''); el.classList.toggle('on', !!e); }
+    function dotOf(d) {
+      if (!d.running) return 'off';
+      if (!d.info || d.info.adb !== 'device') return 'bad';
+      return d.info.booted ? 'ok' : 'booting';
+    }
+    function stateText(d) {
+      if (!d.running) return '已停止';
+      if (!d.info || d.info.adb !== 'device') return d.info && d.info.adb === 'offline' ? 'adb offline' : '启动中 / adb 未连上';
+      return d.info.booted ? '运行中' : '开机中…';
+    }
+
+    // ── list ──────────────────────────────────────────────────────────────
+    function buildRow(d) {
+      const row = document.createElement('div');
+      row.className = 'row'; row.dataset.name = d.name;
+      row.innerHTML = `<div class="line1"><span class="dot"></span><span class="name"></span><span class="chip"></span><span class="st"></span></div>
+        <div class="line2"><span class="port"></span><span class="proxy"></span><span class="ip" title="经该设备代理探测出口 IP（点击重测）"></span></div>`;
+      row.onclick = () => select(d.name);
+      row.querySelector('.ip').onclick = (e) => { e.stopPropagation(); select(d.name); probeIp(); };
+      return row;
+    }
+    function renderRow(d) {
+      let row = rows.get(d.name);
+      if (!row) { row = buildRow(d); rows.set(d.name, row); rowsEl.appendChild(row); }
+      row.classList.toggle('active', d.name === selected);
+      row.querySelector('.dot').className = `dot ${dotOf(d)}`;
+      row.querySelector('.name').textContent = d.name.replace(/^redroid-?/, '') || d.name;
+      row.querySelector('.name').title = d.name;
+      row.querySelector('.chip').textContent = `Android ${d.version || '?'}`;
+      row.querySelector('.st').textContent = stateText(d);
+      row.querySelector('.port').textContent = d.port ? `adb :${d.port}` : '';
+      row.querySelector('.proxy').textContent = d.info && d.info.proxy ? `代理 ${d.info.proxy}` : (d.running ? '直连' : '');
+      const ipEl = row.querySelector('.ip');
+      ipEl.textContent = d.ipInfo ? `${d.ipInfo.area ? d.ipInfo.area + ' · ' : ''}${d.ipInfo.ip}` : (d.running ? '测 IP' : '');
+    }
+    function render() {
+      const names = new Set(devices.map((d) => d.name));
+      for (const [n, row] of rows) if (!names.has(n)) { row.remove(); rows.delete(n); }
+      devices.forEach(renderRow);
+      empty.classList.toggle('on', devices.length === 0);
+      countEl.textContent = devices.length ? `${devices.length} 台` : '';
+      renderSelected();
+    }
+    async function refresh({ quiet = false } = {}) {
+      if (!quiet) $('a-refresh').disabled = true;
+      try {
+        const list = await api.list();
+        const keep = new Map(devices.map((d) => [d.name, d.ipInfo]));
+        devices = list.map((d) => ({ ...d, ipInfo: keep.get(d.name) || null }));
+        if (selected && !devices.some((d) => d.name === selected)) selected = null;
+        if (!selected && devices[0]) selected = (devices.find((d) => d.name === localStorage.getItem('redroid-matrix-sel')) || devices[0]).name;
+        render();
+      } catch (e) { flash(e.message || String(e), 6000); }
+      finally { $('a-refresh').disabled = false; }
+    }
+
+    // ── selection / info pane ─────────────────────────────────────────────
+    function select(name) {
+      selected = name; localStorage.setItem('redroid-matrix-sel', name);
+      screen.removeAttribute('src');
+      render(); loadApps(); $('term-out').innerHTML = '';
+      kickShots();
+    }
+    const badge = (el, ok, txt, cls) => { el.textContent = txt; el.className = `badge ${cls || (ok ? 'ok' : 'bad')}`; };
+    function renderSelected() {
+      const d = dev();
+      $('selected-name').textContent = d ? d.name : '未选择设备';
+      $('sel-dot').className = `dot ${d ? dotOf(d) : ''}`;
+      ovEmpty.classList.toggle('on', !d);
+      ['a-start', 'a-stop', 'a-restart'].forEach((id) => { $(id).disabled = !d; });
+      if (!d) return;
+      $('a-start').style.display = d.running ? 'none' : ''; $('a-stop').style.display = d.running ? '' : 'none';
+      const i = d.info || {};
+      $('i-name').textContent = d.name; badge($('i-status'), d.running, d.status, d.running ? 'ok' : '');
+      $('i-android').textContent = `${i.release || d.version || '?'}${i.model ? ' · ' + i.model : ''} · ${d.image}`;
+      $('i-adb').textContent = d.port ? `127.0.0.1:${d.port}` : '—';
+      badge($('i-adbst'), i.adb === 'device', i.adb === 'device' ? (i.booted ? '已连接' : '开机中') : (i.adb || '—'), i.adb === 'device' ? (i.booted ? 'ok' : 'warn') : 'bad');
+      badge($('i-root'), !!i.root, i.root == null ? '—' : i.root ? '可用' : '不可用');
+      badge($('i-frida'), !!i.frida, i.frida ? '运行中' : '未运行', i.frida ? 'ok' : '');
+      $('frida-btn').textContent = i.frida ? '停止 frida-server' : '启动 frida-server';
+      $('frida-btn').disabled = !d.running || i.adb !== 'device';
+      $('i-frida-addr').style.display = i.frida ? '' : 'none';
+      $('i-frida-addr').textContent = i.frida ? `frida -H 127.0.0.1:${i.fridaPort}` : '';
+      if (document.activeElement !== $('i-proxy')) $('i-proxy').value = i.proxy || '';
+      $('i-ip').textContent = d.ipInfo ? `${d.ipInfo.ip}${d.ipInfo.area ? ' · ' + d.ipInfo.area : ''}${d.ipInfo.isp ? ' · ' + d.ipInfo.isp : ''}${d.ipInfo.hosting ? ' ⚠机房' : ''}${d.ipInfo.proxy ? ' ⚠标记proxy' : ''}` : '—';
+      $('rm-name').textContent = d.name;
+      const ready = d.running && i.adb === 'device';
+      ovWait.classList.toggle('on', !ready);
+      ovWaitText.textContent = !d.running ? '设备已停止' : (i.adb === 'device' ? '' : '等待 adb 连接（开机约需 30–60 秒）…');
+      screen.style.display = ready ? '' : 'none';
+    }
+
+    // ── screenshot stream + input ─────────────────────────────────────────
+    function kickShots() { clearTimeout(shotTimer); shot(); }
+    async function shot() {
+      clearTimeout(shotTimer);
+      const d = dev();
+      if (!d || !live || !d.running || !d.info || d.info.adb !== 'device') { shotTimer = setTimeout(shot, 1500); return; }
+      if (shotBusy) return;
+      shotBusy = true;
+      try {
+        const src = await api.screenshot(d.name);
+        if (dev() && dev().name === d.name) screen.src = src;
+      } catch (e) { flash(`截图失败：${e.message}`, 2000); }
+      finally { shotBusy = false; shotTimer = setTimeout(shot, 350); }
+    }
+    screen.onload = () => { shotSize = { w: screen.naturalWidth, h: screen.naturalHeight }; };
+    // map pointer → device px (object-fit: contain → letterbox aware)
+    function toDevice(ev) {
+      const r = screen.getBoundingClientRect();
+      const scale = Math.min(r.width / shotSize.w, r.height / shotSize.h);
+      const ox = (r.width - shotSize.w * scale) / 2, oy = (r.height - shotSize.h * scale) / 2;
+      return { x: Math.max(0, Math.min(shotSize.w, (ev.clientX - r.left - ox) / scale)), y: Math.max(0, Math.min(shotSize.h, (ev.clientY - r.top - oy) / scale)) };
+    }
+    let down = null;
+    screen.onpointerdown = (e) => { down = { ...toDevice(e), t: Date.now() }; screen.setPointerCapture(e.pointerId); };
+    screen.onpointerup = async (e) => {
+      if (!down || !dev()) return;
+      const up = toDevice(e); const start = down; down = null;
+      const dist = Math.hypot(up.x - start.x, up.y - start.y);
+      const ev = dist < 12 ? { type: 'tap', x: up.x, y: up.y } : { type: 'swipe', x1: start.x, y1: start.y, x2: up.x, y2: up.y, ms: Math.min(1200, Math.max(120, Date.now() - start.t)) };
+      try { await api.input(dev().name, ev); setTimeout(kickShots, 120); } catch (err) { flash(err.message, 2500); }
+    };
+    screen.tabIndex = 0;
+    screen.onkeydown = async (e) => {
+      const d = dev(); if (!d) return;
+      const map = { Enter: 'enter', Backspace: 'del', Escape: 'back', Home: 'home' };
+      let ev = null;
+      if (map[e.key]) ev = { type: 'key', key: map[e.key] };
+      else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && /[\x20-\x7e]/.test(e.key)) ev = { type: 'text', text: e.key };
+      if (!ev) return;
+      e.preventDefault();
+      try { await api.input(d.name, ev); setTimeout(kickShots, 150); } catch (err) { flash(err.message, 2500); }
+    };
+    screen.onpaste = async (e) => {
+      const d = dev(); const t = (e.clipboardData || {}).getData && e.clipboardData.getData('text'); if (!d || !t) return;
+      e.preventDefault();
+      try { await api.input(d.name, { type: 'text', text: t }); setTimeout(kickShots, 150); } catch (err) { flash(err.message, 3000); }
+    };
+    document.querySelectorAll('#navbar [data-key]').forEach((b) => { b.onclick = async () => { const d = dev(); if (!d) return; try { await api.input(d.name, { type: 'key', key: b.dataset.key }); setTimeout(kickShots, 200); } catch (e) { flash(e.message, 2500); } }; });
+    $('live-btn').onclick = () => { live = !live; $('live-btn').textContent = live ? '⏸' : '▶'; if (live) kickShots(); };
+
+    // ── actions ───────────────────────────────────────────────────────────
+    async function act(btnId, fn, okText) {
+      const b = $(btnId); b.disabled = true;
+      try { await fn(); if (okText) flash(okText); await refresh({ quiet: true }); }
+      catch (e) { flash(e.message || String(e), 6000); showErr($('i-err'), e); }
+      finally { b.disabled = false; }
+    }
+    $('a-start').onclick = () => act('a-start', () => api.start(dev().name), '已启动，等待开机…');
+    $('a-stop').onclick = () => act('a-stop', () => api.stop(dev().name), '已停止');
+    $('a-restart').onclick = () => act('a-restart', () => api.restart(dev().name), '重启中…');
+    $('a-refresh').onclick = () => refresh();
+    $('proxy-save').onclick = () => act('proxy-save', async () => { const v = await api.setProxy(dev().name, $('i-proxy').value); const d = dev(); d.ipInfo = null; flash(v ? `代理已设为 ${v}` : '已切为直连'); });
+    $('proxy-hint-btn').onclick = () => { if (defaults.proxyHint) $('i-proxy').value = defaults.proxyHint; else flash('未找到本机 mihomo 容器 IP', 3000); };
+    async function probeIp() {
+      const d = dev(); if (!d) return;
+      $('ip-btn').disabled = true; $('i-ip').textContent = '探测中…';
+      try { d.ipInfo = await api.probeIp(d.name); render(); }
+      catch (e) { $('i-ip').textContent = e.message; }
+      finally { $('ip-btn').disabled = false; }
+    }
+    $('ip-btn').onclick = probeIp;
+    $('frida-btn').onclick = () => act('frida-btn', async () => { const on = await api.frida(dev().name, !(dev().info && dev().info.frida)); flash(on ? `frida-server 已启动，宿主可用 frida -H 127.0.0.1:${dev().info.fridaPort}` : 'frida-server 已停止', 6000); });
+    $('rm-btn').onclick = () => $('rm-confirm').classList.add('on');
+    $('rm-no').onclick = () => $('rm-confirm').classList.remove('on');
+    $('rm-yes').onclick = () => act('rm-yes', async () => { const n = dev().name; await api.remove(n, $('rm-purge').checked); $('rm-confirm').classList.remove('on'); selected = null; flash(`${n} 已删除`); });
+
+    // ── create ────────────────────────────────────────────────────────────
+    $('new-btn').onclick = () => { $('create').classList.toggle('on'); if ($('create').classList.contains('on')) { if (!$('c-proxy').value && defaults.proxyHint) $('c-proxy').value = defaults.proxyHint; $('c-name').focus(); } };
+    $('c-cancel').onclick = () => $('create').classList.remove('on');
+    $('c-ok').onclick = async () => {
+      const b = $('c-ok'); b.disabled = true; showErr($('c-err'), null); flash('正在创建…', 600000);
+      try {
+        const r = await api.create({ name: $('c-name').value, version: $('c-ver').value, width: $('c-w').value, height: $('c-h').value, dpi: $('c-dpi').value, proxy: $('c-proxy').value });
+        $('create').classList.remove('on'); $('c-name').value = '';
+        flash(`${r.name} 已创建（adb :${r.port}），开机中…`, 8000);
+        await refresh({ quiet: true }); select(r.name);
+      } catch (e) { showErr($('c-err'), e); flash('创建失败', 3000); }
+      finally { b.disabled = false; }
+    };
+    $('c-name').onkeydown = (e) => { if (e.key === 'Enter') $('c-ok').click(); };
+    api.onProgress((m) => { if (m && m.message) flash(m.message, 600000); });
+
+    // ── apps ──────────────────────────────────────────────────────────────
+    let apps = [];
+    function renderApps() {
+      const f = $('apps-filter').value.trim().toLowerCase();
+      $('apps-list').innerHTML = apps.filter((p) => !f || p.includes(f)).map((p) => `<div class="app"><span title="${esc(p)}">${esc(p)}</span><button class="ghost sm" data-launch="${esc(p)}">打开</button><button class="ghost sm" data-un="${esc(p)}">卸载</button></div>`).join('') || `<div style="color:var(--muted);padding:12px 4px">${apps.length ? '无匹配' : '没有第三方应用'}</div>`;
+    }
+    async function loadApps() {
+      const d = dev(); apps = []; renderApps(); if (!d || !d.running) return;
+      try { apps = await api.apps(d.name); showErr($('apps-err'), null); } catch (e) { showErr($('apps-err'), e); }
+      renderApps();
+    }
+    $('apps-filter').oninput = renderApps;
+    $('apps-refresh').onclick = loadApps;
+    $('apps-install').onclick = () => act('apps-install', async () => { const r = await api.install(dev().name); if (!r.canceled) { flash(`已安装：${r.installed.join(', ')}`, 6000); loadApps(); } });
+    $('apps-list').onclick = async (e) => {
+      const b = e.target.closest('button'); const d = dev(); if (!b || !d) return;
+      b.disabled = true;
+      try {
+        if (b.dataset.launch) { await api.launch(d.name, b.dataset.launch); setTimeout(kickShots, 600); }
+        if (b.dataset.un) { await api.uninstall(d.name, b.dataset.un); flash(`已卸载 ${b.dataset.un}`); loadApps(); }
+      } catch (err) { showErr($('apps-err'), err); } finally { b.disabled = false; }
+    };
+
+    // ── terminal ──────────────────────────────────────────────────────────
+    async function runCmd() {
+      const d = dev(); const c = $('term-cmd').value.trim(); if (!d || !c) return;
+      $('term-cmd').value = '';
+      const out = $('term-out');
+      out.innerHTML += `<div class="cmd">$ ${esc(c)}</div>`;
+      try { const r = await api.shell(d.name, c); out.innerHTML += `<div>${esc(r)}</div>`; } catch (e) { out.innerHTML += `<div style="color:#ff8a8a">${esc(e.message)}</div>`; }
+      out.scrollTop = out.scrollHeight;
+    }
+    $('term-run').onclick = runCmd;
+    $('term-cmd').onkeydown = (e) => { if (e.key === 'Enter') runCmd(); };
+
+    // ── tabs ──────────────────────────────────────────────────────────────
+    document.querySelectorAll('.tabs button').forEach((b) => { b.onclick = () => {
+      document.querySelectorAll('.tabs button').forEach((x) => x.classList.toggle('on', x === b));
+      document.querySelectorAll('.pane').forEach((p) => p.classList.toggle('on', p.id === `pane-${b.dataset.pane}`));
+      if (b.dataset.pane === 'apps' && !apps.length) loadApps();
+    }; });
+
+    // ── boot ──────────────────────────────────────────────────────────────
+    api.defaults().then((d) => { defaults = d || defaults; }).catch(() => {});
+    refresh().then(() => { if (selected) { loadApps(); kickShots(); } });
+    setInterval(() => refresh({ quiet: true }), 8000);
+  </script>
+</body>
+</html>

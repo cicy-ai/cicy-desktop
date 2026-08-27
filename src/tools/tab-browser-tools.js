@@ -27,6 +27,7 @@ const SHELL_HTML = path.join(__dirname, "..", "tabbrowser", "tab-shell.html");
 const SHELL_PRELOAD = path.join(__dirname, "..", "tabbrowser", "tab-shell-preload.js");
 const PANEL_PRELOAD = path.join(__dirname, "..", "tabbrowser", "panel-preload.js");
 const panelCells = require("../tabbrowser/panel-cells");
+const redroidMatrix = require("../tabbrowser/redroid-matrix");
 const { createPanelMenuTemplate } = require("../tabbrowser/panel-menu");
 const { resolvePanelPreset } = require("../tabbrowser/panel-presets");
 const { normalizeCicyTheme, resolveTabChromeTheme } = require("../tabbrowser/tab-theme");
@@ -751,13 +752,15 @@ function installIpc() {
     m.pushState();
   });
   // panel cells IPC: sender = the panel PAGE's webContents → resolve its (manager, tab)
-  panelCells.installIpc((senderWcId) => {
+  const findPanelTab = (senderWcId) => {
     for (const m of managers.values()) {
       const tab = m.tabs.find((t) => t.id === senderWcId);
       if (tab) return { manager: m, tab };
     }
     return null;
-  });
+  };
+  panelCells.installIpc(findPanelTab);
+  redroidMatrix.installIpc(findPanelTab);
   ipcMain.on("tabwin:activate", (e, { id }) => { const m = mgr(e); if (m) m.activate(id); });
   ipcMain.on("tabwin:close", (e, { id }) => { const m = mgr(e); if (m) m.close(id); });
   ipcMain.on("tabwin:reorder", (e, { ids }) => { const m = mgr(e); if (m) m.reorder(ids); });

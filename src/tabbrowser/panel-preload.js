@@ -28,3 +28,30 @@ contextBridge.exposeInMainWorld("panelAPI", {
     return () => ipcRenderer.removeListener("panelcells:state", h);
   },
 });
+
+// Redroid 矩阵 page: docker+adb driven Android devices (redroid-matrix.js).
+const rd = (ch) => (args) => ipcRenderer.invoke(`redroid:${ch}`, args || {});
+contextBridge.exposeInMainWorld("redroidAPI", {
+  defaults: rd("defaults"),
+  list: rd("list"),
+  create: rd("create"),
+  start: (name) => rd("start")({ name }),
+  stop: (name) => rd("stop")({ name }),
+  restart: (name) => rd("restart")({ name }),
+  remove: (name, purge) => rd("remove")({ name, purge }),
+  screenshot: (name) => rd("screenshot")({ name }),
+  input: (name, event) => rd("input")({ name, event }),
+  setProxy: (name, proxy) => rd("set-proxy")({ name, proxy }),
+  probeIp: (name) => rd("probe-ip")({ name }),
+  frida: (name, on) => rd("frida")({ name, on }),
+  apps: (name) => rd("apps")({ name }),
+  launch: (name, pkg) => rd("launch")({ name, pkg }),
+  uninstall: (name, pkg) => rd("uninstall")({ name, pkg }),
+  install: (name) => rd("install")({ name }),
+  shell: (name, cmd) => rd("shell")({ name, cmd }),
+  onProgress: (cb) => {
+    const h = (_e, m) => { try { cb(m); } catch (e) {} };
+    ipcRenderer.on("redroid:progress", h);
+    return () => ipcRenderer.removeListener("redroid:progress", h);
+  },
+});
