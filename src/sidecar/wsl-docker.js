@@ -559,9 +559,46 @@ function toWslPath(winPath) {
 async function loadImage(winTarballPath, { emit } = {}) {
   emit && emit({ phase: "image", status: "loading", message: "正在导入镜像到 Docker（较大,约 1-3 分钟,下面是实时进度）…" });
   const p = toWslPath(winTarballPath);
-  const { stdout } = await wslRunStream(`docker load -i "${p}"`, { emit, phase: "image", timeout: 600000 });
+  // 精简版 Windows 上见过:发行版里 /mnt/c 没有自动挂载(drvfs 挂载失败),`docker load -i /mnt/c/...`
+  // 直接 "no such file"。先探一下;不可读就试手动挂载;还不行就把包从 Windows 侧通过 stdin 灌进
+  // `docker load`,完全不依赖 /mnt/c。
+  let readable = false;
+  try { await wslRun(`test -r "${p}"`, { timeout: 20000 }); readable = true; } catch {}
+  if (!readable) {
+    try { await wslRun(`mount -t drvfs C: /mnt/c 2>/dev/null || true; test -r "${p}"`, { timeout: 30000 }); readable = true; } catch {}
+  }
+  let stdout = "";
+  if (readable) {
+    ({ stdout } = await wslRunStream(`docker load -i "${p}"`, { emit, phase: "image", timeout: 600000 }));
+  } else {
+    emit && emit({ phase: "image", status: "loading", message: "发行版内看不到 /mnt/c,改为通过管道导入镜像（无实时进度,约 1-3 分钟）…" });
+    stdout = await loadImageViaStdin(winTarballPath, { emit });
+  }
   const m = String(stdout).match(/Loaded image:\s*(\S+)/i);
   if (m && m[1] !== IMAGE) { try { await wslRun(`docker tag ${m[1]} ${IMAGE}`, { timeout: 15000 }); } catch {} }
+}
+
+// `type tarball | wsl -d distro docker load`:从 Windows 侧把镜像包流进发行版,不经过 /mnt/c。
+function loadImageViaStdin(winTarballPath, { emit } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(docker.wslExe(), ["-d", DISTRO, "-u", "root", "--", "docker", "load"], { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
+    let out = "", err = "";
+    const total = (() => { try { return fs.statSync(winTarballPath).size; } catch { return 0; } })();
+    let sent = 0, lastPct = -1;
+    const timer = setTimeout(() => { try { child.kill(); } catch {} reject(new Error("docker load (stdin) timed out")); }, 900000);
+    child.stdout.on("data", (d) => { out += String(d); });
+    child.stderr.on("data", (d) => { err += String(d); });
+    child.on("error", (e) => { clearTimeout(timer); reject(e); });
+    child.on("close", (code) => { clearTimeout(timer); if (code === 0) resolve(out); else reject(new Error(`docker load (stdin) exit ${code}: ${(err || out).slice(0, 300)}`)); });
+    const rs = fs.createReadStream(winTarballPath);
+    rs.on("data", (chunk) => {
+      sent += chunk.length;
+      const pct = total ? Math.floor((sent / total) * 100) : -1;
+      if (pct !== lastPct && pct % 5 === 0) { lastPct = pct; emit && emit({ phase: "image", status: "loading", message: `通过管道导入镜像… ${pct}%`, progress: pct }); }
+    });
+    rs.on("error", (e) => { try { child.kill(); } catch {} reject(e); });
+    rs.pipe(child.stdin);
+  });
 }
 
 // 修复「卡在旧镜像」: imagePresent() 只看本地有没有 `:latest`,旧镜像在就永远跳过下载。

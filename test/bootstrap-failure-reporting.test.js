@@ -86,3 +86,10 @@ test("kernel install falls back to the raw kernel file when msiexec is absent", 
   assert.match(d, /msiexec missing or failed/);
   assert.match(read(".github/workflows/windows-exe-release.yml"), /wsl-kernel\/kernel/);
 });
+
+test("image load survives a missing /mnt/c mount (drvfs retry, then stdin pipe)", () => {
+  const w = read("src/sidecar/wsl-docker.js");
+  assert.match(w, /mount -t drvfs C: \/mnt\/c/);
+  assert.match(w, /function loadImageViaStdin\(/);
+  assert.match(w, /\["-d", DISTRO, "-u", "root", "--", "docker", "load"\]/);
+});
