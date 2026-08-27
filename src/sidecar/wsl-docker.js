@@ -241,12 +241,14 @@ function importTarball(dest, installDir) {
     // and the caller can `wsl --shutdown` + retry instead of hanging 10 minutes.
     execFile(docker.wslExe(), ["--import", DISTRO, installDir, dest, "--version", "2"],
       { timeout: 240000, windowsHide: true, encoding: "buffer" },
-      (err, _so, se) => {
+      (err, so, se) => {
         if (err) {
-          // wsl.exe 的报错是 UTF-16 输出(常见:「请启用'虚拟机平台'Windows 功能并确保在 BIOS 中
-          // 启用虚拟化」);解码后拼进 message,抽屉才能显示真正原因而不是「Command failed」。
+          // wsl.exe 的报错是 UTF-16 输出,而且多半写在 stdout(不是 stderr)(常见:「请启用'虚拟机
+          // 平台'Windows 功能并确保在 BIOS 中启用虚拟化」);两路都解码后拼进 message,抽屉才能显示
+          // 真正原因而不是「Command failed」。
           let text = "";
-          try { text = Buffer.isBuffer(se) ? se.toString("utf16le") : String(se || ""); } catch {}
+          const dec = (b) => { try { return Buffer.isBuffer(b) ? b.toString("utf16le") : String(b || ""); } catch { return ""; } };
+          text = (dec(so) + " " + dec(se));
           text = text.replace(/\u0000/g, "").replace(/\s+/g, " ").trim();
           if (text) err.message = `${err.message.split("\n")[0]} — ${text.slice(0, 300)}`;
           err.stderr = text;

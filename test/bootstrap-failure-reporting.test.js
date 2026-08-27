@@ -28,7 +28,7 @@ test("featureEnabled reads Win32_OptionalFeature (works unelevated), dism only a
 test("wsl --import failures carry wsl.exe's decoded message into the drawer", () => {
   const src = read("src/sidecar/wsl-docker.js");
   assert.match(src, /encoding: "buffer"/);
-  assert.match(src, /se\.toString\("utf16le"\)/);
+  assert.match(src, /toString\("utf16le"\)/);
 });
 
 test("keepalive logon task degrades to LeastPrivilege / HKCU Run when not elevated", () => {
@@ -63,4 +63,12 @@ test("auto-update defaults to on", () => {
 
 test("a missing wsl.exe (ENOENT, features enabled but not yet rebooted) counts as WSL missing", () => {
   assert.match(read("src/sidecar/docker.js"), /err\.code === "ENOENT"[^\n]*return resolve\(true\)/);
+});
+
+test("features enabled but WSL still the pre-reboot stub → needsReboot; auto-reboot capped at 2", () => {
+  const d = read("src/sidecar/docker.js");
+  assert.match(d, /if \(await wslFunctional\(\)\) return \{ ok: true \};/);
+  assert.match(d, /\[Argument\\\]/);
+  const ipc = read("src/backends/sidecar-ipc.js");
+  assert.match(ipc, /rebootCount\(\) >= 2/);
 });

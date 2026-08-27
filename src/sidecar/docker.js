@@ -640,7 +640,9 @@ async function wslMissing() {
       // wsl.exe 不存在(ENOENT):功能刚启用但还没重启 Windows 时就是这样 —— 按「缺失」处理,
       // 让 ensureWsl 走 needsReboot,而不是当成已就绪去 --import 然后 spawn ENOENT。
       if (err && (err.code === "ENOENT" || /ENOENT/.test(err.message || ""))) return resolve(true);
-      if (/未安装|not installed|--install/i.test(s)) return resolve(true);   // definitely missing
+      // 旧版内置 wsl.exe 存根:任何子命令都只打印用法帮助("wsl.exe [Argument]" / "--install")。
+      // 功能刚启用还没重启时就是这个状态 → 按缺失处理(ensureWsl 走 needsReboot)。
+      if (/未安装|not installed|--install|\[Argument\]|\[参数\]/i.test(s)) return resolve(true);
       if (err && (err.killed || err.signal || err.code === "ETIMEDOUT")) return resolve(null); // timed out → unknown
       resolve(false); // wsl present (errored for another reason → assume OK)
     });
@@ -673,7 +675,7 @@ function wslFunctional() {
   return new Promise((resolve) => {
     execFile(wslExe(), ["-l", "-v"], { timeout: 25000, windowsHide: true, encoding: "utf16le" }, (err, stdout, stderr) => {
       const s = String((stdout || "") + (stderr || "")).replace(/\u0000/g, "");
-      if (/NAME\s+STATE|没有已安装的分发版|no installed distributions|aka\.ms\/wslstore/i.test(s)) return resolve(true);
+      if (/NAME\s+STATE|没有已安装的分发版|no installed distributions|aka\.ms\/wslstore|名称\s+状态/i.test(s)) return resolve(true);
       resolve(false);
     });
   });
@@ -814,7 +816,14 @@ async function ensureWsl({ emit } = {}) {
   const subsystemEnabled = await featureEnabled("Microsoft-Windows-Subsystem-Linux");
   const vmPlatformEnabled = await featureEnabled("VirtualMachinePlatform");
   const state = classifyWslPrerequisites({ executableMissing, subsystemEnabled, vmPlatformEnabled });
-  if (state.ready) return { ok: true };
+  if (state.ready) {
+    // 功能都已启用、wsl.exe 也在,但 WSL 本身还不能用(`wsl -l -v` 只打印帮助)= 启用后还没
+    // 重启。别去 --import(必失败),直接进自动重启流程。
+    if (await wslFunctional()) return { ok: true };
+    log.warn("[bootstrap] ensure-wsl: features enabled but WSL not functional yet (pending reboot)");
+    emit && emit({ phase: "install-docker", status: "running", message: "WSL 功能已启用但尚未生效,需要重启 Windows…" });
+    return { ok: false, needsReboot: true };
+  }
 
   emit && emit({ phase: "install-docker", status: "running", message: "Docker 需要 WSL2 后端，开始启用所需的 Windows 功能（会弹一次 UAC，请点「是」）…" });
   const r = await elevatedWslSetup({ emit, need: { subsystem: !subsystemEnabled, vmPlatform: !vmPlatformEnabled } });

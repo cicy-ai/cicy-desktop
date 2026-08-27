@@ -155,7 +155,7 @@ function register({ sidecarLogPath } = {}) {
       const reason = code === "EPERM" || /spawn EPERM/.test(err.message || "") ? "spawn_blocked" : "bootstrap_exception";
       _lastBootstrapError = { reason, message: err.message, ts: Date.now() };
     } else if (result && result.ok) {
-      _lastBootstrapError = null; _autoBootstrapPaused = null; return;
+      _lastBootstrapError = null; _autoBootstrapPaused = null; try { if (rebootCount() > 0) rebootCount(-99); } catch {} return;
     } else if (result) {
       _lastBootstrapError = { reason: result.reason || result.error || "bootstrap_failed", message: result.message || "", ts: Date.now() };
     } else return;
@@ -169,9 +169,19 @@ function register({ sidecarLogPath } = {}) {
   // WSL 功能启用后必须重启 Windows 才能继续。不等人:自动安排 90 秒后重启(桌面上会有
   // 系统倒计时提示),UI 可「取消」或「立即重启」。每次开机只安排一次。
   let _rebootScheduled = false;
+  // 防重启循环:WSL 始终起不来时不能每次开机都重启。计数存 db/wsl-reboots.json,最多自动重启 2 次
+  // (成功后 :8008 起来时清零)。
+  const REBOOT_COUNT_FILE = path.join(os.homedir(), "cicy-ai", "db", "wsl-reboots.json");
+  function rebootCount(delta) {
+    let c = 0; try { c = Number(JSON.parse(fs.readFileSync(REBOOT_COUNT_FILE, "utf8")).count) || 0; } catch {}
+    if (delta) { c = Math.max(0, c + delta); try { fs.mkdirSync(path.dirname(REBOOT_COUNT_FILE), { recursive: true }); fs.writeFileSync(REBOOT_COUNT_FILE, JSON.stringify({ count: c, ts: Date.now() })); } catch {} }
+    return c;
+  }
   function scheduleReboot(delaySec = 90) {
     if (_rebootScheduled || process.platform !== "win32") return false;
+    if (delaySec > 10 && rebootCount() >= 2) { log.warn("[docker] auto-reboot skipped: already rebooted 2× for WSL without success"); return false; }
     _rebootScheduled = true;
+    rebootCount(+1);
     try {
       require("child_process").execFile("shutdown", ["/r", "/t", String(delaySec), "/c", "CiCy Desktop: WSL2 功能已启用,需要重启 Windows 才能继续安装 Docker;登录后会自动继续。可在 CiCy Desktop 里取消。"], { windowsHide: true }, (err) => {
         if (err) { _rebootScheduled = false; log.warn(`[docker] schedule reboot failed: ${err.message}`); }
