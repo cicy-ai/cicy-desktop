@@ -2075,9 +2075,9 @@ function DockerInstallDrawerHost() {
             </>
           ) : st.status === "reboot" ? (
             <>
-              <span className="drawer__foot-status is-reboot">{tr("docker.rebootShort", "需重启 Windows")}</span>
-              {st.onRetry && <button type="button" className="drawer__btn is-accent" data-id="DockerDrawer-retry" onClick={() => st.onRetry()}>{tr("common.retry", "重试")}</button>}
-              <button type="button" className="drawer__btn" data-id="DockerDrawer-dismiss" onClick={() => dockerDrawer.close()}>{tr("common.close", "关闭")}</button>
+              <span className="drawer__foot-status is-reboot">{tr("docker.rebootAuto", "需重启 Windows（90 秒后自动重启，登录后自动继续）")}</span>
+              <button type="button" className="drawer__btn is-accent" data-id="DockerDrawer-reboot-now" onClick={() => window.cicy?.docker?.rebootNow?.()}>{tr("docker.rebootNow", "立即重启")}</button>
+              <button type="button" className="drawer__btn" data-id="DockerDrawer-reboot-cancel" onClick={() => { window.cicy?.docker?.rebootCancel?.(); dockerDrawer.close(); }}>{tr("docker.rebootCancel", "取消自动重启")}</button>
             </>
           ) : st.status === "error" ? (
             <>

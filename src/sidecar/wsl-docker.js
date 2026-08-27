@@ -76,7 +76,7 @@ async function ensureWslKernel({ emit } = {}) {
   // 已有 WSL2 内核就别再装(msiexec 提权会弹 UAC + 可能卡死)。`wsl --status` 报出内核
   // 版本号(如 5.15.x)= 内核已就绪 → 直接跳过。这对"已经有 WSL2 的用户"是常态。
   try {
-    const out = await new Promise((res) => execFile("wsl", ["--status"], { timeout: 15000, windowsHide: true, encoding: "utf16le" }, (e, o) => res(e ? "" : String(o || ""))));
+    const out = await new Promise((res) => execFile(docker.wslExe(), ["--status"], { timeout: 15000, windowsHide: true, encoding: "utf16le" }, (e, o) => res(e ? "" : String(o || ""))));
     if (/\d+\.\d+\.\d+/.test(out)) { emit && emit({ phase: "install-docker", status: "running", message: "WSL2 内核已就绪,跳过安装" }); return; }
   } catch (e) {}
   const msi = path.join(docker.downloadsDir(), "wsl_update_x64.msi");
@@ -92,7 +92,7 @@ async function ensureWslKernel({ emit } = {}) {
 // matters inside `cmd`.
 function wslRun(cmd, { timeout = 60000, distro = DISTRO } = {}) {
   return new Promise((resolve, reject) => {
-    execFile("wsl", ["-d", distro, "-u", "root", "--", "bash", "-lc", cmd],
+    execFile(docker.wslExe(), ["-d", distro, "-u", "root", "--", "bash", "-lc", cmd],
       { timeout, windowsHide: true, maxBuffer: 1 << 26 },
       (err, stdout, stderr) => {
         if (err) { err.stdout = String(stdout || ""); err.stderr = String(stderr || ""); return reject(err); }
@@ -109,7 +109,7 @@ function wslRunStream(cmd, { emit, phase = "install-docker", timeout = 900000, d
   return new Promise((resolve, reject) => {
     // 标准: 每步先把「执行的命令是什么」打到 drawer(和 mac 的 `$ brew install …` 一致)。
     if (emit) emit({ phase, status: "running", message: `$ ${cmd.length > 200 ? cmd.slice(0, 200) + " …" : cmd}` });
-    const child = spawn("wsl", ["-d", distro, "-u", "root", "--", "bash", "-lc", cmd], { windowsHide: true });
+    const child = spawn(docker.wslExe(), ["-d", distro, "-u", "root", "--", "bash", "-lc", cmd], { windowsHide: true });
     let buf = "", tail = "", last = 0;
     const pump = (chunk) => {
       buf += chunk.toString("utf8");
@@ -152,7 +152,7 @@ async function distroInstalled(distro = DISTRO) {
     // first `wsl -l -q`, so an 8s timeout falsely returns null(unknown) → the
     // homepage gets stuck on 「重试检测」 instead of offering 「安装」. A warm WSL
     // answers in <1s, so the longer ceiling never bites in the normal case.
-    execFile("wsl", ["-l", "-q"], { timeout: 25000, windowsHide: true, encoding: "utf16le" }, (err, stdout) => {
+    execFile(docker.wslExe(), ["-l", "-q"], { timeout: 25000, windowsHide: true, encoding: "utf16le" }, (err, stdout) => {
       // Our timeout killed it / it was signalled → WSL didn't answer → UNKNOWN.
       if (err && (err.killed || err.signal || err.code === "ETIMEDOUT")) return resolve(null);
       // Other errors (wsl missing / non-zero exit) → definitively not our distro.
@@ -239,7 +239,7 @@ function importTarball(dest, installDir) {
     // If it runs longer it has WEDGED (the whole WSL subsystem hangs — every later
     // `wsl` call then blocks and the app goes 未响应). Bound it short so we FAIL FAST
     // and the caller can `wsl --shutdown` + retry instead of hanging 10 minutes.
-    execFile("wsl", ["--import", DISTRO, installDir, dest, "--version", "2"],
+    execFile(docker.wslExe(), ["--import", DISTRO, installDir, dest, "--version", "2"],
       { timeout: 240000, windowsHide: true, encoding: "buffer" },
       (err, _so, se) => {
         if (err) {
@@ -263,7 +263,7 @@ function importTarball(dest, installDir) {
 // VM, so it returns even when WSL is stuck. Use it as recovery between retries.
 function wslShutdown() {
   return new Promise((resolve) => {
-    execFile("wsl", ["--shutdown"], { timeout: 30000, windowsHide: true }, () => resolve());
+    execFile(docker.wslExe(), ["--shutdown"], { timeout: 30000, windowsHide: true }, () => resolve());
   });
 }
 
@@ -288,7 +288,7 @@ function killPortListener(port) {
 // terminate + cold boot makes that first real command hit a clean distro.
 function wslTerminate() {
   return new Promise((resolve) => {
-    execFile("wsl", ["--terminate", DISTRO], { timeout: 30000, windowsHide: true }, () => resolve());
+    execFile(docker.wslExe(), ["--terminate", DISTRO], { timeout: 30000, windowsHide: true }, () => resolve());
   });
 }
 
@@ -374,7 +374,7 @@ async function installDistro({ emit, installDir: requestedInstallDir } = {}) {
     emit && emit({ phase: "container", status: "running", message: "导入卡住,重置 WSL(--shutdown)后重试…" });
     try { await wslShutdown(); } catch {}
     try { await ensureWslKernel({ emit }); } catch {}
-    try { await new Promise((r) => execFile("wsl", ["--unregister", DISTRO], { timeout: 30000, windowsHide: true }, () => r())); } catch {}
+    try { await new Promise((r) => execFile(docker.wslExe(), ["--unregister", DISTRO], { timeout: 30000, windowsHide: true }, () => r())); } catch {}
     await importTarball(dest, installDir);
   }
   // 3) Force a clean cold boot. A freshly-imported distro is often wedged, so the
@@ -460,7 +460,7 @@ function ensureKeepalive() {
 function spawnKeepaliveChild() {
   if (_keepalive && _keepalive.exitCode == null && !_keepalive.killed) return;
   try {
-    _keepalive = spawn("wsl", ["-d", DISTRO, "-u", "root", "--", "sh", "-c", "exec flock -n /run/cicy-keepalive.lock sleep infinity"],
+    _keepalive = spawn(docker.wslExe(), ["-d", DISTRO, "-u", "root", "--", "sh", "-c", "exec flock -n /run/cicy-keepalive.lock sleep infinity"],
       { detached: true, stdio: "ignore", windowsHide: true });
     _keepalive.on("error", (e) => { log.warn(`[keepalive] ${e.message}`); _keepalive = null; });
     _keepalive.on("exit", () => { _keepalive = null; });
@@ -471,7 +471,7 @@ function spawnKeepaliveChild() {
 function spawnKeepaliveChild() {
   if (_keepalive && _keepalive.exitCode == null && !_keepalive.killed) return;
   try {
-    _keepalive = spawn("wsl", ["-d", DISTRO, "-u", "root", "--", "sh", "-c", `exec flock -n ${KEEPALIVE_LOCK} sleep infinity`],
+    _keepalive = spawn(docker.wslExe(), ["-d", DISTRO, "-u", "root", "--", "sh", "-c", `exec flock -n ${KEEPALIVE_LOCK} sleep infinity`],
       { detached: true, stdio: "ignore", windowsHide: true });
     _keepalive.on("error", (e) => { log.warn(`[keepalive] ${e.message}`); _keepalive = null; });
     _keepalive.on("exit", () => { _keepalive = null; });
@@ -907,7 +907,7 @@ function writeKeepaliveFiles({ runLevel = "HighestAvailable" } = {}) {
   fs.mkdirSync(dir, { recursive: true });
   const vbs = path.join(dir, "wsl-keepalive.vbs");
   // VBS 里双引号用 "" 转义;第二参数 0 = 隐藏窗口;第三参数 True = 等待(任务保持 running,IgnoreNew 才能去重)。
-  const inner = `wsl.exe -d ${DISTRO} -u root -e sh -c ""${keepaliveShellCmd()}""`;
+  const inner = `"${docker.wslExe()}" -d ${DISTRO} -u root -e sh -c ""${keepaliveShellCmd()}""`;
   fs.writeFileSync(vbs, `Set sh = CreateObject("WScript.Shell")\r\nsh.Run "${inner}", 0, True\r\n`);
   const xml = path.join(dir, "wsl-keepalive-task.xml");
   const body = `<?xml version="1.0" encoding="UTF-16"?>
@@ -1492,7 +1492,7 @@ async function recreate({ onProgress, port = 8008, container = "cicy-code-docker
 // to wipe a stale install before re-importing the latest pre-baked package.
 function unregisterDistro() {
   return new Promise((resolve) => {
-    execFile("wsl", ["--unregister", DISTRO], { timeout: 120000, windowsHide: true }, () => resolve());
+    execFile(docker.wslExe(), ["--unregister", DISTRO], { timeout: 120000, windowsHide: true }, () => resolve());
   });
 }
 

@@ -604,6 +604,21 @@ function launchElevated(exe, args, { emit } = {}) {
   });
 }
 
+// Absolute path of wsl.exe. The desktop can be launched (login item / task) with a
+// PATH that lacks System32, and then every bare "wsl" spawn fails with ENOENT
+// ("spawn wsl ENOENT" seen in the field). Prefer the inbox binary, then the
+// Store version, then fall back to the bare name.
+function wslExe() {
+  if (process.platform !== "win32") return "wsl";
+  const sysroot = process.env.SystemRoot || process.env.windir || "C:\\Windows";
+  const cands = [
+    path.join(sysroot, "System32", "wsl.exe"),
+    path.join(process.env.LOCALAPPDATA || "", "Microsoft", "WindowsApps", "wsl.exe"),
+  ];
+  for (const c of cands) { try { if (c && fs.existsSync(c)) return c; } catch {} }
+  return "wsl";
+}
+
 // Docker Desktop on Windows needs a WSL2 (or Hyper-V) backend — without it the
 // engine never starts and `docker version` can't reach the daemon, so the card
 // hangs on "正在启动 Docker Desktop". Detect a missing WSL. `wsl` prints UTF-16
@@ -620,7 +635,7 @@ async function wslMissing() {
   // (wsl didn't answer / timed out). null lets status() report `unknown` instead
   // of falsely concluding "not installed" when WSL is merely stuck.
   return await new Promise((resolve) => {
-    execFile("wsl", ["--status"], { timeout: 25000, windowsHide: true, encoding: "utf16le" }, (err, stdout, stderr) => {
+    execFile(wslExe(), ["--status"], { timeout: 25000, windowsHide: true, encoding: "utf16le" }, (err, stdout, stderr) => {
       const s = String((stdout || "") + (stderr || "") + (err && err.message ? err.message : ""));
       if (/未安装|not installed|--install/i.test(s)) return resolve(true);   // definitely missing
       if (err && (err.killed || err.signal || err.code === "ETIMEDOUT")) return resolve(null); // timed out → unknown
@@ -653,7 +668,7 @@ function featureEnabled(feature) {
 function wslFunctional() {
   if (process.platform !== "win32") return Promise.resolve(true);
   return new Promise((resolve) => {
-    execFile("wsl", ["-l", "-v"], { timeout: 25000, windowsHide: true, encoding: "utf16le" }, (err, stdout, stderr) => {
+    execFile(wslExe(), ["-l", "-v"], { timeout: 25000, windowsHide: true, encoding: "utf16le" }, (err, stdout, stderr) => {
       const s = String((stdout || "") + (stderr || "")).replace(/\u0000/g, "");
       if (/NAME\s+STATE|没有已安装的分发版|no installed distributions|aka\.ms\/wslstore/i.test(s)) return resolve(true);
       resolve(false);
@@ -677,6 +692,64 @@ async function dismEnableFeature(feature, label, { emit } = {}) {
   const ok = await waitUntil(() => featureEnabled(feature), { totalMs: 240000, everyMs: 5000 });
   emit && emit({ phase: "install-docker", status: ok ? "running" : "error", message: ok ? `${label}：已启用 ✓` : `${label}：未能确认启用（点「重试」）` });
   return ok;
+}
+
+// ONE elevated PowerShell run (= one UAC) that does everything WSL2 needs on this
+// machine: enable both features, and when Windows' component store refuses
+// (0x8007371b ERROR_SXS_TRANSACTION_CLOSURE_INCOMPLETE etc.) run
+// DISM /RestoreHealth + sfc and retry; install the WSL2 kernel MSI if a copy is
+// already downloaded. Progress is read back from a result file; feature state is
+// verified via WMI (no elevation needed). Previously this was 2–3 separate
+// elevations (dism ×2 + msiexec) → 2–3 UAC prompts, and any unattended one failed.
+function elevatedWslSetup({ emit, need = {} } = {}) {
+  return new Promise(async (resolve) => {
+    const dir = path.join(process.env.LOCALAPPDATA || os.tmpdir(), "cicy-desktop");
+    try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+    const ps1 = path.join(dir, "wsl-setup.ps1");
+    const resultFile = path.join(dir, "wsl-setup.result.txt");
+    try { fs.unlinkSync(resultFile); } catch {}
+    const msi = path.join(os.homedir(), "Downloads", "wsl_update_x64.msi");
+    const script = [
+      '$ErrorActionPreference = "Continue"',
+      `$R = "${resultFile.replace(/"/g, '""')}"`,
+      'function Say($m) { Add-Content -Path $R -Value ("[" + (Get-Date -Format "HH:mm:ss") + "] " + $m) }',
+      'function St($n) { try { (Get-CimInstance Win32_OptionalFeature -Filter ("Name=\'" + $n + "\'")).InstallState } catch { 0 } }',
+      'function En($n) { dism /online /enable-feature /featurename:$n /all /norestart | Out-Null; $c = $LASTEXITCODE; Say ("enable " + $n + " exit=" + $c); return $c }',
+      'Say "start admin=$(([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(\'Administrators\'))"',
+      '$feats = @("Microsoft-Windows-Subsystem-Linux","VirtualMachinePlatform")',
+      '$bad = @(); foreach ($f in $feats) { if ((St $f) -ne 1) { $c = En $f; if ($c -ne 0 -and $c -ne 3010) { $bad += $f } } }',
+      'if ($bad.Count -gt 0) {',
+      '  Say "repair: DISM /RestoreHealth (component store refused: $($bad -join \',\')) — this can take 10-30 min"',
+      '  dism /online /cleanup-image /restorehealth /norestart | Out-Null; Say ("restorehealth exit=" + $LASTEXITCODE)',
+      '  sfc /scannow | Out-Null; Say ("sfc exit=" + $LASTEXITCODE)',
+      '  foreach ($f in $bad) { $c = En $f }',
+      '}',
+      `if (Test-Path "${msi.replace(/"/g, '""')}") { Start-Process msiexec.exe -ArgumentList "/i","${msi.replace(/"/g, '""')}","/qn","/norestart" -Wait; Say "kernel msi installed" }`,
+      'Say ("final subsystem=" + (St "Microsoft-Windows-Subsystem-Linux") + " vmPlatform=" + (St "VirtualMachinePlatform"))',
+      'Say "DONE"',
+    ].join("\r\n");
+    try { fs.writeFileSync(ps1, "\uFEFF" + script, "utf8"); } catch (e) { return resolve({ subsystem: false, vmPlatform: false, detail: `写提权脚本失败: ${e.message}` }); }
+    const launched = await launchElevated("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", ps1], { emit });
+    if (!launched) return resolve({ subsystem: false, vmPlatform: false, detail: "无法发起提权（UAC 被拒绝或不可用）" });
+    // Follow the result file (progress lines) until DONE; repair paths can take 30 min.
+    let seen = 0, detail = "";
+    const t0 = Date.now();
+    while (Date.now() - t0 < 40 * 60 * 1000) {
+      await new Promise((r) => setTimeout(r, 4000));
+      let lines = [];
+      try { lines = fs.readFileSync(resultFile, "utf8").split(/\r?\n/).filter(Boolean); } catch {}
+      for (const l of lines.slice(seen)) {
+        emit && emit({ phase: "install-docker", status: "running", message: `提权脚本：${l.replace(/^\[[^\]]*\] /, "")}` });
+        if (/exit=(?!0\b|3010\b)\d+/.test(l)) detail = l;
+      }
+      seen = lines.length;
+      if (lines.some((l) => /DONE/.test(l))) break;
+      if (Date.now() - t0 > 90 * 1000 && lines.length === 0) { detail = "提权后 90 秒内没有任何进展（UAC 可能没有被点击「是」）"; break; }
+    }
+    const subsystem = await featureEnabled("Microsoft-Windows-Subsystem-Linux");
+    const vmPlatform = await featureEnabled("VirtualMachinePlatform");
+    resolve({ subsystem, vmPlatform, detail });
+  });
 }
 
 // Ensure the WSL2 backend exists; install it (elevated) if missing. Returns
@@ -740,11 +813,11 @@ async function ensureWsl({ emit } = {}) {
   const state = classifyWslPrerequisites({ executableMissing, subsystemEnabled, vmPlatformEnabled });
   if (state.ready) return { ok: true };
 
-  emit && emit({ phase: "install-docker", status: "running", message: "Docker 需要 WSL2 后端，开始启用所需的 Windows 功能…" });
-  const a = await dismEnableFeature("Microsoft-Windows-Subsystem-Linux", "启用 WSL 功能 1/2 · Linux 子系统", { emit });
-  const b = await dismEnableFeature("VirtualMachinePlatform", "启用 WSL 功能 2/2 · 虚拟机平台", { emit });
+  emit && emit({ phase: "install-docker", status: "running", message: "Docker 需要 WSL2 后端，开始启用所需的 Windows 功能（会弹一次 UAC，请点「是」）…" });
+  const r = await elevatedWslSetup({ emit, need: { subsystem: !subsystemEnabled, vmPlatform: !vmPlatformEnabled } });
+  const a = r.subsystem, b = r.vmPlatform;
   if (!a || !b) {
-    const message = `WSL 功能未能全部启用（Linux 子系统=${a ? "已启用" : "失败"}，虚拟机平台=${b ? "已启用" : "失败"}；通常是 UAC 被取消或当前账号无管理员权限）——请以管理员身份重试。`;
+    const message = `WSL 功能未能全部启用（Linux 子系统=${a ? "已启用" : "失败"}，虚拟机平台=${b ? "已启用" : "失败"}${r.detail ? `；${r.detail}` : "；通常是 UAC 被取消或当前账号无管理员权限"}）——会自动重试；也可以点「重试」。`;
     log.error(`[bootstrap] ✗ ensure-wsl reason=wsl_enable_failed subsystem=${a} vmPlatform=${b}`);
     emit && emit({ phase: "done", status: "error", message });
     return { ok: false, needsReboot: false, failed: true, reason: "wsl_enable_failed", message };
@@ -752,7 +825,7 @@ async function ensureWsl({ emit } = {}) {
   // Best-effort: also pull the WSL2 kernel/plumbing when the executable itself
   // is missing. Feature-only repairs must stop here and wait for reboot.
   if (state.installWsl) {
-    await launchElevated("wsl", ["--install", "--no-distribution"], { emit }).catch(() => {});
+    await launchElevated(wslExe(), ["--install", "--no-distribution"], { emit }).catch(() => {});
   }
   emit && emit({ phase: "install-docker", status: "running", message: "WSL2 功能已启用 ✓，请【重启 Windows】；重启后回来点「重试」继续。" });
   return { ok: false, needsReboot: true };
@@ -854,7 +927,7 @@ module.exports = {
   start, stop, stopContainer, restart, checkStatus, loadImage, loadImageFromTarball,
   downloadImageTarball, imagePresent, dockerOk, installDocker,
   bootstrap, probeHealth, readContainerToken, dockerDesktopExe, desktopDir, downloadsDir, imageTarballPath,
-  launchElevated, spawnProbe, wslFunctional, wslMissing, ensureWsl, virtualizationStatus,
+  launchElevated, elevatedWslSetup, spawnProbe, wslFunctional, wslExe, wslMissing, ensureWsl, virtualizationStatus,
   // platform-agnostic download/retry primitives, reused by native.js
   ensureDownloaded, curlDownload, withRetry, waitUntil, run, headSize,
   // image freshness (修「重建仍用旧镜像」—— 校验 OSS ETag 变了才重下重载)

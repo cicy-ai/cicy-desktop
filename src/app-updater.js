@@ -144,7 +144,9 @@ let _downloading = false;
 // 打开后 check() 发现新版直接下载 + 拉起安装器,不再弹「发现新版本」询问。
 const GLOBAL_JSON = path.join(os.homedir(), "cicy-ai", "global.json");
 function getAutoUpdate() {
-  try { return readGlobalConfig(GLOBAL_JSON)?.desktopAutoUpdate === true; } catch { return false; }
+  // 默认开启(未设置视为开):机群里的旧版本要能自己收敛到最新版,不能靠人一台台推;
+  // 更新弹窗里取消勾选即关闭(写 false)。
+  try { return readGlobalConfig(GLOBAL_JSON)?.desktopAutoUpdate !== false; } catch { return true; }
 }
 function setAutoUpdate(on) {
   const v = on === true;

@@ -159,12 +159,33 @@ function register({ sidecarLogPath } = {}) {
     } else if (result) {
       _lastBootstrapError = { reason: result.reason || result.error || "bootstrap_failed", message: result.message || "", ts: Date.now() };
     } else return;
+    if (_lastBootstrapError.reason === "wsl_reboot_required") scheduleReboot(90);
     if (HARD_BOOTSTRAP_REASONS.has(_lastBootstrapError.reason)) {
       _autoBootstrapPaused = _lastBootstrapError.reason;
       _autoBootstrapRetryAt = Date.now() + (AUTO_RETRY_MS[_lastBootstrapError.reason] || AUTO_RETRY_MS.default);
     }
     log.error(`[docker] bootstrap failed reason=${_lastBootstrapError.reason}${_lastBootstrapError.message ? ` — ${_lastBootstrapError.message}` : ""}${_autoBootstrapPaused ? " (auto-bootstrap paused until user retries)" : ""}`);
   }
+  // WSL 功能启用后必须重启 Windows 才能继续。不等人:自动安排 90 秒后重启(桌面上会有
+  // 系统倒计时提示),UI 可「取消」或「立即重启」。每次开机只安排一次。
+  let _rebootScheduled = false;
+  function scheduleReboot(delaySec = 90) {
+    if (_rebootScheduled || process.platform !== "win32") return false;
+    _rebootScheduled = true;
+    try {
+      require("child_process").execFile("shutdown", ["/r", "/t", String(delaySec), "/c", "CiCy Desktop: WSL2 功能已启用,需要重启 Windows 才能继续安装 Docker;登录后会自动继续。可在 CiCy Desktop 里取消。"], { windowsHide: true }, (err) => {
+        if (err) { _rebootScheduled = false; log.warn(`[docker] schedule reboot failed: ${err.message}`); }
+        else log.info(`[docker] Windows reboot scheduled in ${delaySec}s (WSL features enabled)`);
+      });
+    } catch (e) { _rebootScheduled = false; }
+    return true;
+  }
+  function cancelReboot() {
+    try { require("child_process").execFile("shutdown", ["/a"], { windowsHide: true }, () => {}); } catch {}
+    _rebootScheduled = false;
+  }
+  ipcMain.handle("docker:reboot-now", () => { cancelReboot(); _rebootScheduled = false; return scheduleReboot(5); });
+  ipcMain.handle("docker:reboot-cancel", () => { cancelReboot(); return true; });
   let _logFile = "";
   try { _logFile = log.transports.file.getFile().path; } catch {}
   let _dockerDaemonBusy = false;

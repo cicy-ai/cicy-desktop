@@ -42,3 +42,21 @@ test("a second bootstrap caller gets the in-flight run's progress (replay + live
   assert.match(src, /for \(const ev of _bootstrapRecent\) \{ try \{ opts\.onProgress\(ev\); \} catch \{\} \}\n\s+_bootstrapListeners\.add\(opts\.onProgress\);/);
   assert.match(src, /for \(const fn of _bootstrapListeners\) \{ try \{ fn\(ev\); \} catch \{\} \}/);
 });
+
+test("WSL setup is a single elevation with component-store repair fallback; reboot is scheduled automatically", () => {
+  const d = read("src/sidecar/docker.js");
+  assert.match(d, /function elevatedWslSetup\(/);
+  assert.match(d, /restorehealth/);
+  assert.match(d, /const r = await elevatedWslSetup\(\{ emit, need:/);
+  assert.match(d, /function wslExe\(\)/);
+  assert.doesNotMatch(d, /execFile\("wsl", \[/);
+  assert.doesNotMatch(read("src/sidecar/wsl-docker.js"), /(execFile|spawn)\("wsl", \[/);
+  const ipc = read("src/backends/sidecar-ipc.js");
+  assert.match(ipc, /reason === "wsl_reboot_required"\) scheduleReboot\(90\)/);
+  assert.match(ipc, /"docker:reboot-cancel"/);
+  assert.match(read("workers/render/src/App.jsx"), /DockerDrawer-reboot-cancel/);
+});
+
+test("auto-update defaults to on", () => {
+  assert.match(read("src/app-updater.js"), /desktopAutoUpdate !== false/);
+});

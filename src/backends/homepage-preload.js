@@ -170,7 +170,9 @@ contextBridge.exposeInMainWorld("cicy", {
     appStatus:    ()  => logInvoke("docker:app-status"),
     appRedetect:  ()  => logInvoke("docker:app-redetect"),   // 「重试检测」: FORCE a fresh probe (appStatus only reads cache)
     appBootstrap: ()  => logInvoke("docker:app-bootstrap"),
-    appRepairWsl: ()  => logInvoke("docker:app-repair-wsl"),   // WSL 卡死时一键修复(重启服务/标记重启后自愈)
+    appRepairWsl: ()  => logInvoke("docker:app-repair-wsl"),
+    rebootNow:    ()  => logInvoke("docker:reboot-now"),      // WSL 功能启用后:立即重启(5s)
+    rebootCancel: ()  => logInvoke("docker:reboot-cancel"),   // 取消 90s 自动重启   // WSL 卡死时一键修复(重启服务/标记重启后自愈)
     appRestart:   ()  => logInvoke("docker:app-restart"),          // supervisorctl 重启 cicy-code
     appDockerRestart: () => logInvoke("docker:app-docker-restart"), // docker restart 整个容器
     appRecreate:  ()  => logInvoke("docker:app-recreate"),         // 删容器+重建(换 key,需 confirm)
