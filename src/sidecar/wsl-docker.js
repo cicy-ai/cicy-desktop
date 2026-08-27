@@ -1081,6 +1081,13 @@ async function status(port = 8008) {
 // downloads and exit-100. A second caller just attaches to the in-flight run.
 let _bootstrapInFlight = null;
 let _bootstrapBeat = 0; // 上次进度事件时间 —— 心跳,用于判定 in-flight 是否卡死
+// 所有跟随同一次安装的进度订阅者 + 最近事件缓存:守护循环先起的安装没有 UI,用户随后点
+// 「安装」打开抽屉时,把已发生的步骤回放给它,之后的事件也同时推给它,而不是只有一句
+// 「正在跟随同一进度…」。
+const _bootstrapListeners = new Set();
+let _bootstrapRecent = [];
+let _bootstrapT0 = 0;
+const BOOTSTRAP_RECENT_MAX = 60;
 // 没有任何进度事件超过这个时长 = wedged(`wsl --import` 静默最久 ~1-4 分钟,留足余量)。
 const BOOTSTRAP_STALL_MS = 6 * 60 * 1000;
 
@@ -1092,7 +1099,11 @@ async function bootstrap(opts = {}) {
     // 丢弃它、重起一次;否则正常并发跟随同一进度。
     const stalled = Date.now() - _bootstrapBeat > BOOTSTRAP_STALL_MS;
     if (!stalled) {
-      try { opts.onProgress && opts.onProgress({ phase: "install-docker", status: "running", message: "安装已在进行中,正在跟随同一进度…" }); } catch {}
+      if (opts.onProgress) {
+        try { opts.onProgress({ phase: "install-docker", status: "running", message: `安装已在进行中(${Math.round((Date.now() - _bootstrapT0) / 1000)}s 前开始),正在跟随同一进度…` }); } catch {}
+        for (const ev of _bootstrapRecent) { try { opts.onProgress(ev); } catch {} }
+        _bootstrapListeners.add(opts.onProgress);
+      }
       return _bootstrapInFlight;
     }
     log.warn(`[bootstrap] in-flight 卡死(${Math.round((Date.now() - _bootstrapBeat) / 1000)}s 无进度)→ 丢弃僵死的,重起一次`);
@@ -1101,9 +1112,16 @@ async function bootstrap(opts = {}) {
   }
   // 包一层 onProgress:每来一个事件就刷新心跳,卡死检测才准。
   _bootstrapBeat = Date.now();
-  const userOnProgress = opts.onProgress;
-  const wrapped = { ...opts, onProgress: (ev) => { _bootstrapBeat = Date.now(); try { userOnProgress && userOnProgress(ev); } catch {} } };
-  _bootstrapInFlight = _bootstrap(wrapped).finally(() => { _bootstrapInFlight = null; });
+  _bootstrapT0 = Date.now();
+  _bootstrapListeners.clear();
+  _bootstrapRecent = [];
+  if (opts.onProgress) _bootstrapListeners.add(opts.onProgress);
+  const wrapped = { ...opts, onProgress: (ev) => {
+    _bootstrapBeat = Date.now();
+    _bootstrapRecent.push(ev); if (_bootstrapRecent.length > BOOTSTRAP_RECENT_MAX) _bootstrapRecent.shift();
+    for (const fn of _bootstrapListeners) { try { fn(ev); } catch {} }
+  } };
+  _bootstrapInFlight = _bootstrap(wrapped).finally(() => { _bootstrapInFlight = null; _bootstrapListeners.clear(); });
   return _bootstrapInFlight;
 }
 

@@ -30,3 +30,9 @@ test("keepalive logon task degrades to LeastPrivilege / HKCU Run when not elevat
   assert.match(src, /writeKeepaliveFiles\(\{ runLevel: "LeastPrivilege" \}\)/);
   assert.match(src, /CurrentVersion\\\\Run/);
 });
+
+test("a second bootstrap caller gets the in-flight run's progress (replay + live)", () => {
+  const src = read("src/sidecar/wsl-docker.js");
+  assert.match(src, /for \(const ev of _bootstrapRecent\) \{ try \{ opts\.onProgress\(ev\); \} catch \{\} \}\n\s+_bootstrapListeners\.add\(opts\.onProgress\);/);
+  assert.match(src, /for \(const fn of _bootstrapListeners\) \{ try \{ fn\(ev\); \} catch \{\} \}/);
+});
