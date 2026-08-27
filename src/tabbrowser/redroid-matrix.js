@@ -159,11 +159,13 @@ async function setProxy(port, proxy) {
 async function probeIp(port) {
   const { stdout } = await adb(port, "shell settings get global http_proxy");
   const proxy = stdout.trim();
-  const px = proxy && proxy !== "null" && proxy !== ":0" ? `-x http://${proxy}` : "";
-  const r = await sh(`curl -s --max-time 12 ${px} ${q(IP_API)}`, { timeout: 15000 });
+  const via = proxy && proxy !== "null" && proxy !== ":0" ? proxy : "";
+  // curl if the distro has it, else python3 (the pre-baked WSL rootfs ships python3 but not curl)
+  const py = `import json,sys,urllib.request as u; h=u.ProxyHandler({'http':'http://${via}','https':'http://${via}'} if ${via ? "True" : "False"} else {}); print(u.build_opener(h).open(sys.argv[1],timeout=12).read().decode())`;
+  const r = await sh(`if command -v curl >/dev/null; then curl -s --max-time 12 ${via ? `-x http://${via}` : ""} ${q(IP_API)}; else python3 -c ${q(py)} ${q(IP_API)}; fi`, { timeout: 20000 });
   let j = null; try { j = JSON.parse(r.stdout); } catch {}
-  if (!j || j.status !== "success") throw new Error(`出口探测失败${proxy ? `（经 ${proxy}）` : ""}`);
-  return { ip: j.query, area: [j.country, j.regionName, j.city].filter(Boolean).join(" · "), isp: j.isp, proxy: !!j.proxy, hosting: !!j.hosting, via: proxy || "direct", probedAt: new Date().toISOString() };
+  if (!j || j.status !== "success") throw new Error(`出口探测失败${via ? `（经 ${via}）` : ""}：${r.stdout.trim().slice(-160)}`);
+  return { ip: j.query, area: [j.country, j.regionName, j.city].filter(Boolean).join(" · "), isp: j.isp, proxy: !!j.proxy, hosting: !!j.hosting, via: via || "direct", probedAt: new Date().toISOString() };
 }
 
 async function frida(dev, on) {
