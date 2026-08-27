@@ -145,6 +145,9 @@ function register({ sidecarLogPath } = {}) {
   // 这些不会自己好,30 秒一轮地重来只会让卡片永远显示「安装已在进行中」。用户点「重试」
   // (docker:app-bootstrap)才清掉。
   let _autoBootstrapPaused = null;
+  let _autoBootstrapRetryAt = 0; // 硬失败后的自动重试时间点(退避,不是永久暂停:用户不会自己修)
+  // 退避:子进程被拦(安全软件开机后一段时间会自己放行)2 分钟一试;其余 15 分钟一试。
+  const AUTO_RETRY_MS = { spawn_blocked: 2 * 60 * 1000, default: 15 * 60 * 1000 };
   const HARD_BOOTSTRAP_REASONS = new Set(["spawn_blocked", "virtualization_disabled", "wsl_enable_failed", "wsl_reboot_required"]);
   function recordBootstrapResult(result, err) {
     if (err) {
@@ -156,7 +159,10 @@ function register({ sidecarLogPath } = {}) {
     } else if (result) {
       _lastBootstrapError = { reason: result.reason || result.error || "bootstrap_failed", message: result.message || "", ts: Date.now() };
     } else return;
-    if (HARD_BOOTSTRAP_REASONS.has(_lastBootstrapError.reason)) _autoBootstrapPaused = _lastBootstrapError.reason;
+    if (HARD_BOOTSTRAP_REASONS.has(_lastBootstrapError.reason)) {
+      _autoBootstrapPaused = _lastBootstrapError.reason;
+      _autoBootstrapRetryAt = Date.now() + (AUTO_RETRY_MS[_lastBootstrapError.reason] || AUTO_RETRY_MS.default);
+    }
     log.error(`[docker] bootstrap failed reason=${_lastBootstrapError.reason}${_lastBootstrapError.message ? ` — ${_lastBootstrapError.message}` : ""}${_autoBootstrapPaused ? " (auto-bootstrap paused until user retries)" : ""}`);
   }
   let _logFile = "";
@@ -190,9 +196,10 @@ function register({ sidecarLogPath } = {}) {
       // bootstrap 幂等且可续跑;首次启用 WSL 若要求重启 Windows,下次登录 Desktop
       // 会再次进入这里并从已完成的步骤继续。unknown 表示 WSL 正卡住/未响应,
       // 此时不并发安装,留给下一轮检测或显式「修复 WSL」。
-      if (!s.running && !s.unknown && _autoBootstrapPaused) {
-        // 硬失败后不自动重来(见 recordBootstrapResult);卡片显示 lastError,等用户「重试」。
+      if (!s.running && !s.unknown && _autoBootstrapPaused && Date.now() < _autoBootstrapRetryAt) {
+        // 硬失败后退避(见 recordBootstrapResult);卡片显示 lastError,到点自动再试,用户点「重试」也行。
       } else if (!s.running && !s.unknown) {
+        if (_autoBootstrapPaused) log.info(`[docker-daemon] backoff elapsed after ${_autoBootstrapPaused} → auto-retrying bootstrap`);
         log.info(`[docker-daemon] :8008 down (${s.installed ? "installed" : "not installed"}) → auto-bootstrapping WSL cicy-code`);
         try {
           await ensureDockerTeam().catch(() => {});

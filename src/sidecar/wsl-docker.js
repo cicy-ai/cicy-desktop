@@ -890,7 +890,7 @@ function keepaliveDir() { return path.join(process.env.LOCALAPPDATA || os.homedi
 function keepaliveShellCmd() {
   return `/usr/local/sbin/start-dockerd.sh; exec flock -n /run/cicy-keepalive.lock sleep infinity`;
 }
-function writeKeepaliveFiles() {
+function writeKeepaliveFiles({ runLevel = "HighestAvailable" } = {}) {
   const dir = keepaliveDir();
   fs.mkdirSync(dir, { recursive: true });
   const vbs = path.join(dir, "wsl-keepalive.vbs");
@@ -902,7 +902,7 @@ function writeKeepaliveFiles() {
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo><Description>CiCy Desktop: keep WSL distro ${DISTRO} alive and dockerd running (hidden)</Description></RegistrationInfo>
   <Triggers><LogonTrigger><Enabled>true</Enabled></LogonTrigger></Triggers>
-  <Principals><Principal id="Author"><LogonType>InteractiveToken</LogonType><RunLevel>HighestAvailable</RunLevel></Principal></Principals>
+  <Principals><Principal id="Author"><LogonType>InteractiveToken</LogonType><RunLevel>${runLevel}</RunLevel></Principal></Principals>
   <Settings>
     <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
     <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
@@ -976,8 +976,27 @@ async function ensureAutostart() {
       await schtasks(["/end", "/tn", AUTOSTART_TASK], 15000);
     }
   } catch {}
-  const r = await schtasks(["/create", "/tn", AUTOSTART_TASK, "/xml", files.xml, "/f"], 30000);
-  if (!r.ok) { log.warn(`[ensureAutostart] schtasks create FAILED (dockerd won't auto-start after reboot): ${r.stderr.trim()}`); return; }
+  let r = await schtasks(["/create", "/tn", AUTOSTART_TASK, "/xml", files.xml, "/f"], 30000);
+  if (!r.ok) {
+    // RunLevel=HighestAvailable 需要管理员才能注册(桌面端通常是普通权限 → 拒绝访问)。wsl.exe 本身
+    // 不需要提权,退一步用 LeastPrivilege 注册,任何账号都能建。
+    log.warn(`[ensureAutostart] schtasks create (HighestAvailable) failed: ${r.stderr.trim()} → retry as LeastPrivilege`);
+    try { files = writeKeepaliveFiles({ runLevel: "LeastPrivilege" }); } catch (e) { log.warn(`[ensureAutostart] rewrite keepalive files failed: ${e.message}`); return; }
+    r = await schtasks(["/create", "/tn", AUTOSTART_TASK, "/xml", files.xml, "/f"], 30000);
+  }
+  if (!r.ok) {
+    // 连普通任务都建不了(策略禁用计划任务)→ 最后兜底:HKCU Run 登录项,登录即拉起保活。
+    log.warn(`[ensureAutostart] schtasks create FAILED: ${r.stderr.trim()} → fallback to HKCU Run login item`);
+    await new Promise((resolve) => {
+      execFile("reg", ["add", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run", "/v", AUTOSTART_TASK, "/t", "REG_SZ", "/d", `wscript.exe //B //Nologo "${files.vbs}"`, "/f"], { windowsHide: true, timeout: 15000 }, (err) => {
+        if (err) log.warn(`[ensureAutostart] HKCU Run fallback FAILED (dockerd won't auto-start after reboot): ${err.message}`);
+        else log.info(`[ensureAutostart] HKCU Run login item '${AUTOSTART_TASK}' registered → keepalive on next logon`);
+        resolve();
+      });
+    });
+    spawnKeepaliveChild();
+    return;
+  }
   log.info(`[ensureAutostart] logon task '${AUTOSTART_TASK}' registered (hidden, no time limit) → dockerd + keepalive on next logon`);
   // 立刻用任务把隐藏保活拉起来,再关掉旧的可见窗口(顺序不能反)。
   if (await runKeepaliveTask()) {
