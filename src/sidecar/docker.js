@@ -637,6 +637,9 @@ async function wslMissing() {
   return await new Promise((resolve) => {
     execFile(wslExe(), ["--status"], { timeout: 25000, windowsHide: true, encoding: "utf16le" }, (err, stdout, stderr) => {
       const s = String((stdout || "") + (stderr || "") + (err && err.message ? err.message : ""));
+      // wsl.exe 不存在(ENOENT):功能刚启用但还没重启 Windows 时就是这样 —— 按「缺失」处理,
+      // 让 ensureWsl 走 needsReboot,而不是当成已就绪去 --import 然后 spawn ENOENT。
+      if (err && (err.code === "ENOENT" || /ENOENT/.test(err.message || ""))) return resolve(true);
       if (/未安装|not installed|--install/i.test(s)) return resolve(true);   // definitely missing
       if (err && (err.killed || err.signal || err.code === "ETIMEDOUT")) return resolve(null); // timed out → unknown
       resolve(false); // wsl present (errored for another reason → assume OK)

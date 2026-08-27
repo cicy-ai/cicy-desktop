@@ -60,3 +60,7 @@ test("WSL setup is a single elevation with component-store repair fallback; rebo
 test("auto-update defaults to on", () => {
   assert.match(read("src/app-updater.js"), /desktopAutoUpdate !== false/);
 });
+
+test("a missing wsl.exe (ENOENT, features enabled but not yet rebooted) counts as WSL missing", () => {
+  assert.match(read("src/sidecar/docker.js"), /err\.code === "ENOENT"[^\n]*return resolve\(true\)/);
+});
