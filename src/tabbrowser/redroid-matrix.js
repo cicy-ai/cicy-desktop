@@ -28,7 +28,15 @@ const FRIDA_PORT = 27042;
 const IP_API = "http://ip-api.com/json/?fields=status,query,country,regionName,city,isp,proxy,hosting";
 
 // ── runner ───────────────────────────────────────────────────────────────────
-function sh(cmd, { timeout = 60000 } = {}) {
+// Short commands go through a persistent shell session (redroid-shell.js):
+// lane "ui" for screenshots/input, lane "mgmt" for docker/adb status+actions.
+// Long jobs (image pull, apk install, purge) use a one-off process so they
+// never wedge a lane.
+const { lane } = require("./redroid-shell");
+function sh(cmd, { timeout = 30000, lane: laneName = "mgmt" } = {}) {
+  return lane(laneName).run(cmd, { timeout });
+}
+function shOnce(cmd, { timeout = 60000 } = {}) {
   if (process.platform === "win32") return require("../sidecar/wsl-docker").wslRun(cmd, { timeout });
   return new Promise((resolve, reject) => {
     execFile("bash", ["-lc", cmd], { timeout, maxBuffer: 1 << 26 }, (err, stdout, stderr) => {
@@ -40,7 +48,9 @@ function sh(cmd, { timeout = 60000 } = {}) {
 const q = (v) => `'${String(v).replace(/'/g, "'\\''")}'`;
 const errText = (e) => {
   const tail = String((e && (e.stderr || e.stdout)) || "").trim().split("\n").slice(-3).join(" ");
-  return tail || (e && e.message) || String(e);
+  if (tail) return tail;
+  if (e && e.killed) return `命令超时：${e.message}`;
+  return (e && e.message) || String(e);
 };
 function toDistroPath(p) {
   if (process.platform !== "win32") return p;
@@ -49,8 +59,8 @@ function toDistroPath(p) {
 
 // ── adb ──────────────────────────────────────────────────────────────────────
 const serial = (port) => `127.0.0.1:${port}`;
-function adb(port, args, { timeout = 20000 } = {}) {
-  return sh(`adb -s ${serial(port)} ${args}`, { timeout });
+function adb(port, args, { timeout = 20000, lane: laneName } = {}) {
+  return sh(`adb -s ${serial(port)} ${args}`, { timeout, lane: laneName });
 }
 async function adbState(port) {
   try {
@@ -128,14 +138,14 @@ async function deviceInfo(dev) {
 }
 
 async function screenshot(port) {
-  const { stdout } = await adb(port, "exec-out screencap -p | base64 -w0", { timeout: 15000 });
+  const { stdout } = await adb(port, "exec-out screencap -p | base64 -w0", { timeout: 15000, lane: "ui" });
   const b64 = stdout.trim();
   if (b64.length < 100) throw new Error("screencap 返回空");
   return `data:image/png;base64,${b64}`;
 }
 
 async function sendInput(port, ev) {
-  await adb(port, `shell ${core.inputArgs(ev).join(" ")}`, { timeout: 10000 });
+  await adb(port, `shell ${core.inputArgs(ev).join(" ")}`, { timeout: 10000, lane: "ui" });
 }
 
 async function setProxy(port, proxy) {
@@ -167,7 +177,7 @@ async function frida(dev, on) {
   if (/MISSING/.test(stdout)) {
     try { await sh(`test -f ${q(FRIDA_SERVER_SRC)}`); }
     catch { throw new Error(`frida-server 不存在：${FRIDA_SERVER_SRC}（x86_64 Android 版，可用 CICY_FRIDA_SERVER 指定）`); }
-    await adb(port, `push ${q(FRIDA_SERVER_SRC)} /data/local/tmp/frida-server`, { timeout: 60000 });
+    await shOnce(`adb -s ${serial(port)} push ${q(FRIDA_SERVER_SRC)} /data/local/tmp/frida-server`, { timeout: 60000 });
   }
   await adb(port, `shell "chmod 755 /data/local/tmp/frida-server; su 0 sh -c 'nohup /data/local/tmp/frida-server -D -l 0.0.0.0:${FRIDA_PORT} >/dev/null 2>&1 &'"`);
   await sh(`adb -s ${serial(port)} forward tcp:${port + 10000} tcp:${FRIDA_PORT}`);
@@ -187,13 +197,13 @@ async function installApk(port, hostPath, emit) {
   const ext = path.extname(hostPath).toLowerCase();
   emit && emit({ message: `安装 ${path.basename(hostPath)} …` });
   if (ext === ".apk") {
-    const r = await adb(port, `install -r -g ${q(p)}`, { timeout: 300000 });
+    const r = await shOnce(`adb -s ${serial(port)} install -r -g ${q(p)}`, { timeout: 300000 });
     if (!/Success/i.test(r.stdout + r.stderr)) throw new Error(errText({ stdout: r.stdout, stderr: r.stderr }));
     return;
   }
   // xapk / apks / zip bundles → unpack the split apks and install-multiple
   const tmp = `/tmp/cicy-apk-${port}`;
-  const r = await sh(`rm -rf ${tmp} && mkdir -p ${tmp} && unzip -o -j ${q(p)} '*.apk' -d ${tmp} >/dev/null && adb -s ${serial(port)} install-multiple -r -g ${tmp}/*.apk; rc=$?; rm -rf ${tmp}; exit $rc`, { timeout: 300000 });
+  const r = await shOnce(`rm -rf ${tmp} && mkdir -p ${tmp} && unzip -o -j ${q(p)} '*.apk' -d ${tmp} >/dev/null && adb -s ${serial(port)} install-multiple -r -g ${tmp}/*.apk; rc=$?; rm -rf ${tmp}; exit $rc`, { timeout: 300000 });
   if (!/Success/i.test(r.stdout + r.stderr)) throw new Error(errText({ stdout: r.stdout, stderr: r.stderr }));
 }
 
@@ -209,7 +219,7 @@ async function createDevice(input, emit) {
   const port = core.allocatePort(existing.map((d) => d.port));
   if (!(await imagePresent(spec.image))) {
     emit && emit({ message: `拉取镜像 ${spec.image}（约 3GB，首次较慢）…` });
-    const r = await sh(`docker pull ${spec.image} 2>&1 | tail -3`, { timeout: 3600000 });
+    const r = await shOnce(`docker pull ${spec.image} 2>&1 | tail -3`, { timeout: 3600000 });
     if (!(await imagePresent(spec.image))) throw new Error(`镜像拉取失败：${r.stdout.trim().slice(-300)}`);
   }
   emit && emit({ message: `启动容器 ${container}（端口 ${port}）…` });
@@ -239,7 +249,7 @@ async function waitBootThen(port, fn, tries = 40) {
 async function removeDevice(name, purge) {
   await findDevice(name);
   const p = purge ? ` && rm -rf ${q(core.dataDir(name))}` : "";
-  await sh(`docker rm -f ${q(name)}${p}`, { timeout: 60000 });
+  await shOnce(`docker rm -f ${q(name)}${p}`, { timeout: 60000 });
 }
 
 // ── IPC ──────────────────────────────────────────────────────────────────────
@@ -250,7 +260,16 @@ function installIpc(findTab) {
   // Only the panel page (profile 0) may drive this; same gate as panel-cells.
   const guard = (e) => { if (!findTab(e.sender.id)) throw new Error("not a panel page"); };
   const emitter = (e) => (m) => { try { e.sender.send("redroid:progress", m); } catch {} };
-  const withDev = async (e, name) => { guard(e); const d = await findDevice(name); if (!d.running || !d.port) throw new Error(`${name} 未运行`); return d; };
+  // device lookup cache: the screen stream asks several times a second and a
+  // `docker ps` per frame would saturate the mgmt lane.
+  let cache = { at: 0, list: [] };
+  const cachedList = async () => { if (Date.now() - cache.at > 5000) cache = { at: Date.now(), list: await dockerList() }; return cache.list; };
+  const withDev = async (e, name) => {
+    guard(e);
+    const d = (await cachedList()).find((x) => x.name === name) || await findDevice(name);
+    if (!d.running || !d.port) throw new Error(`${name} 未运行`);
+    return d;
+  };
   const h = (ch, fn) => ipcMain.handle(ch, async (e, a = {}) => {
     try { return await fn(e, a); }
     catch (err) { throw new Error(errText(err)); }
@@ -259,7 +278,10 @@ function installIpc(findTab) {
   h("redroid:list", async (e) => {
     guard(e);
     const devs = await dockerList();
-    return Promise.all(devs.map(async (d) => ({ ...d, info: await deviceInfo(d) })));
+    cache = { at: Date.now(), list: devs };
+    const out = [];
+    for (const d of devs) out.push({ ...d, info: await deviceInfo(d) }); // serial: one lane, keep it orderly
+    return out;
   });
   h("redroid:create", (e, a) => createDevice(a, emitter(e)));
   h("redroid:start", async (e, { name }) => { guard(e); await findDevice(name); await sh(`docker start ${q(name)}`, { timeout: 60000 }); await ensureWatchdog(); });

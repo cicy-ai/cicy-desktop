@@ -74,3 +74,16 @@ test("preload exposes redroidAPI and the IPC channels it uses exist in main", ()
   const wiring = fs.readFileSync(path.join(__dirname, "..", "src", "tools", "tab-browser-tools.js"), "utf8");
   assert.match(wiring, /redroidMatrix\.installIpc\(findPanelTab\)/);
 });
+
+test("persistent shell session runs commands serially and reports exit codes", async (t) => {
+  const { ShellSession } = require("../src/tabbrowser/redroid-shell");
+  const s = new ShellSession({ spawnArgs: () => ["bash", ["--norc", "--noprofile"]], label: "t" });
+  t.after(() => s.dispose());
+  const [a, b] = await Promise.all([s.run("echo one; echo two"), s.run("printf 'no-newline'")]);
+  assert.equal(a.stdout, "one\ntwo\n"); // trailing newline kept, same as execFile
+  assert.equal(b.stdout, "no-newline");
+  await assert.rejects(s.run("echo oops >&2; exit 3"), (e) => e.code === 3 && /oops/.test(e.stdout));
+  assert.equal((await s.run("echo still-alive")).stdout.trim(), "still-alive");
+  await assert.rejects(s.run("sleep 5", { timeout: 300 }), /timeout/);
+  assert.equal((await s.run("echo respawned")).stdout.trim(), "respawned"); // session respawns after a kill
+});
