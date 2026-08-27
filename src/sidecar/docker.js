@@ -681,7 +681,28 @@ async function virtualizationStatus() {
   });
 }
 
+// 桌面端能不能创建子进程。安全软件(360/火绒/Defender ASR)拦截 CiCy Desktop.exe 的
+// 子进程创建时,每个 execFile/spawn 都报 EPERM:featureEnabled 恒为 false、dism 提权
+// 起不来,ensure-wsl 白等 8 分钟后报 wsl_enable_failed,守护循环又立刻重来 —— 用户只看
+// 到「安装失败」。这里 1 秒探明,直接给出原因。
+function spawnProbe() {
+  if (process.platform !== "win32") return Promise.resolve({ ok: true });
+  return new Promise((resolve) => {
+    execFile(process.env.ComSpec || "cmd.exe", ["/d", "/c", "echo ok"], { timeout: 15000, windowsHide: true }, (err, stdout) => {
+      if (!err && /ok/.test(String(stdout || ""))) return resolve({ ok: true });
+      resolve({ ok: false, code: (err && err.code) || "unknown", error: err && err.message });
+    });
+  });
+}
+
 async function ensureWsl({ emit } = {}) {
+  const sp = await spawnProbe();
+  if (!sp.ok) {
+    const why = `CiCy Desktop 无法创建子进程（spawn ${sp.code}）——通常是安全软件（360/火绒/Defender）拦截了 CiCy Desktop.exe 启动 cmd/powershell/dism。请把 CiCy Desktop 加入信任并以管理员身份重新打开后点「重试」。`;
+    log.error(`[bootstrap] ✗ ensure-wsl reason=spawn_blocked code=${sp.code} err=${sp.error || ""}`);
+    emit && emit({ phase: "done", status: "error", message: why });
+    return { ok: false, needsReboot: false, failed: true, reason: "spawn_blocked", message: why };
+  }
   const virt = await virtualizationStatus();
   if (virt.known && !virt.ok) {
     const why = virt.cpuSupports
@@ -811,7 +832,7 @@ module.exports = {
   start, stop, stopContainer, restart, checkStatus, loadImage, loadImageFromTarball,
   downloadImageTarball, imagePresent, dockerOk, installDocker,
   bootstrap, probeHealth, readContainerToken, dockerDesktopExe, desktopDir, downloadsDir, imageTarballPath,
-  launchElevated, wslMissing, ensureWsl, virtualizationStatus,
+  launchElevated, spawnProbe, wslMissing, ensureWsl, virtualizationStatus,
   // platform-agnostic download/retry primitives, reused by native.js
   ensureDownloaded, curlDownload, withRetry, waitUntil, run, headSize,
   // image freshness (修「重建仍用旧镜像」—— 校验 OSS ETag 变了才重下重载)

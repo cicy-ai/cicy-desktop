@@ -141,6 +141,26 @@ function register({ sidecarLogPath } = {}) {
   // 最近一次安装/启动失败的原因(reason + 人话 message),写进 docker-status.json 的
   // lastError,卡片和排障都能看到"为什么装不上",而不是只看到 installed:false。
   let _lastBootstrapError = null;
+  // 硬失败(BIOS 没开虚拟化 / 子进程被拦 / WSL 功能启用失败)后暂停守护循环的自动安装:
+  // 这些不会自己好,30 秒一轮地重来只会让卡片永远显示「安装已在进行中」。用户点「重试」
+  // (docker:app-bootstrap)才清掉。
+  let _autoBootstrapPaused = null;
+  const HARD_BOOTSTRAP_REASONS = new Set(["spawn_blocked", "virtualization_disabled", "wsl_enable_failed", "wsl_reboot_required"]);
+  function recordBootstrapResult(result, err) {
+    if (err) {
+      const code = err && err.code;
+      const reason = code === "EPERM" || /spawn EPERM/.test(err.message || "") ? "spawn_blocked" : "bootstrap_exception";
+      _lastBootstrapError = { reason, message: err.message, ts: Date.now() };
+    } else if (result && result.ok) {
+      _lastBootstrapError = null; _autoBootstrapPaused = null; return;
+    } else if (result) {
+      _lastBootstrapError = { reason: result.reason || result.error || "bootstrap_failed", message: result.message || "", ts: Date.now() };
+    } else return;
+    if (HARD_BOOTSTRAP_REASONS.has(_lastBootstrapError.reason)) _autoBootstrapPaused = _lastBootstrapError.reason;
+    log.error(`[docker] bootstrap failed reason=${_lastBootstrapError.reason}${_lastBootstrapError.message ? ` — ${_lastBootstrapError.message}` : ""}${_autoBootstrapPaused ? " (auto-bootstrap paused until user retries)" : ""}`);
+  }
+  let _logFile = "";
+  try { _logFile = log.transports.file.getFile().path; } catch {}
   let _dockerDaemonBusy = false;
   let _autostartEnsured = false;
   async function refreshDockerStatus() {
@@ -151,7 +171,7 @@ function register({ sidecarLogPath } = {}) {
       if (s.running) { try { ver = await require("../sidecar/version").running(APP_PORT); } catch {} }
       // installed: distro 装了 OR :8008 健康(WSL 抽风查不到 distro 但容器在跑 → 也算装了,
       // 否则卡片误显「下载安装」)。wslUnmanaged: 服务在跑但 WSL 管不到 → 卡片显式提示异常。
-      _dockerStatusCache = { installed: !!s.distro || !!s.healthy, dockerRunning: !!s.engineUp || !!s.healthy, running: !!s.running, unknown: !!s.unknown, wslUnmanaged: !!s.wslUnmanaged, wslWedged: !!s.wslWedged, version: ver, port: APP_PORT, platform: process.platform, chromeProxy: chromeProxyEnabled(), chromeProxyRunning: hostMihomo.running(), lastError: (!s.running && _lastBootstrapError) ? _lastBootstrapError : null, ts: Date.now() };
+      _dockerStatusCache = { installed: !!s.distro || !!s.healthy, dockerRunning: !!s.engineUp || !!s.healthy, running: !!s.running, unknown: !!s.unknown, wslUnmanaged: !!s.wslUnmanaged, wslWedged: !!s.wslWedged, version: ver, port: APP_PORT, platform: process.platform, chromeProxy: chromeProxyEnabled(), chromeProxyRunning: hostMihomo.running(), lastError: (!s.running && _lastBootstrapError) ? _lastBootstrapError : null, autoBootstrapPaused: _autoBootstrapPaused, logFile: _logFile, ts: Date.now() };
     } catch (e) {
       _dockerStatusCache = { installed: false, dockerRunning: false, running: false, unknown: true, port: APP_PORT, platform: process.platform, error: e.message, ts: Date.now() };
     }
@@ -170,17 +190,20 @@ function register({ sidecarLogPath } = {}) {
       // bootstrap 幂等且可续跑;首次启用 WSL 若要求重启 Windows,下次登录 Desktop
       // 会再次进入这里并从已完成的步骤继续。unknown 表示 WSL 正卡住/未响应,
       // 此时不并发安装,留给下一轮检测或显式「修复 WSL」。
-      if (!s.running && !s.unknown) {
+      if (!s.running && !s.unknown && _autoBootstrapPaused) {
+        // 硬失败后不自动重来(见 recordBootstrapResult);卡片显示 lastError,等用户「重试」。
+      } else if (!s.running && !s.unknown) {
         log.info(`[docker-daemon] :8008 down (${s.installed ? "installed" : "not installed"}) → auto-bootstrapping WSL cicy-code`);
         try {
           await ensureDockerTeam().catch(() => {});
           const result = await appDocker.bootstrap(await appOpts());
+          recordBootstrapResult(result);
           if (result && result.ok) {
             try { await registerAppTeam(); } catch {}
           } else if (result && result.reason) {
             log.warn(`[docker-daemon] auto-bootstrap paused: ${result.reason}`);
           }
-        } catch (e) { log.warn(`[docker-daemon] auto-bootstrap failed: ${e.message}`); }
+        } catch (e) { recordBootstrapResult(null, e); log.warn(`[docker-daemon] auto-bootstrap failed: ${e.message}`); }
         await refreshDockerStatus();
       } else if (s.running) {
         // 桌面端不再向容器注入/自愈网关 key:LLM key 由 cicy-code 自己管理(global.json
@@ -428,16 +451,20 @@ function register({ sidecarLogPath } = {}) {
       // docker 起来之前就把宿主 mihomo 二进制下载安装好(给系统 Chrome 代理用,始终开启)。
       // 纯宿主侧、不依赖容器,和 docker 装机并行;OSS 下载,失败不挡 docker(reconcile 会重试)。
       try { await hostMihomo.ensureBinary({ emit }); } catch (err) { log.warn(`[chrome-proxy] ensureBinary failed: ${err.message}`); }
+      _autoBootstrapPaused = null; // 用户主动重试 → 解除暂停
       const result = await appDocker.bootstrap({ ...(await appOpts()), onProgress: emit });
+      recordBootstrapResult(result);
       if (result && result.ok) {
         await registerAppTeam();
         // 容器起来了 → 立刻从容器同步配置并拉起 host mihomo(不必等 60s reconcile)。
         try { await maybeStartChromeProxy(); } catch (err) { log.warn(`[chrome-proxy] start after bootstrap failed: ${err.message}`); }
-        await refreshDockerStatus().catch(() => {});
       }
+      await refreshDockerStatus().catch(() => {});
       return result;
     } catch (err) {
-      return { ok: false, error: err.message };
+      recordBootstrapResult(null, err);
+      await refreshDockerStatus().catch(() => {});
+      return { ok: false, error: err.message, reason: _lastBootstrapError && _lastBootstrapError.reason, message: err.message };
     }
   });
 
