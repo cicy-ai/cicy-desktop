@@ -132,7 +132,45 @@ function inputArgs(ev) {
   }
 }
 
+
+// ── egress IP classification ─────────────────────────────────────────────────
+// Two free sources are merged: ip-api.com (geo, isp/as, mobile/proxy/hosting)
+// and ipapi.is (is_datacenter/is_proxy/is_vpn/is_tor/is_abuser, asn). The
+// grade answers the user's real question — "will sign-up risk engines
+// (Facebook, Google, Telegram…) accept this IP?":
+//   A  residential / mobile line, no flags     → best
+//   B  no datacenter / proxy flags but a backbone or unknown-type ISP
+//   C  datacenter / hosting                     → sign-ups usually blocked
+//   D  flagged proxy / VPN / Tor / abuser       → practically dead
+const RESIDENTIAL_ISP = /comcast|xfinity|verizon|at&t|att\b|spectrum|charter|cox\b|frontier|centurylink|lumen|t-mobile|sprint|optimum|altice|windstream|mediacom|deutsche telekom|telekom|vodafone|orange|\bbt\b|british telecom|sky broadband|virgin media|talktalk|kddi|ntt|softbank|docomo|telstra|optus|bell canada|rogers|shaw|telus|sfr|bouygues|free sas|telefonica|movistar|kpn|swisscom|telia|telenor|chunghwa|sk broadband|kt corp|lg uplink|pldt|globe telecom|singtel|starhub|m1 limited|china telecom|china unicom|china mobile/i;
+
+function classifyIp({ ipapi = null, ipapis = null } = {}) {
+  const a = ipapi || {}, b = ipapis || {};
+  const flags = {
+    proxy: !!(a.proxy || b.is_proxy),
+    vpn: !!b.is_vpn,
+    tor: !!b.is_tor,
+    abuser: !!b.is_abuser,
+    datacenter: !!(a.hosting || b.is_datacenter),
+    mobile: !!a.mobile,
+  };
+  const isp = String(a.isp || a.org || b.asn_org || b.company_name || "");
+  const residential = flags.mobile || RESIDENTIAL_ISP.test(isp);
+  let grade, kind, verdict;
+  if (flags.proxy || flags.vpn || flags.tor || flags.abuser) {
+    grade = "D"; kind = "已标记"; verdict = "情报库已标记为代理 / VPN / Tor / 滥用来源，注册类风控基本必拦，建议换节点。";
+  } else if (flags.datacenter) {
+    grade = "C"; kind = "机房"; verdict = "机房 / 云主机 IP。Facebook、Google 等注册风控大概率拦截或要求验证；日常登录一般可用。";
+  } else if (residential) {
+    grade = "A"; kind = flags.mobile ? "移动网络" : "住宅"; verdict = "住宅 / 移动线路且无任何标记，风控最友好。";
+  } else {
+    grade = "B"; kind = "骨干/未知"; verdict = "未被标记为机房或代理，但也不是明确的住宅线路（骨干 / 商业网络）。注册可试，成功率一般。";
+  }
+  return { grade, kind, verdict, flags, residential };
+}
+
 module.exports = {
+  classifyIp, RESIDENTIAL_ISP,
   LABEL, PORT_BASE, IMAGES, DEFAULT_SPEC, AOSP_KEYS,
   slugify, containerName, dataDir, allocatePort, normalizeSpec, buildRunCommand, parsePs,
   normalizeDeviceProxy, inputArgs,

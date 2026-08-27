@@ -25,7 +25,7 @@ const core = require("./redroid-matrix-core");
 const WATCHDOG = "/usr/local/sbin/redroid-net.sh";
 const FRIDA_SERVER_SRC = process.env.CICY_FRIDA_SERVER || "/mnt/c/wsl/frida-server";
 const FRIDA_PORT = 27042;
-const IP_API = "http://ip-api.com/json/?fields=status,query,country,regionName,city,isp,proxy,hosting";
+const IP_API = "http://ip-api.com/json/?fields=status,message,query,country,countryCode,regionName,city,isp,org,as,mobile,proxy,hosting";
 
 // ── runner ───────────────────────────────────────────────────────────────────
 // Short commands go through a persistent shell session (redroid-shell.js):
@@ -126,21 +126,25 @@ async function deviceInfo(dev) {
   info.adb = await ensureConnected(dev.port);
   if (info.adb !== "device") return info;
   try {
-    const { stdout } = await adb(dev.port, `shell "getprop sys.boot_completed; getprop ro.build.version.release; getprop ro.product.model; settings get global http_proxy; (su 0 id 2>/dev/null || echo NOSU); (pgrep -f frida-server >/dev/null 2>&1 && echo FRIDA || ps -A 2>/dev/null | grep -q frida-server && echo FRIDA || echo NOFRIDA)"`);
+    const { stdout } = await adb(dev.port, `shell "getprop sys.boot_completed; getprop ro.build.version.release; getprop ro.product.model; settings get global http_proxy; (su 0 id 2>/dev/null || echo NOSU); (pgrep -f frida-server >/dev/null 2>&1 && echo FRIDA || ps -A 2>/dev/null | grep -q frida-server && echo FRIDA || echo NOFRIDA); wm size 2>/dev/null | tail -1; cat /proc/uptime 2>/dev/null | cut -d. -f1; getprop ro.build.fingerprint"`);
     const l = stdout.replace(/\r/g, "").split("\n").map((s) => s.trim());
     info.booted = l[0] === "1";
     info.release = l[1] || ""; info.model = l[2] || "";
     info.proxy = l[3] && l[3] !== "null" && l[3] !== ":0" ? l[3] : "";
     info.root = /uid=0/.test(l[4] || "");
     info.frida = /^FRIDA$/m.test(stdout);
+    const rest = l.slice(5).filter((x) => !/^(NO)?FRIDA$/.test(x));
+    const wm = rest.find((x) => /size:/i.test(x)); info.size = wm ? wm.replace(/.*size:\s*/i, "") : "";
+    const up = rest.find((x) => /^\d+$/.test(x)); info.uptime = up ? Number(up) : null;
+    info.fingerprint = rest.find((x) => /\//.test(x) && /:/.test(x)) || "";
   } catch (e) { info.error = errText(e); }
   return info;
 }
 
 async function screenshot(port) {
   const { stdout } = await adb(port, "exec-out screencap -p | base64 -w0", { timeout: 15000, lane: "ui" });
-  const b64 = stdout.trim();
-  if (b64.length < 100) throw new Error("screencap 返回空");
+  const b64 = stdout.replace(/\s+/g, "");
+  if (b64.length < 100 || !b64.startsWith("iVBOR") || /[^A-Za-z0-9+/=]/.test(b64)) throw new Error("screencap 返回异常数据");
   return `data:image/png;base64,${b64}`;
 }
 
@@ -155,17 +159,30 @@ async function setProxy(port, proxy) {
 }
 
 // Egress as the DEVICE sees it: through its configured proxy (probed from the
-// distro, which sits on the same docker bridge). Direct = the distro's own egress.
+// distro, which sits on the same docker bridge). Direct = the distro's own
+// egress. Merges ip-api.com (geo/isp/flags) with ipapi.is (datacenter/vpn/tor/
+// abuser) and grades the result (core.classifyIp).
+async function fetchJsonVia(url, via) {
+  const py = `import json,sys,urllib.request as u; h=u.ProxyHandler({'http':'http://${via}','https':'http://${via}'} if ${via ? "True" : "False"} else {}); print(u.build_opener(h).open(sys.argv[1],timeout=12).read().decode())`;
+  const r = await sh(`if command -v curl >/dev/null; then curl -s --max-time 12 ${via ? `-x http://${via}` : ""} ${q(url)}; else python3 -c ${q(py)} ${q(url)}; fi`, { timeout: 20000 });
+  try { return JSON.parse(r.stdout); } catch { throw new Error(`探测服务无响应：${r.stdout.trim().slice(-120) || "empty"}`); }
+}
 async function probeIp(port) {
   const { stdout } = await adb(port, "shell settings get global http_proxy");
   const proxy = stdout.trim();
   const via = proxy && proxy !== "null" && proxy !== ":0" ? proxy : "";
-  // curl if the distro has it, else python3 (the pre-baked WSL rootfs ships python3 but not curl)
-  const py = `import json,sys,urllib.request as u; h=u.ProxyHandler({'http':'http://${via}','https':'http://${via}'} if ${via ? "True" : "False"} else {}); print(u.build_opener(h).open(sys.argv[1],timeout=12).read().decode())`;
-  const r = await sh(`if command -v curl >/dev/null; then curl -s --max-time 12 ${via ? `-x http://${via}` : ""} ${q(IP_API)}; else python3 -c ${q(py)} ${q(IP_API)}; fi`, { timeout: 20000 });
-  let j = null; try { j = JSON.parse(r.stdout); } catch {}
-  if (!j || j.status !== "success") throw new Error(`出口探测失败${via ? `（经 ${via}）` : ""}：${r.stdout.trim().slice(-160)}`);
-  return { ip: j.query, area: [j.country, j.regionName, j.city].filter(Boolean).join(" · "), isp: j.isp, proxy: !!j.proxy, hosting: !!j.hosting, via: via || "direct", probedAt: new Date().toISOString() };
+  const a = await fetchJsonVia(IP_API, via);
+  if (!a || a.status !== "success") throw new Error(`出口探测失败${via ? `（经 ${via}）` : ""}：${(a && a.message) || "ip-api 无结果"}`);
+  let b = null;
+  try { b = await fetchJsonVia(`https://api.ipapi.is/?q=${a.query}`, via); } catch {}
+  const cls = core.classifyIp({ ipapi: a, ipapis: b });
+  return {
+    ip: a.query, cc: a.countryCode || (b && b.cc) || "", country: a.country || "", region: a.regionName || "", city: a.city || "",
+    area: [a.country, a.regionName, a.city].filter(Boolean).join(" · "),
+    isp: a.isp || "", org: a.org || "", as: a.as || (b && b.asn_num ? `AS${b.asn_num} ${b.asn_org || ""}` : ""),
+    ...cls, sources: { ipapi: !!a, ipapis: !!b },
+    via: via || "direct", probedAt: new Date().toISOString(),
+  };
 }
 
 async function frida(dev, on) {

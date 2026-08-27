@@ -87,3 +87,14 @@ test("persistent shell session runs commands serially and reports exit codes", a
   await assert.rejects(s.run("sleep 5", { timeout: 300 }), /timeout/);
   assert.equal((await s.run("echo respawned")).stdout.trim(), "respawned"); // session respawns after a kill
 });
+
+test("egress IP classification grades residential / backbone / datacenter / flagged", () => {
+  const g = (ipapi, ipapis) => core.classifyIp({ ipapi, ipapis }).grade;
+  assert.equal(g({ isp: "Comcast Cable Communications" }, { is_datacenter: false }), "A");
+  assert.equal(g({ mobile: true, hosting: false }, null), "A");
+  assert.equal(g({ isp: "Cogent Communications" }, { is_datacenter: false }), "B");
+  assert.equal(g({ isp: "Thunderbox Inc", hosting: false }, { is_datacenter: true }), "C");
+  assert.equal(g({ isp: "Comcast", proxy: true }, null), "D");
+  assert.equal(g({}, { is_vpn: true }), "D");
+  assert.deepEqual(core.classifyIp({ ipapi: { proxy: true, hosting: true } }).flags, { proxy: true, vpn: false, tor: false, abuser: false, datacenter: true, mobile: false });
+});
