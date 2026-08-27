@@ -50,7 +50,8 @@
     .card .geo { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .card .geo.none { color: var(--muted); }
     .card .l3 { margin-top: 5px; display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
-    .flag { font-size: 14px; line-height: 1; }
+    .flag { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 16px; padding: 0 4px; border-radius: 4px; font-size: 10px; font-weight: 800; letter-spacing: .5px; color: #dfe6ff; background: rgba(122,162,255,.18); border: 1px solid rgba(122,162,255,.35); flex: none; }
+    .flag:empty { display: none; }
     .grade { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 5px; border: 1px solid; letter-spacing: .2px; flex: none; }
     .grade.A { color: var(--gA); border-color: rgba(46,204,113,.45); background: rgba(46,204,113,.1); }
     .grade.B { color: var(--gB); border-color: rgba(143,209,79,.45); background: rgba(143,209,79,.1); }
@@ -83,8 +84,9 @@
     .topbar .meta { color: var(--muted); font-size: 12px; white-space: nowrap; }
     .topbar .sp { flex: 1; }
     .topbar .actions { display: flex; gap: 6px; }
-    .stage { flex: 1; min-height: 0; display: grid; grid-template-rows: 1fr auto; place-items: center; padding: 16px 18px 12px; gap: 12px; }
-    .frame { position: relative; height: 100%; max-height: 100%; aspect-ratio: 9 / 16; max-width: 100%; border-radius: 30px; padding: 10px; background: linear-gradient(180deg, #202026, #141418); border: 1px solid var(--line2); box-shadow: 0 30px 80px rgba(0,0,0,.55), inset 0 0 0 1px rgba(255,255,255,.04); }
+    .stage { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; padding: 14px 18px 12px; gap: 12px; }
+    .stage-fit { flex: 1; min-height: 0; width: 100%; display: flex; align-items: center; justify-content: center; }
+    .frame { position: relative; height: 100%; aspect-ratio: 9 / 16; max-width: 100%; border-radius: 30px; padding: 10px; background: linear-gradient(180deg, #202026, #141418); border: 1px solid var(--line2); box-shadow: 0 30px 80px rgba(0,0,0,.55), inset 0 0 0 1px rgba(255,255,255,.04); }
     .frame .glass { position: relative; width: 100%; height: 100%; border-radius: 21px; overflow: hidden; background: #000; }
     #screen { display: block; width: 100%; height: 100%; object-fit: contain; cursor: default; user-select: none; -webkit-user-drag: none; }
     #screen:active { cursor: grabbing; }
@@ -94,8 +96,8 @@
     .overlay h4 { margin: 0; font-size: 14px; font-weight: 600; }
     .spinner { width: 30px; height: 30px; border: 3px solid rgba(255,255,255,.1); border-top-color: var(--accent); border-radius: 50%; animation: spin .9s linear infinite; margin: 0 auto 12px; }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .fps { position: absolute; right: 18px; top: 18px; z-index: 3; font-size: 10.5px; color: rgba(255,255,255,.55); background: rgba(0,0,0,.45); padding: 2px 7px; border-radius: 999px; pointer-events: none; }
-    .controls { display: flex; flex-direction: column; align-items: center; gap: 10px; width: min(560px, 100%); }
+    .fps { position: absolute; right: 12px; bottom: 12px; z-index: 3; font-size: 10.5px; color: rgba(255,255,255,.55); background: rgba(0,0,0,.45); padding: 2px 7px; border-radius: 999px; pointer-events: none; }
+    .controls { flex: none; display: flex; flex-direction: column; align-items: center; gap: 10px; width: min(560px, 100%); }
     .navbar { display: flex; gap: 4px; padding: 5px; background: var(--card); border: 1px solid var(--line2); border-radius: 12px; }
     .navbar button { background: transparent; color: var(--fg2); padding: 7px 12px; border-radius: 8px; font-weight: 500; font-size: 12px; flex-direction: column; gap: 3px; min-width: 62px; }
     .navbar button svg { width: 18px; height: 18px; }
@@ -233,14 +235,14 @@
       </div>
     </div>
     <div class="stage">
-      <div class="frame">
+      <div class="stage-fit"><div class="frame">
         <div class="glass">
           <img id="screen" alt="" draggable="false">
           <div class="fps" id="fps"></div>
           <div class="overlay on" id="ov-empty"><div><h4>选择左侧一台设备</h4><p>画面可直接点按、拖动滑动、键盘输入、粘贴</p></div></div>
           <div class="overlay" id="ov-wait"><div><div class="spinner"></div><h4 id="ov-wait-text">连接中…</h4><p id="ov-wait-sub"></p></div></div>
         </div>
-      </div>
+      </div></div>
       <div class="controls">
         <div class="navbar">
           <button data-key="back" title="返回"><svg class="ico"><use href="#i-back"/></svg>返回</button>
@@ -351,7 +353,7 @@
     const esc = (v) => String(v || '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const dev = () => devices.find((d) => d.name === selected) || null;
     const short = (n) => n.replace(/^redroid-?/, '') || n;
-    const flag = (cc) => cc && cc.length === 2 ? String.fromCodePoint(...[...cc.toUpperCase()].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65)) : '';
+    const flag = (cc) => cc ? String(cc).toUpperCase().slice(0, 3) : '';
     const fmtUp = (s) => s == null ? '—' : s < 3600 ? `${Math.floor(s / 60)} 分钟` : s < 86400 ? `${(s / 3600).toFixed(1)} 小时` : `${(s / 86400).toFixed(1)} 天`;
     const fmtAgo = (iso) => { const t = Date.parse(iso || ''); if (!t) return ''; const m = Math.round((Date.now() - t) / 60000); return m < 1 ? '刚刚' : m < 60 ? `${m} 分钟前` : m < 1440 ? `${Math.round(m / 60)} 小时前` : `${Math.round(m / 1440)} 天前`; };
 
@@ -525,6 +527,10 @@
       } catch (e) { /* keep last frame */ }
       finally { shotBusy = false; shotTimer = setTimeout(shot, 250); }
     }
+    // size the phone frame to whatever height is left above the controls (aspect-ratio does the width)
+    { const fit = $('stage-fit') || document.querySelector('.stage-fit'); const fr = document.querySelector('.frame');
+      const doFit = () => { const h = fit.clientHeight, w = fit.clientWidth; const hh = Math.min(h, (w - 20) * 16 / 9); fr.style.height = `${Math.max(240, hh)}px`; };
+      new ResizeObserver(doFit).observe(fit); doFit(); }
     screen.onload = () => { shotSize = { w: screen.naturalWidth, h: screen.naturalHeight }; };
     function toDevice(ev) {
       const r = screen.getBoundingClientRect();
