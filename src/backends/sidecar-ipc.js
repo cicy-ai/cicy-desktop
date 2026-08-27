@@ -21,7 +21,6 @@ const os = require("os");
 const path = require("path");
 const log = require("electron-log");
 const { auditDestructiveIpc } = require("./docker-audit");
-const { nextGatewayKeyHealth } = require("../sidecar/gateway-key-health");
 const dockerProtect = require("../sidecar/docker-protect"); // 容器保护开关(默认开)
 // Background-computed docker status lives here; the homepage READS this (never
 // probes WSL live → never blocks the UI / strands it on 「重试检测」).
@@ -143,7 +142,6 @@ function register({ sidecarLogPath } = {}) {
   // lastError,卡片和排障都能看到"为什么装不上",而不是只看到 installed:false。
   let _lastBootstrapError = null;
   let _dockerDaemonBusy = false;
-  let _gatewayKeyMissingChecks = 0;
   let _autostartEnsured = false;
   async function refreshDockerStatus() {
     try {
@@ -185,32 +183,8 @@ function register({ sidecarLogPath } = {}) {
         } catch (e) { log.warn(`[docker-daemon] auto-bootstrap failed: ${e.message}`); }
         await refreshDockerStatus();
       } else if (s.running) {
-        // 自愈:容器在跑,但很可能是「首次启动时还没登录 / key 还没就位就建好了」的没 key 容器
-        // —— runContainer 见到 :8008 健康就直接 adopt 不重建,key 永远进不去(Windows 实测的
-        // 'llm key 没拿到')。这里:已能拿到 key + 容器里确实没 key → 带 key 重建一次(volume
-        // 数据保留)。mac/win 同一套(hasGatewayKey 两个 docker 模块都实现了)。
-        try {
-          const opts = await appOpts();
-          if (opts.env && opts.env.CICY_AI_GATEWAY_LLM_API_KEY && appDocker.hasGatewayKey && dockerProtect.isProtected()) {
-            _gatewayKeyMissingChecks = 0; // 容器保护:绝不因缺 key 自动重建;用户可从卡片菜单手动「重建」
-          } else if (opts.env && opts.env.CICY_AI_GATEWAY_LLM_API_KEY && appDocker.hasGatewayKey) {
-            const keyState = await appDocker.hasGatewayKey(APP_CONTAINER);
-            const health = nextGatewayKeyHealth(_gatewayKeyMissingChecks, keyState);
-            _gatewayKeyMissingChecks = health.missingChecks;
-            if (!health.shouldRecreate) {
-              if (keyState === false) log.warn(`[docker-daemon] 网关 key 明确缺失 (${_gatewayKeyMissingChecks}/3)，暂不重建`);
-            } else {
-              log.warn("[docker-daemon] 网关 key 连续 3 次明确缺失 → 带 key 重建(数据保留)");
-              auditDestructiveIpc(log, "docker:self-heal-missing-gateway-key", null, {
-                container: APP_CONTAINER,
-                confirmedMissingChecks: 3,
-              });
-              await appDocker.recreate(opts);
-              try { await registerAppTeam(); } catch {}
-              await refreshDockerStatus();
-            }
-          }
-        } catch (e) { log.warn(`[docker-daemon] key self-heal failed: ${e.message}`); }
+        // 桌面端不再向容器注入/自愈网关 key:LLM key 由 cicy-code 自己管理(global.json
+        // 只读 api_token,绝不写)。
         // 开机自启链:每次会话确认一次登录任务 + wsl.conf [boot](幂等;老装机也能补上)。
         if (!_autostartEnsured && appDocker.ensureAutostart) {
           _autostartEnsured = true;
@@ -345,8 +319,8 @@ function register({ sidecarLogPath } = {}) {
   // 前自己的 key 已就位;拿不到(未登录)就先不带 key,登录后「重建 Docker」再带上。
   const appOpts = async () => {
     await ensureDockerTeam().catch(() => {});
+    // 只传网关地址,不传 key —— cicy-code 自己配置/持有 LLM key,桌面端不写。
     const env = { CICY_AI_GATEWAY_LLM_ENDPOINT: GATEWAY_ENDPOINT };
-    if (dockerTeamReg && dockerTeamReg.apiKey) env.CICY_AI_GATEWAY_LLM_API_KEY = dockerTeamReg.apiKey;
     return { port: APP_PORT, container: APP_CONTAINER, volume: APP_VOLUME, env, extraPorts: readExtraPorts(), dockerSock: sidecar.isDood() };
   };
   // Register the running :8008 instance as a (custom) team so the card's "打开"

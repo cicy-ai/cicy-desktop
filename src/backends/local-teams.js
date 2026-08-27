@@ -567,16 +567,8 @@ async function syncNameToCloud(id) {
       log.warn(`[local-teams] cached cloud_team_id=${cloudTeamIdFor(node, uid)} (uid=${uid}) returned no gateway key — re-creating a fresh team`);
       reg = await cc.registerTeam({ teamId: null, title: node.name || "", titleVersion: node.titleVersion || 0 });
     }
-    // The cloud assigns this team a sk-cicy- gateway apiKey on register — wire
-    // it (full provider items + CLI routing, spec) into this machine's
-    // global.json so cicy-code has an LLM key from the moment it starts.
-    // Idempotent: injectGatewayKey no-ops when everything is already in place.
-    if (reg && reg.ok && reg.apiKey) {
-      try {
-        const inj = cc.injectGatewayKey(reg.apiKey, reg.gatewayUrl);
-        if (inj && inj.changed) log.info(`[local-teams] gateway key injected into global.json (teamId=${reg.teamId})`);
-      } catch (e) { log.warn(`[local-teams] gateway key injection failed: ${e.message}`); }
-    }
+    // cicy-desktop 不再往 cicy-code 的 global.json 写网关 key(providers)——那是
+    // cicy-code 自己的配置,桌面端只在打开团队时读它的 api_token。
     if (reg && reg.ok) {
       // 服务端权威版本号裁决(w-10032 契约):响应版本 > 本地 → 采用响应的 title+version。
       // 一条规则覆盖三种情况:(a) 云端/别处改名下行(reg.title=云端名,版本更大);

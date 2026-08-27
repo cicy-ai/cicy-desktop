@@ -20,9 +20,10 @@ test("wsl-docker guards every automatic destructive path with docker-protect", (
   assert.match(src, /protect\.guard\(log, "auto-update after health miss"\)/);
 });
 
-test("sidecar-ipc: self-heal is disabled under protection and user actions pass force", () => {
+test("sidecar-ipc: no gateway-key self-heal/injection; user actions pass force", () => {
   const src = read("src/backends/sidecar-ipc.js");
-  assert.match(src, /appDocker\.hasGatewayKey && dockerProtect\.isProtected\(\)/);
+  assert.doesNotMatch(src, /CICY_AI_GATEWAY_LLM_API_KEY/);
+  assert.doesNotMatch(src, /self-heal-missing-gateway-key/);
   const forced = (src.match(/force: true/g) || []).length;
   assert.ok(forced >= 4, `expected recreate/upgrade/set-ports/set-dood to pass force:true, got ${forced}`);
 });

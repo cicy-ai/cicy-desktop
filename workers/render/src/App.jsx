@@ -346,9 +346,12 @@ export default function App() {
   // Prevents the login card from flashing on every launch before restore.
   const [authRestoring, setAuthRestoring] = useState(() => !safeGet(TOKEN_KEY));
   // 访客模式:跳过登录进入主界面(本地功能可用)。登录成功即退出访客态。
-  const [guest, setGuest] = useState(() => safeGet(GUEST_KEY) === "1");
-  const enterGuest = () => { try { localStorage.setItem(GUEST_KEY, "1"); } catch {} setGuest(true); };
-  const leaveGuest = () => { try { localStorage.removeItem(GUEST_KEY); } catch {} setGuest(false); };
+  // 主页不要求登录:没有 token 就是访客,本地/自定义团队全部可用;登录卡已移除
+  // (LOGIN_UI=false)。已有 token 的老用户照常显示云端团队。
+  const LOGIN_UI = false;
+  const [guest, setGuest] = useState(true);
+  const enterGuest = () => setGuest(true);
+  const leaveGuest = () => setGuest(true);
   const [loggingIn, setLoggingIn] = useState(false);
   const [loginBusy, setLoginBusy] = useState(false); // login 请求在途:按钮 disable+loading,防重复点击,出错恢复
   const [loginUrl, setLoginUrl] = useState(""); // shown as a manual fallback when the browser doesn't auto-open
@@ -725,7 +728,6 @@ export default function App() {
         try { localStorage.setItem(TOKEN_KEY, payload.token); } catch {}
         setToken(payload.token);
         try { localStorage.removeItem(GUEST_KEY); } catch {}
-        setGuest(false);
         if (payload.accessToken) {
           try { localStorage.setItem(ACCESS_TOKEN_KEY, payload.accessToken); } catch {}
           setAccessToken(payload.accessToken);
@@ -836,7 +838,7 @@ export default function App() {
 
   // Not logged in yet → centered login card (unless the user chose to continue
   // as a guest: local-only features, login available from the header).
-  if (!token && !guest) {
+  if (LOGIN_UI && !token && !guest) {
     return (
       <div className="shell">
         <div className="glow" aria-hidden />
@@ -992,7 +994,7 @@ export default function App() {
               { k: "local",  label: tr("teamFilter.local", "本地"),   n: localCount },
               { k: "cloud",  label: tr("teamFilter.cloud", "私有云"), n: cloudCount },
               { k: "custom", label: tr("teamFilter.custom", "自定义"), n: customCount },
-            ].map(({ k, label, n }) => (
+            ].filter(({ k }) => k !== "cloud" || token).map(({ k, label, n }) => (
               <button
                 key={k}
                 type="button"
@@ -1024,11 +1026,13 @@ export default function App() {
                     <div style={{ fontSize: 13, fontWeight: 600 }}>{tr("teams.addCustom", "自定义团队")}</div>
                     <div style={{ fontSize: 11, opacity: .6, marginTop: 2 }}>{tr("teams.addCustomSub", "手动输入地址和名称(只存本地)")}</div>
                   </button>
-                  <button type="button" data-id="AddTeamMenu-private" className="bcard__menu-item" style={{ display: "block", width: "100%", textAlign: "left", padding: "11px 14px", border: "none", borderTop: "1px solid var(--border, #2c2f36)", background: "transparent", cursor: "pointer", color: "inherit", opacity: (!token && guest) ? .55 : 1 }}
-                    onClick={() => { setAddMenuOpen(false); if (!token && guest) { leaveGuest(); return; } openCloudPage("?tab=private"); }}>
+                  {token && (
+                  <button type="button" data-id="AddTeamMenu-private" className="bcard__menu-item" style={{ display: "block", width: "100%", textAlign: "left", padding: "11px 14px", border: "none", borderTop: "1px solid var(--border, #2c2f36)", background: "transparent", cursor: "pointer", color: "inherit" }}
+                    onClick={() => { setAddMenuOpen(false); openCloudPage("?tab=private"); }}>
                     <div style={{ fontSize: 13, fontWeight: 600 }}>{tr("teams.addPrivate", "私有云团队")}</div>
-                    <div style={{ fontSize: 11, opacity: .6, marginTop: 2 }}>{(!token && guest) ? tr("teams.addPrivateNeedLogin", "需要登录") : tr("teams.addPrivateSub", "去云端团队中心添加")}</div>
+                    <div style={{ fontSize: 11, opacity: .6, marginTop: 2 }}>{tr("teams.addPrivateSub", "去云端团队中心添加")}</div>
                   </button>
+                  )}
                 </div>
               </>
             )}
@@ -1487,10 +1491,13 @@ function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin }) {
           </span>
         )}
         {guest ? (
-          // 访客:没有账号可显示,给一个明显的「登录」入口(回到登录卡)
-          <button type="button" data-id="UserChip-login" className="btn-primary" onClick={onLogin}
-            style={{ padding: "6px 14px", fontSize: 13 }}>
-            {tr("auth.loginNow", "登录")}
+          // 访客:同样的头像下拉(受信任站点/审计/协议/检查更新都不依赖登录),
+          // 菜单里用「登录」替代「退出」;账号相关项(邮箱/钱包)不显示。
+          <button type="button" data-id="UserChip-trigger" className={`user-chip__trigger${open ? " is-open" : ""}`}
+            onClick={() => setOpen((v) => !v)}>
+            <div className="avatar" style={{ background: "var(--border, #2c2f36)", color: "var(--muted, #8b8b92)" }}>?</div>
+            <span className="user-name">{tr("auth.localName", "本机")}</span>
+            <span className="user-chip__caret" aria-hidden>▾</span>
           </button>
         ) : !me ? (
           // 首次打开:profile 还没拉到 → avatar/名字用 skeleton 占位
@@ -1512,15 +1519,12 @@ function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin }) {
         )}
         {open && (
           <div className="user-chip__menu" data-id="UserChip-menu" role="menu">
-            {me?.email && (
+            {!guest && me?.email && (
               <button type="button" data-id="UserChip-email-copy" className="user-chip__menu-item" title={tr("userMenu.copyEmail", "点击复制邮箱")} onClick={copyEmail}
                 style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {me.email}
               </button>
             )}
-            <button type="button" data-id="UserChip-wallet" className="user-chip__menu-item" onClick={() => goDash("/wallet")}>
-              {tr("userMenu.wallet", "我的钱包")}
-            </button>
             <button type="button" data-id="UserChip-trusted-sites" className="user-chip__menu-item" onClick={() => { setOpen(false); setTrustOpen(true); }}>
               {tr("trustedSites.menu", "受信任站点")}
             </button>
@@ -1540,9 +1544,11 @@ function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin }) {
               </div>
             )}
             <div className="user-chip__menu-sep" aria-hidden />
-            <button type="button" data-id="UserChip-logout" className="user-chip__menu-item is-danger" onClick={() => { setOpen(false); onLogout(); }}>
-              {tr("userMenu.logout", "退出")}
-            </button>
+            {!guest && (
+              <button type="button" data-id="UserChip-logout" className="user-chip__menu-item is-danger" onClick={() => { setOpen(false); onLogout(); }}>
+                {tr("userMenu.logout", "退出")}
+              </button>
+            )}
             <div className="user-chip__menu-version" data-id="UserChip-version">
               CiCy Desktop {appVer ? `v${appVer}` : "…"}
             </div>
@@ -2495,10 +2501,6 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
                   onClick={(e) => { e.stopPropagation(); setMenuOpen(false); setDoodOpen(true); }}>
                   {tr("dood.menu", "容器内使用 Docker")}
                 </button>
-                <button type="button" data-id="DockerCard-billing" className="bcard__menu-item"
-                  onClick={() => { setMenuOpen(false); openCloudPage((cloudCode || dockerTeam?.cloud_team_id) ? `?team=${encodeURIComponent(cloudCode || dockerTeam.cloud_team_id)}` : "?view=usage"); }}>
-                  {tr("docker.billing", "帐单")}
-                </button>
                 {/* 分隔线:下面是操作整个 Docker 容器的(授权访问 Mac / 重启 Docker / 重建 Docker)*/}
                 <div className="bcard__menu-sep" data-id="DockerCard-menu-sep" role="separator" aria-hidden />
                 {/* 仅 macOS:授权容器经 SSH 访问 Mac 主机(host.docker.internal),不挂 docker */}
@@ -3016,23 +3018,6 @@ function LocalTeamCard({ team, cloudCode, onOpen, onRename, onRefresh }) {
                       {tr("sidecar.lanAccess", "局域网访问")} · {lanOn ? tr("common.on", "开") : tr("common.off", "关")}
                     </button>
                   </>
-                )}
-                {team.cloud_team_id && (
-                  <button
-                    type="button"
-                    data-id="LocalTeamCard-billing"
-                    className="bcard__menu-item"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setMenuOpen(false);
-                      // Per-team billing (w-10032): /dash?team=<teamId> + handoff
-                      // ticket. teamId = the cloud_team_id we stored on name-sync;
-                      // no key in the URL — dash fetches it via session.
-                      openCloudPage(`?team=${encodeURIComponent(cloudCode || team.cloud_team_id)}`);
-                    }}
-                  >
-                    {tr("localTeams.billing", "账单")}
-                  </button>
                 )}
                 {isCustom && (
                   <>
