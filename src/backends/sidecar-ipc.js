@@ -147,8 +147,8 @@ function register({ sidecarLogPath } = {}) {
   let _autoBootstrapPaused = null;
   let _autoBootstrapRetryAt = 0; // 硬失败后的自动重试时间点(退避,不是永久暂停:用户不会自己修)
   // 退避:子进程被拦(安全软件开机后一段时间会自己放行)2 分钟一试;其余 15 分钟一试。
-  const AUTO_RETRY_MS = { spawn_blocked: 2 * 60 * 1000, default: 15 * 60 * 1000 };
-  const HARD_BOOTSTRAP_REASONS = new Set(["spawn_blocked", "virtualization_disabled", "wsl_enable_failed", "wsl_kernel_missing", "wsl_reboot_required"]);
+  const AUTO_RETRY_MS = { spawn_blocked: 2 * 60 * 1000, windows_component_store_broken: 6 * 60 * 60 * 1000, virtualization_disabled: 60 * 60 * 1000, default: 15 * 60 * 1000 };
+  const HARD_BOOTSTRAP_REASONS = new Set(["spawn_blocked", "virtualization_disabled", "wsl_enable_failed", "windows_component_store_broken", "wsl_kernel_missing", "wsl_reboot_required"]);
   function recordBootstrapResult(result, err) {
     if (err) {
       const code = err && err.code;

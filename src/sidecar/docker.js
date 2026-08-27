@@ -738,7 +738,10 @@ function elevatedWslSetup({ emit, need = {} } = {}) {
       'Say "start admin=$(([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(\'Administrators\'))"',
       '$feats = @("Microsoft-Windows-Subsystem-Linux","VirtualMachinePlatform")',
       '$bad = @(); foreach ($f in $feats) { if ((St $f) -ne 1) { $c = En $f; if ($c -ne 0 -and $c -ne 3010) { $bad += $f } } }',
-      'if ($bad.Count -gt 0) {',
+      `$REPAIRED = "${path.join(dir, "wsl-repair-attempted.txt").replace(/"/g, '""')}"`,
+      'if ($bad.Count -gt 0 -and (Test-Path $REPAIRED)) { Say "repair already attempted before and the feature still cannot be enabled — skipping the 30-min repair; this Windows image is missing the feature payload (reinstall/repair Windows needed)" }',
+      'if ($bad.Count -gt 0 -and -not (Test-Path $REPAIRED)) {',
+      '  Set-Content -Path $REPAIRED -Value (Get-Date -Format s)',
       '  Say "repair: DISM /RestoreHealth (component store refused: $($bad -join \',\')) — this can take 10-30 min"',
       '  & $DISM /online /cleanup-image /restorehealth /norestart | Out-Null; Say ("restorehealth exit=" + $LASTEXITCODE)',
       '  & $SFC /scannow | Out-Null; Say ("sfc exit=" + $LASTEXITCODE)',
@@ -768,7 +771,7 @@ function elevatedWslSetup({ emit, need = {} } = {}) {
       try { lines = fs.readFileSync(resultFile, "utf8").split(/\r?\n/).filter(Boolean); } catch {}
       for (const l of lines.slice(seen)) {
         emit && emit({ phase: "install-docker", status: "running", message: `提权脚本：${l.replace(/^\[[^\]]*\] /, "")}` });
-        if (/exit=(?!0\b|3010\b)\d+/.test(l)) detail = l;
+        if (/exit=(?!0\b|3010\b)\d+|repair already attempted/.test(l)) detail = l;
       }
       seen = lines.length;
       if (lines.some((l) => /DONE/.test(l))) break;
@@ -869,10 +872,13 @@ async function ensureWsl({ emit } = {}) {
   const r = await elevatedWslSetup({ emit, need: { subsystem: !subsystemEnabled, vmPlatform: !vmPlatformEnabled } });
   const a = r.subsystem, b = r.vmPlatform;
   if (!a || !b) {
-    const message = `WSL 功能未能全部启用（Linux 子系统=${a ? "已启用" : "失败"}，虚拟机平台=${b ? "已启用" : "失败"}${r.detail ? `；${r.detail}` : "；通常是 UAC 被取消或当前账号无管理员权限"}）——会自动重试；也可以点「重试」。`;
+    const storeBroken = /exit=(14107|3017)|repair already attempted/.test(r.detail || "");
+    const message = storeBroken
+      ? `Windows 系统组件缺失或损坏，无法启用「虚拟机平台」（DISM 修复后仍失败，错误 14107）。这台 Windows 需要用安装镜像修复（DISM /Source）或重装系统后才能使用 WSL2/Docker。`
+      : `WSL 功能未能全部启用（Linux 子系统=${a ? "已启用" : "失败"}，虚拟机平台=${b ? "已启用" : "失败"}${r.detail ? `；${r.detail}` : "；通常是 UAC 被取消或当前账号无管理员权限"}）——会自动重试；也可以点「重试」。`;
     log.error(`[bootstrap] ✗ ensure-wsl reason=wsl_enable_failed subsystem=${a} vmPlatform=${b}`);
     emit && emit({ phase: "done", status: "error", message });
-    return { ok: false, needsReboot: false, failed: true, reason: "wsl_enable_failed", message };
+    return { ok: false, needsReboot: false, failed: true, reason: storeBroken ? "windows_component_store_broken" : "wsl_enable_failed", message };
   }
   // Best-effort: also pull the WSL2 kernel/plumbing when the executable itself
   // is missing. Feature-only repairs must stop here and wait for reboot.

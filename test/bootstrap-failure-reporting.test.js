@@ -93,3 +93,10 @@ test("image load survives a missing /mnt/c mount (drvfs retry, then stdin pipe)"
   assert.match(w, /function loadImageViaStdin\(/);
   assert.match(w, /\["-d", DISTRO, "-u", "root", "--", "docker", "load"\]/);
 });
+
+test("a broken component store is reported once and backed off for hours, not re-repaired every 15 min", () => {
+  const d = read("src/sidecar/docker.js");
+  assert.match(d, /wsl-repair-attempted\.txt/);
+  assert.match(d, /reason: storeBroken \? "windows_component_store_broken" : "wsl_enable_failed"/);
+  assert.match(read("src/backends/sidecar-ipc.js"), /windows_component_store_broken: 6 \* 60 \* 60 \* 1000/);
+});
