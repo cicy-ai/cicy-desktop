@@ -240,8 +240,20 @@ function importTarball(dest, installDir) {
     // `wsl` call then blocks and the app goes 未响应). Bound it short so we FAIL FAST
     // and the caller can `wsl --shutdown` + retry instead of hanging 10 minutes.
     execFile("wsl", ["--import", DISTRO, installDir, dest, "--version", "2"],
-      { timeout: 240000, windowsHide: true },
-      (err, _so, se) => { if (err) { err.stderr = String(se || ""); return reject(err); } resolve(); });
+      { timeout: 240000, windowsHide: true, encoding: "buffer" },
+      (err, _so, se) => {
+        if (err) {
+          // wsl.exe 的报错是 UTF-16 输出(常见:「请启用'虚拟机平台'Windows 功能并确保在 BIOS 中
+          // 启用虚拟化」);解码后拼进 message,抽屉才能显示真正原因而不是「Command failed」。
+          let text = "";
+          try { text = Buffer.isBuffer(se) ? se.toString("utf16le") : String(se || ""); } catch {}
+          text = text.replace(/\u0000/g, "").replace(/\s+/g, " ").trim();
+          if (text) err.message = `${err.message.split("\n")[0]} — ${text.slice(0, 300)}`;
+          err.stderr = text;
+          return reject(err);
+        }
+        resolve();
+      });
   });
 }
 

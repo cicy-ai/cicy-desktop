@@ -19,10 +19,16 @@ test("bootstrap failures land in lastError and pause the auto-bootstrap loop unt
   assert.match(src, /logFile: _logFile/);
 });
 
-test("featureEnabled does not treat dism's empty (unelevated) output as disabled", () => {
+test("featureEnabled reads Win32_OptionalFeature (works unelevated), dism only as fallback", () => {
   const src = read("src/sidecar/docker.js");
-  assert.match(src, /if \(\/State\\s\*:\\s\*Disabled\/i\.test\(text\)\) return resolve\(false\);\n\s+resolve\(await wslFunctional\(\)\)/);
-  assert.match(src, /function wslFunctional\(\)/);
+  assert.match(src, /Get-CimInstance Win32_OptionalFeature -Filter "Name='\$\{feature\}'"\)\.InstallState/);
+  assert.match(src, /resolve\(v === "1"\)/);
+});
+
+test("wsl --import failures carry wsl.exe's decoded message into the drawer", () => {
+  const src = read("src/sidecar/wsl-docker.js");
+  assert.match(src, /encoding: "buffer"/);
+  assert.match(src, /se\.toString\("utf16le"\)/);
 });
 
 test("keepalive logon task degrades to LeastPrivilege / HKCU Run when not elevated", () => {

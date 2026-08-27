@@ -629,20 +629,21 @@ async function wslMissing() {
   });
 }
 
-// True iff a Windows optional feature reports State : Enabled. NOTE: dism
-// /get-featureinfo prints NOTHING when the caller is not elevated (the desktop
-// normally runs at medium integrity even for an admin account), so an empty
-// answer must not be read as "disabled" — fall back to the functional probe.
+// True iff a Windows optional feature is enabled. Primary source: WMI
+// Win32_OptionalFeature (InstallState 1=Enabled, 2=Disabled) — readable WITHOUT
+// elevation, unlike `dism /get-featureinfo`, which prints nothing at medium
+// integrity (the desktop normally runs unelevated even for admin accounts) and
+// was being misread as "disabled". dism stays as the fallback when WMI is unavailable.
 function featureEnabled(feature) {
   return new Promise((resolve) => {
-    execFile("dism", ["/english", "/online", "/get-featureinfo", `/featurename:${feature}`],
-      { timeout: 30000, windowsHide: true },
-      async (_e, out) => {
-        const text = String(out || "");
-        if (/State\s*:\s*Enabled/i.test(text)) return resolve(true);
-        if (/State\s*:\s*Disabled/i.test(text)) return resolve(false);
-        resolve(await wslFunctional()); // no answer (not elevated) → ask WSL itself
-      });
+    const ps = `(Get-CimInstance Win32_OptionalFeature -Filter "Name='${feature}'").InstallState`;
+    execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { timeout: 30000, windowsHide: true }, (err, out) => {
+      const v = String(out || "").trim();
+      if (!err && /^[0-9]+$/.test(v)) return resolve(v === "1");
+      execFile("dism", ["/english", "/online", "/get-featureinfo", `/featurename:${feature}`],
+        { timeout: 30000, windowsHide: true },
+        (_e, out2) => resolve(/State\s*:\s*Enabled/i.test(String(out2 || ""))));
+    });
   });
 }
 
