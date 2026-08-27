@@ -668,6 +668,8 @@ function featureEnabled(feature) {
 }
 
 const WSL_KERNEL_MSI_URL = process.env.CICY_WSL_KERNEL_URL || "https://wslstorestorage.blob.core.windows.net/wslblob/wsl_update_x64.msi";
+// 裸内核文件(由发布工作流从 MSI 解出后放到 OSS):精简版 Windows 没有 msiexec 时直接放到位。
+const WSL_KERNEL_RAW_URL = process.env.CICY_WSL_KERNEL_RAW_URL || (require("./mirrors").OSS_RELEASES_BASE + "/wsl-kernel/kernel");
 // WSL2 kernel present? The inbox (feature-based) WSL keeps it at System32\lxss\tools\kernel;
 // the Store WSL bundles its own, in which case the file is absent but `wsl --status`
 // reports a kernel version — callers treat "functional + version" as present too.
@@ -742,7 +744,15 @@ function elevatedWslSetup({ emit, need = {} } = {}) {
       '  & $SFC /scannow | Out-Null; Say ("sfc exit=" + $LASTEXITCODE)',
       '  foreach ($f in $bad) { $c = En $f }',
       '}',
-      `if (Test-Path "${msi.replace(/"/g, '""')}") { $p = Start-Process $MSIEXEC -ArgumentList "/i","\`"${msi.replace(/"/g, '""')}\`"","/qn","/norestart" -Wait -PassThru; Say ("kernel msi exit=" + $p.ExitCode) }`,
+      `$KDIR = Join-Path $S32 "lxss\\tools"; $KFILE = Join-Path $KDIR "kernel"`,
+      `if (-not (Test-Path $KFILE)) {`,
+      `  if ((Test-Path $MSIEXEC) -and (Test-Path "${msi.replace(/"/g, '""')}")) { $p = Start-Process $MSIEXEC -ArgumentList "/i","\`"${msi.replace(/"/g, '""')}\`"","/qn","/norestart" -Wait -PassThru; Say ("kernel msi exit=" + $p.ExitCode) }`,
+      `  if (-not (Test-Path $KFILE)) {`,
+      `    Say "msiexec missing or failed — downloading the raw WSL2 kernel file"`,
+      `    New-Item -ItemType Directory -Force $KDIR | Out-Null`,
+      `    try { Invoke-WebRequest -UseBasicParsing -Uri "${WSL_KERNEL_RAW_URL}" -OutFile $KFILE; Say ("kernel file " + (Get-Item $KFILE).Length + " bytes") } catch { Say ("kernel download failed: " + $_.Exception.Message) }`,
+      `  }`,
+      `}`,
       'Say ("final subsystem=" + (St "Microsoft-Windows-Subsystem-Linux") + " vmPlatform=" + (St "VirtualMachinePlatform"))',
       'Say "DONE"',
     ].join("\r\n");

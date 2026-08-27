@@ -79,3 +79,10 @@ test("missing WSL2 kernel is installed through the same single elevation", () =>
   assert.match(d, /if \(!wslKernelPresent\(\)\) \{[^]*elevatedWslSetup\(\{ emit, need: \{\} \}\)/);
   assert.match(d, /reason: "wsl_kernel_missing"/);
 });
+
+test("kernel install falls back to the raw kernel file when msiexec is absent", () => {
+  const d = read("src/sidecar/docker.js");
+  assert.match(d, /WSL_KERNEL_RAW_URL/);
+  assert.match(d, /msiexec missing or failed/);
+  assert.match(read(".github/workflows/windows-exe-release.yml"), /wsl-kernel\/kernel/);
+});
