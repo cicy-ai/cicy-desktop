@@ -667,6 +667,18 @@ function featureEnabled(feature) {
   });
 }
 
+const WSL_KERNEL_MSI_URL = process.env.CICY_WSL_KERNEL_URL || "https://wslstorestorage.blob.core.windows.net/wslblob/wsl_update_x64.msi";
+// WSL2 kernel present? The inbox (feature-based) WSL keeps it at System32\lxss\tools\kernel;
+// the Store WSL bundles its own, in which case the file is absent but `wsl --status`
+// reports a kernel version — callers treat "functional + version" as present too.
+function wslKernelPresent() {
+  if (process.platform !== "win32") return true;
+  const sysroot = process.env.SystemRoot || process.env.windir || "C:\\Windows";
+  try { if (fs.existsSync(path.join(sysroot, "System32", "lxss", "tools", "kernel"))) return true; } catch {}
+  try { if (fs.existsSync(path.join(process.env.LOCALAPPDATA || "", "Microsoft", "WindowsApps", "wsl.exe")) && fs.existsSync(path.join(process.env.ProgramFiles || "C:\\Program Files", "WSL", "wsl.exe"))) return true; } catch {}
+  return false;
+}
+
 // Functional WSL probe that needs no elevation: `wsl -l -v` on a machine with
 // the features enabled (and rebooted) either lists distros or says "no installed
 // distributions"; with the features off it prints the "--install" help text.
@@ -719,17 +731,18 @@ function elevatedWslSetup({ emit, need = {} } = {}) {
       `$R = "${resultFile.replace(/"/g, '""')}"`,
       'function Say($m) { Add-Content -Path $R -Value ("[" + (Get-Date -Format "HH:mm:ss") + "] " + $m) }',
       'function St($n) { try { (Get-CimInstance Win32_OptionalFeature -Filter ("Name=\'" + $n + "\'")).InstallState } catch { 0 } }',
-      'function En($n) { dism /online /enable-feature /featurename:$n /all /norestart | Out-Null; $c = $LASTEXITCODE; Say ("enable " + $n + " exit=" + $c); return $c }',
+      '$S32 = Join-Path $env:SystemRoot "System32"; $DISM = Join-Path $S32 "dism.exe"; $SFC = Join-Path $S32 "sfc.exe"; $MSIEXEC = Join-Path $S32 "msiexec.exe"',
+      'function En($n) { & $DISM /online /enable-feature /featurename:$n /all /norestart | Out-Null; $c = $LASTEXITCODE; Say ("enable " + $n + " exit=" + $c); return $c }',
       'Say "start admin=$(([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(\'Administrators\'))"',
       '$feats = @("Microsoft-Windows-Subsystem-Linux","VirtualMachinePlatform")',
       '$bad = @(); foreach ($f in $feats) { if ((St $f) -ne 1) { $c = En $f; if ($c -ne 0 -and $c -ne 3010) { $bad += $f } } }',
       'if ($bad.Count -gt 0) {',
       '  Say "repair: DISM /RestoreHealth (component store refused: $($bad -join \',\')) — this can take 10-30 min"',
-      '  dism /online /cleanup-image /restorehealth /norestart | Out-Null; Say ("restorehealth exit=" + $LASTEXITCODE)',
-      '  sfc /scannow | Out-Null; Say ("sfc exit=" + $LASTEXITCODE)',
+      '  & $DISM /online /cleanup-image /restorehealth /norestart | Out-Null; Say ("restorehealth exit=" + $LASTEXITCODE)',
+      '  & $SFC /scannow | Out-Null; Say ("sfc exit=" + $LASTEXITCODE)',
       '  foreach ($f in $bad) { $c = En $f }',
       '}',
-      `if (Test-Path "${msi.replace(/"/g, '""')}") { Start-Process msiexec.exe -ArgumentList "/i","${msi.replace(/"/g, '""')}","/qn","/norestart" -Wait; Say "kernel msi installed" }`,
+      `if (Test-Path "${msi.replace(/"/g, '""')}") { $p = Start-Process $MSIEXEC -ArgumentList "/i","\`"${msi.replace(/"/g, '""')}\`"","/qn","/norestart" -Wait -PassThru; Say ("kernel msi exit=" + $p.ExitCode) }`,
       'Say ("final subsystem=" + (St "Microsoft-Windows-Subsystem-Linux") + " vmPlatform=" + (St "VirtualMachinePlatform"))',
       'Say "DONE"',
     ].join("\r\n");
@@ -819,10 +832,27 @@ async function ensureWsl({ emit } = {}) {
   if (state.ready) {
     // 功能都已启用、wsl.exe 也在,但 WSL 本身还不能用(`wsl -l -v` 只打印帮助)= 启用后还没
     // 重启。别去 --import(必失败),直接进自动重启流程。
-    if (await wslFunctional()) return { ok: true };
-    log.warn("[bootstrap] ensure-wsl: features enabled but WSL not functional yet (pending reboot)");
-    emit && emit({ phase: "install-docker", status: "running", message: "WSL 功能已启用但尚未生效,需要重启 Windows…" });
-    return { ok: false, needsReboot: true };
+    if (!(await wslFunctional())) {
+      log.warn("[bootstrap] ensure-wsl: features enabled but WSL not functional yet (pending reboot)");
+      emit && emit({ phase: "install-docker", status: "running", message: "WSL 功能已启用但尚未生效,需要重启 Windows…" });
+      return { ok: false, needsReboot: true };
+    }
+    // WSL2 内核(lxss\tools\kernel)缺失时 --import 也必失败。先把 MSI 下到 Downloads,再用
+    // 同一个提权脚本装(功能已启用的话脚本只做装内核这一件事)。
+    if (!wslKernelPresent()) {
+      const msi = path.join(os.homedir(), "Downloads", "wsl_update_x64.msi");
+      try { await ensureDownloaded(WSL_KERNEL_MSI_URL, msi, null, { emit, phase: "install-docker", label: "下载 WSL2 内核" }); }
+      catch (e) { log.warn(`[bootstrap] kernel msi download failed: ${e.message}`); }
+      emit && emit({ phase: "install-docker", status: "running", message: "WSL2 内核未安装,开始安装（会弹一次 UAC，请点「是」）…" });
+      const r = await elevatedWslSetup({ emit, need: {} });
+      if (!wslKernelPresent()) {
+        const message = `WSL2 内核未能安装${r.detail ? `（${r.detail}）` : "（UAC 未确认或 MSI 安装失败）"}——会自动重试。`;
+        log.error(`[bootstrap] ✗ ensure-wsl reason=wsl_kernel_missing ${r.detail || ""}`);
+        emit && emit({ phase: "done", status: "error", message });
+        return { ok: false, needsReboot: false, failed: true, reason: "wsl_kernel_missing", message };
+      }
+    }
+    return { ok: true };
   }
 
   emit && emit({ phase: "install-docker", status: "running", message: "Docker 需要 WSL2 后端，开始启用所需的 Windows 功能（会弹一次 UAC，请点「是」）…" });
@@ -939,7 +969,7 @@ module.exports = {
   start, stop, stopContainer, restart, checkStatus, loadImage, loadImageFromTarball,
   downloadImageTarball, imagePresent, dockerOk, installDocker,
   bootstrap, probeHealth, readContainerToken, dockerDesktopExe, desktopDir, downloadsDir, imageTarballPath,
-  launchElevated, elevatedWslSetup, spawnProbe, wslFunctional, wslExe, wslMissing, ensureWsl, virtualizationStatus,
+  launchElevated, elevatedWslSetup, spawnProbe, wslFunctional, wslKernelPresent, wslExe, wslMissing, ensureWsl, virtualizationStatus,
   // platform-agnostic download/retry primitives, reused by native.js
   ensureDownloaded, curlDownload, withRetry, waitUntil, run, headSize,
   // image freshness (修「重建仍用旧镜像」—— 校验 OSS ETag 变了才重下重载)

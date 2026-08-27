@@ -67,8 +67,15 @@ test("a missing wsl.exe (ENOENT, features enabled but not yet rebooted) counts a
 
 test("features enabled but WSL still the pre-reboot stub → needsReboot; auto-reboot capped at 2", () => {
   const d = read("src/sidecar/docker.js");
-  assert.match(d, /if \(await wslFunctional\(\)\) return \{ ok: true \};/);
+  assert.match(d, /if \(!\(await wslFunctional\(\)\)\) \{/);
   assert.match(d, /\[Argument\\\]/);
   const ipc = read("src/backends/sidecar-ipc.js");
   assert.match(ipc, /rebootCount\(\) >= 2/);
+});
+
+test("missing WSL2 kernel is installed through the same single elevation", () => {
+  const d = read("src/sidecar/docker.js");
+  assert.match(d, /function wslKernelPresent\(\)/);
+  assert.match(d, /if \(!wslKernelPresent\(\)\) \{[^]*elevatedWslSetup\(\{ emit, need: \{\} \}\)/);
+  assert.match(d, /reason: "wsl_kernel_missing"/);
 });
