@@ -629,13 +629,34 @@ async function wslMissing() {
   });
 }
 
-// Read-only, works without elevation. True iff a Windows optional feature
-// reports State : Enabled.
+// True iff a Windows optional feature reports State : Enabled. NOTE: dism
+// /get-featureinfo prints NOTHING when the caller is not elevated (the desktop
+// normally runs at medium integrity even for an admin account), so an empty
+// answer must not be read as "disabled" — fall back to the functional probe.
 function featureEnabled(feature) {
   return new Promise((resolve) => {
     execFile("dism", ["/english", "/online", "/get-featureinfo", `/featurename:${feature}`],
       { timeout: 30000, windowsHide: true },
-      (_e, out) => resolve(/State\s*:\s*Enabled/i.test(String(out || ""))));
+      async (_e, out) => {
+        const text = String(out || "");
+        if (/State\s*:\s*Enabled/i.test(text)) return resolve(true);
+        if (/State\s*:\s*Disabled/i.test(text)) return resolve(false);
+        resolve(await wslFunctional()); // no answer (not elevated) → ask WSL itself
+      });
+  });
+}
+
+// Functional WSL probe that needs no elevation: `wsl -l -v` on a machine with
+// the features enabled (and rebooted) either lists distros or says "no installed
+// distributions"; with the features off it prints the "--install" help text.
+function wslFunctional() {
+  if (process.platform !== "win32") return Promise.resolve(true);
+  return new Promise((resolve) => {
+    execFile("wsl", ["-l", "-v"], { timeout: 25000, windowsHide: true, encoding: "utf16le" }, (err, stdout, stderr) => {
+      const s = String((stdout || "") + (stderr || "")).replace(/\u0000/g, "");
+      if (/NAME\s+STATE|没有已安装的分发版|no installed distributions|aka\.ms\/wslstore/i.test(s)) return resolve(true);
+      resolve(false);
+    });
   });
 }
 
@@ -832,7 +853,7 @@ module.exports = {
   start, stop, stopContainer, restart, checkStatus, loadImage, loadImageFromTarball,
   downloadImageTarball, imagePresent, dockerOk, installDocker,
   bootstrap, probeHealth, readContainerToken, dockerDesktopExe, desktopDir, downloadsDir, imageTarballPath,
-  launchElevated, spawnProbe, wslMissing, ensureWsl, virtualizationStatus,
+  launchElevated, spawnProbe, wslFunctional, wslMissing, ensureWsl, virtualizationStatus,
   // platform-agnostic download/retry primitives, reused by native.js
   ensureDownloaded, curlDownload, withRetry, waitUntil, run, headSize,
   // image freshness (修「重建仍用旧镜像」—— 校验 OSS ETag 变了才重下重载)
