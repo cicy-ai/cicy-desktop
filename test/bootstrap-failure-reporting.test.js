@@ -100,3 +100,10 @@ test("a broken component store is reported once and backed off for hours, not re
   assert.match(d, /reason: storeBroken \? "windows_component_store_broken" : "wsl_enable_failed"/);
   assert.match(read("src/backends/sidecar-ipc.js"), /windows_component_store_broken: 6 \* 60 \* 60 \* 1000/);
 });
+
+test("broken WSL localhost relay (healthy inside, unreachable from Windows) is reset once per boot", () => {
+  assert.match(read("src/sidecar/wsl-docker.js"), /async function insideHealthy\(/);
+  const ipc = read("src/backends/sidecar-ipc.js");
+  assert.match(ipc, /_relayMisses >= 2 && !_relayResetDone/);
+  assert.match(ipc, /docker:self-heal-localhost-relay/);
+});

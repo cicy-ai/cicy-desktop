@@ -169,6 +169,7 @@ function register({ sidecarLogPath } = {}) {
   // WSL 功能启用后必须重启 Windows 才能继续。不等人:自动安排 90 秒后重启(桌面上会有
   // 系统倒计时提示),UI 可「取消」或「立即重启」。每次开机只安排一次。
   let _rebootScheduled = false;
+  let _relayMisses = 0, _relayResetDone = false; // WSL localhost 转发自愈(见 daemon 循环)
   // 防重启循环:WSL 始终起不来时不能每次开机都重启。计数存 db/wsl-reboots.json,最多自动重启 2 次
   // (成功后 :8008 起来时清零)。
   const REBOOT_COUNT_FILE = path.join(os.homedir(), "cicy-ai", "db", "wsl-reboots.json");
@@ -227,6 +228,25 @@ function register({ sidecarLogPath } = {}) {
       // bootstrap 幂等且可续跑;首次启用 WSL 若要求重启 Windows,下次登录 Desktop
       // 会再次进入这里并从已完成的步骤继续。unknown 表示 WSL 正卡住/未响应,
       // 此时不并发安装,留给下一轮检测或显式「修复 WSL」。
+      // 容器在里面健康、Windows 侧却连不通 = WSL localhost 转发坏了(实测 wsl --shutdown 后恢复)。
+      // 连续 2 轮(≈2 分钟)如此 → 每次开机最多自动重置一次 WSL。数据在 volume 里,容器由
+      // unless-stopped 策略自动拉起;不算「销毁」——对用户来说它本来就已经不可用了。
+      if (!s.running && !s.unknown && s.installed && appDocker.insideHealthy && appDocker.wslShutdown) {
+        let inside = false;
+        try { inside = await appDocker.insideHealthy(APP_CONTAINER, APP_PORT); } catch {}
+        if (inside) {
+          _relayMisses += 1;
+          if (_relayMisses >= 2 && !_relayResetDone) {
+            _relayResetDone = true;
+            auditDestructiveIpc(log, "docker:self-heal-localhost-relay", null, { container: APP_CONTAINER, misses: _relayMisses });
+            log.warn("[docker-daemon] container healthy inside WSL but 127.0.0.1:8008 unreachable from Windows → wsl --shutdown once to rebuild the localhost relay");
+            try { await appDocker.wslShutdown(); } catch (e) { log.warn(`[docker-daemon] wsl --shutdown failed: ${e.message}`); }
+            await refreshDockerStatus();
+            return;
+          }
+          if (_relayMisses < 2) { log.warn(`[docker-daemon] :${APP_PORT} unreachable from Windows but healthy inside (${_relayMisses}/2)`); return; }
+        } else { _relayMisses = 0; }
+      } else if (s.running) { _relayMisses = 0; }
       if (!s.running && !s.unknown && _autoBootstrapPaused && Date.now() < _autoBootstrapRetryAt) {
         // 硬失败后退避(见 recordBootstrapResult);卡片显示 lastError,到点自动再试,用户点「重试」也行。
       } else if (!s.running && !s.unknown) {

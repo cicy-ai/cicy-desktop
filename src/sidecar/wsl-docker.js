@@ -620,6 +620,16 @@ async function ensureFreshImage({ emit } = {}) {
   return true;
 }
 
+// 容器内部视角的健康:docker exec 进容器用 node 探 127.0.0.1:8008。用来区分「容器真挂了」和
+// 「容器好好的、只是 WSL 的 localhost 转发坏了」(后者 Windows 侧 :8008 打不通,实测
+// `wsl --shutdown` 后 75 秒恢复)。
+async function insideHealthy(container = "cicy-code-docker-8008", port = 8008) {
+  try {
+    await wslRun(`docker exec ${container} node -e "fetch('http://127.0.0.1:${port}/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"`, { timeout: 20000 });
+    return true;
+  } catch { return false; }
+}
+
 // HTTP /health probe on 127.0.0.1:port from Windows — WSL2 forwards localhost,
 // so a container published on :port is reachable here. Reuse docker.js's probe.
 const probeHealth = docker.probeHealth;
@@ -1602,6 +1612,7 @@ async function readMihomoSelections(container = "cicy-code-docker-8008") {
 }
 
 module.exports = {
+  insideHealthy, wslShutdown,
   bootstrap, status, restart, stop, dockerRestart, recreate, update, upgrade, runContainer, readContainerToken,
   distroInstalled, dockerInstalled, dockerEngineUp, imagePresent, probeHealth, wslRun, hasGatewayKey,
   readMihomoConfig, readMihomoSelections, parseMihomoSelections,
