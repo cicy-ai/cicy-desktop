@@ -14,7 +14,7 @@ test("ensureWsl explains a disabled-virtualization host in the log and the card"
   assert.match(ensure, /reason: "virtualization_disabled"/);
   assert.match(ensure, /log\.error\(`\[bootstrap\] ✗ ensure-wsl reason=virtualization_disabled/);
   assert.match(ensure, /BIOS/);
-  assert.match(ensure, /reason: "wsl_enable_failed", message/);
+  assert.match(ensure, /reason: storeBroken \? "windows_component_store_broken" : "wsl_enable_failed", message/);
   assert.match(read("src/sidecar/wsl-docker.js"), /const reason = w\.reason \|\| "wsl_enable_failed"; fail\(reason, w\.message\)/);
   const ipc = read("src/backends/sidecar-ipc.js");
   assert.match(ipc, /lastError: \(!s\.running && _lastBootstrapError\)/);
