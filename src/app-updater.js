@@ -17,6 +17,8 @@
 const { app, shell } = require("electron");
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
+const { readGlobalConfig, updateGlobalConfig } = require("./utils/global-json");
 const https = require("https");
 const log = require("electron-log");
 const { OSS_RELEASES_BASE } = require("./sidecar/mirrors");
@@ -135,8 +137,22 @@ function download(url, dest, onProgress, redirects = 0) {
 
 // ── 状态机 + 广播 ─────────────────────────────────────────────────────────────
 let _win = null;
-let _state = { status: "idle", version: null, current: null, progress: null, filePath: null, error: null };
+let _state = { status: "idle", version: null, current: null, progress: null, filePath: null, error: null, autoUpdate: false, auto: false };
 let _downloading = false;
+
+// 「以后自动更新到最新版」开关,存 ~/cicy-ai/global.json desktopAutoUpdate(设备级,与账号无关)。
+// 打开后 check() 发现新版直接下载 + 拉起安装器,不再弹「发现新版本」询问。
+const GLOBAL_JSON = path.join(os.homedir(), "cicy-ai", "global.json");
+function getAutoUpdate() {
+  try { return readGlobalConfig(GLOBAL_JSON)?.desktopAutoUpdate === true; } catch { return false; }
+}
+function setAutoUpdate(on) {
+  const v = on === true;
+  try { updateGlobalConfig(GLOBAL_JSON, (c) => ({ ...(c || {}), desktopAutoUpdate: v })); }
+  catch (e) { log.warn("[app-updater] setAutoUpdate failed:", e.message); }
+  broadcast({ autoUpdate: v });
+  return v;
+}
 
 function broadcast(patch) {
   Object.assign(_state, patch);
@@ -147,6 +163,7 @@ function getState() { return _state; }
 function init(mainWin) {
   _win = mainWin;
   _state.current = app.getVersion();
+  _state.autoUpdate = getAutoUpdate();
   setTimeout(() => check().catch(() => {}), 15_000);      // 启动后探一次
   setInterval(() => check().catch(() => {}), 30 * 60 * 1000); // 每 30 分钟
 }
@@ -162,8 +179,15 @@ async function check() {
       // 真能下(200),否则当成「还没就绪」继续显已是最新,避免用户点下载 404。
       const { url } = assetFor(latest);
       const ready = await headOk(url);
-      if (ready) broadcast({ status: "available", version: latest, current, progress: null, filePath: null });
-      else { log.info(`[app-updater] ${latest} 版本号已更新但安装包未就位(HEAD 非 200):${url} — 暂不提示更新`); broadcast({ status: "up-to-date", version: current, current }); }
+      if (ready) {
+        broadcast({ status: "available", version: latest, current, progress: null, filePath: null, autoUpdate: getAutoUpdate(), auto: false });
+        if (getAutoUpdate()) {
+          log.info(`[app-updater] auto-update on → downloading ${latest} and installing without asking`);
+          broadcast({ auto: true });
+          await downloadUpdate();
+          if (_state.status === "ready") installNow();
+        }
+      } else { log.info(`[app-updater] ${latest} 版本号已更新但安装包未就位(HEAD 非 200):${url} — 暂不提示更新`); broadcast({ status: "up-to-date", version: current, current }); }
     } else {
       broadcast({ status: "up-to-date", version: latest || current, current });
     }
@@ -215,4 +239,4 @@ function installNow() {
   } catch (e) { log.warn("[app-updater] install failed:", e.message); }
 }
 
-module.exports = { init, check, getState, downloadUpdate, installNow };
+module.exports = { init, check, getState, downloadUpdate, installNow, getAutoUpdate, setAutoUpdate };

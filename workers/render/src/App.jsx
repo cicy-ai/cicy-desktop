@@ -3453,12 +3453,26 @@ function Brand() {
 function UpdateBanner() {
   const [st, setSt] = useState(null);
   const [dismissed, setDismissed] = useState(false);
+  const [autoUpd, setAutoUpd] = useState(false); // 「以后自动更新到最新版」(存 global.json,设备级)
   const active = useRef(false); // 用户已点下载 → 后续状态喂给 drawer
+  const toggleAuto = (on) => {
+    setAutoUpd(on);
+    window.cicy?.app?.setAutoUpdate?.(on).catch(() => {});
+  };
   useEffect(() => {
     let alive = true;
     window.cicy?.app?.updateState?.().then((s) => { if (alive) setSt(s); }).catch(() => {});
+    window.cicy?.app?.getAutoUpdate?.().then((v) => { if (alive) setAutoUpd(v === true); }).catch(() => {});
     const unsub = window.cicy?.app?.onUpdateState?.((s) => {
       setSt(s);
+      if (typeof s?.autoUpdate === "boolean") setAutoUpd(s.autoUpdate);
+      // 主进程自动更新(开关已开):没人点过下载,自己开抽屉显示进度。
+      if (s?.auto && !active.current && (s.status === "downloading" || s.status === "ready")) {
+        active.current = true;
+        setDismissed(true);
+        updateDrawer.open({ kind: "app", title: tr("updateBanner.drawerTitle", "应用更新"), fromVer: s.current, toVer: s.version, onRetry: () => window.cicy?.app?.downloadUpdate?.() });
+        updateDrawer.push({ phase: "download", status: "running", message: tr("updateBanner.autoDl", "已开启自动更新,正在下载安装包…") });
+      }
       if (!active.current) return;
       if (s.status === "downloading") updateDrawer.setProgress(s.progress || {});
       else if (s.status === "ready") updateDrawer.ready({ onInstall: () => window.cicy?.app?.installUpdate?.() });
@@ -3487,7 +3501,11 @@ function UpdateBanner() {
         style={{ width: 380, maxWidth: "90vw", background: "#161b22", border: "1px solid #30363d", borderRadius: 14, padding: "24px 24px 20px", boxShadow: "0 20px 60px rgba(0,0,0,0.55)", textAlign: "center" }}>
         <div style={{ fontSize: 34, lineHeight: 1, marginBottom: 12 }} aria-hidden>🚀</div>
         <h3 style={{ margin: "0 0 8px", fontSize: 17, color: "#e6edf3" }} data-id="UpdateBanner-text">{tr("updateBanner.available", "发现新版本 v{{v}}", { v: st.version })}</h3>
-        <p style={{ margin: "0 0 20px", fontSize: 13, lineHeight: 1.6, color: "#9aa4b2" }}>{tr("updateBanner.modalSub", "建议尽快更新到最新版本")}</p>
+        <p style={{ margin: "0 0 14px", fontSize: 13, lineHeight: 1.6, color: "#9aa4b2" }}>{tr("updateBanner.modalSub", "建议尽快更新到最新版本")}</p>
+        <label data-id="UpdateBanner-auto" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, margin: "0 0 18px", fontSize: 12.5, color: "#c9d1d9", cursor: "pointer", userSelect: "none" }}>
+          <input type="checkbox" checked={autoUpd} onChange={(e) => toggleAuto(e.target.checked)} style={{ accentColor: "#238636", width: 15, height: 15, margin: 0, cursor: "pointer" }} />
+          {tr("updateBanner.autoNext", "以后发现新版本自动更新，不再询问")}
+        </label>
         <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
           <button type="button" data-id="UpdateBanner-later" onClick={() => setDismissed(true)}
             style={{ flex: 1, padding: "9px 16px", borderRadius: 9, border: "1px solid #30363d", background: "transparent", color: "#c9d1d9", cursor: "pointer", fontSize: 14 }}>

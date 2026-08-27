@@ -177,6 +177,8 @@ function register(opts = {}) {
   ipcMain.handle("app:check-update",    async () => { await appUpdater.check(); return appUpdater.getState(); });
   ipcMain.handle("app:download-update", async () => { await appUpdater.downloadUpdate(); return appUpdater.getState(); }); // 用户点「下载」→ 按平台/网络下安装包(带进度,可重试)
   ipcMain.handle("app:install-update",  () => { appUpdater.installNow(); return true; });
+  ipcMain.handle("app:auto-update-get", () => appUpdater.getAutoUpdate());
+  ipcMain.handle("app:auto-update-set", (_e, on) => appUpdater.setAutoUpdate(on === true)); // 更新弹窗「以后自动更新」勾选
 
   // Static version info: cicy-desktop's own version + the cicy-code version we
   // actually ship. (2026-06): the real bundled cicy-code = the per-platform

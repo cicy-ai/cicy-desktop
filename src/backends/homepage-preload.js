@@ -237,6 +237,8 @@ contextBridge.exposeInMainWorld("cicy", {
     checkUpdate:   ()  => logInvoke("app:check-update"),
     downloadUpdate:()  => logInvoke("app:download-update"),
     installUpdate: ()  => logInvoke("app:install-update"),
+    getAutoUpdate: ()  => logInvoke("app:auto-update-get"),
+    setAutoUpdate: (on) => logInvoke("app:auto-update-set", on === true),
     onUpdateState: (cb) => {
       const handler = (_e, state) => { try { cb(state); } catch {} };
       ipcRenderer.on("app:update-state", handler);
