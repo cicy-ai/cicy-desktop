@@ -240,7 +240,21 @@ function register({ sidecarLogPath } = {}) {
           _wslRepairDone = true;
           auditDestructiveIpc(log, "docker:self-heal-wsl-wedged", null, { streak: _unknownStreak });
           log.warn("[docker-daemon] WSL unresponsive for 3 checks → auto repair (kill wsl.exe, restart LxssManager)");
-          try { const r = await appDocker.repairWsl({ emit: () => {} }); if (r && r.needsReboot) { _lastBootstrapError = { reason: "wsl_wedged", message: "WSL 卡死且服务重启无效,将自动重启 Windows 修复", ts: Date.now() }; scheduleReboot(90); } } catch (e) { log.warn(`[docker-daemon] auto repairWsl failed: ${e.message}`); }
+          try {
+            const r = await appDocker.repairWsl({ emit: () => {} });
+            if (r && r.needsReboot) {
+              // 旧版 WSL 死锁且服务重启无效:在重启前先装微软新版 WSL(一次 UAC),重启后就不再走
+              // 旧的 LxssManager 路径 —— 否则重启回来还会死锁。装成功时重置重启计数,给新版一次机会。
+              const dk = require("../sidecar/docker");
+              if (dk.modernWslInstalled && !dk.modernWslInstalled() && dk.elevatedWslSetup) {
+                log.warn("[docker-daemon] legacy WSL deadlocked → installing modern WSL before the reboot");
+                try { await dk.elevatedWslSetup({ emit: () => {}, need: {} }); } catch (e) { log.warn(`[docker-daemon] modern WSL install failed: ${e.message}`); }
+                if (dk.modernWslInstalled()) { try { rebootCount(-99); } catch {} }
+              }
+              _lastBootstrapError = { reason: "wsl_wedged", message: dk.modernWslInstalled && dk.modernWslInstalled() ? "已安装新版 WSL,将自动重启 Windows 生效" : "WSL 卡死且服务重启无效,将自动重启 Windows 修复", ts: Date.now() };
+              scheduleReboot(90);
+            }
+          } catch (e) { log.warn(`[docker-daemon] auto repairWsl failed: ${e.message}`); }
           await refreshDockerStatus(); return;
         }
         if (_unknownStreak >= 6 && !_rebootScheduled) { _lastBootstrapError = { reason: "wsl_wedged", message: "WSL 持续无响应,将自动重启 Windows 修复", ts: Date.now() }; scheduleReboot(90); }

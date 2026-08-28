@@ -156,3 +156,7 @@ test("legacy WSL trouble → install modern WSL (MSI mirrored to OSS) in the sin
   assert.match(d, /if \(!modernWslInstalled\(\) && legacyWslTroubleSeen\(\)\) \{/);
   assert.match(read(".github/workflows/windows-exe-release.yml"), /wsl\/wsl\.x64\.msi/);
 });
+
+test("a deadlocked legacy WSL gets modern WSL installed before the automatic reboot", () => {
+  assert.match(read("src/backends/sidecar-ipc.js"), /legacy WSL deadlocked → installing modern WSL before the reboot/);
+});
