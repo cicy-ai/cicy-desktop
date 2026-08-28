@@ -217,9 +217,21 @@ async function repairWsl({ emit } = {}) {
   if (process.platform !== "win32") return { ok: false, error: "win-only" };
   const say = (m) => { try { emit && emit({ phase: "install-docker", status: "running", message: m }); } catch {} };
   say("尝试重启 WSL 服务(LxssManager)…");
+  // 先把僵住的 wsl.exe 杀掉(它们挂在 LxssManager 上,不杀 Restart-Service 也 hang)。
+  await new Promise((r) => execFile("taskkill", ["/IM", "wsl.exe", "/F"], { timeout: 15000, windowsHide: true }, () => r()));
   await new Promise((r) => execFile("powershell", ["-NoProfile", "-Command", "Restart-Service LxssManager -Force -ErrorAction SilentlyContinue"], { timeout: 30000, windowsHide: true }, () => r()));
   await new Promise((r) => setTimeout(r, 2500));
-  if (await lxssWedged()) {
+  // 「服务状态正常但所有 wsl 命令都 hang」也是卡死(实测):用 `wsl -l -q` 的超时(null)判定,
+  // 不只看 LxssManager 的 STOP_PENDING。非提权重启服务通常没权限 → 再提权试一次(一次 UAC)。
+  const stillHung = async () => (await lxssWedged()) || (await distroInstalled()) === null;
+  if (await stillHung()) {
+    say("普通权限重启 WSL 服务无效,提权再试(会弹一次 UAC)…");
+    try {
+      await docker.launchElevated("powershell.exe", ["-NoProfile", "-Command", "Get-Process wsl,wslhost -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; Restart-Service LxssManager -Force"], { emit });
+    } catch {}
+    await new Promise((r) => setTimeout(r, 8000));
+  }
+  if (await stillHung()) {
     markWslReset();
     say("WSL 服务仍卡死,需要重启电脑;重启后会自动修复。");
     return { ok: false, needsReboot: true };

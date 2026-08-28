@@ -170,6 +170,7 @@ function register({ sidecarLogPath } = {}) {
   // 系统倒计时提示),UI 可「取消」或「立即重启」。每次开机只安排一次。
   let _rebootScheduled = false;
   let _relayMisses = 0, _relayResetDone = false; // WSL localhost 转发自愈(见 daemon 循环)
+  let _unknownStreak = 0, _wslRepairDone = false; // WSL 卡死自愈(见 daemon 循环)
   // 防重启循环:WSL 始终起不来时不能每次开机都重启。计数存 db/wsl-reboots.json,最多自动重启 2 次
   // (成功后 :8008 起来时清零)。
   const REBOOT_COUNT_FILE = path.join(os.homedir(), "cicy-ai", "db", "wsl-reboots.json");
@@ -228,6 +229,21 @@ function register({ sidecarLogPath } = {}) {
       // bootstrap 幂等且可续跑;首次启用 WSL 若要求重启 Windows,下次登录 Desktop
       // 会再次进入这里并从已完成的步骤继续。unknown 表示 WSL 正卡住/未响应,
       // 此时不并发安装,留给下一轮检测或显式「修复 WSL」。
+      // WSL 卡死(所有 wsl 命令 hang → status unknown)也不能等人点「修复 WSL」:连续 3 轮先自动
+      // 修(杀僵进程 + 重启 LxssManager,必要时提权一次);6 轮仍卡死 → 自动重启 Windows(受
+      // 2 次上限保护;重启后 bootstrap 自动重置坏 distro)。
+      if (s.unknown && !s.running) {
+        _unknownStreak += 1;
+        if (_unknownStreak === 3 && !_wslRepairDone && appDocker.repairWsl) {
+          _wslRepairDone = true;
+          auditDestructiveIpc(log, "docker:self-heal-wsl-wedged", null, { streak: _unknownStreak });
+          log.warn("[docker-daemon] WSL unresponsive for 3 checks → auto repair (kill wsl.exe, restart LxssManager)");
+          try { const r = await appDocker.repairWsl({ emit: () => {} }); if (r && r.needsReboot) { _lastBootstrapError = { reason: "wsl_wedged", message: "WSL 卡死且服务重启无效,将自动重启 Windows 修复", ts: Date.now() }; scheduleReboot(90); } } catch (e) { log.warn(`[docker-daemon] auto repairWsl failed: ${e.message}`); }
+          await refreshDockerStatus(); return;
+        }
+        if (_unknownStreak >= 6 && !_rebootScheduled) { _lastBootstrapError = { reason: "wsl_wedged", message: "WSL 持续无响应,将自动重启 Windows 修复", ts: Date.now() }; scheduleReboot(90); }
+        return;
+      } else if (!s.unknown) { _unknownStreak = 0; }
       // 容器在里面健康、Windows 侧却连不通 = WSL localhost 转发坏了(实测 wsl --shutdown 后恢复)。
       // 连续 2 轮(≈2 分钟)如此 → 每次开机最多自动重置一次 WSL。数据在 volume 里,容器由
       // unless-stopped 策略自动拉起;不算「销毁」——对用户来说它本来就已经不可用了。

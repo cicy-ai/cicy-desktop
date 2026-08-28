@@ -113,3 +113,12 @@ test("wsl --status printing usage (old inbox wsl.exe) is not 'missing' when wsl 
   const i = d.indexOf("async function wslMissing()");
   assert.match(d.slice(i, i + 2000), /return wslFunctional\(\)\.then\(\(ok\) => resolve\(!ok\)\);/);
 });
+
+test("a wedged WSL (status unknown) is auto-repaired, then auto-rebooted if still hung", () => {
+  const ipc = read("src/backends/sidecar-ipc.js");
+  assert.match(ipc, /_unknownStreak === 3 && !_wslRepairDone/);
+  assert.match(ipc, /docker:self-heal-wsl-wedged/);
+  assert.match(ipc, /_unknownStreak >= 6 && !_rebootScheduled/);
+  const w = read("src/sidecar/wsl-docker.js");
+  assert.match(w, /const stillHung = async \(\) => \(await lxssWedged\(\)\) \|\| \(await distroInstalled\(\)\) === null;/);
+});
