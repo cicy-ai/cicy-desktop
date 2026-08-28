@@ -159,6 +159,7 @@ function register({ sidecarLogPath } = {}) {
     } else if (result) {
       _lastBootstrapError = { reason: result.reason || result.error || "bootstrap_failed", message: result.message || "", ts: Date.now() };
     } else return;
+    _softRetryAt = Date.now() + 2 * 60 * 1000;
     if (_lastBootstrapError.reason === "wsl_reboot_required") scheduleReboot(90);
     if (HARD_BOOTSTRAP_REASONS.has(_lastBootstrapError.reason)) {
       _autoBootstrapPaused = _lastBootstrapError.reason;
@@ -171,6 +172,7 @@ function register({ sidecarLogPath } = {}) {
   let _rebootScheduled = false;
   let _relayMisses = 0, _relayResetDone = false; // WSL localhost 转发自愈(见 daemon 循环)
   let _unknownStreak = 0, _wslRepairDone = false; // WSL 卡死自愈(见 daemon 循环)
+  let _softRetryAt = 0; // 非硬失败(如 docker_install_failed)也退避 2 分钟,别每 35 秒重跑一遍
   // 防重启循环:WSL 始终起不来时不能每次开机都重启。计数存 db/wsl-reboots.json,最多自动重启 2 次
   // (成功后 :8008 起来时清零)。
   const REBOOT_COUNT_FILE = path.join(os.homedir(), "cicy-ai", "db", "wsl-reboots.json");
@@ -265,6 +267,8 @@ function register({ sidecarLogPath } = {}) {
       } else if (s.running) { _relayMisses = 0; }
       if (!s.running && !s.unknown && _autoBootstrapPaused && Date.now() < _autoBootstrapRetryAt) {
         // 硬失败后退避(见 recordBootstrapResult);卡片显示 lastError,到点自动再试,用户点「重试」也行。
+      } else if (!s.running && !s.unknown && Date.now() < _softRetryAt) {
+        // 上一轮刚失败,2 分钟内不重跑
       } else if (!s.running && !s.unknown) {
         if (_autoBootstrapPaused) log.info(`[docker-daemon] backoff elapsed after ${_autoBootstrapPaused} → auto-retrying bootstrap`);
         log.info(`[docker-daemon] :8008 down (${s.installed ? "installed" : "not installed"}) → auto-bootstrapping WSL cicy-code`);

@@ -139,3 +139,10 @@ test("the container update script is pushed with LF endings even from a CRLF che
   assert.match(read("src/sidecar/wsl-docker.js"), /cicy-code-update\.sh"\), "utf8"\)\.replace\(\/\\r\\n\?\/g, "\\n"\)/);
   assert.match(read(".gitattributes"), /\*\.sh text eol=lf/);
 });
+
+test("streamed wsl runs flag an unreachable VM too, and soft failures back off 2 min", () => {
+  const w = read("src/sidecar/wsl-docker.js");
+  assert.match(w, /const err = Object\.assign\(new Error\(`exit \$\{code\}`\), \{ stdout: tail, code \}\);\n\s+err\.wslVmUnreachable = isWslVmUnreachable\(err\);/);
+  assert.match(w, /err\.code > 255\)/);
+  assert.match(read("src/backends/sidecar-ipc.js"), /_softRetryAt = Date\.now\(\) \+ 2 \* 60 \* 1000;/);
+});

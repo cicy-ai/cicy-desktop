@@ -95,7 +95,9 @@ async function ensureWslKernel({ emit } = {}) {
 // …连接尝试失败」。实测 `wsl --shutdown` 后恢复。据此标记,bootstrap 遇到就重置一次再重试。
 function isWslVmUnreachable(err) {
   if (!err) return false;
-  const code = err.code === 4294967295 || err.code === -1 || err.code === 0xffffffff;
+  // bash 的退出码只会是 0-255;>255 / -1 / 4294967295 只可能来自 wsl.exe 自己(连不上 VM)。
+  const code = err.code === 4294967295 || err.code === -1 || err.code === 0xffffffff || (typeof err.code === "number" && err.code > 255);
+  if (code) return true;
   let text = "";
   try { const raw = err.stdout || ""; text = Buffer.isBuffer(raw) ? raw.toString("utf16le") : String(raw); } catch {}
   try { text += Buffer.from(String(err.stdout || ""), "binary").toString("utf16le"); } catch {}
@@ -139,7 +141,13 @@ function wslRunStream(cmd, { emit, phase = "install-docker", timeout = 900000, d
     child.stderr.on("data", pump);
     const timer = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} reject(Object.assign(new Error("timeout"), { stdout: tail })); }, timeout);
     child.on("error", (e) => { clearTimeout(timer); reject(e); });
-    child.on("close", (code) => { clearTimeout(timer); code === 0 ? resolve({ stdout: tail }) : reject(Object.assign(new Error(`exit ${code}`), { stdout: tail })); });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (code === 0) return resolve({ stdout: tail });
+      const err = Object.assign(new Error(`exit ${code}`), { stdout: tail, code });
+      err.wslVmUnreachable = isWslVmUnreachable(err);
+      reject(err);
+    });
   });
 }
 
