@@ -134,3 +134,8 @@ test("an unreachable WSL VM (socket timeout from wsl.exe) resets WSL and retries
   assert.match(w, /err\.wslVmUnreachable = isWslVmUnreachable\(err\)/);
   assert.match(w, /if \(e && e\.wslVmUnreachable\) \{[^]*await wslTerminate\(\)[^]*await wslShutdown\(\)[^]*reason: "wsl_vm_unreachable"/);
 });
+
+test("the container update script is pushed with LF endings even from a CRLF checkout", () => {
+  assert.match(read("src/sidecar/wsl-docker.js"), /cicy-code-update\.sh"\), "utf8"\)\.replace\(\/\\r\\n\?\/g, "\\n"\)/);
+  assert.match(read(".gitattributes"), /\*\.sh text eol=lf/);
+});

@@ -1510,7 +1510,7 @@ async function update({ onProgress, container = "cicy-code-docker", port = 8008 
   emit({ phase: "image", status: "running", message: latest ? t("docker.updating.toVersion", { v: latest }) : t("docker.updating.pulling") });
   // cp 结果出到 drawer(诊断:之前静默失败 → 回落镜像内旧脚本 → 又卡 2 分钟,看不出来)。
   try {
-    const b64 = fs.readFileSync(path.join(__dirname, "container-scripts", "cicy-code-update.sh")).toString("base64");
+    const b64 = Buffer.from(fs.readFileSync(path.join(__dirname, "container-scripts", "cicy-code-update.sh"), "utf8").replace(/\r\n?/g, "\n"), "utf8").toString("base64"); // CI 的 Windows runner 会把 .sh 转成 CRLF → 容器里 shebang 变 /bin/bash\r 执行不了
     await wslRun(buildPushUpdateScriptCommand(b64, container), { timeout: 30000 });
     emit({ phase: "image", status: "running", message: t("docker.updating.scriptReady") });
   } catch (e) {
