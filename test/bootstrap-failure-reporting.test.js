@@ -122,3 +122,8 @@ test("a wedged WSL (status unknown) is auto-repaired, then auto-rebooted if stil
   const w = read("src/sidecar/wsl-docker.js");
   assert.match(w, /const stillHung = async \(\) => \(await lxssWedged\(\)\) \|\| \(await distroInstalled\(\)\) === null;/);
 });
+
+test("readContainerToken throttles after a failure so a wedged WSL is not hammered", () => {
+  const w = read("src/sidecar/wsl-docker.js");
+  assert.match(w, /if \(Date\.now\(\) - _tokenFailAt < 60000\) return "";/);
+});

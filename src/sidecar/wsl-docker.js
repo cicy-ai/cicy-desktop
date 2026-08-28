@@ -844,11 +844,20 @@ async function runContainer({ port = 8008, container = "cicy-code-docker", volum
 // must then NOT open with a wrong/host token — that strands the user at login).
 // 原则:执行什么命令、输出什么、报什么错,全都要可见(onLog),且每一步可重试。
 // onLog({ status, message }) —— 上层把它接进 drawer。不传也安全(默认静默 + 写 log 文件)。
+// 失败节流:WSL 卡死时每次 readContainerToken 都会起 wsl.exe 挂 8s+,多个调用方(标签恢复 /
+// openTeam / 守护循环)每 10 秒来一次 → 僵死的 wsl.exe 越积越多。读不到就记一下,60 秒内直接返回 ""。
+let _tokenFailAt = 0;
 async function readContainerToken(port = 8008, container = "cicy-code-docker", volume = "cicy-team-8008", { onLog } = {}) {
   const say = (status, message) => {
     try { (status === "error" ? log.warn : log.info)(`[readContainerToken] ${message}`); } catch (e) {}
     try { onLog && onLog({ status, message }); } catch (e) {}
   };
+  if (Date.now() - _tokenFailAt < 60000) return "";
+  const _r = await _readContainerTokenOnce(port, container, volume, say);
+  if (!_r) _tokenFailAt = Date.now();
+  return _r;
+}
+async function _readContainerTokenOnce(port, container, volume, say) {
   const volCmd = `cat /var/lib/docker/volumes/${volume}/_data/cicy-ai/global.json`;
   const execCmd = `docker exec ${container} cat /home/cicy/cicy-ai/global.json`;
   for (let attempt = 1; attempt <= 5; attempt++) {
