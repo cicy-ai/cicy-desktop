@@ -612,6 +612,7 @@ function wslExe() {
   if (process.platform !== "win32") return "wsl";
   const sysroot = process.env.SystemRoot || process.env.windir || "C:\\Windows";
   const cands = [
+    path.join(process.env.ProgramFiles || "C:\\Program Files", "WSL", "wsl.exe"), // 新版 WSL(MSI),优先
     path.join(sysroot, "System32", "wsl.exe"),
     path.join(process.env.LOCALAPPDATA || "", "Microsoft", "WindowsApps", "wsl.exe"),
   ];
@@ -670,6 +671,18 @@ function featureEnabled(feature) {
   });
 }
 
+// 新版 WSL(微软独立发布的 MSI,Store 版同源):不走旧的 LxssManager、内核内置、`--status` 等命令
+// 齐全、localhost 转发稳定。老 Win10 自带的旧版 WSL 反复死锁/半死/缺内核,全部由它一次解决。
+// MSI 由发布工作流从 GitHub 镜像到 OSS(国内可下)。
+const WSL_MODERN_MSI_URL = process.env.CICY_WSL_MSI_URL || (require("./mirrors").OSS_RELEASES_BASE + "/wsl/wsl.x64.msi");
+function modernWslInstalled() {
+  if (process.platform !== "win32") return true;
+  try { return fs.existsSync(path.join(process.env.ProgramFiles || "C:\\Program Files", "WSL", "wsl.exe")); } catch { return false; }
+}
+// 这台机器的旧版 WSL 出过死锁/被自动重启过(db/wsl-reboots.json 有计数)→ 下次提权时顺手换新版。
+function legacyWslTroubleSeen() {
+  try { const j = JSON.parse(fs.readFileSync(path.join(os.homedir(), "cicy-ai", "db", "wsl-reboots.json"), "utf8")); return (Number(j.count) || 0) > 0; } catch { return false; }
+}
 const WSL_KERNEL_MSI_URL = process.env.CICY_WSL_KERNEL_URL || "https://wslstorestorage.blob.core.windows.net/wslblob/wsl_update_x64.msi";
 // 裸内核文件(由发布工作流从 MSI 解出后放到 OSS):精简版 Windows 没有 msiexec 时直接放到位。
 const WSL_KERNEL_RAW_URL = process.env.CICY_WSL_KERNEL_RAW_URL || (require("./mirrors").OSS_RELEASES_BASE + "/wsl-kernel/kernel");
@@ -750,6 +763,12 @@ function elevatedWslSetup({ emit, need = {} } = {}) {
       '  & $SFC /scannow | Out-Null; Say ("sfc exit=" + $LASTEXITCODE)',
       '  foreach ($f in $bad) { $c = En $f }',
       '}',
+      `$MODERN = Join-Path $env:ProgramFiles "WSL\\wsl.exe"`,
+      `if (-not (Test-Path $MODERN) -and (Test-Path $MSIEXEC)) {`,
+      `  $wm = Join-Path $env:USERPROFILE "Downloads\\wsl.x64.msi"`,
+      `  Say "installing modern WSL (replaces the legacy inbox WSL: no LxssManager deadlocks, kernel built in) — download ~250MB"`,
+      `  try { if (-not (Test-Path $wm) -or (Get-Item $wm).Length -lt 100000000) { Invoke-WebRequest -UseBasicParsing -Uri "${WSL_MODERN_MSI_URL}" -OutFile $wm }; $p = Start-Process $MSIEXEC -ArgumentList "/i","\`"$wm\`"","/qn","/norestart" -Wait -PassThru; Say ("modern wsl msi exit=" + $p.ExitCode) } catch { Say ("modern wsl install failed: " + $_.Exception.Message) }`,
+      `}`,
       `$KDIR = Join-Path $S32 "lxss\\tools"; $KFILE = Join-Path $KDIR "kernel"`,
       `if (-not (Test-Path $KFILE)) {`,
       `  if ((Test-Path $MSIEXEC) -and (Test-Path "${msi.replace(/"/g, '""')}")) { $p = Start-Process $MSIEXEC -ArgumentList "/i","\`"${msi.replace(/"/g, '""')}\`"","/qn","/norestart" -Wait -PassThru; Say ("kernel msi exit=" + $p.ExitCode) }`,
@@ -849,9 +868,19 @@ async function ensureWsl({ emit } = {}) {
     // 功能都已启用、wsl.exe 也在,但 WSL 本身还不能用(`wsl -l -v` 只打印帮助)= 启用后还没
     // 重启。别去 --import(必失败),直接进自动重启流程。
     if (!(await wslFunctional())) {
+      if (!modernWslInstalled() && legacyWslTroubleSeen()) {
+        // 旧版 WSL 已经死锁/重启过 → 别再等它,换新版 WSL(一次 UAC),装完重启。
+        emit && emit({ phase: "install-docker", status: "running", message: "旧版 WSL 反复无响应,改为安装微软新版 WSL（会弹一次 UAC，请点「是」，下载约 250MB）…" });
+        await elevatedWslSetup({ emit, need: {} });
+      }
       log.warn("[bootstrap] ensure-wsl: features enabled but WSL not functional yet (pending reboot)");
       emit && emit({ phase: "install-docker", status: "running", message: "WSL 功能已启用但尚未生效,需要重启 Windows…" });
       return { ok: false, needsReboot: true };
+    }
+    if (!modernWslInstalled() && legacyWslTroubleSeen()) {
+      emit && emit({ phase: "install-docker", status: "running", message: "这台机器的旧版 WSL 出过死锁,升级为微软新版 WSL（会弹一次 UAC，下载约 250MB）…" });
+      await elevatedWslSetup({ emit, need: {} });
+      if (modernWslInstalled()) { emit && emit({ phase: "install-docker", status: "running", message: "新版 WSL 已安装,需要重启 Windows 生效…" }); return { ok: false, needsReboot: true }; }
     }
     // WSL2 内核(lxss\tools\kernel)缺失时 --import 也必失败。先把 MSI 下到 Downloads,再用
     // 同一个提权脚本装(功能已启用的话脚本只做装内核这一件事)。
@@ -988,7 +1017,7 @@ module.exports = {
   start, stop, stopContainer, restart, checkStatus, loadImage, loadImageFromTarball,
   downloadImageTarball, imagePresent, dockerOk, installDocker,
   bootstrap, probeHealth, readContainerToken, dockerDesktopExe, desktopDir, downloadsDir, imageTarballPath,
-  launchElevated, elevatedWslSetup, spawnProbe, wslFunctional, wslKernelPresent, wslExe, wslMissing, ensureWsl, virtualizationStatus,
+  launchElevated, elevatedWslSetup, modernWslInstalled, spawnProbe, wslFunctional, wslKernelPresent, wslExe, wslMissing, ensureWsl, virtualizationStatus,
   // platform-agnostic download/retry primitives, reused by native.js
   ensureDownloaded, curlDownload, withRetry, waitUntil, run, headSize,
   // image freshness (修「重建仍用旧镜像」—— 校验 OSS ETag 变了才重下重载)

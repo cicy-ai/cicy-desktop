@@ -132,6 +132,21 @@ jobs:
             if ($kfile) { & $oss cp "$($kfile.FullName)" "$kernelKey" -f --acl public-read } else { Write-Warning "kernel not found in msi extract" }
           } else { Write-Host "WSL2 kernel already on OSS, skip" }
 
+          # 0b) 新版 WSL 的 MSI(一次性,已存在就跳过):老 Win10 自带旧版 WSL 反复死锁,桌面端改为装新版。
+          $wslKey = "$base/wsl/wsl.x64.msi"
+          & $oss stat "$wslKey" 2>$null | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/microsoft/WSL/releases/latest" -Headers @{ "User-Agent" = "cicy-desktop-ci" }
+            $asset = $rel.assets | Where-Object { $_.name -match 'x64\.msi$' } | Select-Object -First 1
+            if ($asset) {
+              Write-Host "Publishing modern WSL $($rel.tag_name) -> $wslKey"
+              Invoke-WebRequest -Uri $asset.browser_download_url -OutFile wsl.x64.msi
+              & $oss cp "wsl.x64.msi" "$wslKey" -f --acl public-read
+              Set-Content -Path wsl-version.txt -Value $rel.tag_name
+              & $oss cp "wsl-version.txt" "$base/wsl/version.txt" -f --acl public-read
+            } else { Write-Warning "no x64 msi asset in microsoft/WSL latest" }
+          } else { Write-Host "modern WSL msi already on OSS, skip" }
+
           # 1) 永久版本化副本(unique key — 不会被后续发版覆盖)
           $verKey = "$base/cicy-desktop-$version.exe"
           Write-Host "Uploading versioned -> $verKey"

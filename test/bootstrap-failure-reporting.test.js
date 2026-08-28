@@ -146,3 +146,13 @@ test("streamed wsl runs flag an unreachable VM too, and soft failures back off 2
   assert.match(w, /err\.code > 255\)/);
   assert.match(read("src/backends/sidecar-ipc.js"), /_softRetryAt = Date\.now\(\) \+ 2 \* 60 \* 1000;/);
 });
+
+test("legacy WSL trouble → install modern WSL (MSI mirrored to OSS) in the single elevation; wslExe prefers it", () => {
+  const d = read("src/sidecar/docker.js");
+  assert.match(d, /function modernWslInstalled\(\)/);
+  assert.match(d, /function legacyWslTroubleSeen\(\)/);
+  assert.match(d, /"WSL", "wsl\.exe"\), \/\/ 新版 WSL/);
+  assert.match(d, /installing modern WSL/);
+  assert.match(d, /if \(!modernWslInstalled\(\) && legacyWslTroubleSeen\(\)\) \{/);
+  assert.match(read(".github/workflows/windows-exe-release.yml"), /wsl\/wsl\.x64\.msi/);
+});
