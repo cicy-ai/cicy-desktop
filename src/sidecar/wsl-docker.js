@@ -23,6 +23,7 @@ const log = require("electron-log"); // persisted main.log — bootstrap timing/
 const { gatewayKeyPresentInEnv } = require("./gateway-key-health");
 const { t } = require("../i18n"); // 打开/读 token 的可见日志走 i18n
 const { shouldSkipCicyUpdate } = require("./cicy-runtime-health");
+const { inAppUpdate } = require("./cicy-inapp-update");
 const protect = require("./docker-protect"); // 容器保护:自动流程禁止 rm/shutdown
 
 // Dedicated distro name — NEVER reuse/clobber a user's own "Ubuntu" distro.
@@ -1463,6 +1464,28 @@ async function update({ onProgress, container = "cicy-code-docker", port = 8008 
   }
   // 宿主机没解析出版本 → 给个可见提示(诊断:让用户/我们知道是 host 网络问题,而非容器)。
   if (!latest) emit({ phase: "image", status: "running", message: t("docker.updating.hostResolveFail") });
+  // 3) 首选:cicy-code 自己的升级方式 —— 容器内 API `POST /api/cicy-update`,把宿主机解析好
+  //    的版本 pin 进去。更新脚本在容器里自己跑(setsid,扛得住 supervisor 重启),desktop
+  //    不再 docker exec、不再往 /usr/local/bin 推脚本(这两步就是"required file not found"
+  //    / EACCES / 打错容器 的来源)。API 打不通或被拒才回落到下面的老路径。
+  const apiRegistry = net === "global" ? "https://registry.npmjs.org" : net === "cn" ? "https://registry.npmmirror.com" : "";
+  try {
+    const token = await readContainerToken(port, container, `cicy-team-${port}`, { onLog: (ev) => emit({ phase: "image", status: ev.status === "error" ? "running" : ev.status, message: ev.message }) });
+    const r = await inAppUpdate({ port, token, target: latest || "", registry: apiRegistry, emit });
+    log.info(`[wsl-docker] update via API: ${JSON.stringify(r)}`);
+    if (r.started) {
+      if (r.alreadyLatest) {
+        emit({ phase: "done", status: "done", message: t("docker.updating.alreadyLatest", { v: r.version || current }) });
+        return { ok: true, alreadyLatest: true, version: r.version || current };
+      }
+      const doneMsg = r.ok ? t("docker.updating.doneVersion", { v: r.version }) : t("docker.updating.notReady");
+      emit({ phase: "done", status: r.ok ? "done" : "error", message: doneMsg });
+      return { ok: r.ok, version: r.version || latest || null, inApp: true };
+    }
+    emit({ phase: "image", status: "running", message: `in-app update unavailable (${r.reason}) → docker exec` });
+  } catch (e) {
+    emit({ phase: "image", status: "running", message: `in-app update failed (${e.message}) → docker exec` });
+  }
   // 3) 真要装:cp desktop 自带的脚本进容器(随 desktop 发版下发,不依赖镜像),把**已解析
   //    的具体版本**作参数传进去 → 脚本跳过自己的 npm view,容器里不再有版本查询的卡顿。
   emit({ phase: "image", status: "running", message: latest ? t("docker.updating.toVersion", { v: latest }) : t("docker.updating.pulling") });
