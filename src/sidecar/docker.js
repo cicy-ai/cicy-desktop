@@ -640,9 +640,12 @@ async function wslMissing() {
       // wsl.exe 不存在(ENOENT):功能刚启用但还没重启 Windows 时就是这样 —— 按「缺失」处理,
       // 让 ensureWsl 走 needsReboot,而不是当成已就绪去 --import 然后 spawn ENOENT。
       if (err && (err.code === "ENOENT" || /ENOENT/.test(err.message || ""))) return resolve(true);
-      // 旧版内置 wsl.exe 存根:任何子命令都只打印用法帮助("wsl.exe [Argument]" / "--install")。
-      // 功能刚启用还没重启时就是这个状态 → 按缺失处理(ensureWsl 走 needsReboot)。
-      if (/未安装|not installed|--install|\[Argument\]|\[参数\]/i.test(s)) return resolve(true);
+      // 用法帮助有两种来源:(a) 功能刚启用还没重启的存根 wsl.exe —— 任何子命令都只打印帮助;
+      // (b) 老版 Win10(19042 等)的内置 wsl.exe 根本不认识 `--status`,也打印帮助,但 WSL 本身
+      // 完全可用。只看帮助文本区分不了 → 再用 `wsl -l -v` 功能探测:能列出/说"没有发行版"就是可用。
+      if (/未安装|not installed|--install|\[Argument\]|\[参数\]/i.test(s)) {
+        return wslFunctional().then((ok) => resolve(!ok));
+      }
       if (err && (err.killed || err.signal || err.code === "ETIMEDOUT")) return resolve(null); // timed out → unknown
       resolve(false); // wsl present (errored for another reason → assume OK)
     });

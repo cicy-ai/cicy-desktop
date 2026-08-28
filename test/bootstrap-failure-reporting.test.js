@@ -107,3 +107,9 @@ test("broken WSL localhost relay (healthy inside, unreachable from Windows) is r
   assert.match(ipc, /_relayMisses >= 2 && !_relayResetDone/);
   assert.match(ipc, /docker:self-heal-localhost-relay/);
 });
+
+test("wsl --status printing usage (old inbox wsl.exe) is not 'missing' when wsl -l works", () => {
+  const d = read("src/sidecar/docker.js");
+  const i = d.indexOf("async function wslMissing()");
+  assert.match(d.slice(i, i + 2000), /return wslFunctional\(\)\.then\(\(ok\) => resolve\(!ok\)\);/);
+});
