@@ -14,7 +14,7 @@ if (!global._cicyIpcBridge) {
     const { url, title } = data || {};
     if (!url) return;
     log.info(`[IPC Bridge] open-window: ${url} ${title || ""}`);
-    const win = createWindow({ url }, 0, true);
+    const win = createWindow({ url, background: true }, 0, true); // 渲染进程请求:后台开,不抢焦点
     if (title) win.setTitle(title);
   });
 

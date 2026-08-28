@@ -206,7 +206,7 @@ function registerTools(registerTool) {
         const registry = require("../utils/window-registry");
         const entry = registry.getByKey(window_key);
         if (!entry) throw new Error(`windowKey ${window_key} not found in registry`);
-        const opts = { url: entry.url };
+        const opts = { url: entry.url, background: true }; // agent 驱动:后台开,不抢焦点
         if (entry.bounds && typeof entry.bounds === "object") Object.assign(opts, entry.bounds);
         const win = createWindow(opts, entry.accountIdx || 0, true);
         return {

@@ -83,7 +83,7 @@ function windowOpenDecision(url, { wc } = {}) {
   // its own profile N. Never in-session for profile 0.
   const openerIdx = accountIdxOfWebContents(wc);
   const target = openerIdx === 0 ? 1 : openerIdx;
-  try { createWindow({ url }, target, true); }
+  try { createWindow({ url, background: true }, target, true); } // 页面驱动:后台开,不抢焦点
   catch (e) { log.warn(`[WindowOpen] open external in profile ${target} failed: ${e && e.message}`); }
   return { action: "deny" };
 }

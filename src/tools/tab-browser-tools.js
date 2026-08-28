@@ -268,6 +268,9 @@ class TabManager {
     const winOpts = {
       width: 1180,
       height: 820,
+      // 先不显示:由 openTab 决定 show+focus(用户明确要求)还是 showInactive(程序/页面触发)。
+      // 默认 show:true 会在新建 profile 窗口的瞬间把 app 抢到前台。
+      show: false,
       backgroundColor: STRIP_BG,
       title: accountIdx === 0 ? "CiCy Desktop" : `CiCy Browser · sandbox-${accountIdx}`,
       // Drop the native title-bar row — the tab strip becomes the top of the window
@@ -305,6 +308,8 @@ class TabManager {
       } catch (e) {}
     }
     this.win = new BrowserWindow(winOpts);
+    // 兜底:无论谁建的窗口,3s 内没人 show/showInactive 就静默显示,窗口绝不会永远隐身。
+    setTimeout(() => { try { if (!this.win.isDestroyed() && !this.win.isVisible()) this.win.showInactive(); } catch (e) {} }, 3000);
     try {
       this.win.cicyAccountIdx = accountIdx;
       this.win.webContents.cicyAccountIdx = accountIdx;
@@ -490,7 +495,9 @@ class TabManager {
     // 沙箱 profile(accountIdx ≥ 1)自身的 window.open 本就没有桥,仍开成本 profile 的 tab。
     try { wc.setWindowOpenHandler(({ url: u }) => {
       try {
-        if (this.accountIdx === 0) openTab(1, u); // 特权 profile 的链接 → 沙箱 profile 1
+        // activate:false —— 这是页面自己(window.open/重定向)触发的,不是用户在看 cicy-desktop;
+        // 不能因此把窗口抢到前台(用户报的「莫名其妙跳到前台」主因之一)。
+        if (this.accountIdx === 0) openTab(1, u, { activate: false }); // 特权 profile 的链接 → 沙箱 profile 1
         else this.addTab(u);                      // 沙箱 profile → 本 profile 内开 tab
       } catch (e) {}
       return { action: "deny" };
@@ -508,7 +515,7 @@ class TabManager {
           let curOrigin = ""; try { curOrigin = new URL(wc.getURL()).origin; } catch {}
           if (tgt.origin !== curOrigin && !(tab.team && isInstanceAuthNavigation(wc.getURL(), u))) {
             e.preventDefault();
-            openTab(1, u);
+            openTab(1, u, { activate: false }); // 页面驱动,不抢焦点
           }
         } catch (err) {}
       });
@@ -1024,7 +1031,7 @@ function registerTabBrowserTools(registerTool) {
         if (success) {
           // agent 驱动的切标签:只切视图、静默保证窗口可见,绝不从用户当前 app 抢焦点
           // (之前这里 show()+focus() + mac app.focus({steal:true}) 会让 cicy-desktop 突然跳到前台)。
-          try { if (m.win.isMinimized()) m.win.restore(); } catch (e) {}
+          // 不 restore():Windows 上 restore() 会激活窗口(=抢前台)。最小化就保持最小化。
           m.surfaceQuiet();
         }
         return ok({ success, webContentsId });

@@ -358,6 +358,24 @@ if (oneWindow) {
 // Setup logging
 setupLogging(config);
 wrapLogger();
+// ── focus audit ──────────────────────────────────────────────────────────────
+// 「cicy-desktop 莫名其妙跳到前台」修了多次都没根治,因为事后无法知道是谁调的 show/focus。
+// 这里给 BrowserWindow 的抢前台方法打点:每次调用记一行 [focus-audit] + 调用栈前几帧。
+// 只记日志,不改行为。排查时 grep 主日志里的 focus-audit 即可。
+try {
+  const { BrowserWindow: _BW } = require("electron");
+  for (const method of ["show", "focus", "restore", "moveTop"]) {
+    const orig = _BW.prototype[method];
+    if (typeof orig !== "function") continue;
+    _BW.prototype[method] = function (...args) {
+      try {
+        const frames = String(new Error().stack || "").split("\n").slice(2, 6).map((l) => l.trim().replace(/^at /, "")).join(" ← ");
+        log.info(`[focus-audit] ${method}() win=${this.id} title="${(this.getTitle && this.getTitle()) || ""}" visible=${this.isVisible && this.isVisible()} focused=${this.isFocused && this.isFocused()} ← ${frames}`);
+      } catch (e) {}
+      return orig.apply(this, args);
+    };
+  }
+} catch (e) {}
 
 log.info("[MCP] Server starting at", new Date().toISOString());
 
@@ -1579,7 +1597,7 @@ electronApp.whenReady().then(async () => {
         if (!e.url) continue;
         if (liveSet.has(`${e.accountIdx || 0}::${registry.normalizeUrl(e.url)}`)) continue;
         log.info(`[WindowRegistry] Reopening ${e.url} (account ${e.accountIdx || 0})`);
-        const opts = { url: e.url };
+        const opts = { url: e.url, background: true }; // 启动时自动重开:后台,不抢焦点
         if (e.bounds && typeof e.bounds === "object") Object.assign(opts, e.bounds);
         createWindow(opts, e.accountIdx || 0, true);
       }
