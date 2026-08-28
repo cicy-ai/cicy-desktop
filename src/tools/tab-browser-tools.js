@@ -1022,12 +1022,10 @@ function registerTabBrowserTools(registerTool) {
         if (!m) throw new Error(`tab ${webContentsId} not found`);
         const success = m.activate(webContentsId);
         if (success) {
-          try {
-            if (process.platform === "darwin") app.focus({ steal: true });
-            if (m.win.isMinimized()) m.win.restore();
-            m.win.show();
-            m.win.focus();
-          } catch (e) {}
+          // agent 驱动的切标签:只切视图、静默保证窗口可见,绝不从用户当前 app 抢焦点
+          // (之前这里 show()+focus() + mac app.focus({steal:true}) 会让 cicy-desktop 突然跳到前台)。
+          try { if (m.win.isMinimized()) m.win.restore(); } catch (e) {}
+          m.surfaceQuiet();
         }
         return ok({ success, webContentsId });
       } catch (e) { return ok({ error: e.message }, true); }

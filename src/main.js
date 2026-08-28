@@ -298,11 +298,13 @@ electronApp.on("second-instance", (_e, argv) => {
     const { openHomepage } = require("./backends/homepage-window");
     openHomepage({ activate: false }); // 再次启动 exe 只把窗口带到前台,不抢走用户正在看的团队 tab
   } catch {}
+  // 绝不抢焦点:second-instance 大多不是用户点的(登录自启重复拉起、deeplink、安装器/自动更新
+  // 重开)。只有当一个可见窗口都没有时才把最近的窗口静默显示出来(showInactive),用户正在
+  // 别的 app 里时不会被莫名跳到前台;想看 app 的用户点托盘/任务栏即可。
   const { BrowserWindow } = require("electron");
-  for (const w of BrowserWindow.getAllWindows()) {
-    if (w.isMinimized()) w.restore();
-    w.show();
-    w.focus();
+  const wins = BrowserWindow.getAllWindows();
+  if (!wins.some((w) => { try { return w.isVisible() && !w.isMinimized(); } catch { return false; } })) {
+    for (const w of wins) { try { if (w.isMinimized()) w.restore(); if (!w.isVisible()) w.showInactive(); } catch {} }
   }
 });
 
