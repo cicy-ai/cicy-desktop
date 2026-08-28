@@ -127,3 +127,10 @@ test("readContainerToken throttles after a failure so a wedged WSL is not hammer
   const w = read("src/sidecar/wsl-docker.js");
   assert.match(w, /if \(Date\.now\(\) - _tokenFailAt < 60000\) return "";/);
 });
+
+test("an unreachable WSL VM (socket timeout from wsl.exe) resets WSL and retries instead of failing docker install", () => {
+  const w = read("src/sidecar/wsl-docker.js");
+  assert.match(w, /function isWslVmUnreachable\(err\)/);
+  assert.match(w, /err\.wslVmUnreachable = isWslVmUnreachable\(err\)/);
+  assert.match(w, /if \(e && e\.wslVmUnreachable\) \{[^]*await wslTerminate\(\)[^]*await wslShutdown\(\)[^]*reason: "wsl_vm_unreachable"/);
+});

@@ -90,12 +90,24 @@ async function ensureWslKernel({ emit } = {}) {
 // Run a bash command as root inside the distro. execFile (no host shell) → the
 // command string is passed verbatim to `bash -lc`, so only bash-level quoting
 // matters inside `cmd`.
+// wsl.exe 连不上发行版的 VM(注册了、显示 Running,但 init 不可达):任何 `wsl -d` 立刻以
+// 4294967295(-1)退出,stdout 是 UTF-16 的 Windows 套接字错误「由于连接方在一段时间后没有正确答复
+// …连接尝试失败」。实测 `wsl --shutdown` 后恢复。据此标记,bootstrap 遇到就重置一次再重试。
+function isWslVmUnreachable(err) {
+  if (!err) return false;
+  const code = err.code === 4294967295 || err.code === -1 || err.code === 0xffffffff;
+  let text = "";
+  try { const raw = err.stdout || ""; text = Buffer.isBuffer(raw) ? raw.toString("utf16le") : String(raw); } catch {}
+  try { text += Buffer.from(String(err.stdout || ""), "binary").toString("utf16le"); } catch {}
+  const msg = /连接尝试失败|connection attempt failed|没有正确答复|did not properly respond|0x80072746|0x8007274c/i.test(text + " " + (err.message || ""));
+  return code && msg || (code && /^Command failed: [^\n]*wsl[^\n]*\n?\s*$/.test(err.message || "") && !err.stderr);
+}
 function wslRun(cmd, { timeout = 60000, distro = DISTRO } = {}) {
   return new Promise((resolve, reject) => {
     execFile(docker.wslExe(), ["-d", distro, "-u", "root", "--", "bash", "-lc", cmd],
       { timeout, windowsHide: true, maxBuffer: 1 << 26 },
       (err, stdout, stderr) => {
-        if (err) { err.stdout = String(stdout || ""); err.stderr = String(stderr || ""); return reject(err); }
+        if (err) { err.stdout = String(stdout || ""); err.stderr = String(stderr || ""); err.wslVmUnreachable = isWslVmUnreachable(err); return reject(err); }
         resolve({ stdout: String(stdout), stderr: String(stderr) });
       });
   });
@@ -1297,7 +1309,16 @@ async function _bootstrap({ onProgress, port = 8008, container = "cicy-code-dock
   // 3) Docker Engine inside Ubuntu
   begin("install-docker-engine");
   if (!(await dockerInstalled())) {
-    try { await installDockerEngine({ emit }); } catch (e) { fail("docker_install_failed", e.message); emit({ phase: "install-docker", status: "error", message: `Docker 安装失败：${e.message}（点重试）${errTail(e)}` }); finish(false, "docker_install_failed"); return { ok: false, reason: "docker_install_failed" }; }
+    try { await installDockerEngine({ emit }); } catch (e) {
+      if (e && e.wslVmUnreachable) {
+        // VM 半死:wsl.exe 连不上 init。重置 WSL(terminate + shutdown)后由下一轮自动重试。
+        fail("wsl_vm_unreachable", e.message);
+        emit({ phase: "install-docker", status: "running", message: "wsl.exe 连不上 WSL 虚拟机(半死状态),正在重置 WSL 后自动重试…" });
+        try { await wslTerminate(); } catch {}
+        try { await wslShutdown(); } catch {}
+        finish(false, "wsl_vm_unreachable"); return { ok: false, reason: "wsl_vm_unreachable", message: "WSL 虚拟机无响应,已重置,稍后自动重试" };
+      }
+      fail("docker_install_failed", e.message); emit({ phase: "install-docker", status: "error", message: `Docker 安装失败：${e.message}（点重试）${errTail(e)}` }); finish(false, "docker_install_failed"); return { ok: false, reason: "docker_install_failed" }; }
     done();
   } else done(true);
 
