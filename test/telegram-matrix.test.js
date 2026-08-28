@@ -95,8 +95,8 @@ test("matrix page exposes profile table, phone preview, note, proxy drawer and i
   assert.match(html, /id="add-profile"/);
   assert.match(html, /class="cfg"[^]*data-role="proxy"/);
   assert.match(html, /\.row\.cfg-open \.cfg \{ display: block; \}/);
-  assert.match(html, /panelAPI\.setProfileNote/);
-  assert.match(html, /data-role="note"/);
+  assert.doesNotMatch(html, /panelAPI\.setProfileNote/);
+  assert.doesNotMatch(html, /data-role="note"/);
   assert.match(html, /class="tg none"/);
   assert.match(html, /id="phone-preview"/);
   assert.match(html, /https:\/\/web\.telegram\.org\/k\//);
