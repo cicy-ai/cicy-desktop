@@ -47,6 +47,7 @@ function profileForCell(url, requested) {
   return Number.isInteger(idx) && idx > 0 ? idx : DEFAULT_PROFILE;
 }
 const telegramIdentity = require("./telegram-identity");
+const facebookIdentity = require("./facebook-identity");
 const appliedProxy = new Set(); // partitions whose proxy is already configured
 function ensureCellSessionProxy(idx) {
   const part = partitionFor(idx);
@@ -228,20 +229,25 @@ class PanelCells {
     const detectIdentity = () => {
       if (profileIdx === 0) return;
       let url = ""; try { url = wc.getURL(); } catch (e) {}
-      if (!telegramIdentity.isTelegramUrl(url)) return;
+      // 站点 → 身份模块(Telegram Web K / Facebook);其他站点不探。
+      const site = telegramIdentity.isTelegramUrl(url) ? telegramIdentity : facebookIdentity.isFacebookUrl(url) ? facebookIdentity : null;
+      if (!site) return;
+      const script = site === telegramIdentity ? telegramIdentity.TELEGRAM_IDENTITY_SCRIPT : facebookIdentity.FACEBOOK_IDENTITY_SCRIPT;
+      const normalize = site === telegramIdentity ? telegramIdentity.normalizeTelegramIdentity : facebookIdentity.normalizeFacebookIdentity;
+      const record = site === telegramIdentity ? telegramIdentity.telegramLoginRecord : facebookIdentity.facebookLoginRecord;
       const seq = ++identSeq;
       const delays = [2500, 8000, 20000, 45000];
       const tick = async (i) => {
         if (seq !== identSeq || wc.isDestroyed()) return;
         let raw = null;
-        try { raw = await wc.executeJavaScript(telegramIdentity.TELEGRAM_IDENTITY_SCRIPT, true); } catch (e) {}
-        const it = telegramIdentity.normalizeTelegramIdentity(raw);
+        try { raw = await wc.executeJavaScript(script, true); } catch (e) {}
+        const it = normalize(raw);
         if (seq !== identSeq) return;
         if (it && (it.username || it.displayName || it.phone)) {
           const prev = rec.identity;
           rec.identity = it;
           if (!prev || prev.username !== it.username || prev.displayName !== it.displayName || prev.phone !== it.phone) {
-            try { require("../profiles/profile-store").setLogin("electron", profileIdx, telegramIdentity.telegramLoginRecord(it)); } catch (e) {}
+            try { require("../profiles/profile-store").setLogin("electron", profileIdx, record(it)); } catch (e) {}
             this.sendState({ id: cellId, wcId: wc.id, identity: it, loading: false, url, title: (() => { try { return wc.getTitle(); } catch (e) { return ""; } })() });
           }
           return;
@@ -393,6 +399,7 @@ function installIpc(findTab) {
           proxy: p.proxy && p.proxy.enabled ? String(p.proxy.url || "") : "",
           note: String(p.note || ""),
           telegram: telegramIdentity.telegramIdentityFromProfile(p),
+          facebook: facebookIdentity.facebookIdentityFromProfile(p),
           ipInfo: p.ipInfo && p.ipInfo.ip ? { ip: String(p.ipInfo.ip), area: String(p.ipInfo.area || ""), probedAt: String(p.ipInfo.probedAt || "") } : null,
         }));
     } catch (err) { return []; }

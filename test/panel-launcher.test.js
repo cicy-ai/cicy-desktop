@@ -18,7 +18,7 @@ test("panel menu offers blank panel and Telegram matrix actions", () => {
   const opened = [];
   const template = createPanelMenuTemplate((preset) => opened.push(preset));
 
-  assert.deepEqual(template.map((item) => item.label), ["面板", "Telegram 矩阵", "Redroid 矩阵"]);
+  assert.deepEqual(template.map((item) => item.label), ["面板", "Telegram 矩阵", "Redroid 矩阵", "Facebook 矩阵"]);
   template[0].click();
   template[1].click();
   template[2].click();

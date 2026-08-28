@@ -3,6 +3,7 @@
 const PAGES = {
   "telegram-matrix": "telegram-matrix.html",
   "redroid-matrix": "redroid-matrix.html",
+  "facebook-matrix": "facebook-matrix.html",
 };
 
 function panelPageForUrl(value) {
