@@ -172,7 +172,15 @@ function register({ sidecarLogPath } = {}) {
   let _rebootScheduled = false;
   let _tcpRepairDone = false;        // Windows 端口修复每次进程只做一次(需要 UAC)
   let _relayMissesAfterRepair = 0;   // 端口修复后仍连不上的轮数 → 3 轮自动重启
-  let _relayMisses = 0, _relayResetDone = false; // WSL localhost 转发自愈(见 daemon 循环)
+  let _relayMisses = 0; // WSL localhost 转发自愈(见 daemon 循环)
+  // 「每次开机只 wsl --shutdown 一次」必须跨进程持久化:桌面端自动更新/崩溃重开后内存标记归零,
+  // 实测 XS-MASTER 上每隔几分钟就 shutdown 一次,把容器和所有 agent 一起杀掉,还引发 :8008 的
+  // 重连风暴(14k TIME_WAIT → 端口耗尽 → 误判不通 → 再 shutdown)的死循环。按开机时间戳存文件。
+  const RELAY_RESET_FILE = path.join(os.homedir(), "cicy-ai", "db", "wsl-relay-reset.json");
+  const bootStamp = () => Math.round((Date.now() - os.uptime() * 1000) / 60000); // 开机分钟戳(±1 分钟抖动无所谓)
+  const relayResetDoneThisBoot = () => { try { const j = JSON.parse(fs.readFileSync(RELAY_RESET_FILE, "utf8")); return Math.abs(Number(j.boot) - bootStamp()) <= 2; } catch { return false; } };
+  const markRelayReset = () => { try { fs.mkdirSync(path.dirname(RELAY_RESET_FILE), { recursive: true }); fs.writeFileSync(RELAY_RESET_FILE, JSON.stringify({ boot: bootStamp(), ts: Date.now() })); } catch {} };
+  let _relayResetDone = relayResetDoneThisBoot();
   let _unknownStreak = 0, _wslRepairDone = false; // WSL 卡死自愈(见 daemon 循环)
   let _softRetryAt = 0; // 非硬失败(如 docker_install_failed)也退避 2 分钟,别每 35 秒重跑一遍
   // 防重启循环:WSL 始终起不来时不能每次开机都重启。计数存 db/wsl-reboots.json,最多自动重启 2 次
@@ -271,7 +279,7 @@ function register({ sidecarLogPath } = {}) {
         if (inside) {
           _relayMisses += 1;
           if (_relayMisses >= 2 && !_relayResetDone) {
-            _relayResetDone = true;
+            _relayResetDone = true; markRelayReset();
             auditDestructiveIpc(log, "docker:self-heal-localhost-relay", null, { container: APP_CONTAINER, misses: _relayMisses });
             log.warn("[docker-daemon] container healthy inside WSL but 127.0.0.1:8008 unreachable from Windows → wsl --shutdown once to rebuild the localhost relay");
             try { await appDocker.wslShutdown(); } catch (e) { log.warn(`[docker-daemon] wsl --shutdown failed: ${e.message}`); }

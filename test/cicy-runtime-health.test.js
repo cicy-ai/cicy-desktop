@@ -55,3 +55,10 @@ test("cloud title reconcile is rate-limited (no TIME_WAIT storm on Windows)", ()
   const main = readSrc("src/main.js");
   assert.equal((main.match(/syncAllLocalTeams\(\{ force: true \}\)/g) || []).length, 2);
 });
+
+test("the once-per-boot wsl --shutdown relay reset is persisted across desktop restarts", () => {
+  const s = readSrc("src/backends/sidecar-ipc.js");
+  assert.match(s, /wsl-relay-reset\.json/);
+  assert.match(s, /let _relayResetDone = relayResetDoneThisBoot\(\);/);
+  assert.match(s, /_relayResetDone = true; markRelayReset\(\);/);
+});
