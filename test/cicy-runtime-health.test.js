@@ -45,3 +45,13 @@ test("relay still broken after wsl reset → one-shot elevated Windows TCP repai
   assert.match(block, /appDocker\.elevatedTcpRepair\(/);
   assert.match(block, /_relayMissesAfterRepair >= 3[\s\S]*?scheduleReboot\(90/);
 });
+
+test("cloud title reconcile is rate-limited (no TIME_WAIT storm on Windows)", () => {
+  const app = readSrc("workers/render/src/App.jsx");
+  assert.match(app, /const VISIBLE_MS = 30_000;/);
+  assert.match(app, /const HIDDEN_MS = 120_000;/);
+  const lt = readSrc("src/backends/local-teams.js");
+  assert.match(lt, /if \(!force && Date\.now\(\) - _lastSyncAllAt < 60_000\) return;/);
+  const main = readSrc("src/main.js");
+  assert.equal((main.match(/syncAllLocalTeams\(\{ force: true \}\)/g) || []).length, 2);
+});

@@ -663,7 +663,13 @@ async function pullCustomTeams() {
 // this code) — register to cloud without needing a manual rename to trigger it.
 // create/rename still sync individually; this is the catch-up for the rest.
 // Best-effort, fully non-blocking, no-op when logged out.
-async function syncAllLocalTeams() {
+// 防抖:主页对账 IPC + 30s 定时器 + 登录/启动钩子都会调这里,每次对每个团队发一个云端请求。
+// 60s 内只真正跑一次(force:true 绕过,用于登录/启动后的首次同步),避免 Windows 端口被
+// TIME_WAIT 耗尽。
+let _lastSyncAllAt = 0;
+async function syncAllLocalTeams({ force = false } = {}) {
+  if (!force && Date.now() - _lastSyncAllAt < 60_000) return;
+  _lastSyncAllAt = Date.now();
   try {
     const cc = require("../cloud/cloud-client");
     if (!cc.loginToken || !cc.loginToken()) return; // logged out → no-op
@@ -674,7 +680,7 @@ async function syncAllLocalTeams() {
     for (const id of ids) {
       try { await syncNameToCloud(id); } catch {}
     }
-    if (ids.length) log.info(`[local-teams] startup cloud-sync of ${ids.length} team(s)`);
+    if (ids.length) log.info(`[local-teams] cloud-sync of ${ids.length} team(s)`);
     // 自定义团队只本地,不再 pullCustomTeams。
   } catch (e) { log.warn(`[local-teams] startup cloud-sync failed: ${e.message}`); }
 }

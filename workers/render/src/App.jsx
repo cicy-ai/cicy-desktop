@@ -597,8 +597,11 @@ export default function App() {
   useEffect(() => {
     let timer;
     let stopped = false;
-    const VISIBLE_MS = 3_000;
-    const HIDDEN_MS = 30_000;
+    // 3s 对账 = 每分钟几十个新 TCP 连接(每个团队一个云端请求),Windows 上 TIME_WAIT 堆到上万把
+    // 动态端口耗尽(实测 15165 个 TIME_WAIT → 连 127.0.0.1:8008 都 EADDRINUSE)。改 30s/120s,
+    // 切回可见/聚焦仍立即对账一次。
+    const VISIBLE_MS = 30_000;
+    const HIDDEN_MS = 120_000;
 
     // 一发对账:本地 title 拉进 teams.json + 刷新本地列表 + 重拉云端团队(私有云
     // host_url/名字/状态的同步)。三件事并行。

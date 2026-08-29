@@ -1095,7 +1095,7 @@ electronApp.whenReady().then(async () => {
           // Chain them so syncAllLocalTeams only runs after the device exists.
           require("./cloud/cloud-client")
             .registerDevice()
-            .then(() => require("./backends/local-teams").syncAllLocalTeams())
+            .then(() => require("./backends/local-teams").syncAllLocalTeams({ force: true }))
             .catch((e) => log.warn(`[cloud] device/team register (on login) failed: ${e.message}`));
         } catch (e) { log.warn(`[cloud] device register hook failed: ${e.message}`); }
       }
@@ -1208,7 +1208,7 @@ electronApp.whenReady().then(async () => {
     try { sysLang = (electronApp.getLocale && electronApp.getLocale()) || ""; } catch (_) {}
     cc.detectAndPersistDeviceInfo({ systemLanguage: sysLang })
       .then(() => cc.registerDevice())
-      .then(() => require("./backends/local-teams").syncAllLocalTeams())
+      .then(() => require("./backends/local-teams").syncAllLocalTeams({ force: true }))
       .catch((e) => log.warn(`[cloud] device-info/register (on launch) failed: ${e.message}`));
   } catch (e) { log.warn(`[cloud] device-info launch hook failed: ${e.message}`); }
 
