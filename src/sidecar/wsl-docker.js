@@ -656,6 +656,13 @@ async function ensureFreshImage({ emit } = {}) {
 // 容器内部视角的健康:docker exec 进容器用 node 探 127.0.0.1:8008。用来区分「容器真挂了」和
 // 「容器好好的、只是 WSL 的 localhost 转发坏了」(后者 Windows 侧 :8008 打不通,实测
 // `wsl --shutdown` 后 75 秒恢复)。
+// 容器内健康、Windows 却连不上 :port 时给用户/日志的统一说明(bootstrap 与守护循环共用)。
+function RELAY_UNREACHABLE_HINT(port = 8008) {
+  return `容器内 cicy-code 正常,但 Windows 连不上 127.0.0.1:${port}(WSL localhost 转发或 Windows TCP 端口异常;` +
+    `若桌面端日志里出现 connect EADDRINUSE,多半是 Windows 动态端口被占满/被 Hyper-V 保留段吞掉)。` +
+    `已自动重置过一次 WSL 仍不通时,请在管理员 PowerShell 执行:` +
+    ` netsh int ipv4 show excludedportrange protocol=tcp; netsh int ipv4 set dynamicport tcp start=49152 num=16384; 然后重启 Windows。`;
+}
 async function insideHealthy(container = "cicy-code-docker-8008", port = 8008) {
   try {
     await wslRun(`docker exec ${container} node -e "fetch('http://127.0.0.1:${port}/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"`, { timeout: 20000 });
@@ -1374,7 +1381,17 @@ async function _bootstrap({ onProgress, port = 8008, container = "cicy-code-dock
   if (!healthy && !protect.guard(log, "auto-update after health miss")) {
     healthy = await docker.waitUntil(() => probeHealth(port), { totalMs: 120000, everyMs: 3000 }); // 保护开启:只等,不自动改容器
   }
+  // Windows 侧探不到 ≠ 容器坏了。先从容器内部探一次:内部健康 = WSL localhost 转发 / Windows 端口
+  // 出了问题(实测 connect EADDRINUSE 连外网也报),这时绝不能再跑 update()「修复」——它会
+  // SIGTERM 重启 cicy-code,把正在跑的 agent 全部打断,而且对转发问题毫无帮助。
+  let relayBroken = false;
   if (!healthy) {
+    try { relayBroken = await insideHealthy(container, port); } catch {}
+  }
+  if (!healthy && relayBroken) {
+    log.warn(`[bootstrap] container healthy inside but 127.0.0.1:${port} unreachable from Windows → not touching the container`);
+    emit({ phase: "container", status: "running", message: RELAY_UNREACHABLE_HINT(port) });
+  } else if (!healthy) {
     emit({ phase: "container", status: "running", message: "服务尚未响应,正在检查并修复运行时完整性…" });
     try {
       const repaired = await update({ onProgress: emit, container, port });
@@ -1383,11 +1400,13 @@ async function _bootstrap({ onProgress, port = 8008, container = "cicy-code-dock
       log.warn(`[bootstrap] runtime auto-repair failed: ${e.message}`);
     }
   }
-  if (!healthy) healthy = await docker.waitUntil(() => probeHealth(port), { totalMs: 105000, everyMs: 3000 });
+  if (!healthy) healthy = await docker.waitUntil(() => probeHealth(port), { totalMs: relayBroken ? 30000 : 105000, everyMs: 3000 });
   if (healthy) { done(); await ensureAutostart(); await ensureDesktopShortcut(volume, port); } // survive reboot + desktop shortcut
-  else fail("health_timeout");
+  else fail(relayBroken ? "relay_unreachable" : "health_timeout", relayBroken ? RELAY_UNREACHABLE_HINT(port) : "");
   let healthMessage = "Docker cicy-code 已就绪 🎉";
-  if (!healthy) {
+  if (!healthy && relayBroken) {
+    healthMessage = RELAY_UNREACHABLE_HINT(port);
+  } else if (!healthy) {
     let tail = "";
     try {
       const r = await wslRun(`docker logs --tail 60 ${container}`, { timeout: 15000 });
@@ -1473,7 +1492,10 @@ async function cicyRuntimePlatformReady(container) {
   const check = `target=$(readlink -f "$HOME/.local/bin/cicy-code" 2>/dev/null || true); ` +
     `dest=$(dirname "$(dirname "$target")" 2>/dev/null); ` +
     `case "$(uname -m)" in x86_64) p=cicy-code-linux-x64;; aarch64|arm64) p=cicy-code-linux-arm64;; *) exit 1;; esac; ` +
-    `[ -x "$target" ] && { [ -f "$dest/lib/node_modules/$p/package.json" ] || [ -f "$dest/lib/node_modules/cicy-code/node_modules/$p/package.json" ]; }`;
+    // readlink -f 会一路解析到 <prefix>/lib/node_modules/cicy-code/bin/cicy-code.js,此时 $dest 就是
+    // 包目录本身,平台包在 $dest/node_modules/<p>(实际布局)。之前只查 $dest/lib/... 两种 → 永远 false
+    // → 每轮 bootstrap 都把「更新 cicy-code」当修复跑一遍 → 更新脚本 SIGTERM 重启 cicy-code,打断所有 agent。
+    `[ -x "$target" ] && { [ -f "$dest/node_modules/$p/package.json" ] || [ -f "$dest/lib/node_modules/$p/package.json" ] || [ -f "$dest/lib/node_modules/cicy-code/node_modules/$p/package.json" ]; }`;
   try { await wslRun(`docker exec ${container} bash -lc '${check}'`, { timeout: 15000 }); return true; }
   catch { return false; }
 }
@@ -1685,7 +1707,7 @@ async function readMihomoSelections(container = "cicy-code-docker-8008") {
 }
 
 module.exports = {
-  insideHealthy, wslShutdown,
+  insideHealthy, wslShutdown, RELAY_UNREACHABLE_HINT,
   bootstrap, status, restart, stop, dockerRestart, recreate, update, upgrade, runContainer, readContainerToken,
   distroInstalled, dockerInstalled, dockerEngineUp, imagePresent, probeHealth, wslRun, hasGatewayKey,
   readMihomoConfig, readMihomoSelections, parseMihomoSelections,

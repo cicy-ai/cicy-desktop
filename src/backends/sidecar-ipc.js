@@ -277,6 +277,14 @@ function register({ sidecarLogPath } = {}) {
             return;
           }
           if (_relayMisses < 2) { log.warn(`[docker-daemon] :${APP_PORT} unreachable from Windows but healthy inside (${_relayMisses}/2)`); return; }
+          // 已重置过一次仍不通:bootstrap 对此无能为力(而且以前它会跑「修复=更新」把 cicy-code
+          // 重启掉)。只把原因和修复提示写进卡片,每 10 分钟记一次日志,不再反复 bootstrap。
+          if (_relayResetDone) {
+            const hint = (appDocker.RELAY_UNREACHABLE_HINT && appDocker.RELAY_UNREACHABLE_HINT(APP_PORT)) || `container healthy inside but 127.0.0.1:${APP_PORT} unreachable from Windows`;
+            if (!_lastBootstrapError || _lastBootstrapError.reason !== "relay_unreachable") { _lastBootstrapError = { reason: "relay_unreachable", message: hint, ts: Date.now() }; log.warn(`[docker-daemon] ${hint}`); }
+            await refreshDockerStatus();
+            return;
+          }
         } else { _relayMisses = 0; }
       } else if (s.running) { _relayMisses = 0; }
       if (!s.running && !s.unknown && _autoBootstrapPaused && Date.now() < _autoBootstrapRetryAt) {
