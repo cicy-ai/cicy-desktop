@@ -1013,7 +1013,50 @@ async function bootstrap({ onProgress, port = 8008, container = CONTAINER, volum
   return { ok: healthy, container };
 }
 
+// Windows 侧「连 127.0.0.1 都 connect EADDRINUSE」= 动态 TCP 端口被占满 / 被 Hyper-V(winnat)
+// 的保留段吞掉。软件可修:重启 winnat 释放保留段 + 把动态端口范围重设为默认(49152-65535)。
+// 一次 UAC,结果写文件回读。返回 { ok, detail }。
+function elevatedTcpRepair({ emit } = {}) {
+  return new Promise(async (resolve) => {
+    if (process.platform !== "win32") return resolve({ ok: false, detail: "win-only" });
+    const dir = path.join(process.env.LOCALAPPDATA || os.tmpdir(), "cicy-desktop");
+    try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+    const ps1 = path.join(dir, "tcp-repair.ps1");
+    const resultFile = path.join(dir, "tcp-repair.result.txt");
+    try { fs.unlinkSync(resultFile); } catch {}
+    const script = [
+      '$ErrorActionPreference = "Continue"',
+      `$R = "${resultFile.replace(/"/g, '""')}"`,
+      'function Say($m) { Add-Content -Path $R -Value ("[" + (Get-Date -Format "HH:mm:ss") + "] " + $m) }',
+      '$S32 = Join-Path $env:SystemRoot "System32"; $NETSH = Join-Path $S32 "netsh.exe"; $NET = Join-Path $S32 "net.exe"',
+      'Say "start admin=$(([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(\'Administrators\'))"',
+      'try { $d = (& $NETSH int ipv4 show dynamicport tcp | Out-String) -replace "\s+"," "; Say ("before: " + $d.Trim()) } catch {}',
+      'try { $x = (& $NETSH int ipv4 show excludedportrange protocol=tcp | Out-String); $n = ([regex]::Matches($x, "^\s*\d+\s+\d+", "Multiline")).Count; Say ("excluded ranges: " + $n) } catch {}',
+      'try { $tw = (& (Join-Path $S32 "netstat.exe") -ano | Select-String "TIME_WAIT").Count; Say ("TIME_WAIT: " + $tw) } catch {}',
+      '& $NET stop winnat | Out-Null; Say ("net stop winnat exit=" + $LASTEXITCODE)',
+      '& $NETSH int ipv4 set dynamicport tcp start=49152 num=16384 | Out-Null; Say ("set dynamicport tcp exit=" + $LASTEXITCODE)',
+      '& $NETSH int ipv4 set dynamicport udp start=49152 num=16384 | Out-Null; Say ("set dynamicport udp exit=" + $LASTEXITCODE)',
+      '& $NET start winnat | Out-Null; Say ("net start winnat exit=" + $LASTEXITCODE)',
+      'try { $d = (& $NETSH int ipv4 show dynamicport tcp | Out-String) -replace "\s+"," "; Say ("after: " + $d.Trim()) } catch {}',
+      'Say "DONE"',
+    ].join("\r\n");
+    try { fs.writeFileSync(ps1, "\uFEFF" + script, "utf8"); } catch (e) { return resolve({ ok: false, detail: `写提权脚本失败: ${e.message}` }); }
+    const launched = await launchElevated("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", ps1], { emit });
+    if (!launched) return resolve({ ok: false, detail: "无法发起提权（UAC 被拒绝或不可用）" });
+    const t0 = Date.now(); let lines = [];
+    while (Date.now() - t0 < 3 * 60 * 1000) {
+      await new Promise((r) => setTimeout(r, 3000));
+      try { lines = fs.readFileSync(resultFile, "utf8").split(/\r?\n/).filter(Boolean); } catch {}
+      if (lines.some((l) => /DONE/.test(l))) break;
+      if (Date.now() - t0 > 90 * 1000 && lines.length === 0) break;
+    }
+    const detail = lines.map((l) => l.replace(/^\[[^\]]*\] /, "")).join(" | ");
+    resolve({ ok: /set dynamicport tcp exit=0/.test(detail) && /net start winnat exit=0/.test(detail), detail: detail || "提权后 90 秒内没有任何进展（UAC 可能没有被点击「是」）" });
+  });
+}
+
 module.exports = {
+  elevatedTcpRepair,
   start, stop, stopContainer, restart, checkStatus, loadImage, loadImageFromTarball,
   downloadImageTarball, imagePresent, dockerOk, installDocker,
   bootstrap, probeHealth, readContainerToken, dockerDesktopExe, desktopDir, downloadsDir, imageTarballPath,

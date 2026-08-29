@@ -170,6 +170,8 @@ function register({ sidecarLogPath } = {}) {
   // WSL 功能启用后必须重启 Windows 才能继续。不等人:自动安排 90 秒后重启(桌面上会有
   // 系统倒计时提示),UI 可「取消」或「立即重启」。每次开机只安排一次。
   let _rebootScheduled = false;
+  let _tcpRepairDone = false;        // Windows 端口修复每次进程只做一次(需要 UAC)
+  let _relayMissesAfterRepair = 0;   // 端口修复后仍连不上的轮数 → 3 轮自动重启
   let _relayMisses = 0, _relayResetDone = false; // WSL localhost 转发自愈(见 daemon 循环)
   let _unknownStreak = 0, _wslRepairDone = false; // WSL 卡死自愈(见 daemon 循环)
   let _softRetryAt = 0; // 非硬失败(如 docker_install_failed)也退避 2 分钟,别每 35 秒重跑一遍
@@ -181,13 +183,13 @@ function register({ sidecarLogPath } = {}) {
     if (delta) { c = Math.max(0, c + delta); try { fs.mkdirSync(path.dirname(REBOOT_COUNT_FILE), { recursive: true }); fs.writeFileSync(REBOOT_COUNT_FILE, JSON.stringify({ count: c, ts: Date.now() })); } catch {} }
     return c;
   }
-  function scheduleReboot(delaySec = 90) {
+  function scheduleReboot(delaySec = 90, why = "") {
     if (_rebootScheduled || process.platform !== "win32") return false;
     if (delaySec > 10 && rebootCount() >= 2) { log.warn("[docker] auto-reboot skipped: already rebooted 2× for WSL without success"); return false; }
     _rebootScheduled = true;
     rebootCount(+1);
     try {
-      require("child_process").execFile("shutdown", ["/r", "/t", String(delaySec), "/c", "CiCy Desktop: WSL2 功能已启用,需要重启 Windows 才能继续安装 Docker;登录后会自动继续。可在 CiCy Desktop 里取消。"], { windowsHide: true }, (err) => {
+      require("child_process").execFile("shutdown", ["/r", "/t", String(delaySec), "/c", why || "CiCy Desktop: WSL2 功能已启用,需要重启 Windows 才能继续安装 Docker;登录后会自动继续。可在 CiCy Desktop 里取消。"], { windowsHide: true }, (err) => {
         if (err) { _rebootScheduled = false; log.warn(`[docker] schedule reboot failed: ${err.message}`); }
         else log.info(`[docker] Windows reboot scheduled in ${delaySec}s (WSL features enabled)`);
       });
@@ -277,11 +279,34 @@ function register({ sidecarLogPath } = {}) {
             return;
           }
           if (_relayMisses < 2) { log.warn(`[docker-daemon] :${APP_PORT} unreachable from Windows but healthy inside (${_relayMisses}/2)`); return; }
-          // 已重置过一次仍不通:bootstrap 对此无能为力(而且以前它会跑「修复=更新」把 cicy-code
-          // 重启掉)。只把原因和修复提示写进卡片,每 10 分钟记一次日志,不再反复 bootstrap。
+          // 已重置过一次 WSL 仍不通:bootstrap 对此无能为力(以前它会跑「修复=更新」把 cicy-code
+          // 重启掉)。自愈继续往下走:
+          //   1) 一次 UAC 修 Windows 端口(net stop winnat → 重设动态端口范围 → net start winnat),30s 复探;
+          //   2) 修完仍连续 3 轮不通 → 自动重启 Windows(沿用上限 2 次)。
           if (_relayResetDone) {
             const hint = (appDocker.RELAY_UNREACHABLE_HINT && appDocker.RELAY_UNREACHABLE_HINT(APP_PORT)) || `container healthy inside but 127.0.0.1:${APP_PORT} unreachable from Windows`;
-            if (!_lastBootstrapError || _lastBootstrapError.reason !== "relay_unreachable") { _lastBootstrapError = { reason: "relay_unreachable", message: hint, ts: Date.now() }; log.warn(`[docker-daemon] ${hint}`); }
+            if (!_tcpRepairDone && appDocker.elevatedTcpRepair) {
+              _tcpRepairDone = true;
+              _lastBootstrapError = { reason: "relay_unreachable", message: "容器正常但 Windows 连不上 :8008 → 正在修复 Windows TCP 端口(请在 UAC 弹窗点「是」)…", ts: Date.now() };
+              await refreshDockerStatus();
+              auditDestructiveIpc(log, "docker:self-heal-windows-tcp", null, { container: APP_CONTAINER });
+              let r = { ok: false, detail: "" };
+              try { r = await appDocker.elevatedTcpRepair({ emit: () => {} }); } catch (e) { r = { ok: false, detail: e.message }; }
+              log.warn(`[docker-daemon] windows tcp repair ok=${r.ok}: ${r.detail}`);
+              await new Promise((res) => setTimeout(res, 30000));
+              _relayMissesAfterRepair = 0;
+              await refreshDockerStatus();
+              return;
+            }
+            _relayMissesAfterRepair += 1;
+            if (_relayMissesAfterRepair >= 3 && !_rebootScheduled && rebootCount() < 2) {
+              _lastBootstrapError = { reason: "relay_unreachable", message: "容器正常但 Windows 连不上 :8008,端口修复无效 → 90 秒后自动重启 Windows 修复", ts: Date.now() };
+              log.warn("[docker-daemon] relay still unreachable after tcp repair → auto reboot");
+              scheduleReboot(90, "Windows 无法连接本机 :8008(端口异常),自动重启修复");
+              await refreshDockerStatus();
+              return;
+            }
+            if (!_lastBootstrapError || _lastBootstrapError.reason !== "relay_unreachable" || !/端口修复无效|正在修复/.test(_lastBootstrapError.message)) { _lastBootstrapError = { reason: "relay_unreachable", message: hint, ts: Date.now() }; log.warn(`[docker-daemon] ${hint}`); }
             await refreshDockerStatus();
             return;
           }
