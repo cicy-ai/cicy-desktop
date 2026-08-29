@@ -14,7 +14,7 @@ const path = require("path");
 const { BrowserWindow } = require("electron");
 const log = require("electron-log");
 
-// Fixed homepage window size (写死 930*640, 不能 resize).
+// Initial homepage window size; the window is maximized right after creation.
 const FIXED_WIDTH = 930;
 const FIXED_HEIGHT = 640;
 
@@ -59,9 +59,9 @@ async function openHomepageStandalone() {
   homepage = new BrowserWindow({
     width: FIXED_WIDTH,
     height: FIXED_HEIGHT,
-    resizable: false,
-    maximizable: false,
-    fullscreenable: false,
+    resizable: true,
+    maximizable: true,
+    fullscreenable: true,
     title: "CiCy Desktop",
     icon: require("../utils/app-icon").appIconPath(), // npx/unpackaged → set the
     // window+taskbar icon ourselves (no .exe to embed it on Windows).
@@ -98,6 +98,8 @@ async function openHomepageStandalone() {
   homepage.on("leave-full-screen", () => {
     try { homepage.webContents.send("window:fullscreen", false); } catch {}
   });
+
+  try { homepage.maximize(); } catch (e) {}
 
   const target = pickHomepageURL();
   log.info(`[homepage] loading ${target}`);

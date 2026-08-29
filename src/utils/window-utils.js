@@ -357,11 +357,16 @@ function createWindow(options = {}, accountIdx = 1, forceNew = false) {
 
   // 后台开窗:渲染好再 showInactive(不夺焦点/不激活 app)。ready-to-show 偶发不触发
   // (页面挂了等)→ 3s 兜底照样 showInactive,窗口绝不会永远隐身。
+  // 默认最大化:调用方没指定尺寸、且没有用户手动还原过的保存状态时,窗口最大化打开。
+  const wantMaximize = width === 1200 && height === 800 && (!savedState || savedState.isMaximized !== false);
+  const maximize = () => { try { if (!win.isDestroyed() && !win.isMaximized()) win.maximize(); } catch (e) {} };
   if (background) {
     let shown = false;
-    const quiet = () => { if (shown || win.isDestroyed()) return; shown = true; try { win.showInactive(); } catch (e) {} };
+    const quiet = () => { if (shown || win.isDestroyed()) return; shown = true; try { win.showInactive(); } catch (e) {} if (wantMaximize) maximize(); };
     try { win.once("ready-to-show", quiet); } catch (e) {}
     setTimeout(quiet, 3000);
+  } else if (wantMaximize) {
+    maximize();
   }
 
   // 监听窗口状态变化并自动保存（基于URL）

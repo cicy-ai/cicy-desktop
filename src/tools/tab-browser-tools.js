@@ -307,7 +307,15 @@ class TabManager {
         }
       } catch (e) {}
     }
+    // 所有 cicy-desktop 窗口默认最大化:先按工作区尺寸建窗(隐藏态 maximize 在 Windows
+    // 上会把窗口直接弹出来,所以不能在 show 前调),首次显示时再真正 maximize。
+    try {
+      const { screen } = require("electron");
+      const wa = screen.getPrimaryDisplay().workArea;
+      Object.assign(winOpts, { x: wa.x, y: wa.y, width: wa.width, height: wa.height });
+    } catch (e) {}
     this.win = new BrowserWindow(winOpts);
+    this.win.once("show", () => { try { if (!this.win.isDestroyed() && !this.win.isMaximized()) this.win.maximize(); } catch (e) {} });
     // 兜底:无论谁建的窗口,3s 内没人 show/showInactive 就静默显示,窗口绝不会永远隐身。
     setTimeout(() => { try { if (!this.win.isDestroyed() && !this.win.isVisible()) this.win.showInactive(); } catch (e) {} }, 3000);
     try {
