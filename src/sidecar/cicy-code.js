@@ -39,6 +39,11 @@ function nodeMajor(bin) {
   try { const m = String(execFileSync(bin, ["-v"], { encoding: "utf8", timeout: 5000 })).match(/v(\d+)\./); return m ? Number(m[1]) : 0; } catch { return 0; }
 }
 function findUsableNode() {
+  // PATH 上的 node 优先(Linux 发行版 / nvm / 自定义前缀,例如 /tools/node/bin)。
+  for (const d of String(process.env.PATH || "").split(path.delimiter).filter(Boolean)) {
+    const node = path.join(d, "node"), npx = path.join(d, "npx");
+    try { if (fs.existsSync(node) && fs.existsSync(npx) && nodeMajor(node) >= 20) return d; } catch {}
+  }
   for (const d of NODE_SEARCH) {
     const node = path.join(d, "node"), npx = path.join(d, "npx");
     try { if (fs.existsSync(node) && fs.existsSync(npx) && nodeMajor(node) >= 20) return d; } catch {}
@@ -74,7 +79,8 @@ async function ensureNode({ emit } = {}) {
   let dir = findUsableNode();
   if (dir) return adopt(dir);
   const arch = process.arch === "arm64" ? "arm64" : "x64";
-  const fname = `node-${NODE_VER}-darwin-${arch}.tar.gz`;
+  const osTag = process.platform === "darwin" ? "darwin" : "linux"; // win32 在上层已分流
+  const fname = `node-${NODE_VER}-${osTag}-${arch}.tar.gz`;
   const urls = [
     `https://cdn.npmmirror.com/binaries/node/${NODE_VER}/${fname}`, // CN-fast
     `https://nodejs.org/dist/${NODE_VER}/${fname}`,                 // 官方兜底
@@ -122,7 +128,7 @@ function probeIsCN() {
 }
 
 // ── Homebrew + 系统依赖 ───────────────────────────────────────────────────────
-const BREW_DIRS = ["/opt/homebrew/bin", "/usr/local/bin"];
+const BREW_DIRS = ["/opt/homebrew/bin", "/usr/local/bin", "/home/linuxbrew/.linuxbrew/bin"];
 function findBrew() { for (const d of BREW_DIRS) { const p = path.join(d, "brew"); try { if (fs.existsSync(p)) return p; } catch {} } return null; }
 
 // 把 runtime 二进制软链进 ~/.local/bin —— cicy 约定的用户 bin(cicy-code setup 会把它加进 shell
@@ -174,14 +180,15 @@ async function ensureEnv({ emit } = {}) {
   // 3+4) Homebrew + tmux/jq(cicy-code 跑 tmux 多 agent 必需,首次它自己装很慢且会和我们抢锁,
   // 所以这里**预装好**,cicy-code 启动时已就绪)。
   const pathEnv = `${nodeBinDir}:${BREW_DIRS.join(":")}:${NODE_SEARCH.join(":")}:/usr/bin:/bin:${process.env.PATH || ""}`;
+  // brew 只在真的缺依赖时才需要(Linux 发行版通常 apt 已装好 tmux/jq,没有 brew 也不该挡启动)。
   const brew = findBrew();
-  if (!brew) {
-    e({ phase: "deps", status: "error", message: t("sidecar.brewMissing") + "\n/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"" });
-    return null;
-  }
   const brewEnv = { ...process.env, PATH: pathEnv, HOMEBREW_NO_AUTO_UPDATE: "1", ...(cn ? { HOMEBREW_BOTTLE_DOMAIN: process.env.HOMEBREW_BOTTLE_DOMAIN || "https://mirrors.ustc.edu.cn/homebrew-bottles" } : {}) };
   for (const dep of ["tmux", "jq"]) {
     if (cmdExists(dep, pathEnv)) { e({ phase: "deps", status: "running", message: t("sidecar.depInstalled", { dep }) }); continue; }
+    if (!brew) {
+      e({ phase: "deps", status: "error", message: t("sidecar.brewMissing") + "\n/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"" });
+      return null;
+    }
     e({ phase: "deps", status: "running", message: t("sidecar.depInstalling", { dep }) });
     const ok = await brewInstallStream(brew, dep, brewEnv, e);
     if (!ok) { e({ phase: "deps", status: "error", message: t("sidecar.depFail", { dep }) }); return null; }
