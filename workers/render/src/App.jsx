@@ -3840,23 +3840,23 @@ function HubBar({ hub }) {
   if (!hub.loggedIn) {
     return (
       <div data-id="HubBar" className="hubbar" style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", marginBottom: 12, border: "1px dashed var(--border, #2c2f36)", borderRadius: 12 }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ flex: "1 1 0", minWidth: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 600 }}>{tr("cicyHub.title", "CiCy Hub")}</div>
           <div style={{ fontSize: 12, opacity: .6 }}>{tr("cicyHub.loginSub", "邮箱验证码登录,自动列出这个账号下的所有 cicy-code 实例")}</div>
         </div>
-        <button type="button" className="btn-primary" data-id="HubBar-login" onClick={hub.openLogin}>{tr("cicyHub.login", "登录 CiCy Hub")}</button>
+        <button type="button" className="btn-primary" data-id="HubBar-login" style={{ width: "auto", flex: "none", whiteSpace: "nowrap" }} onClick={hub.openLogin}>{tr("cicyHub.login", "登录 CiCy Hub")}</button>
       </div>
     );
   }
   return (
-    <div data-id="HubBar" className="hubbar" style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 14px", marginBottom: 12, border: "1px solid var(--border, #2c2f36)", borderRadius: 12 }}>
+    <div data-id="HubBar" className="hubbar" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, padding: "8px 14px", marginBottom: 12, border: "1px solid var(--border, #2c2f36)", borderRadius: 12 }}>
       <span className="bcard__dot" data-tone="ok" />
       <div style={{ flex: 1, minWidth: 0, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         <b>{tr("cicyHub.title", "CiCy Hub")}</b> · {tr("cicyHub.signedInAs", "已登录")} {hub.owner}
         {hub.error && <span style={{ color: "#f87171", marginLeft: 8 }}>{hubErrText(hub.error)}</span>}
       </div>
-      <button type="button" className="btn-ghost" data-id="HubBar-refresh" disabled={hub.loading} onClick={hub.refresh}>{hub.loading ? <Spinner /> : tr("cicyHub.refresh", "刷新")}</button>
-      <button type="button" className="btn-ghost" data-id="HubBar-logout" onClick={hub.logout}>{tr("cicyHub.logout", "退出 Hub")}</button>
+      <button type="button" className="btn-ghost" data-id="HubBar-refresh" style={{ width: "auto", flex: "none", whiteSpace: "nowrap" }} disabled={hub.loading} onClick={hub.refresh}>{hub.loading ? <Spinner /> : tr("cicyHub.refresh", "刷新")}</button>
+      <button type="button" className="btn-ghost" data-id="HubBar-logout" style={{ width: "auto", flex: "none", whiteSpace: "nowrap" }} onClick={hub.logout}>{tr("cicyHub.logout", "退出 Hub")}</button>
       {hub.instances && hub.instances.length === 0 && !hub.loading && (
         <div style={{ flexBasis: "100%", fontSize: 12, opacity: .6, marginTop: 4 }}>{tr("cicyHub.empty", "这个账号下还没有 cicy-code 实例。在 cicy-code 的「CiCy 账号」里用同一个邮箱登录 Hub 即可出现。")}</div>
       )}
