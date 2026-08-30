@@ -669,10 +669,16 @@ async function openTab(accountIdx, url, opts = {}) {
   if (accountIdx === 0 && url) {
     try {
       const team = require("../backends/local-teams").teamIdentityForUrl(url);
+      // Only the team's root page gets the team name as a fixed tab title. A
+      // sub-page of the same origin (e.g. /proxy → 代理管理) keeps the team's
+      // avatar/colour but lets its own document.title through, so the tab
+      // strip shows what the page is rather than "Docker :8008" twice.
+      let subPage = false;
+      try { subPage = new URL(url).pathname.replace(/\/+$/, "") !== ""; } catch (e) {}
       if (team) opts = {
         ...opts,
         team: true,
-        title: opts.title || team.title,
+        title: opts.title || (subPage ? "" : team.title),
         avatar: opts.avatar || team.avatar,
         colorKey: opts.colorKey || team.id,
       };
