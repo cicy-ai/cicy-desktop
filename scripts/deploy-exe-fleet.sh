@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Superseded by the cicy-exe-deploy skill (cicy-skills/skills/cicy-exe-deploy) — kept as a plain-ssh fallback.
 # Push a locally built CiCy Desktop installer to every Windows node and install
 # it there — no CDN, no auto-update wait.
 #
@@ -29,7 +30,7 @@ WIN_PATH="C:\\$REMOTE_NAME"
 if [ $# -gt 0 ]; then NODES="$*"; fi
 if [ -z "${NODES:-}" ]; then
   # every xs-* alias in ~/.ssh/config (Windows hosts); mac-local etc. are not exe targets
-  NODES=$(awk '/^Host xs-/{print $2}' ~/.ssh/config | sort -V)
+  NODES=$(awk '/^Host xs-/ && $2 !~ /[*?]/{print $2}' ~/.ssh/config | sort -V)
 fi
 PORT=${LOCAL_PORT_BASE:-18100}
 SCRATCH=$(mktemp -d)
