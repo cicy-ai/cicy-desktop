@@ -21,7 +21,7 @@ const os = require("os");
 const { readGlobalConfig, updateGlobalConfig } = require("./utils/global-json");
 const https = require("https");
 const log = require("electron-log");
-const { OSS_RELEASES_BASE } = require("./sidecar/mirrors");
+const { R2_RELEASES_BASE } = require("./sidecar/mirrors");
 
 // ── 版本比较:>0 a 新于 b ─────────────────────────────────────────────────────
 function cmpVer(a, b) {
@@ -81,7 +81,7 @@ async function fetchLatestVersion() {
   const file = process.platform === "win32" ? "win-latest-version.txt"
     : process.platform === "darwin" ? "mac-latest-version.txt"
     : "linux-latest-version.txt";
-  return (await getText(`${OSS_RELEASES_BASE}/${file}`)).trim().replace(/^v/, "");
+  return (await getText(`${R2_RELEASES_BASE}/${file}`)).trim().replace(/^v/, "");
 }
 
 // ── 安装包 URL(分平台 + 分网络)+ 本地文件名 ────────────────────────────────
@@ -92,7 +92,7 @@ function assetFor(version) {
   const file = plat === "win32" ? `cicy-desktop-${version}.exe`
     : plat === "darwin" ? `cicy-desktop-${version}-${arch}.pkg`
     : `CiCy-Desktop-${version}.AppImage`;
-  return { url: `${OSS_RELEASES_BASE}/${file}`, file };
+  return { url: `${R2_RELEASES_BASE}/${file}`, file };
 }
 
 // ── 下载(带进度,跟随重定向)──────────────────────────────────────────────────

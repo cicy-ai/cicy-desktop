@@ -29,14 +29,14 @@ const { t } = require("../i18n"); // 进度/错误文案 i18n(drawer 里显示)
 const tt = (k, o) => t(`chromeProxy.${k}`, o);
 
 const VER = (process.env.CICY_MIHOMO_VERSION || "v1.10.4").replace(/^v?/, "v");
-const OSS_BASE = process.env.CICY_OSS_BASE || "https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com";
+const R2_BASE = process.env.CICY_R2_BASE || process.env.CICY_OSS_BASE || "https://r2.deepfetch.de5.net";
 const IS_WIN = process.platform === "win32";
 const EXT = IS_WIN ? ".exe" : "";
 
 function osStr() { return process.platform === "darwin" ? "darwin" : IS_WIN ? "windows" : "linux"; }
 function archStr() { return process.arch === "arm64" ? "arm64" : "amd64"; }
-// OSS mirror of cicy-ai/cicy-mihomo releases (see mihomo/<ver>/mihomo-<os>-<arch>).
-function assetUrl() { return process.env.CICY_MIHOMO_RELEASE_URL || `${OSS_BASE}/mihomo/${VER}/mihomo-${osStr()}-${archStr()}${EXT}`; }
+// R2 mirror of cicy-ai/cicy-mihomo releases (see mihomo/<ver>/mihomo-<os>-<arch>).
+function assetUrl() { return process.env.CICY_MIHOMO_RELEASE_URL || `${R2_BASE}/mihomo/${VER}/mihomo-${osStr()}-${archStr()}${EXT}`; }
 
 // Store under ~/.local/bin like cicy-code / cicy-mihomo — never ~/cicy-ai/runtime
 // anymore. Old runtime-store copies still RESOLVE (read-only compat) so an

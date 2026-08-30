@@ -191,46 +191,42 @@ jobs:
             echo "uploaded $PKG ($(du -h "$PKG" | cut -f1))"
           done
 
-      # Publish the .pkg installers to OSS (CN-fast). GitHub release downloads stall from
-      # mainland China, so users in CN pull from OSS instead. Each arch gets a versioned key
+      # Publish the .pkg installers to our R2 bucket. GitHub release downloads stall from
+      # mainland China, so users in CN pull from the CDN instead. Each arch gets a versioned key
       # plus a stable cicy-desktop-mac-<arch>-latest.pkg alias a download page can hard-link.
       # Same bucket/creds as the Windows latest.exe step.
-      - name: Upload .pkg to OSS (versioned + per-arch latest alias)
-        continue-on-error: true   # OSS is a convenience mirror — never fail the release
+      - name: Upload .pkg to R2 (versioned + per-arch latest alias)
+        continue-on-error: true   # the CDN mirror is a convenience — never fail the release
         shell: bash
         env:
-          OSS_AK: ${{ secrets.OSS_ACCESS_KEY_ID }}
-          OSS_SK: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_API_TOKEN:  ${{ secrets.R2_API_TOKEN }}
         run: |
           set -uo pipefail
           VER="${{ steps.meta.outputs.version }}"
-          if [ -z "${OSS_AK:-}" ] || [ -z "${OSS_SK:-}" ]; then
-            echo "::warning::OSS creds missing — skipping OSS mirror"; exit 0
+          if [ -z "${R2_ACCOUNT_ID:-}" ] || [ -z "${R2_API_TOKEN:-}" ]; then
+            echo "::warning::R2 creds missing — skipping CDN mirror"; exit 0
           fi
-          curl -fsSL -o ossutil.zip "https://gosspublic.alicdn.com/ossutil/1.7.18/ossutil-v1.7.18-mac-arm64.zip"
-          unzip -oq ossutil.zip
-          OSS="./ossutil-v1.7.18-mac-arm64/ossutil"; chmod +x "$OSS"
-          "$OSS" config -e oss-cn-shanghai.aliyuncs.com -i "$OSS_AK" -k "$OSS_SK"
-          BASE="oss://cicy-1372193042-cn/releases"
-          HOST="https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/releases"
+          BASE="releases"
+          HOST="https://r2.deepfetch.de5.net/releases"
           for ARCH in x64 arm64; do
             PKG="cicy-desktop-$VER-$ARCH.pkg"
-            [ -f "$PKG" ] || { echo "::warning::$PKG not built — skipping OSS for $ARCH"; continue; }
-            "$OSS" cp "$PKG" "$BASE/$PKG" -f --acl public-read || { echo "::warning::OSS versioned upload failed $ARCH"; continue; }
-            "$OSS" cp "$PKG" "$BASE/cicy-desktop-mac-$ARCH-latest.pkg" -f --acl public-read || echo "::warning::OSS latest upload failed $ARCH"
-            echo "OSS $ARCH: $HOST/cicy-desktop-mac-$ARCH-latest.pkg"
+            [ -f "$PKG" ] || { echo "::warning::$PKG not built — skipping R2 for $ARCH"; continue; }
+            node scripts/r2.mjs put "$BASE/$PKG" "$PKG" || { echo "::warning::R2 versioned upload failed $ARCH"; continue; }
+            node scripts/r2.mjs put "$BASE/cicy-desktop-mac-$ARCH-latest.pkg" "$PKG" || echo "::warning::R2 latest upload failed $ARCH"
+            echo "R2 $ARCH: $HOST/cicy-desktop-mac-$ARCH-latest.pkg"
           done
           printf '%s' "$VER" > mac-latest-version.txt
-          "$OSS" cp mac-latest-version.txt "$BASE/mac-latest-version.txt" -f --acl public-read || true
+          node scripts/r2.mjs put "$BASE/mac-latest-version.txt" mac-latest-version.txt || true
 
-          # Prune —— 版本化 pkg 只保留最新 2 个版本(每版含 x64+arm64),更旧的删掉(省 OSS)。
+          # Prune —— 版本化 pkg 只保留最新 2 个版本(每版含 x64+arm64),更旧的删掉(省存储)。
           # 只匹配 cicy-desktop-<semver>-<arch>.pkg;mac-<arch>-latest.pkg 指针不含 semver、永远保留。非致命。
-          allvers=$("$OSS" ls "$BASE/cicy-desktop-" -s 2>/dev/null | grep -oE 'cicy-desktop-[0-9]+\.[0-9]+\.[0-9]+-(x64|arm64)\.pkg' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | sort -uV || true)
+          allvers=$(node scripts/r2.mjs list "$BASE/cicy-desktop-" 2>/dev/null | grep -oE 'cicy-desktop-[0-9]+\.[0-9]+\.[0-9]+-(x64|arm64)\.pkg' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | sort -uV || true)
           keep=$(echo "$allvers" | tail -2)
           for v in $allvers; do
             echo "$keep" | grep -qx "$v" && continue
             for ARCH in x64 arm64; do
-              "$OSS" rm "$BASE/cicy-desktop-$v-$ARCH.pkg" -f 2>/dev/null || true
+              node scripts/r2.mjs delete "$BASE/cicy-desktop-$v-$ARCH.pkg" 2>/dev/null || true
             done
             echo "Pruned old mac pkg version: $v"
           done

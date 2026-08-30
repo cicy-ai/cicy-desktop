@@ -34,11 +34,11 @@ const EXTRA_PORTS = process.env.CICY_EXTRA_PORTS || "18000-19999";
 // PRE-BAKED WSL rootfs (built in CI, .github/workflows/build-wsl-package.yml):
 // Ubuntu 22.04 + Docker Engine + the cicy-code image already loaded into
 // /var/lib/docker, with dockerd auto-start via /etc/wsl.conf. We just download
-// it (Aliyun OSS, CN-fast ~2.7MB/s) and `wsl --import` it — so the bootstrap's
+// it (Cloudflare R2) and `wsl --import` it — so the bootstrap's
 // apt-install + image download/load steps are already done inside the tarball
 // (their checks see docker present + image present and SKIP). ~122MB.
 const ROOTFS_URL = process.env.CICY_WSL_ROOTFS_URL ||
-  "https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/rootfs/cicy-wsl-latest.tar.gz";
+  "https://r2.deepfetch.de5.net/rootfs/cicy-wsl-latest.tar.gz";
 
 function rootfsPath() { return path.join(docker.downloadsDir(), "cicy-wsl-rootfs.tar.gz"); }
 function shellQuote(value) { return `'${String(value).replace(/'/g, "'\\''")}'`; }

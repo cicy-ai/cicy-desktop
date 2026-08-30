@@ -11,10 +11,13 @@
 //
 // All current mirrors are prepend-style. Add domain-style entries as needed.
 
-// 自更新 CN feed 首选 OSS(自建,稳)。gh-proxy.com 反代已删(不稳/有问题);
-// ghproxy.net 留作 OSS 不可达时的兜底镜像。非 CN 走 GitHub 直连(见 app-updater)。
-const OSS_RELEASES_BASE = process.env.CICY_OSS_RELEASES_BASE
-  || "https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/releases";
+// 自更新 CN feed 首选自建 R2(Cloudflare)。原先的 Aliyun OSS 已下线(账号停用,
+// 整桶 403 UserDisable),不再作为来源。gh-proxy.com 反代已删(不稳/有问题);
+// ghproxy.net 留作 R2 不可达时的兜底镜像。非 CN 走 GitHub 直连(见 app-updater)。
+// 注意:R2 从中国大陆的下载速度明显不如原来的 OSS,大文件(rootfs/镜像)会更慢。
+const R2_RELEASES_BASE = process.env.CICY_R2_RELEASES_BASE
+  || process.env.CICY_OSS_RELEASES_BASE  // 兼容旧变量名
+  || "https://r2.deepfetch.de5.net/releases";
 
 const MIRRORS = [
   // gh.llkk.cc / gh-proxy.com removed — unreachable / unstable from APAC.
@@ -63,8 +66,8 @@ async function resolveFeedUrl(feedBase) {
     req.end();
   });
 
-  // CN 首选 OSS:OSS 上有 electron-updater feed(latest*.yml)才用它。
-  if (await probe(OSS_RELEASES_BASE + "/latest.yml")) return OSS_RELEASES_BASE;
+  // CN 首选 R2:R2 上有 electron-updater feed(latest*.yml)才用它。
+  if (await probe(R2_RELEASES_BASE + "/latest.yml")) return R2_RELEASES_BASE;
   for (const m of MIRRORS) {
     const base = mirrorUrl(feedBase, m);
     if (await probe(base + "/latest.yml")) return base;
@@ -72,4 +75,4 @@ async function resolveFeedUrl(feedBase) {
   return feedBase; // fallback: direct
 }
 
-module.exports = { MIRRORS, OSS_RELEASES_BASE, mirrorUrl, buildUrlList, resolveFeedUrl };
+module.exports = { MIRRORS, R2_RELEASES_BASE, mirrorUrl, buildUrlList, resolveFeedUrl };

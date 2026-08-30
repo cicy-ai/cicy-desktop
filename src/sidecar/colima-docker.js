@@ -50,12 +50,12 @@ const VM_DISK   = process.env.CICY_COLIMA_DISK   || "30";
 // Colima 基础 VM 镜像:colima `start` 默认从 github.com/abiosoft/colima-core 下,
 // CN 直接 EOF 拉不下来(真机实测)。colima 0.10.3 没有 --disk-image-mirror(那是
 // main 分支才有),但有 `--disk-image <本地文件> --force-disk-image` —— 所以我们把
-// 基础镜像托到自己的 OSS(CN-fast),先下到本地,再用 --disk-image 指过去,彻底绕开
+// 基础镜像托到自己的 R2,先下到本地,再用 --disk-image 指过去,彻底绕开
 // github。--force-disk-image 让 colima 不去校验它「不是我预期版本」。镜像内容只要是
 // ubuntu-24.04 + docker 的 cloudimg 即可,和 colima 版本解耦(用稳定 key,不跟版本号)。
-const OSS_BASE = process.env.CICY_OSS_BASE || "https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com";
+const R2_BASE = process.env.CICY_R2_BASE || process.env.CICY_OSS_BASE || "https://r2.deepfetch.de5.net";
 const BASE_IMAGE_URL = process.env.CICY_COLIMA_BASE_URL ||
-  `${OSS_BASE}/colima-base/ubuntu-2404-${ARCH_TAG}-docker.raw.gz`;
+  `${R2_BASE}/colima-base/ubuntu-2404-${ARCH_TAG}-docker.raw.gz`;
 function baseImagePath() { return path.join(os.homedir(), "cicy-ai", "colima", `ubuntu-2404-${ARCH_TAG}-docker.raw.gz`); }
 
 // Electron 启动时 PATH 往往不含 Homebrew 的 bin,导致找不到 brew/colima/docker。

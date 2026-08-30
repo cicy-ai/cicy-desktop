@@ -7,8 +7,8 @@
 // cicy-code` (see cicy-code.js); Windows runs it in Docker Desktop instead.
 // The base-env image's entrypoint installs cicy-code from npm at container
 // startup, so the image is version-independent. If the image isn't present
-// locally it's loaded from R2 (CN-friendly, no Docker Hub pull):
-//   https://r2.deepfetch.de5.net/docker/cicy-code-latest.tar.gz
+// locally it's loaded from our R2 bucket (no Docker Hub pull):
+//   https://r2.deepfetch.de5.net/images/cicy-code-latest.tar.gz
 //
 // The container maps :8008 and persists ~/cicy-ai in a named volume.
 const log = require("electron-log"); // bootstrap preflight failures must land in main.log
@@ -21,9 +21,11 @@ const path = require("path");
 const { classifyWslPrerequisites } = require("./wsl-prerequisites");
 
 const IMAGE     = process.env.CICY_DOCKER_IMAGE || "cicybot/cicy-code:latest";
-// Image tarball on Aliyun OSS (oss-cn-shanghai, public-read) — CN-domestic and
-// fast (~13MB/s upload); R2 was throttled to ~150KB/s from CN. Override via env.
-const R2_TARBALL = process.env.CICY_DOCKER_URL  || "https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/images/cicy-code-latest.tar.gz";
+// Image tarball on Cloudflare R2 (public bucket). The Aliyun OSS mirror it used
+// to live on is gone — that account was disabled and the whole bucket returns
+// 403 UserDisable. Note the tradeoff recorded when we moved OFF R2 originally:
+// OSS served CN at ~13MB/s, R2 was throttled to ~150KB/s from CN. Override via env.
+const R2_TARBALL = process.env.CICY_DOCKER_URL  || "https://r2.deepfetch.de5.net/images/cicy-code-latest.tar.gz";
 const DL_UA     = process.env.CICY_DL_UA || "cicy-desktop"; // download UA (CN mirrors 403 empty/Mozilla UAs)
 const CONTAINER = process.env.CICY_DOCKER_CONTAINER || "cicy-code";
 const VOLUME    = process.env.CICY_DOCKER_VOLUME || "cicy-ai-data";
@@ -674,7 +676,7 @@ function featureEnabled(feature) {
 // 新版 WSL(微软独立发布的 MSI,Store 版同源):不走旧的 LxssManager、内核内置、`--status` 等命令
 // 齐全、localhost 转发稳定。老 Win10 自带的旧版 WSL 反复死锁/半死/缺内核,全部由它一次解决。
 // MSI 由发布工作流从 GitHub 镜像到 OSS(国内可下)。
-const WSL_MODERN_MSI_URL = process.env.CICY_WSL_MSI_URL || (require("./mirrors").OSS_RELEASES_BASE + "/wsl/wsl.x64.msi");
+const WSL_MODERN_MSI_URL = process.env.CICY_WSL_MSI_URL || (require("./mirrors").R2_RELEASES_BASE + "/wsl/wsl.x64.msi");
 function modernWslInstalled() {
   if (process.platform !== "win32") return true;
   try { return fs.existsSync(path.join(process.env.ProgramFiles || "C:\\Program Files", "WSL", "wsl.exe")); } catch { return false; }
@@ -685,7 +687,7 @@ function legacyWslTroubleSeen() {
 }
 const WSL_KERNEL_MSI_URL = process.env.CICY_WSL_KERNEL_URL || "https://wslstorestorage.blob.core.windows.net/wslblob/wsl_update_x64.msi";
 // 裸内核文件(由发布工作流从 MSI 解出后放到 OSS):精简版 Windows 没有 msiexec 时直接放到位。
-const WSL_KERNEL_RAW_URL = process.env.CICY_WSL_KERNEL_RAW_URL || (require("./mirrors").OSS_RELEASES_BASE + "/wsl-kernel/kernel");
+const WSL_KERNEL_RAW_URL = process.env.CICY_WSL_KERNEL_RAW_URL || (require("./mirrors").R2_RELEASES_BASE + "/wsl-kernel/kernel");
 // WSL2 kernel present? The inbox (feature-based) WSL keeps it at System32\lxss\tools\kernel;
 // the Store WSL bundles its own, in which case the file is absent but `wsl --status`
 // reports a kernel version — callers treat "functional + version" as present too.

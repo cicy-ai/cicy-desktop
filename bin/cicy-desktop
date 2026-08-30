@@ -22,11 +22,12 @@ const STATE_FILE = path.join(HOME, ".cicy-cluster.json");
 const LOGS_DIR = path.join(HOME, "logs");
 const PACKAGE_ROOT = path.join(__dirname, "..");
 // Electron 二进制来源:**不用用户设任何变量**,自动判断网络。
-//   CN(或探测不通,兜底)→ 我们的 Aliyun OSS 镜像(CN-fast,三平台 zip 镜像在
-//     <OSS>electron/v<version>/electron-v<version>-<platform>.zip,正是 @electron/get 的布局)。
+//   CN(或探测不通,兜底)→ 我们的 Cloudflare R2 镜像(三平台 zip 镜像在
+//     <R2>electron/v<version>/electron-v<version>-<platform>.zip,正是 @electron/get 的布局)。
+//     原 Aliyun OSS 镜像已下线(账号停用,整桶 403 UserDisable)。
 //   海外 → electron 官方 GitHub release(不压我们 OSS,海外更快)。
 // 仍可用 ELECTRON_MIRROR 显式覆盖(power user / CI)。下载只在首次(无缓存)发生。
-const OSS_ELECTRON_MIRROR = "https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/electron/";
+const R2_ELECTRON_MIRROR = "https://r2.deepfetch.de5.net/electron/";
 const GH_ELECTRON_BASE = "https://github.com/electron/electron/releases/download/";
 const NPM_REGISTRY = process.env.CICY_NPM_REGISTRY || process.env.npm_config_registry || "https://registry.npmmirror.com";
 const MASTER_ENTRY = path.join(PACKAGE_ROOT, "src", "master", "master-main.js");
@@ -111,11 +112,11 @@ function isCNNetwork() {
   } catch { return true; } // google 不可达 → CN/兜底,走 OSS
 }
 
-// 决定 electron zip 的下载地址(不用用户设变量):ELECTRON_MIRROR 显式覆盖 > CN→OSS > 海外→官方 GitHub。
+// 决定 electron zip 的下载地址(不用用户设变量):ELECTRON_MIRROR 显式覆盖 > CN→R2 > 海外→官方 GitHub。
 function electronZipUrl() {
   const { zip } = electronArtifact();
   if (process.env.ELECTRON_MIRROR) return { url: `${process.env.ELECTRON_MIRROR}v${ELECTRON_VERSION}/${zip}`, src: "ELECTRON_MIRROR" };
-  if (isCNNetwork()) return { url: `${OSS_ELECTRON_MIRROR}v${ELECTRON_VERSION}/${zip}`, src: "OSS(CN)" };
+  if (isCNNetwork()) return { url: `${R2_ELECTRON_MIRROR}v${ELECTRON_VERSION}/${zip}`, src: "R2(CN)" };
   return { url: `${GH_ELECTRON_BASE}v${ELECTRON_VERSION}/${zip}`, src: "GitHub(海外)" };
 }
 
@@ -615,7 +616,7 @@ function ensureMacDesktopApp() {
     : "cicy-desktop";
   // do shell script needs node + the global bin on PATH (GUI launch has a
   // minimal PATH); trailing & + nohup + </dev/null lets the shell return so the
-  // applet quits. 不再 export ELECTRON_MIRROR —— bin 自己按网络自动选(CN→OSS / 海外→GitHub)。
+  // applet quits. 不再 export ELECTRON_MIRROR —— bin 自己按网络自动选(CN→R2 / 海外→GitHub)。
   // npm_config_registry(npmmirror)留着给 cicy-code 子包下载用。
   const ascript =
     `do shell script "export PATH=\\"${nodeDir}:${gbin}:/usr/local/bin:/opt/homebrew/bin:$PATH\\" ; ` +

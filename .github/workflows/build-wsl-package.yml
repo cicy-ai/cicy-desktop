@@ -3,7 +3,7 @@ name: Build WSL Package
 # Bakes a single WSL2 rootfs that already contains Ubuntu 22.04 + Docker Engine
 # + the cicy-code image (pre-loaded into /var/lib/docker), so a Windows install
 # is just: wsl --import <this> → dockerd auto-starts → docker run. No apt, no
-# image pull/load on the customer machine. Uploaded to Aliyun OSS (CN-fast).
+# image pull/load on the customer machine. Uploaded to our Cloudflare R2 bucket.
 
 on:
   workflow_dispatch:
@@ -11,8 +11,8 @@ on:
       image:
         description: cicy-code image to embed
         default: cicybot/cicy-code:latest
-      oss_key:
-        description: OSS object key
+      r2_key:
+        description: R2 object key
         default: rootfs/cicy-wsl-latest.tar.gz
 
 jobs:
@@ -80,25 +80,27 @@ jobs:
           docker export "$cid" | gzip > cicy-wsl.tar.gz
           ls -lh cicy-wsl.tar.gz
 
-      - name: Upload to Aliyun OSS (public-read)
+      - name: Upload to Cloudflare R2
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_API_TOKEN:  ${{ secrets.R2_API_TOKEN }}
         run: |
-          curl -sL https://gosspublic.alicdn.com/ossutil/1.7.18/ossutil64 -o ossutil && chmod +x ossutil
-          test -s ossutil && head -c4 ossutil | grep -q ELF || { echo "ossutil download bad"; exit 1; }
-          ./ossutil config -e oss-cn-shanghai.aliyuncs.com \
-            -i "${{ secrets.OSS_ACCESS_KEY_ID }}" -k "${{ secrets.OSS_ACCESS_KEY_SECRET }}"
-          ./ossutil cp cicy-wsl.tar.gz "oss://cicy-1372193042-cn/${{ inputs.oss_key }}" -f --acl public-read
-          echo "Uploaded: https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/${{ inputs.oss_key }}"
+          set -e
+          node scripts/r2.mjs put "${{ inputs.r2_key }}" cicy-wsl.tar.gz
 
       # macOS (colima) loads the cicy-code image tarball directly, NOT a WSL rootfs. So the
       # SAME run also republishes images/cicy-code-latest.tar.gz from the image already saved
       # at /tmp/cicy-image.tar — one workflow keeps BOTH platforms' docker images current
-      # (this OSS key had no producer, which is why macOS was stuck on a stale image).
-      - name: Publish cicy-code image tarball to OSS (macOS / colima)
+      # (this key had no producer, which is why macOS was stuck on a stale image).
+      - name: Publish cicy-code image tarball to R2 (macOS / colima)
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_API_TOKEN:  ${{ secrets.R2_API_TOKEN }}
         run: |
+          set -e
           gzip -c /tmp/cicy-image.tar > cicy-code-latest.tar.gz
           ls -lh cicy-code-latest.tar.gz
-          ./ossutil cp cicy-code-latest.tar.gz "oss://cicy-1372193042-cn/images/cicy-code-latest.tar.gz" -f --acl public-read
-          echo "Uploaded mac image: https://cicy-1372193042-cn.oss-cn-shanghai.aliyuncs.com/images/cicy-code-latest.tar.gz"
+          node scripts/r2.mjs put images/cicy-code-latest.tar.gz cicy-code-latest.tar.gz
 
       - name: Upload artifact (backup)
         uses: actions/upload-artifact@v4
