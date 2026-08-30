@@ -3849,8 +3849,9 @@ function useHub() {
 function HubLoginModal({ hub }) {
   const codeStep = hub.step === "code";
   return createPortal(
-    <div data-id="HubLoginModal" style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.5)" }}
-      onMouseDown={(e) => { if (!hub.busy && e.target === e.currentTarget) hub.closeLogin(); }}>
+    // No click-outside close: the click that re-focuses the window after copying
+    // the code from the mail client lands on this backdrop. Cancel is explicit.
+    <div data-id="HubLoginModal" style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.5)" }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: 400, maxWidth: "92vw", background: "var(--card, #1b1d22)", border: "1px solid var(--border, #2c2f36)", borderRadius: 14, padding: 22, boxShadow: "0 20px 60px rgba(0,0,0,.5)" }}>
         <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{tr("cicyHub.login", "登录 CiCy Hub")}</div>
         <div style={{ fontSize: 12, opacity: .6, marginBottom: 16 }}>
