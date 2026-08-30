@@ -62,19 +62,37 @@ function desktopInstanceId() {
   return id;
 }
 
-async function hubFetch(route, { method = "GET", token = "", body = null } = {}) {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
-  try {
-    const headers = { accept: "application/json" };
-    if (token) headers.authorization = "Bearer " + token;
-    if (body != null) headers["content-type"] = "application/json";
-    const r = await fetch(hubOrigin() + route, { method, headers, body: body == null ? undefined : JSON.stringify(body), signal: ctrl.signal, cache: "no-store" });
-    const text = await r.text();
-    let json = null;
-    try { json = text ? JSON.parse(text) : null; } catch {}
-    return { status: r.status, ok: r.ok, json, text };
-  } finally { clearTimeout(t); }
+// Electron's net.fetch goes through Chromium's network stack — it honours the
+// OS proxy settings (PAC / system proxy) like the renderer does. Node's global
+// fetch ignores them, which showed up as "fetch failed" on PCs that can only
+// reach the hub through a proxy. Falls back to global fetch outside Electron.
+function pickFetch() {
+  try { const { net, app } = require("electron"); if (net && typeof net.fetch === "function" && app && app.isReady()) return net.fetch.bind(net); } catch {}
+  return fetch;
+}
+
+async function hubFetch(route, { method = "GET", token = "", body = null, tries = 2 } = {}) {
+  let lastErr;
+  for (let attempt = 0; attempt < tries; attempt++) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const headers = { accept: "application/json" };
+      if (token) headers.authorization = "Bearer " + token;
+      if (body != null) headers["content-type"] = "application/json";
+      const r = await pickFetch()(hubOrigin() + route, { method, headers, body: body == null ? undefined : JSON.stringify(body), signal: ctrl.signal, cache: "no-store" });
+      const text = await r.text();
+      let json = null;
+      try { json = text ? JSON.parse(text) : null; } catch {}
+      return { status: r.status, ok: r.ok, json, text };
+    } catch (e) {
+      lastErr = e;
+      log.warn(`[hub] ${method} ${route} failed (${attempt + 1}/${tries}): ${e.message}`);
+      if (attempt + 1 < tries) await new Promise((r) => setTimeout(r, 1500));
+    } finally { clearTimeout(t); }
+  }
+  const msg = String((lastErr && lastErr.message) || lastErr || "fetch failed");
+  throw new Error(/fetch failed|ECONN|ENOTFOUND|abort/i.test(msg) ? `hub unreachable (${hubOrigin()}): ${msg}` : msg);
 }
 
 function errorOf(res, fallback) {
@@ -168,7 +186,9 @@ function clearAuth() {
 async function instances() {
   const a = readAuth();
   if (!a) return { ok: false, error: "not_logged_in", instances: [] };
-  const res = await hubFetch("/api/instances", { token: a.token });
+  let res;
+  try { res = await hubFetch("/api/instances", { token: a.token }); }
+  catch (e) { return { ok: false, error: e.message, instances: [] }; }
   if (res.status === 401) { clearAuth(); return { ok: false, error: "unauthorized", instances: [] }; }
   if (!res.ok || !res.json) return { ok: false, error: errorOf(res, "instances_failed"), instances: [] };
   const list = Array.isArray(res.json.instances) ? res.json.instances : [];
