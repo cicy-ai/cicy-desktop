@@ -40,26 +40,22 @@
     .line2 .tg b { color: var(--fg); font-weight: 600; }
     .line2 .tg.none { color: #6b6b72; }
     /* 编辑态就地变成可输入,尺寸/位置与只读态完全一致,不发生位移 */
-    .line2 .ip { flex: none; max-width: 45%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 6px; border-radius: 999px; background: var(--head); color: #b4b4bb; font: 11px ui-monospace, monospace; line-height: 16px; cursor: pointer; }
-    .line2 .ip.none { color: #6b6b72; font-family: inherit; }
-    .line2 .ip.busy { color: #f0b429; }
-    .line2 .ip.bad { color: #ff8a8a; }
-    .line2 .ip:hover { color: #fff; }
-    .cfg { display: none; margin: 8px 0 2px 16px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--head); }
-    .row.cfg-open .cfg { display: block; }
-    .row.cfg-open .gear { color: var(--accent); }
-    .cfg .f { display: flex; align-items: center; gap: 6px; }
-    .cfg .f + .f { margin-top: 6px; }
-    .cfg label { flex: none; width: 34px; font-size: 11px; color: var(--muted); }
-    .cfg input { flex: 1; min-width: 0; height: 26px; border: 1px solid var(--line); border-radius: 6px; padding: 0 8px; background: #111113; color: var(--fg); font: 11.5px ui-monospace, monospace; outline: 0; }
-    .cfg input:focus { border-color: var(--accent); }
-    .cfg .hint { font-size: 11px; color: var(--muted); padding-left: 40px; }
-    .cfg .hint b { color: #b4b4bb; font-weight: 500; }
-    .cfg .danger { display: flex; align-items: center; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); }
-    .cfg .danger .sp { flex: 1; }
-    .cfg .confirm { display: none; align-items: center; gap: 6px; margin-top: 8px; padding: 6px 8px; border-radius: 6px; background: rgba(255,92,92,.12); color: #ffb3b3; font-size: 11.5px; }
-    .cfg .confirm.on { display: flex; }
-    .cfg .confirm .sp { flex: 1; }
+    .line2 .ip { flex: none; max-width: 45%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 6px; border-radius: 999px; background: var(--head); color: #b4b4bb; font: 11px ui-monospace, monospace; line-height: 16px; }
+    .line2 .ip.none { display: none; }
+    /* 代理设置弹窗 */
+    .modal { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.55); }
+    .modal[hidden] { display: none; }
+    .modal-card { width: 380px; max-width: 92vw; background: var(--cell); border: 1px solid var(--line); border-radius: 14px; padding: 18px; box-shadow: 0 24px 70px rgba(0,0,0,.5); }
+    .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; font-size: 15px; font-weight: 650; }
+    .modal-head .icon { background: transparent; color: #b4b4bb; padding: 2px 6px; font-size: 14px; border-radius: 6px; }
+    .modal-head .icon:hover { background: var(--hover); color: #fff; }
+    .modal-label { display: block; font-size: 12px; color: var(--muted); margin: 4px 0 6px; }
+    .modal-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+    .modal-row input { flex: 1; min-width: 0; height: 32px; border: 1px solid var(--line); border-radius: 8px; padding: 0 10px; background: #111113; color: var(--fg); font: 12px ui-monospace, monospace; outline: 0; }
+    .modal-row input:focus { border-color: var(--accent); }
+    .modal-ip { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: #b4b4bb; }
+    .modal-err { color: #ff8a8a; font-size: 12px; min-height: 16px; margin-bottom: 4px; word-break: break-all; }
+    .modal-danger { margin-top: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
     button.del { background: #b3261e; }
     .row-err { padding: 4px 0 0 16px; color: #ff8a8a; font-size: 11px; display: none; }
     .row-err.on { display: block; }
@@ -95,12 +91,12 @@
       <div id="rows"></div>
       <div id="empty">还没有 Profile<br>点击右上角「添加 Profile」创建第一个 Telegram 会话</div>
     </div>
-    <div class="hint">点击行切换预览；点代理地址可修改（留空 = 直连）。已打开过的会话会在后台保持登录。</div>
+    <div class="hint">点击行切换预览；点 ⚙ 设置代理 / 测 IP / 删除。已打开过的会话会在后台保持登录。</div>
   </aside>
   <main>
     <div id="preview-title">
       <div class="left"><span class="dot" id="sel-dot"></span><span id="selected-name">未选择 Profile</span><span id="status"></span></div>
-      <div class="actions"><button class="ghost" id="reload" title="重新加载 Telegram Web">重新加载</button></div>
+      <div class="actions"><button class="ghost" id="probe-ip" title="经该 Profile 的代理探测出口 IP / 地区">测 IP</button><button class="ghost" id="reload" title="重新加载 Telegram Web">重新加载</button></div>
     </div>
     <div id="phone">
       <div id="phone-preview"></div>
@@ -115,6 +111,16 @@
       </div>
     </div>
   </main>
+  <div id="cfg-modal" class="modal" hidden>
+    <div class="modal-card">
+      <div class="modal-head"><span id="cfg-title">Profile 设置</span><button class="icon" id="cfg-x" title="关闭">✕</button></div>
+      <label class="modal-label">代理地址</label>
+      <div class="modal-row"><input id="cfg-proxy" placeholder="留空 = 直连，例如 http://127.0.0.1:20001" spellcheck="false"><button id="cfg-save">保存</button></div>
+      <div class="modal-row"><button class="ghost" id="cfg-test">测 IP</button><span class="modal-ip" id="cfg-ip"></span></div>
+      <div class="modal-err" id="cfg-err"></div>
+      <div class="modal-danger"><button class="ghost del" id="cfg-del">删除此 Profile</button></div>
+    </div>
+  </div>
   <script>
     const TELEGRAM_URL = 'https://web.telegram.org/k/';
     const rowsEl = document.getElementById('rows');
@@ -139,25 +145,25 @@
     const dotClass = (st) => st.loading ? 'loading' : st.failed ? 'failed' : (st.url ? 'ok' : '');
     const stateText = (st, opened) => st.loading ? '加载中…' : st.failed ? '连接失败' : st.url ? '已加载' : (opened ? '' : '未打开');
     const fmtAgo = (iso) => { const t = Date.parse(iso || ''); if (!t) return ''; const m = Math.round((Date.now() - t) / 60000); return m < 1 ? '刚刚' : m < 60 ? `${m} 分钟前` : m < 1440 ? `${Math.round(m / 60)} 小时前` : `${Math.round(m / 1440)} 天前`; };
-    function renderIp(p, mode) {
+    // 列表只显示一个简短地区(取最具体的一段:优先省/州,否则国家),完整信息在 tooltip。
+    const shortArea = (area) => { const seg = String(area || '').split('·').map((x) => x.trim()).filter(Boolean); return seg[1] || seg[0] || ''; };
+    function renderIp(p) {
       const row = rows.get(p.accountIdx); if (!row) return;
-      const el = row.querySelector('.ip');
-      el.className = 'ip';
-      if (mode === 'busy') { el.classList.add('busy'); el.textContent = '测 IP…'; el.title = ''; return; }
-      if (mode && mode.error) { el.classList.add('bad'); el.textContent = 'IP 探测失败'; el.title = mode.error + '（点击重试）'; return; }
+      const el = row.querySelector('.ip'); el.className = 'ip';
       const info = p.ipInfo;
       if (info && info.ip) {
-        el.textContent = info.area ? `${info.area} · ${info.ip}` : info.ip;
-        el.title = `出口 IP ${info.ip}${info.area ? '，' + info.area : ''}，${fmtAgo(info.probedAt) || '未知时间'}探测（点击重测）`;
-      } else { el.classList.add('none'); el.textContent = '测 IP'; el.title = '经该 Profile 的代理探测出口 IP / 地区'; }
+        const a = shortArea(info.area);
+        el.textContent = a || info.ip;
+        el.title = `出口 IP ${info.ip}${info.area ? '，' + info.area : ''}，${fmtAgo(info.probedAt) || '未知时间'}探测`;
+      } else { el.classList.add('none'); el.textContent = ''; el.title = ''; }
     }
+    // 经该 Profile 的代理探测出口 IP;成功后更新它的列表地区。返回 {ok, info|error}。
     async function probeIp(p) {
-      renderIp(p, 'busy');
       try {
         const r = await window.panelAPI.probeIp(p.accountIdx);
-        if (r && r.ipInfo) { p.ipInfo = r.ipInfo; renderIp(p); }
-        else renderIp(p, { error: (r && r.error) || '探测失败' });
-      } catch (e) { renderIp(p, { error: e.message || String(e) }); }
+        if (r && r.ipInfo) { p.ipInfo = r.ipInfo; renderIp(p); return { ok: true, info: r.ipInfo }; }
+        return { ok: false, error: (r && r.error) || '探测失败' };
+      } catch (e) { return { ok: false, error: e.message || String(e) }; }
     }
     // 身份:优先用本次会话探到的(cellState.identity),否则用 profile 里存的(上次登录)。
     const identityOf = (p) => stateOf(p.accountIdx).identity || p.telegram || null;
@@ -225,46 +231,9 @@
       row.className = 'row'; row.dataset.id = String(p.accountIdx); row.title = `persist:sandbox-${p.accountIdx}`;
       row.innerHTML = `
         <div class="line1"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="st"></span><button class="icon gear" title="代理设置">⚙</button><button class="icon reload" title="重新加载">⟳</button></div>
-        <div class="line2"><span class="tg none">—</span><span class="ip none" title="经该 Profile 的代理探测出口 IP / 地区">测 IP</span></div>
-        <div class="cfg">
-          <div class="f"><label>代理</label><input data-role="proxy" placeholder="留空 = 直连，例如 http://127.0.0.1:20001" spellcheck="false"><button class="sm save">保存</button><button class="sm ghost test">测 IP</button></div>
-          <div class="hint">保存后已打开的会话会重新加载；<b>测 IP</b> 经该代理访问 IP 服务，结果显示在上方。</div>
-          <div class="danger"><span>删除此 Profile 会一并清除它的 Telegram 登录态和缓存。</span><span class="sp"></span><button class="sm ghost rm">删除</button></div>
-          <div class="confirm"><span>确认删除 <b>${esc(p.name)} #${p.accountIdx}</b>？不可恢复。</span><span class="sp"></span><button class="sm del rm-yes">确认删除</button><button class="sm ghost rm-no">取消</button></div>
-        </div>
-        <div class="row-err"></div>`;
-      const errEl = row.querySelector('.row-err');
-      // 备注功能已按需求移除(列表只保留 名称 / @用户名 / 状态 / IP)
-      // 代理设置抽屉(⚙):不常用,默认收起,列表保持干净。
-      const proxyInput = row.querySelector('[data-role="proxy"]');
-      const saveBtn = row.querySelector('.cfg .save');
-      const toggleCfg = (e) => { e.stopPropagation(); const open = !row.classList.contains('cfg-open'); row.classList.toggle('cfg-open', open); if (open) { proxyInput.value = p.proxy || ''; proxyInput.focus(); } };
-      const saveProxy = async () => {
-        saveBtn.disabled = true; errEl.classList.remove('on');
-        try {
-          const updated = await window.panelAPI.setProfileProxy(p.accountIdx, proxyInput.value.trim());
-          p.proxy = updated.proxy; p.ipInfo = null; renderIp(p);
-          if (openedProfiles.has(p.accountIdx)) { reloadProfile(p.accountIdx); flash(`#${p.accountIdx} 代理已应用，重新加载中`); }
-          else flash(`#${p.accountIdx} 代理已保存，打开时生效`);
-          row.classList.remove('cfg-open');
-        } catch (e) { errEl.textContent = e.message || String(e); errEl.classList.add('on'); }
-        finally { saveBtn.disabled = false; }
-      };
-      row.querySelector('.gear').onclick = toggleCfg;
-      row.querySelector('.cfg').onclick = (e) => e.stopPropagation();
-      saveBtn.onclick = saveProxy;
-      proxyInput.onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Enter') saveProxy(); if (e.key === 'Escape') row.classList.remove('cfg-open'); };
-      row.querySelector('.cfg .test').onclick = () => probeIp(p);
-      row.querySelector('.ip').onclick = (e) => { e.stopPropagation(); probeIp(p); };
-      const confirmEl = row.querySelector('.cfg .confirm');
-      row.querySelector('.rm').onclick = () => { confirmEl.classList.add('on'); row.querySelector('.rm-yes').focus(); };
-      row.querySelector('.rm-no').onclick = () => confirmEl.classList.remove('on');
-      row.querySelector('.rm-yes').onclick = async () => {
-        const btn = row.querySelector('.rm-yes'); btn.disabled = true;
-        try { await removeProfile(p); }
-        catch (e) { errEl.textContent = e.message || String(e); errEl.classList.add('on'); btn.disabled = false; }
-      };
-      row._openCfg = () => { if (!row.classList.contains('cfg-open')) toggleCfg(new Event('click')); row.scrollIntoView({ block: 'nearest' }); };
+        <div class="line2"><span class="tg none">—</span><span class="ip none"></span></div>`;
+      // ⚙ 打开设置弹窗(代理 / 测 IP / 删除),不再 inline。
+      row.querySelector('.gear').onclick = (e) => { e.stopPropagation(); openCfgModal(p); };
       row.onclick = () => selectProfile(p.accountIdx);
       row.querySelector('.reload').onclick = (e) => { e.stopPropagation(); reloadProfile(p.accountIdx); };
       return row;
@@ -367,7 +336,57 @@
     };
     document.getElementById('reload').onclick = () => { if (selected) reloadProfile(selected.accountIdx); };
     document.getElementById('err-retry').onclick = () => { if (selected) reloadProfile(selected.accountIdx); };
-    document.getElementById('err-cfg').onclick = () => { const row = selected && rows.get(selected.accountIdx); if (row) row._openCfg(); };
+    document.getElementById('err-cfg').onclick = () => { if (selected) openCfgModal(selected); };
+    document.getElementById('probe-ip').onclick = async () => {
+      if (!selected) { flash('先选择一个 Profile'); return; }
+      const b = document.getElementById('probe-ip'); const o = b.textContent; b.disabled = true; b.textContent = '测 IP…';
+      const r = await probeIp(selected);
+      b.disabled = false; b.textContent = o;
+      flash(r.ok ? `#${selected.accountIdx} 出口：${shortArea(selected.ipInfo.area) || selected.ipInfo.ip}` : `IP 探测失败：${r.error}`, 6000);
+    };
+    // ── 设置弹窗(代理 / 测 IP / 删除) ──
+    const cfgModal = document.getElementById('cfg-modal');
+    const cfgProxy = document.getElementById('cfg-proxy');
+    const cfgErr = document.getElementById('cfg-err');
+    const cfgIp = document.getElementById('cfg-ip');
+    const cfgDel = document.getElementById('cfg-del');
+    let cfgP = null, delArmed = false;
+    const cfgIpText = (p) => p && p.ipInfo && p.ipInfo.ip ? (p.ipInfo.area ? `${p.ipInfo.area} · ${p.ipInfo.ip}` : p.ipInfo.ip) : '未探测';
+    function openCfgModal(p) {
+      if (!p) return; cfgP = p; delArmed = false;
+      document.getElementById('cfg-title').textContent = `${p.name} · #${p.accountIdx} 设置`;
+      cfgProxy.value = p.proxy || ''; cfgErr.textContent = ''; cfgIp.textContent = cfgIpText(p);
+      cfgDel.textContent = '删除此 Profile'; cfgDel.disabled = false;
+      cfgModal.hidden = false; cfgProxy.focus();
+    }
+    function closeCfgModal() { cfgModal.hidden = true; cfgP = null; delArmed = false; }
+    cfgModal.onclick = (e) => { if (e.target === cfgModal) closeCfgModal(); };
+    document.getElementById('cfg-x').onclick = closeCfgModal;
+    document.getElementById('cfg-save').onclick = async () => {
+      if (!cfgP) return; const b = document.getElementById('cfg-save'); b.disabled = true; cfgErr.textContent = '';
+      try {
+        const u = await window.panelAPI.setProfileProxy(cfgP.accountIdx, cfgProxy.value.trim());
+        cfgP.proxy = u.proxy; cfgP.ipInfo = null; renderIp(cfgP);
+        if (openedProfiles.has(cfgP.accountIdx)) { reloadProfile(cfgP.accountIdx); flash(`#${cfgP.accountIdx} 代理已应用，重新加载中`); }
+        else flash(`#${cfgP.accountIdx} 代理已保存，打开时生效`);
+        closeCfgModal();
+      } catch (e) { cfgErr.textContent = e.message || String(e); } finally { b.disabled = false; }
+    };
+    cfgProxy.onkeydown = (e) => { if (e.key === 'Enter') document.getElementById('cfg-save').onclick(); if (e.key === 'Escape') closeCfgModal(); };
+    document.getElementById('cfg-test').onclick = async () => {
+      if (!cfgP) return; const b = document.getElementById('cfg-test'); const o = b.textContent; b.disabled = true; b.textContent = '测 IP…'; cfgErr.textContent = '';
+      const r = await probeIp(cfgP);
+      b.disabled = false; b.textContent = o;
+      if (r.ok) cfgIp.textContent = cfgIpText(cfgP); else cfgErr.textContent = '探测失败：' + r.error;
+    };
+    cfgDel.onclick = async () => {
+      if (!cfgP) return;
+      if (!delArmed) { delArmed = true; cfgDel.textContent = '确认删除（不可恢复）'; setTimeout(() => { if (delArmed) { delArmed = false; cfgDel.textContent = '删除此 Profile'; } }, 4000); return; }
+      delArmed = false; cfgDel.disabled = true; cfgErr.textContent = '';
+      try { await removeProfile(cfgP); closeCfgModal(); }
+      catch (e) { cfgErr.textContent = e.message || String(e); cfgDel.disabled = false; cfgDel.textContent = '删除此 Profile'; }
+    };
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !cfgModal.hidden) closeCfgModal(); });
 
     new ResizeObserver(() => requestAnimationFrame(syncPreview)).observe(preview);
     window.addEventListener('resize', syncPreview);

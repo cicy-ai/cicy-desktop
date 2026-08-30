@@ -88,13 +88,13 @@ test("matrix page exposes profile table, phone preview, proxy drawer and ip prob
   assert.match(html, /panelAPI\.setProfileProxy/);
   assert.match(html, /panelAPI\.probeIp/);
   assert.match(html, /panelAPI\.removeProfile/);
-  // 删除必须二次确认:确认块默认隐藏,只有 rm-yes 才真正调用删除
-  assert.match(html, /\.cfg \.confirm \{ display: none;/);
-  assert.match(html, /querySelector\('\.rm-yes'\)\.onclick = async[^]*await removeProfile\(p\)/);
-  assert.doesNotMatch(html.slice(html.indexOf("querySelector('.rm').onclick"), html.indexOf("querySelector('.rm-no')")), /removeProfile\(/);
+  // 删除在设置弹窗里二次确认(delArmed):第一次点只 arm,第二次才真正 removeProfile
+  assert.match(html, /id="cfg-del"/);
+  assert.match(html, /if \(!delArmed\) \{ delArmed = true;[^]*return; \}/);
+  assert.match(html, /delArmed = false;[^]*await removeProfile\(cfgP\)/);
   assert.match(html, /id="add-profile"/);
-  assert.match(html, /class="cfg"[^]*data-role="proxy"/);
-  assert.match(html, /\.row\.cfg-open \.cfg \{ display: block; \}/);
+  assert.match(html, /id="cfg-modal"/);
+  assert.match(html, /openCfgModal\(/);
   assert.match(html, /class="tg none"/);
   assert.match(html, /id="phone-preview"/);
   assert.match(html, /https:\/\/web\.telegram\.org\/k\//);
