@@ -358,8 +358,14 @@
       cfgProxy.value = p.proxy || ''; cfgErr.textContent = ''; cfgIp.textContent = cfgIpText(p);
       cfgDel.textContent = '删除此 Profile'; cfgDel.disabled = false;
       cfgModal.hidden = false; cfgProxy.focus();
+      // BrowserView 预览永远浮在页面 DOM 之上,会盖住弹窗 —— 打开弹窗时把 cells 脱离(复用拖拽逻辑),关闭时贴回。
+      try { window.panelAPI.dragging(true); } catch (e) {}
     }
-    function closeCfgModal() { cfgModal.hidden = true; cfgP = null; delArmed = false; }
+    function closeCfgModal() {
+      cfgModal.hidden = true; cfgP = null; delArmed = false;
+      try { window.panelAPI.dragging(false); } catch (e) {}
+      syncPreview();
+    }
     cfgModal.onclick = (e) => { if (e.target === cfgModal) closeCfgModal(); };
     document.getElementById('cfg-x').onclick = closeCfgModal;
     document.getElementById('cfg-save').onclick = async () => {
