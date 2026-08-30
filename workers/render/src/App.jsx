@@ -989,7 +989,7 @@ export default function App() {
     <div className="shell shell--app">
       <div className="glow glow--app" aria-hidden />
       <div className="shell__left">
-      <Header me={me} welcome={welcome} onLogout={handleLogout}
+      <Header me={me} welcome={welcome} onLogout={handleLogout} hub={hub}
         guest={!token && guest} onLogin={leaveGuest}
         mitmTeam={localList.length > 0 ? localList[0] : null} />
       <UpdateBanner />
@@ -1035,13 +1035,6 @@ export default function App() {
                     <div style={{ fontSize: 13, fontWeight: 600 }}>{tr("teams.addCustom", "自定义团队")}</div>
                     <div style={{ fontSize: 11, opacity: .6, marginTop: 2 }}>{tr("teams.addCustomSub", "手动输入地址和名称(只存本地)")}</div>
                   </button>
-                  {!hub.loggedIn && (
-                  <button type="button" data-id="AddTeamMenu-hub" className="bcard__menu-item" style={{ display: "block", width: "100%", textAlign: "left", padding: "11px 14px", border: "none", borderTop: "1px solid var(--border, #2c2f36)", background: "transparent", cursor: "pointer", color: "inherit" }}
-                    onClick={() => { setAddMenuOpen(false); setTab("hub"); hub.openLogin(me?.email); }}>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>{tr("cicyHub.addMenu", "CiCy Hub 实例")}</div>
-                    <div style={{ fontSize: 11, opacity: .6, marginTop: 2 }}>{tr("cicyHub.addMenuSub", "邮箱登录后自动列出所有实例")}</div>
-                  </button>
-                  )}
                   {token && (
                   <button type="button" data-id="AddTeamMenu-private" className="bcard__menu-item" style={{ display: "block", width: "100%", textAlign: "left", padding: "11px 14px", border: "none", borderTop: "1px solid var(--border, #2c2f36)", background: "transparent", cursor: "pointer", color: "inherit" }}
                     onClick={() => { setAddMenuOpen(false); openCloudPage("?tab=private"); }}>
@@ -1096,10 +1089,16 @@ export default function App() {
           </div>
         )}
 
-        {showHub && <HubBar hub={hub} prefillEmail={me?.email} />}
         {hub.loginOpen && <HubLoginModal hub={hub} />}
         <div className="app__grid">
           {firstLoading && [0, 1, 2].map((i) => <SkeletonCard key={"skc" + i} />)}
+          {!firstLoading && tab === "hub" && (!hub.loggedIn || (hub.instances && hub.instances.length === 0)) && (
+            <div className="empty" data-id="HubEmpty" style={{ gridColumn: "1 / -1" }}>
+              {!hub.loggedIn
+                ? <>{tr("cicyHub.loginSub", "邮箱验证码登录,自动列出这个账号下的所有 cicy-code 实例")} — <a href="#" onClick={(e) => { e.preventDefault(); hub.openLogin(me?.email); }}>{tr("cicyHub.login", "登录 CiCy Hub")}</a></>
+                : (hub.error ? hubErrText(hub.error) : tr("cicyHub.empty", "这个账号下还没有 cicy-code 实例。在 cicy-code 的「CiCy 账号」里用同一个邮箱登录 Hub 即可出现。"))}
+            </div>
+          )}
           {!firstLoading && showHub && hub.loggedIn && (hub.instances || []).map((it) => (
             <HubInstanceCard key={"hub:" + it.id} inst={it} onOpen={() => hub.open(it)} />
           ))}
@@ -1414,7 +1413,7 @@ function AuditLogModal({ onClose }) {
   );
 }
 
-function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin }) {
+function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin, hub }) {
   const name = me?.display_name || me?.username || "…";
   const initials = (name || "?").slice(0, 1).toUpperCase();
   const [open, setOpen] = useState(false);
@@ -1558,6 +1557,18 @@ function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin }) {
             <button type="button" data-id="UserChip-check-update" className="user-chip__menu-item" disabled={checkingUpd} onClick={checkUpdate}>
               {checkingUpd ? tr("updateBanner.checkingShort", "检查中…") : tr("updateBanner.checkBtn", "检查更新")}
             </button>
+            {hub?.available && (
+              hub.loggedIn ? (
+                <button type="button" data-id="UserChip-hub-logout" className="user-chip__menu-item" title={hub.owner} onClick={() => { setOpen(false); hub.logout(); }}
+                  style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {tr("cicyHub.logout", "退出 Hub")} · {hub.owner}
+                </button>
+              ) : (
+                <button type="button" data-id="UserChip-hub-login" className="user-chip__menu-item" onClick={() => { setOpen(false); hub.openLogin(me?.email); }}>
+                  {tr("cicyHub.login", "登录 CiCy Hub")}
+                </button>
+              )
+            )}
             {/* HTTPS 审计入口暂时隐藏 */}
             {false && mitmTeam && (
               <div className="user-chip__menu-mitm" data-id="UserChip-mitm" onClick={(e) => e.stopPropagation()}>
@@ -3833,35 +3844,6 @@ function useHub() {
     instances, loading, error, refresh, logout, open,
     loginOpen, openLogin, closeLogin, email, setEmail, code, setCode, step, busy, loginErr, sendCode, verify,
   };
-}
-
-function HubBar({ hub, prefillEmail }) {
-  if (!hub.available) return null;
-  if (!hub.loggedIn) {
-    return (
-      <div data-id="HubBar" className="hubbar" style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", marginBottom: 12, border: "1px dashed var(--border, #2c2f36)", borderRadius: 12 }}>
-        <div style={{ flex: "1 1 0", minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 600 }}>{tr("cicyHub.title", "CiCy Hub")}</div>
-          <div style={{ fontSize: 12, opacity: .6 }}>{tr("cicyHub.loginSub", "邮箱验证码登录,自动列出这个账号下的所有 cicy-code 实例")}</div>
-        </div>
-        <button type="button" className="btn-primary" data-id="HubBar-login" style={{ width: "auto", flex: "none", whiteSpace: "nowrap" }} onClick={() => hub.openLogin(prefillEmail)}>{tr("cicyHub.login", "登录 CiCy Hub")}</button>
-      </div>
-    );
-  }
-  return (
-    <div data-id="HubBar" className="hubbar" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, padding: "8px 14px", marginBottom: 12, border: "1px solid var(--border, #2c2f36)", borderRadius: 12 }}>
-      <span className="bcard__dot" data-tone="ok" />
-      <div style={{ flex: 1, minWidth: 0, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        <b>{tr("cicyHub.title", "CiCy Hub")}</b> · {tr("cicyHub.signedInAs", "已登录")} {hub.owner}
-        {hub.error && <span style={{ color: "#f87171", marginLeft: 8 }}>{hubErrText(hub.error)}</span>}
-      </div>
-      <button type="button" className="btn-ghost" data-id="HubBar-refresh" style={{ width: "auto", flex: "none", whiteSpace: "nowrap" }} disabled={hub.loading} onClick={hub.refresh}>{hub.loading ? <Spinner /> : tr("cicyHub.refresh", "刷新")}</button>
-      <button type="button" className="btn-ghost" data-id="HubBar-logout" style={{ width: "auto", flex: "none", whiteSpace: "nowrap" }} onClick={hub.logout}>{tr("cicyHub.logout", "退出 Hub")}</button>
-      {hub.instances && hub.instances.length === 0 && !hub.loading && (
-        <div style={{ flexBasis: "100%", fontSize: 12, opacity: .6, marginTop: 4 }}>{tr("cicyHub.empty", "这个账号下还没有 cicy-code 实例。在 cicy-code 的「CiCy 账号」里用同一个邮箱登录 Hub 即可出现。")}</div>
-      )}
-    </div>
-  );
 }
 
 function HubLoginModal({ hub }) {
