@@ -316,6 +316,21 @@ contextBridge.exposeInMainWorld("cicy", {
   cloud: {
     fetch: (url, opts) => logInvoke("cloud:fetch", { url, ...(opts || {}) }),
   },
+  // CiCy Hub — email sign-in, then every cicy-code instance of that account.
+  hub: {
+    status:     ()      => logInvoke("hub:status"),
+    loginStart: (email) => logInvoke("hub:login-start", email),
+    loginCode:  (code)  => logInvoke("hub:login-code", code),
+    cancel:     ()      => logInvoke("hub:cancel"),
+    instances:  ()      => logInvoke("hub:instances"),
+    open:       (id, title, port) => logInvoke("hub:open", { id, title, port }),
+    logout:     ()      => logInvoke("hub:logout"),
+    onComplete: (cb)    => {
+      const handler = (_e, payload) => cb(payload);
+      ipcRenderer.on("hub:complete", handler);
+      return () => ipcRenderer.removeListener("hub:complete", handler);
+    },
+  },
 
   // Homepage window state. onFullscreen fires (bool) whenever the user
   // enter/leaves macOS native fullscreen — renderer toggles a data-attr

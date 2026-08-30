@@ -466,7 +466,8 @@
     "all": "All",
     "local": "Local",
     "cloud": "Private cloud",
-    "custom": "Custom"
+    "custom": "Custom",
+    "hub": "CiCy Hub"
   },
   "userMenu": {
     "wallet": "My wallet",
@@ -633,5 +634,37 @@
     "noTeams": "No teams online in this hub",
     "agents": "{n} agents",
     "scan": "Scan with CiCy Mobile to add this hub"
+  },
+  "cicyHub": {
+    "title": "CiCy Hub",
+    "login": "Sign in to CiCy Hub",
+    "loginSub": "Email code sign-in; every cicy-code instance of that account shows up here",
+    "email": "Email",
+    "sendCode": "Send code",
+    "sending": "Sending…",
+    "codeSent": "Code sent to {{email}} — the link in the mail works too",
+    "code": "6-digit code",
+    "verify": "Sign in",
+    "verifying": "Verifying…",
+    "cancel": "Cancel",
+    "logout": "Sign out of Hub",
+    "refresh": "Refresh",
+    "signedInAs": "Signed in",
+    "empty": "No cicy-code instances under this account yet. Sign in to the Hub with the same email in cicy-code → CiCy account.",
+    "online": "online",
+    "offline": "offline",
+    "open": "Open",
+    "unreachable": "unreachable",
+    "version": "version",
+    "agents": "{{n}} agents",
+    "kind": "Hub",
+    "loginFailed": "Sign-in failed",
+    "codeInvalid": "Wrong or expired code",
+    "rateLimited": "Too many requests, try later (5 per hour)",
+    "mailFailed": "Mail could not be sent",
+    "nameTaken": "Name conflict, try another machine",
+    "expired": "Sign-in expired, send again",
+    "addMenu": "CiCy Hub instances",
+    "addMenuSub": "Sign in by email; all instances are listed automatically"
   }
 }

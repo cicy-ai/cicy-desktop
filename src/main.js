@@ -1161,6 +1161,35 @@ electronApp.whenReady().then(async () => {
       return { ok: true };
     });
 
+    // CiCy Hub: email/code sign-in + tenant instance list. See backends/hub-client.js.
+    {
+      const hub = require("./backends/hub-client");
+      const notify = (payload) => {
+        try {
+          const hw = require("./backends/homepage-window");
+          const w = hw.getHomepageWindow && hw.getHomepageWindow();
+          if (w && !w.isDestroyed()) w.webContents.send("hub:complete", payload);
+        } catch {}
+      };
+      const wrap = (fn) => async (_e, arg) => {
+        try { return { ok: true, ...(await fn(arg)) }; }
+        catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+      };
+      __ipcMainAuth.handle("hub:status", () => hub.status());
+      __ipcMainAuth.handle("hub:login-start", wrap((email) => hub.loginStart({ email, onResult: notify })));
+      __ipcMainAuth.handle("hub:login-code", wrap((code) => hub.loginCode({ code })));
+      __ipcMainAuth.handle("hub:cancel", () => hub.cancel());
+      __ipcMainAuth.handle("hub:instances", async () => { try { return await hub.instances(); } catch (e) { return { ok: false, error: String((e && e.message) || e), instances: [] }; } });
+      __ipcMainAuth.handle("hub:logout", () => hub.logout());
+      // Grant → open as a team tab in profile 0 (same place local/custom teams open).
+      __ipcMainAuth.handle("hub:open", wrap(async (input) => {
+        const { url, host } = await hub.grantUrl(input || {});
+        const tb = require("./tools/tab-browser-tools");
+        const r = await tb.openTab(0, url, { systemOpen: true, trusted: false, title: (input && input.title) || host, avatar: "", team: true, colorKey: (input && input.id) || host });
+        return { url: "https://" + host, host, winId: r.winId, tabId: r.tabId };
+      }));
+    }
+
     // First-run terms gate (合规第一道整体同意). Persist acceptance in
     // global.json keyed by terms VERSION — a future version bump re-gates.
     // This is DISTINCT from the MITM CA opt-in (the compliance second consent);

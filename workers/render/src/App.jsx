@@ -390,8 +390,11 @@ export default function App() {
   const [customUrl, setCustomUrl] = useState("");
   const [customBusy, setCustomBusy] = useState(false);
   const [customErr, setCustomErr] = useState("");
-  // Tab state for the team grid: "all" | "local" | "cloud".
+  // Tab state for the team grid: "all" | "local" | "cloud" | "custom" | "hub".
   const [tab, setTab] = useState("all");
+  // CiCy Hub: email sign-in → every cicy-code instance of that account (no local
+  // cicy-code needed). State + cards live in useHub / HubInstanceCard below.
+  const hub = useHub();
 
   // Pull /api/user/self + /api/teams in parallel using the access_token.
   // Goes through window.cicy.cloud.fetch — main does the actual request,
@@ -976,6 +979,8 @@ export default function App() {
   const showLocal = tab === "all" || tab === "local";
   const showCustom = tab === "all" || tab === "custom";
   const showCloud = tab === "all" || tab === "cloud";
+  const showHub = tab === "all" || tab === "hub";
+  const hubCount = hub.instances ? hub.instances.length : 0;
   // 首次打开:本地或云端团队任一还没拉到(为 null)→ grid 显示 skeleton 占位卡,直到两边都
   // resolve(出错也 resolve 成 []),再显示真实内容 —— 避免一个先回来另一个还空的露馅。
   const firstLoading = localTeams === null || teams === null;
@@ -993,8 +998,9 @@ export default function App() {
         <div className="app__tabsrow">
           <div className="app__tabs">
             {[
-              { k: "all",    label: tr("teamFilter.all", "全部"),   n: localCount + customCount + cloudCount },
+              { k: "all",    label: tr("teamFilter.all", "全部"),   n: localCount + customCount + cloudCount + hubCount },
               { k: "local",  label: tr("teamFilter.local", "本地"),   n: localCount },
+              { k: "hub",    label: tr("teamFilter.hub", "CiCy Hub"), n: hubCount },
               { k: "cloud",  label: tr("teamFilter.cloud", "私有云"), n: cloudCount },
               { k: "custom", label: tr("teamFilter.custom", "自定义"), n: customCount },
             ].filter(({ k }) => k !== "cloud" || token).map(({ k, label, n }) => (
@@ -1029,6 +1035,13 @@ export default function App() {
                     <div style={{ fontSize: 13, fontWeight: 600 }}>{tr("teams.addCustom", "自定义团队")}</div>
                     <div style={{ fontSize: 11, opacity: .6, marginTop: 2 }}>{tr("teams.addCustomSub", "手动输入地址和名称(只存本地)")}</div>
                   </button>
+                  {!hub.loggedIn && (
+                  <button type="button" data-id="AddTeamMenu-hub" className="bcard__menu-item" style={{ display: "block", width: "100%", textAlign: "left", padding: "11px 14px", border: "none", borderTop: "1px solid var(--border, #2c2f36)", background: "transparent", cursor: "pointer", color: "inherit" }}
+                    onClick={() => { setAddMenuOpen(false); setTab("hub"); hub.openLogin(); }}>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{tr("cicyHub.addMenu", "CiCy Hub 实例")}</div>
+                    <div style={{ fontSize: 11, opacity: .6, marginTop: 2 }}>{tr("cicyHub.addMenuSub", "邮箱登录后自动列出所有实例")}</div>
+                  </button>
+                  )}
                   {token && (
                   <button type="button" data-id="AddTeamMenu-private" className="bcard__menu-item" style={{ display: "block", width: "100%", textAlign: "left", padding: "11px 14px", border: "none", borderTop: "1px solid var(--border, #2c2f36)", background: "transparent", cursor: "pointer", color: "inherit" }}
                     onClick={() => { setAddMenuOpen(false); openCloudPage("?tab=private"); }}>
@@ -1083,8 +1096,13 @@ export default function App() {
           </div>
         )}
 
+        {showHub && <HubBar hub={hub} />}
+        {hub.loginOpen && <HubLoginModal hub={hub} />}
         <div className="app__grid">
           {firstLoading && [0, 1, 2].map((i) => <SkeletonCard key={"skc" + i} />)}
+          {!firstLoading && showHub && hub.loggedIn && (hub.instances || []).map((it) => (
+            <HubInstanceCard key={"hub:" + it.id} inst={it} onOpen={() => hub.open(it)} />
+          ))}
           {!firstLoading && showLocal && localList.map((t) => (
             <LocalTeamCard key={"local:" + t.id} team={t} cloudCode={cloudCodeFor(t.cloud_team_id)} onOpen={() => openLocalTeam(t.id)} onRename={renameLocalTeam} onRefresh={fetchLocalTeams} />
           ))}
@@ -3696,4 +3714,245 @@ function humanError(s) {
   if (/no token/i.test(s))        return "登录未完成，请重试。";
   if (/bridge missing/i.test(s))  return "无法连接到登录服务（preload 未就绪）。";
   return s;
+}
+
+
+// ─── CiCy Hub ────────────────────────────────────────────────────────────────
+// Sign in to the hub with an email (6-digit code or the link in the mail) and the
+// homepage lists every cicy-code instance of that account — one card per node,
+// online/offline, version, live cpu/mem/disk — without a local cicy-code and
+// without adding each node as a custom team. Opening goes through a one-time
+// hub grant, so the tab lands logged in.
+const HUB_REFRESH_MS = 30_000;
+
+function hubErrText(code) {
+  const c = String(code || "");
+  const map = {
+    invalid_code: tr("cicyHub.codeInvalid", "验证码不对或已过期"),
+    rate_limited: tr("cicyHub.rateLimited", "发送太频繁,稍后再试(每小时最多 5 次)"),
+    mail_failed: tr("cicyHub.mailFailed", "邮件发送失败"),
+    name_taken: tr("cicyHub.nameTaken", "名称冲突,换台机器再试"),
+    expired: tr("cicyHub.expired", "登录已过期,重新发送"),
+    invalid_email: tr("auth.badEmail", "请输入有效的邮箱地址"),
+  };
+  return map[c] || c;
+}
+
+function useHub() {
+  const bridge = typeof window !== "undefined" ? window.cicy?.hub : null;
+  const [status, setStatus] = useState(null);       // { loggedIn, owner, pending }
+  const [instances, setInstances] = useState(null); // null = not loaded
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [loginOpen, setLoginOpen] = useState(false);
+  const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
+  const [step, setStep] = useState("email");         // email | code
+  const [busy, setBusy] = useState(false);
+  const [loginErr, setLoginErr] = useState("");
+
+  const refreshStatus = useCallback(async () => {
+    if (!bridge) return null;
+    try { const st = await bridge.status(); setStatus(st || null); return st; } catch { return null; }
+  }, [bridge]);
+
+  const refresh = useCallback(async () => {
+    if (!bridge) return;
+    setLoading(true);
+    try {
+      const r = await bridge.instances();
+      if (r?.ok) { setInstances(r.instances || []); setError(""); }
+      else {
+        setInstances([]);
+        setError(r?.error || "");
+        if (r?.error === "unauthorized" || r?.error === "not_logged_in") refreshStatus();
+      }
+    } catch (e) { setError(e?.message || String(e)); }
+    finally { setLoading(false); }
+  }, [bridge, refreshStatus]);
+
+  // mount: status → instances; periodic refresh while signed in
+  useEffect(() => {
+    if (!bridge) { setStatus({ loggedIn: false }); setInstances([]); return; }
+    let alive = true;
+    refreshStatus().then((st) => { if (alive && st?.loggedIn) refresh(); else if (alive) setInstances([]); });
+    const off = bridge.onComplete?.((p) => {
+      if (p?.ok) {
+        setLoginOpen(false); setBusy(false); setStep("email"); setCode("");
+        toast.show({ id: "hub-login", message: tr("auth.loginSuccess", "登录成功"), status: "done", ttl: 2500 });
+        refreshStatus().then(() => refresh());
+      } else if (p?.error && p.error !== "cancelled") {
+        setBusy(false); setLoginErr(hubErrText(p.error)); setStep("email");
+      }
+    });
+    return () => { alive = false; try { off && off(); } catch {} };
+  }, [bridge, refresh, refreshStatus]);
+  useEffect(() => {
+    if (!status?.loggedIn) return;
+    const id = setInterval(refresh, HUB_REFRESH_MS);
+    return () => clearInterval(id);
+  }, [status?.loggedIn, refresh]);
+
+  const openLogin = () => { setLoginErr(""); setStep("email"); setCode(""); setLoginOpen(true); };
+  const closeLogin = () => { if (step === "code") { try { bridge?.cancel(); } catch {} } setLoginOpen(false); setBusy(false); };
+  const sendCode = async () => {
+    const addr = email.trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr)) { setLoginErr(tr("auth.badEmail", "请输入有效的邮箱地址")); return; }
+    setBusy(true); setLoginErr("");
+    try {
+      const r = await bridge.loginStart(addr);
+      if (!r?.ok) { setLoginErr(hubErrText(r?.error) || tr("cicyHub.loginFailed", "登录失败")); return; }
+      setStep("code");
+    } catch (e) { setLoginErr(e?.message || String(e)); }
+    finally { setBusy(false); }
+  };
+  const verify = async () => {
+    const c = code.replace(/\D/g, "");
+    if (c.length !== 6) { setLoginErr(tr("cicyHub.codeInvalid", "验证码不对或已过期")); return; }
+    setBusy(true); setLoginErr("");
+    try {
+      const r = await bridge.loginCode(c);
+      if (!r?.ok) { setLoginErr(hubErrText(r?.error) || tr("cicyHub.loginFailed", "登录失败")); setBusy(false); }
+      // success → onComplete closes the modal
+    } catch (e) { setLoginErr(e?.message || String(e)); setBusy(false); }
+  };
+  const logout = async () => {
+    try { await bridge?.logout(); } catch {}
+    setInstances([]); setError("");
+    refreshStatus();
+  };
+  const open = async (inst) => {
+    try {
+      const r = await bridge.open(inst.id, inst.name, 0);
+      if (!r?.ok) toast.show({ id: "hub-open", message: hubErrText(r?.error) || tr("cicyHub.loginFailed", "打开失败"), status: "error", ttl: 5000 });
+    } catch (e) { toast.show({ id: "hub-open", message: e?.message || String(e), status: "error", ttl: 5000 }); }
+  };
+
+  return {
+    available: !!bridge, status, loggedIn: !!status?.loggedIn, owner: status?.owner || "",
+    instances, loading, error, refresh, logout, open,
+    loginOpen, openLogin, closeLogin, email, setEmail, code, setCode, step, busy, loginErr, sendCode, verify,
+  };
+}
+
+function HubBar({ hub }) {
+  if (!hub.available) return null;
+  if (!hub.loggedIn) {
+    return (
+      <div data-id="HubBar" className="hubbar" style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", marginBottom: 12, border: "1px dashed var(--border, #2c2f36)", borderRadius: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>{tr("cicyHub.title", "CiCy Hub")}</div>
+          <div style={{ fontSize: 12, opacity: .6 }}>{tr("cicyHub.loginSub", "邮箱验证码登录,自动列出这个账号下的所有 cicy-code 实例")}</div>
+        </div>
+        <button type="button" className="btn-primary" data-id="HubBar-login" onClick={hub.openLogin}>{tr("cicyHub.login", "登录 CiCy Hub")}</button>
+      </div>
+    );
+  }
+  return (
+    <div data-id="HubBar" className="hubbar" style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 14px", marginBottom: 12, border: "1px solid var(--border, #2c2f36)", borderRadius: 12 }}>
+      <span className="bcard__dot" data-tone="ok" />
+      <div style={{ flex: 1, minWidth: 0, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <b>{tr("cicyHub.title", "CiCy Hub")}</b> · {tr("cicyHub.signedInAs", "已登录")} {hub.owner}
+        {hub.error && <span style={{ color: "#f87171", marginLeft: 8 }}>{hubErrText(hub.error)}</span>}
+      </div>
+      <button type="button" className="btn-ghost" data-id="HubBar-refresh" disabled={hub.loading} onClick={hub.refresh}>{hub.loading ? <Spinner /> : tr("cicyHub.refresh", "刷新")}</button>
+      <button type="button" className="btn-ghost" data-id="HubBar-logout" onClick={hub.logout}>{tr("cicyHub.logout", "退出 Hub")}</button>
+      {hub.instances && hub.instances.length === 0 && !hub.loading && (
+        <div style={{ flexBasis: "100%", fontSize: 12, opacity: .6, marginTop: 4 }}>{tr("cicyHub.empty", "这个账号下还没有 cicy-code 实例。在 cicy-code 的「CiCy 账号」里用同一个邮箱登录 Hub 即可出现。")}</div>
+      )}
+    </div>
+  );
+}
+
+function HubLoginModal({ hub }) {
+  const codeStep = hub.step === "code";
+  return createPortal(
+    <div data-id="HubLoginModal" style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.5)" }}
+      onMouseDown={(e) => { if (!hub.busy && e.target === e.currentTarget) hub.closeLogin(); }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: 400, maxWidth: "92vw", background: "var(--card, #1b1d22)", border: "1px solid var(--border, #2c2f36)", borderRadius: 14, padding: 22, boxShadow: "0 20px 60px rgba(0,0,0,.5)" }}>
+        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{tr("cicyHub.login", "登录 CiCy Hub")}</div>
+        <div style={{ fontSize: 12, opacity: .6, marginBottom: 16 }}>
+          {codeStep ? tr("cicyHub.codeSent", "验证码已发到 {{email}},也可以直接点邮件里的链接", { email: hub.email.trim() })
+                    : tr("cicyHub.loginSub", "邮箱验证码登录,自动列出这个账号下的所有 cicy-code 实例")}
+        </div>
+        {!codeStep ? (
+          <>
+            <label style={{ display: "block", fontSize: 12, opacity: .75, marginBottom: 6 }}>{tr("cicyHub.email", "邮箱")}</label>
+            <input data-id="HubLoginModal-email" className="login-email-input" style={{ width: "100%", marginBottom: 6 }} type="email" autoFocus spellCheck={false}
+              value={hub.email} onChange={(e) => hub.setEmail(e.target.value)} placeholder="you@example.com"
+              onKeyDown={(e) => { if (e.key === "Enter") hub.sendCode(); }} />
+          </>
+        ) : (
+          <>
+            <label style={{ display: "block", fontSize: 12, opacity: .75, marginBottom: 6 }}>{tr("cicyHub.code", "6 位验证码")}</label>
+            <input data-id="HubLoginModal-code" className="login-email-input" style={{ width: "100%", marginBottom: 6, letterSpacing: 6, fontSize: 20, textAlign: "center" }} inputMode="numeric" autoFocus maxLength={6}
+              value={hub.code} onChange={(e) => hub.setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="••••••"
+              onKeyDown={(e) => { if (e.key === "Enter") hub.verify(); }} />
+            {hub.busy && <div style={{ fontSize: 12, opacity: .6, display: "flex", alignItems: "center", gap: 6 }}><Spinner /> {tr("cicyHub.verifying", "验证中…")}</div>}
+          </>
+        )}
+        {hub.loginErr && <div className="error" style={{ marginTop: 10 }}>{hub.loginErr}</div>}
+        <div className="modal-actions">
+          <button type="button" className="btn-ghost" data-id="HubLoginModal-cancel" onClick={hub.closeLogin}>{tr("cicyHub.cancel", "取消")}</button>
+          {!codeStep ? (
+            <button type="button" className="btn-primary" data-id="HubLoginModal-send" disabled={hub.busy} onClick={hub.sendCode}>
+              {hub.busy ? tr("cicyHub.sending", "发送中…") : tr("cicyHub.sendCode", "发送验证码")}
+            </button>
+          ) : (
+            <button type="button" className="btn-primary" data-id="HubLoginModal-verify" disabled={hub.busy || hub.code.length !== 6} onClick={hub.verify}>
+              {hub.busy ? tr("cicyHub.verifying", "验证中…") : tr("cicyHub.verify", "登录")}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+function hubPct(v) { const n = Number(v); return Number.isFinite(n) ? Math.round(n) + "%" : "–"; }
+function hubGB(bytes) { const n = Number(bytes); return Number.isFinite(n) && n > 0 ? (n / 1073741824).toFixed(n >= 100 * 1073741824 ? 0 : 1) + "G" : ""; }
+
+function HubInstanceCard({ inst, onOpen }) {
+  const tone = inst.online ? "ok" : "off";
+  const res = inst.resources || null;
+  const [busy, setBusy] = useState(false);
+  const handleOpen = async () => { if (busy) return; setBusy(true); try { await onOpen(); } finally { setBusy(false); } };
+  const canOpen = inst.reachable || inst.online;
+  const chips = [];
+  if (inst.version) chips.push({ k: "ver", t: "v" + inst.version });
+  if (res) {
+    chips.push({ k: "cpu", t: "CPU " + hubPct(res.cpu_usage_pct), warn: res.cpu_usage_pct >= 90 });
+    chips.push({ k: "mem", t: "内存 " + hubPct(res.mem_usage_pct) + (hubGB(res.mem_total_bytes) ? "/" + hubGB(res.mem_total_bytes) : ""), warn: res.mem_usage_pct >= 90 });
+    chips.push({ k: "disk", t: "磁盘 " + hubPct(res.disk_usage_pct) + (hubGB(res.disk_total_bytes) ? "/" + hubGB(res.disk_total_bytes) : ""), warn: res.disk_usage_pct >= 90 });
+  }
+  if (typeof inst.agents === "number") chips.push({ k: "agents", t: tr("cicyHub.agents", "{{n}} 个 Agent", { n: inst.agents }) });
+  return (
+    <div data-id="HubInstanceCard" className={`bcard bcard--custom${inst.online ? " bcard--online" : ""}`} title={inst.host}>
+      <div className="bcard__accent" />
+      <div className="bcard__top">
+        <div className="bcard__pill">
+          <span className="bcard__dot" data-tone={tone} />
+          <LaptopIcon />
+        </div>
+        <span className="bcard__chip" data-id="HubInstanceCard-state" style={{ opacity: .8 }}>{inst.online ? tr("cicyHub.online", "在线") : tr("cicyHub.offline", "离线")}</span>
+      </div>
+      <div className="bcard__body">
+        <div style={{ height: 28, display: "flex", alignItems: "center", gap: 8 }}>
+          <TeamAvatar size={24} name={inst.name} teamId={inst.id} />
+          <h3 className="bcard__name" style={{ flex: 1, minWidth: 0, margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{inst.name}</h3>
+        </div>
+        <div className="bcard__meta" style={{ flexWrap: "wrap", gap: 4 }}>
+          <span className="bcard__chip" data-id="HubInstanceCard-kind">{tr("cicyHub.kind", "Hub")}</span>
+          {chips.map((c) => (
+            <span key={c.k} className="bcard__chip" style={c.warn ? { color: "#f87171" } : undefined}>{c.t}</span>
+          ))}
+        </div>
+      </div>
+      <button type="button" className="bcard__cta" data-id="HubInstanceCard-open" disabled={busy || !canOpen} onClick={handleOpen}>
+        {busy ? <Spinner /> : <ArrowIcon />}
+        <span>{canOpen ? tr("cicyHub.open", "打开") : tr("cicyHub.unreachable", "不可达")}</span>
+      </button>
+    </div>
+  );
 }

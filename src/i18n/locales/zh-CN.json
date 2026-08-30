@@ -466,7 +466,8 @@
     "all": "全部",
     "local": "本地",
     "cloud": "私有云",
-    "custom": "自定义"
+    "custom": "自定义",
+    "hub": "CiCy Hub"
   },
   "userMenu": {
     "wallet": "我的钱包",
@@ -633,5 +634,37 @@
     "noTeams": "该 Hub 暂无在线 team",
     "agents": "{n} agent",
     "scan": "用 CiCy Mobile 扫码添加此 Hub"
+  },
+  "cicyHub": {
+    "title": "CiCy Hub",
+    "login": "登录 CiCy Hub",
+    "loginSub": "邮箱验证码登录,自动列出这个账号下的所有 cicy-code 实例",
+    "email": "邮箱",
+    "sendCode": "发送验证码",
+    "sending": "发送中…",
+    "codeSent": "验证码已发到 {{email}},也可以直接点邮件里的链接",
+    "code": "6 位验证码",
+    "verify": "登录",
+    "verifying": "验证中…",
+    "cancel": "取消",
+    "logout": "退出 Hub",
+    "refresh": "刷新",
+    "signedInAs": "已登录",
+    "empty": "这个账号下还没有 cicy-code 实例。在 cicy-code 的「CiCy 账号」里用同一个邮箱登录 Hub 即可出现。",
+    "online": "在线",
+    "offline": "离线",
+    "open": "打开",
+    "unreachable": "不可达",
+    "version": "版本",
+    "agents": "{{n}} 个 Agent",
+    "kind": "Hub",
+    "loginFailed": "登录失败",
+    "codeInvalid": "验证码不对或已过期",
+    "rateLimited": "发送太频繁,稍后再试(每小时最多 5 次)",
+    "mailFailed": "邮件发送失败",
+    "nameTaken": "名称冲突,换台机器再试",
+    "expired": "登录已过期,重新发送",
+    "addMenu": "CiCy Hub 实例",
+    "addMenuSub": "邮箱登录后自动列出所有实例"
   }
 }
