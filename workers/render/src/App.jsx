@@ -3902,14 +3902,14 @@ function HubInstanceCard({ inst, onOpen }) {
   const [busy, setBusy] = useState(false);
   const handleOpen = async () => { if (busy) return; setBusy(true); try { await onOpen(); } finally { setBusy(false); } };
   const canOpen = inst.reachable || inst.online;
-  const chips = [];
-  if (inst.version) chips.push({ k: "ver", t: "v" + inst.version });
-  if (res) {
-    chips.push({ k: "cpu", t: "CPU " + hubPct(res.cpu_usage_pct), warn: res.cpu_usage_pct >= 90 });
-    chips.push({ k: "mem", t: "内存 " + hubPct(res.mem_usage_pct) + (hubGB(res.mem_total_bytes) ? "/" + hubGB(res.mem_total_bytes) : ""), warn: res.mem_usage_pct >= 90 });
-    chips.push({ k: "disk", t: "磁盘 " + hubPct(res.disk_usage_pct) + (hubGB(res.disk_total_bytes) ? "/" + hubGB(res.disk_total_bytes) : ""), warn: res.disk_usage_pct >= 90 });
-  }
-  if (typeof inst.agents === "number") chips.push({ k: "agents", t: tr("cicyHub.agents", "{{n}} 个 Agent", { n: inst.agents }) });
+  const hot = (v) => Number(v) >= 90;
+  // One muted line for live usage — chips only for identity (version).
+  const usage = res ? [
+    { k: "cpu", t: "CPU " + hubPct(res.cpu_usage_pct), warn: hot(res.cpu_usage_pct) },
+    { k: "mem", t: "内存 " + hubPct(res.mem_usage_pct), warn: hot(res.mem_usage_pct) },
+    { k: "disk", t: "磁盘 " + hubPct(res.disk_usage_pct), warn: hot(res.disk_usage_pct) },
+  ] : [];
+  const usageTitle = res ? `内存 ${hubGB(res.mem_used_bytes)}/${hubGB(res.mem_total_bytes)} · 磁盘 ${hubGB(res.disk_used_bytes)}/${hubGB(res.disk_total_bytes)}` : "";
   return (
     <div data-id="HubInstanceCard" className={`bcard bcard--custom${inst.online ? " bcard--online" : ""}`} title={inst.host}>
       <div className="bcard__accent" />
@@ -3918,19 +3918,26 @@ function HubInstanceCard({ inst, onOpen }) {
           <span className="bcard__dot" data-tone={tone} />
           <LaptopIcon />
         </div>
-        <span className="bcard__chip" data-id="HubInstanceCard-state" style={{ opacity: .8 }}>{inst.online ? tr("cicyHub.online", "在线") : tr("cicyHub.offline", "离线")}</span>
+        {typeof inst.agents === "number" && inst.agents > 0 && (
+          <span data-id="HubInstanceCard-agents" style={{ fontSize: 11, color: "#8b949e" }}>{tr("cicyHub.agents", "{{n}} 个 Agent", { n: inst.agents })}</span>
+        )}
       </div>
       <div className="bcard__body">
         <div style={{ height: 28, display: "flex", alignItems: "center", gap: 8 }}>
           <TeamAvatar size={24} name={inst.name} teamId={inst.id} />
           <h3 className="bcard__name" style={{ flex: 1, minWidth: 0, margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{inst.name}</h3>
         </div>
-        <div className="bcard__meta" style={{ flexWrap: "wrap", gap: 4 }}>
+        <div className="bcard__meta">
           <span className="bcard__chip" data-id="HubInstanceCard-kind">{tr("cicyHub.kind", "Hub")}</span>
-          {chips.map((c) => (
-            <span key={c.k} className="bcard__chip" style={c.warn ? { color: "#f87171" } : undefined}>{c.t}</span>
-          ))}
+          {inst.version && <span className="bcard__chip" data-id="HubInstanceCard-version">v{inst.version}</span>}
         </div>
+        {usage.length > 0 && (
+          <div data-id="HubInstanceCard-usage" title={usageTitle} style={{ marginTop: 6, fontSize: 11, color: "#8b949e", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {usage.map((u, i) => (
+              <span key={u.k} style={u.warn ? { color: "#f87171" } : undefined}>{i > 0 ? " · " : ""}{u.t}</span>
+            ))}
+          </div>
+        )}
       </div>
       <button type="button" className="bcard__cta" data-id="HubInstanceCard-open" disabled={busy || !canOpen} onClick={handleOpen}>
         {busy ? <Spinner /> : <ArrowIcon />}
