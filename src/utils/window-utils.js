@@ -170,7 +170,7 @@ function setupWindowHandlers(win) {
       }
 
       // 3. 检查域名注入脚本
-      const injectDir = path.join(os.homedir(), "data", "electron", "extension", "inject");
+      const injectDir = path.join(os.homedir(), "cicy-ai", "electron", "extension", "inject");
       const injectFile = path.join(injectDir, `${domain}.js`);
 
       // 4. 确保目录存在

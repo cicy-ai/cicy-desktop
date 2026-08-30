@@ -7,7 +7,7 @@ const os = require("os");
 const crypto = require("crypto");
 const log = require("electron-log");
 
-const STATE_DIR = path.join(os.homedir(), "data", "electron", "state");
+const STATE_DIR = path.join(os.homedir(), "cicy-ai", "electron", "state");
 
 // 确保状态目录存在
 function ensureStateDir() {

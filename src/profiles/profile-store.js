@@ -12,7 +12,7 @@
 //
 // Stores (unchanged locations):
 //   chrome   → ~/cicy-ai/db/chrome.json        keyed "profile_<N>"
-//   electron → ~/data/electron/account-<N>.json
+//   electron → ~/cicy-ai/electron/account-<N>.json
 //
 // Core fields (identical names in BOTH files, added lazily; missing = default):
 //   name    : string
@@ -26,7 +26,18 @@ const os = require("os");
 const path = require("path");
 
 const CHROME_JSON = path.join(os.homedir(), "cicy-ai", "db", "chrome.json");
-const ELECTRON_DIR = path.join(os.homedir(), "data", "electron");
+const ELECTRON_DIR = path.join(os.homedir(), "cicy-ai", "electron");
+// Profiles used to live in ~/data/electron (ephemeral on Colab). They now live
+// under ~/cicy-ai/electron so the per-minute config sync persists them. A real
+// legacy directory (not a symlink) is moved over once; a symlink is just dropped.
+(function migrateLegacyElectronDir() {
+  const legacy = path.join(os.homedir(), "data", "electron");
+  try {
+    const st = fs.lstatSync(legacy);
+    if (st.isSymbolicLink()) { fs.unlinkSync(legacy); return; }
+    if (st.isDirectory() && !fs.existsSync(ELECTRON_DIR)) { fs.mkdirSync(path.dirname(ELECTRON_DIR), { recursive: true }); fs.renameSync(legacy, ELECTRON_DIR); }
+  } catch (e) { /* no legacy dir */ }
+})();
 
 // ── proxy: the ONE normalizer ────────────────────────────────────────────────
 // Accepts every historical encoding and returns the canonical {url, enabled}:

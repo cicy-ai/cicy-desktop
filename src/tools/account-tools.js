@@ -10,7 +10,7 @@ const profileStore = require("../profiles/profile-store");
 const { summarizeCookieLogins } = require("../utils/cookie-logins");
 const { probeIpViaSession } = require("../utils/ip-probe");
 
-const ACCOUNT_DIR = path.join(os.homedir(), "data", "electron");
+const ACCOUNT_DIR = path.join(os.homedir(), "cicy-ai", "electron");
 
 function ensureAccountDir() {
   if (!fs.existsSync(ACCOUNT_DIR)) {
@@ -233,7 +233,7 @@ module.exports = (registerTool) => {
 
   registerTool(
     "electron_add_profile",
-    "新增一个 Electron profile：在 ~/data/electron/ 写入下一个 account-N.json（N=现有最大+1，至少为 1），返回统一视图",
+    "新增一个 Electron profile：在 ~/cicy-ai/electron/ 写入下一个 account-N.json（N=现有最大+1，至少为 1），返回统一视图",
     z.object({ name: z.string().optional().describe("可选：profile 名称（metadata.name）") }),
     async ({ name } = {}) => {
       try {

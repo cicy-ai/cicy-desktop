@@ -17,7 +17,7 @@ class AuthManager {
     // Legacy locations we migrate from so existing users don't lose their token:
     // the old ~/global.json (pre cicy-ai unification) and the even older token.txt.
     this.legacyGlobalJsonPath = path.join(os.homedir(), "global.json");
-    this.legacyTokenPath = path.join(os.homedir(), "data", "electron", "token.txt");
+    this.legacyTokenPath = path.join(os.homedir(), "cicy-ai", "electron", "token.txt");
     this.authToken = this.getOrGenerateToken();
     log.info("[MCP] Auth token enabled");
     log.info("[MCP] Token stored in ~/cicy-ai/global.json");
@@ -25,7 +25,7 @@ class AuthManager {
 
   /**
    * 获取或生成认证令牌
-   * 优先读取 ~/global.json，兼容旧版 ~/data/electron/token.txt（自动迁移）
+   * 优先读取 ~/global.json，兼容旧版 ~/cicy-ai/electron/token.txt（自动迁移）
    * @returns {string} 认证令牌
    */
   getOrGenerateToken() {

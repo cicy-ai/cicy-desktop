@@ -13,7 +13,7 @@ const SAFE_NAME = /^[a-z0-9][a-z0-9._-]*\.js$/;
 function injectRoot() {
   return path.resolve(
     process.env.CICY_ELECTRON_INJECT_DIR ||
-      path.join(os.homedir(), "data", "electron", "extension", "inject")
+      path.join(os.homedir(), "cicy-ai", "electron", "extension", "inject")
   );
 }
 
@@ -86,7 +86,7 @@ function operate({ operation, name, content }) {
 function registerTools(registerTool) {
   registerTool(
     "electron_inject",
-    "Install, inspect, or uninstall a JavaScript file under ~/data/electron/extension/inject/",
+    "Install, inspect, or uninstall a JavaScript file under ~/cicy-ai/electron/extension/inject/",
     z.object({
       operation: z.enum(["install", "status", "uninstall"]),
       name: z.string(),
