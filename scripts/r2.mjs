@@ -23,6 +23,7 @@
 // list has no wrangler equivalent, so it goes through the REST API.
 
 import { spawnSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import { existsSync, statSync } from "node:fs";
 
 const BUCKET = process.env.R2_BUCKET || "cicy-assets-poc";
@@ -42,12 +43,23 @@ function needCreds() {
   if (!ACCOUNT || !TOKEN) die("R2_ACCOUNT_ID and R2_API_TOKEN must be set");
 }
 
+// Windows: npx is npx.cmd, which Node only spawns with shell:true — and then
+// cmd.exe re-parses the argv, so anything with a space ("CiCy Desktop Setup
+// 2.1.324.exe") must be quoted or it arrives as several arguments.
+export function shellQuote(arg, platform = process.platform) {
+  const s = String(arg);
+  if (platform !== "win32" || !/[\s"&|<>^()]/.test(s)) return s;
+  return `"${s.replace(/"/g, '\\"')}"`;
+}
+
 function wrangler(args) {
   needCreds();
-  const npx = process.platform === "win32" ? "npx.cmd" : "npx";
-  const r = spawnSync(npx, ["--yes", WRANGLER, ...args, "--remote"], {
+  const isWin = process.platform === "win32";
+  const npx = isWin ? "npx.cmd" : "npx";
+  const argv = ["--yes", WRANGLER, ...args, "--remote"].map((a) => shellQuote(a));
+  const r = spawnSync(npx, argv, {
     stdio: "inherit",
-    shell: process.platform === "win32",
+    shell: isWin,
     env: { ...process.env, CLOUDFLARE_ACCOUNT_ID: ACCOUNT, CLOUDFLARE_API_TOKEN: TOKEN },
   });
   return r.status == null ? 1 : r.status;
@@ -122,4 +134,5 @@ async function main() {
   }
 }
 
-main();
+// Only run when executed directly (tests import shellQuote).
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();
