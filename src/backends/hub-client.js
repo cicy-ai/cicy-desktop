@@ -95,6 +95,40 @@ async function hubFetch(route, { method = "GET", token = "", body = null, tries 
   throw new Error(/fetch failed|ECONN|ENOTFOUND|abort/i.test(msg) ? `hub unreachable (${hubOrigin()}): ${msg}` : msg);
 }
 
+// ── fallback: the local cicy-code sidecar ───────────────────────────────────
+// Some PCs cannot reach the hub directly at all (no proxy on Windows) while the
+// cicy-code container on the same PC can (it carries its own proxy) and is
+// signed in to the same hub account. Its /api/im/cicy-cloud/* routes give us
+// the same instance list and one-time open grants, so use them when the direct
+// call dies with a network error.
+const SIDECAR_PORT = Number(process.env.CICY_SIDECAR_PORT || 8008);
+let _sidecarTok = { value: "", at: 0 };
+async function sidecarToken() {
+  if (_sidecarTok.value && Date.now() - _sidecarTok.at < 5 * 60 * 1000) return _sidecarTok.value;
+  let tok = "";
+  try { tok = String(readGlobalConfig(GLOBAL_JSON)?.api_token || "").trim(); } catch {}
+  if (!tok && process.platform === "win32") {
+    try { tok = String(await require("../sidecar/wsl-docker").readContainerToken(SIDECAR_PORT) || "").trim(); } catch (e) { log.warn(`[hub] sidecar token: ${e.message}`); }
+  }
+  if (tok) _sidecarTok = { value: tok, at: Date.now() };
+  return tok;
+}
+async function sidecarFetch(route, { method = "GET", body = null } = {}) {
+  const tok = await sidecarToken();
+  if (!tok) throw new Error("local cicy-code token unavailable");
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const headers = { accept: "application/json", authorization: "Bearer " + tok };
+    if (body != null) headers["content-type"] = "application/json";
+    const r = await fetch(`http://127.0.0.1:${SIDECAR_PORT}${route}`, { method, headers, body: body == null ? undefined : JSON.stringify(body), signal: ctrl.signal, cache: "no-store" });
+    const text = await r.text();
+    let json = null; try { json = text ? JSON.parse(text) : null; } catch {}
+    return { status: r.status, ok: r.ok, json, text };
+  } finally { clearTimeout(t); }
+}
+const isNetErr = (e) => /unreachable|fetch failed|ECONN|ENOTFOUND|abort/i.test(String((e && e.message) || e));
+
 function errorOf(res, fallback) {
   return (res && res.json && (res.json.error || res.json.message)) || fallback || `HTTP ${res && res.status}`;
 }
@@ -186,20 +220,27 @@ function clearAuth() {
 async function instances() {
   const a = readAuth();
   if (!a) return { ok: false, error: "not_logged_in", instances: [] };
-  let res;
+  let res, viaSidecar = false;
   try { res = await hubFetch("/api/instances", { token: a.token }); }
-  catch (e) { return { ok: false, error: e.message, instances: [] }; }
-  if (res.status === 401) { clearAuth(); return { ok: false, error: "unauthorized", instances: [] }; }
+  catch (e) {
+    if (!isNetErr(e)) return { ok: false, error: e.message, instances: [] };
+    log.warn(`[hub] direct instance list failed (${e.message}); trying the local cicy-code`);
+    try { res = await sidecarFetch("/api/im/cicy-cloud/instances"); viaSidecar = true; }
+    catch (e2) { return { ok: false, error: `${e.message}; sidecar: ${e2.message}`, instances: [] }; }
+  }
+  if (res.status === 401 && !viaSidecar) { clearAuth(); return { ok: false, error: "unauthorized", instances: [] }; }
   if (!res.ok || !res.json) return { ok: false, error: errorOf(res, "instances_failed"), instances: [] };
   const list = Array.isArray(res.json.instances) ? res.json.instances : [];
   const out = list
-    .filter((i) => !i.self && !String(i.platform || "").startsWith("desktop"))
+    // direct: `self` is this desktop's hidden pseudo-instance; via sidecar: `self` is the
+    // local node itself, which IS a real instance the user may want to open.
+    .filter((i) => (viaSidecar || !i.self) && !String(i.platform || "").startsWith("desktop"))
     .map((i) => ({
       id: i.instanceId,
-      name: i.name || i.proxyHost || i.instanceId,
+      name: i.name || (i.proxyHost ? String(i.proxyHost).split(".")[0] : i.instanceId),
       host: i.proxyHost || "",
       url: i.proxyHost ? "https://" + i.proxyHost : "",
-      online: !!i.online,
+      online: i.status ? i.status === "online" : !!i.online,
       reachable: !!i.proxyAvailable,
       version: i.version || "",
       platform: i.platform || "",
@@ -212,14 +253,22 @@ async function instances() {
       agents: Array.isArray(i.agents) ? i.agents.length : undefined,
     }))
     .sort((x, y) => Number(y.online) - Number(x.online) || x.name.localeCompare(y.name));
-  return { ok: true, owner: res.json.owner || a.owner, instances: out };
+  return { ok: true, owner: res.json.owner || a.owner, viaSidecar, instances: out };
 }
 
 // One-time hand-off URL for an instance (optionally one of its local ports).
 async function grantUrl({ id, port = 0, next = "/" } = {}) {
   const a = readAuth();
   if (!a) throw new Error("not_logged_in");
-  const res = await hubFetch("/api/gateway/grant", { method: "POST", token: a.token, body: { instanceId: String(id || ""), port: Number(port) || 0, next: String(next || "/") } });
+  let res;
+  try { res = await hubFetch("/api/gateway/grant", { method: "POST", token: a.token, body: { instanceId: String(id || ""), port: Number(port) || 0, next: String(next || "/") } }); }
+  catch (e) {
+    if (!isNetErr(e)) throw e;
+    log.warn(`[hub] direct grant failed (${e.message}); trying the local cicy-code`);
+    res = await sidecarFetch("/api/im/cicy-cloud/open", { method: "POST", body: { instance_id: String(id || ""), port: Number(port) || 0, next: String(next || "/") } });
+    if (!res.ok || !res.json || !res.json.url) throw new Error(errorOf(res, "grant_failed"));
+    return { url: res.json.url, host: res.json.host };
+  }
   if (res.status === 401) { clearAuth(); throw new Error("unauthorized"); }
   if (!res.ok || !res.json || !res.json.url) throw new Error(errorOf(res, "grant_failed"));
   return { url: res.json.url, host: res.json.host };
