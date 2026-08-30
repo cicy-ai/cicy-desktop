@@ -978,7 +978,7 @@ export default function App() {
   const cloudCount = cloudList.length;
   const showLocal = tab === "all" || tab === "local";
   const showCustom = tab === "all" || tab === "custom";
-  const showCloud = tab === "all" || tab === "cloud";
+  const showCloud = false; // 首页只用 CiCy Hub 账号,云端团队不再展示
   const showHub = tab === "all" || tab === "hub";
   const hubCount = hub.instances ? hub.instances.length : 0;
   // 首次打开:本地或云端团队任一还没拉到(为 null)→ grid 显示 skeleton 占位卡,直到两边都
@@ -998,12 +998,11 @@ export default function App() {
         <div className="app__tabsrow">
           <div className="app__tabs">
             {[
-              { k: "all",    label: tr("teamFilter.all", "全部"),   n: localCount + customCount + cloudCount + hubCount },
+              { k: "all",    label: tr("teamFilter.all", "全部"),   n: localCount + customCount + hubCount },
               { k: "local",  label: tr("teamFilter.local", "本地"),   n: localCount },
               { k: "hub",    label: tr("teamFilter.hub", "CiCy Hub"), n: hubCount },
-              { k: "cloud",  label: tr("teamFilter.cloud", "私有云"), n: cloudCount },
               { k: "custom", label: tr("teamFilter.custom", "自定义"), n: customCount },
-            ].filter(({ k }) => k !== "cloud" || token).map(({ k, label, n }) => (
+            ].map(({ k, label, n }) => (
               <button
                 key={k}
                 type="button"
@@ -1035,13 +1034,6 @@ export default function App() {
                     <div style={{ fontSize: 13, fontWeight: 600 }}>{tr("teams.addCustom", "自定义团队")}</div>
                     <div style={{ fontSize: 11, opacity: .6, marginTop: 2 }}>{tr("teams.addCustomSub", "手动输入地址和名称(只存本地)")}</div>
                   </button>
-                  {token && (
-                  <button type="button" data-id="AddTeamMenu-private" className="bcard__menu-item" style={{ display: "block", width: "100%", textAlign: "left", padding: "11px 14px", border: "none", borderTop: "1px solid var(--border, #2c2f36)", background: "transparent", cursor: "pointer", color: "inherit" }}
-                    onClick={() => { setAddMenuOpen(false); openCloudPage("?tab=private"); }}>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>{tr("teams.addPrivate", "私有云团队")}</div>
-                    <div style={{ fontSize: 11, opacity: .6, marginTop: 2 }}>{tr("teams.addPrivateSub", "去云端团队中心添加")}</div>
-                  </button>
-                  )}
                 </div>
               </>
             )}
@@ -1080,7 +1072,7 @@ export default function App() {
         {/* Docker 安装卡已下线 : Windows 走原生 cicy-code.exe --helper,不再用 Docker。 */}
         {/* HTTPS 审计 tip(MitmConsentCard)已移入右上角用户菜单(user-chip 下拉)。 */}
 
-        {profileError && (
+        {false && profileError && (
           <div className="error" style={{ marginBottom: 12 }}>
             {tr("common.cloud", "云端")}: {profileError}
             <button className="btn-ghost" style={{ marginLeft: 8 }} onClick={() => fetchProfile(token || accessToken, userId)}>
@@ -1095,7 +1087,7 @@ export default function App() {
           {!firstLoading && tab === "hub" && (!hub.loggedIn || (hub.instances && hub.instances.length === 0)) && (
             <div className="empty" data-id="HubEmpty" style={{ gridColumn: "1 / -1" }}>
               {!hub.loggedIn
-                ? <>{tr("cicyHub.loginSub", "邮箱验证码登录,自动列出这个账号下的所有 cicy-code 实例")} — <a href="#" onClick={(e) => { e.preventDefault(); hub.openLogin(me?.email); }}>{tr("cicyHub.login", "登录 CiCy Hub")}</a></>
+                ? <>{tr("cicyHub.loginSub", "邮箱验证码登录,自动列出这个账号下的所有 cicy-code 实例")} — <a href="#" onClick={(e) => { e.preventDefault(); hub.openLogin(); }}>{tr("cicyHub.login", "登录 CiCy Hub")}</a></>
                 : (hub.error ? hubErrText(hub.error) : tr("cicyHub.empty", "这个账号下还没有 cicy-code 实例。在 cicy-code 的「CiCy 账号」里用同一个邮箱登录 Hub 即可出现。"))}
             </div>
           )}
@@ -1414,8 +1406,13 @@ function AuditLogModal({ onClose }) {
 }
 
 function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin, hub }) {
-  const name = me?.display_name || me?.username || "…";
+  // 首页只认 CiCy Hub 账号:头像/名字 = hub 邮箱;未登录 hub = 访客。
+  const hubIn = !!hub?.loggedIn;
+  const hubEmail = hubIn ? String(hub.owner || "") : "";
+  const name = hubEmail || "…";
   const initials = (name || "?").slice(0, 1).toUpperCase();
+  guest = !hubIn;
+  me = hubIn ? { email: hubEmail } : null;
   const [open, setOpen] = useState(false);
   // 账号版本档位(个人版/团队版/企业版)—— 账号级,来自 tunnelStatus()=GET /api/gateway/tunnels
   // 的 tier 字段(personal|team|enterprise)。~分钟级刷新以反映升/降档。
@@ -1466,7 +1463,7 @@ function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin, hub }
   // (no long-term token in the URL — see openCloudPage).
   const goDash = (query) => { openCloudPage(query); setOpen(false); };
   const copyEmail = async () => {
-    const email = String(me?.email || "").trim();
+    const email = String(hubEmail || "").trim();
     if (!email) return;
     try {
       if (window.cicy?.clipboard?.write) await window.cicy.clipboard.write(email);
@@ -1516,7 +1513,7 @@ function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin, hub }
           <button type="button" data-id="UserChip-trigger" className={`user-chip__trigger${open ? " is-open" : ""}`}
             onClick={() => setOpen((v) => !v)}>
             <div className="avatar" style={{ background: "var(--border, #2c2f36)", color: "var(--muted, #8b8b92)" }}>?</div>
-            <span className="user-name">{tr("auth.localName", "本机")}</span>
+            <span className="user-name">{tr("cicyHub.login", "登录 CiCy Hub")}</span>
             <span className="user-chip__caret" aria-hidden>▾</span>
           </button>
         ) : !me ? (
@@ -1557,17 +1554,10 @@ function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin, hub }
             <button type="button" data-id="UserChip-check-update" className="user-chip__menu-item" disabled={checkingUpd} onClick={checkUpdate}>
               {checkingUpd ? tr("updateBanner.checkingShort", "检查中…") : tr("updateBanner.checkBtn", "检查更新")}
             </button>
-            {hub?.available && (
-              hub.loggedIn ? (
-                <button type="button" data-id="UserChip-hub-logout" className="user-chip__menu-item" title={hub.owner} onClick={() => { setOpen(false); hub.logout(); }}
-                  style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {tr("cicyHub.logout", "退出 Hub")} · {hub.owner}
-                </button>
-              ) : (
-                <button type="button" data-id="UserChip-hub-login" className="user-chip__menu-item" onClick={() => { setOpen(false); hub.openLogin(me?.email); }}>
-                  {tr("cicyHub.login", "登录 CiCy Hub")}
-                </button>
-              )
+            {hub?.available && !hubIn && (
+              <button type="button" data-id="UserChip-hub-login" className="user-chip__menu-item" onClick={() => { setOpen(false); hub.openLogin(); }}>
+                {tr("cicyHub.login", "登录 CiCy Hub")}
+              </button>
             )}
             {/* HTTPS 审计入口暂时隐藏 */}
             {false && mitmTeam && (
@@ -1576,8 +1566,8 @@ function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin, hub }
               </div>
             )}
             <div className="user-chip__menu-sep" aria-hidden />
-            {!guest && (
-              <button type="button" data-id="UserChip-logout" className="user-chip__menu-item is-danger" onClick={() => { setOpen(false); onLogout(); }}>
+            {hubIn && (
+              <button type="button" data-id="UserChip-hub-logout" className="user-chip__menu-item is-danger" onClick={() => { setOpen(false); hub.logout(); }}>
                 {tr("userMenu.logout", "退出")}
               </button>
             )}
