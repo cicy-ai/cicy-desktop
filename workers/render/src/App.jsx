@@ -1037,7 +1037,7 @@ export default function App() {
                   </button>
                   {!hub.loggedIn && (
                   <button type="button" data-id="AddTeamMenu-hub" className="bcard__menu-item" style={{ display: "block", width: "100%", textAlign: "left", padding: "11px 14px", border: "none", borderTop: "1px solid var(--border, #2c2f36)", background: "transparent", cursor: "pointer", color: "inherit" }}
-                    onClick={() => { setAddMenuOpen(false); setTab("hub"); hub.openLogin(); }}>
+                    onClick={() => { setAddMenuOpen(false); setTab("hub"); hub.openLogin(me?.email); }}>
                     <div style={{ fontSize: 13, fontWeight: 600 }}>{tr("cicyHub.addMenu", "CiCy Hub 实例")}</div>
                     <div style={{ fontSize: 11, opacity: .6, marginTop: 2 }}>{tr("cicyHub.addMenuSub", "邮箱登录后自动列出所有实例")}</div>
                   </button>
@@ -1096,7 +1096,7 @@ export default function App() {
           </div>
         )}
 
-        {showHub && <HubBar hub={hub} />}
+        {showHub && <HubBar hub={hub} prefillEmail={me?.email} />}
         {hub.loginOpen && <HubLoginModal hub={hub} />}
         <div className="app__grid">
           {firstLoading && [0, 1, 2].map((i) => <SkeletonCard key={"skc" + i} />)}
@@ -3793,7 +3793,7 @@ function useHub() {
     return () => clearInterval(id);
   }, [status?.loggedIn, refresh]);
 
-  const openLogin = () => { setLoginErr(""); setStep("email"); setCode(""); setLoginOpen(true); };
+  const openLogin = (prefill) => { setLoginErr(""); setStep("email"); setCode(""); if (prefill && !email.trim()) setEmail(String(prefill)); setLoginOpen(true); };
   const closeLogin = () => { if (step === "code") { try { bridge?.cancel(); } catch {} } setLoginOpen(false); setBusy(false); };
   const sendCode = async () => {
     const addr = email.trim();
@@ -3835,7 +3835,7 @@ function useHub() {
   };
 }
 
-function HubBar({ hub }) {
+function HubBar({ hub, prefillEmail }) {
   if (!hub.available) return null;
   if (!hub.loggedIn) {
     return (
@@ -3844,7 +3844,7 @@ function HubBar({ hub }) {
           <div style={{ fontSize: 13, fontWeight: 600 }}>{tr("cicyHub.title", "CiCy Hub")}</div>
           <div style={{ fontSize: 12, opacity: .6 }}>{tr("cicyHub.loginSub", "邮箱验证码登录,自动列出这个账号下的所有 cicy-code 实例")}</div>
         </div>
-        <button type="button" className="btn-primary" data-id="HubBar-login" style={{ width: "auto", flex: "none", whiteSpace: "nowrap" }} onClick={hub.openLogin}>{tr("cicyHub.login", "登录 CiCy Hub")}</button>
+        <button type="button" className="btn-primary" data-id="HubBar-login" style={{ width: "auto", flex: "none", whiteSpace: "nowrap" }} onClick={() => hub.openLogin(prefillEmail)}>{tr("cicyHub.login", "登录 CiCy Hub")}</button>
       </div>
     );
   }
