@@ -38,7 +38,6 @@ const CTX     = `colima-${PROFILE}`;
 const IMAGE   = process.env.CICY_DOCKER_IMAGE || "cicybot/cicy-code:latest";
 // Apple Silicon 需要给 amd64 镜像加 --platform;Intel 原生 amd64 不用。
 const IS_ARM  = process.arch === "arm64";
-const ARCH_TAG = IS_ARM ? "arm64" : "amd64";
 const PLATFORM_FLAG = IS_ARM ? "--platform linux/amd64" : "";
 // 容器额外暴露的端口段(给容器内 agent 跑服务用),宿主 127.0.0.1 直达。
 const EXTRA_PORTS = process.env.CICY_EXTRA_PORTS || "18000-19999";
@@ -47,16 +46,11 @@ const VM_CPUS   = process.env.CICY_COLIMA_CPUS   || "4";
 const VM_MEMORY = process.env.CICY_COLIMA_MEMORY || "8";
 const VM_DISK   = process.env.CICY_COLIMA_DISK   || "30";
 
-// Colima 基础 VM 镜像:colima `start` 默认从 github.com/abiosoft/colima-core 下,
-// CN 直接 EOF 拉不下来(真机实测)。colima 0.10.3 没有 --disk-image-mirror(那是
-// main 分支才有),但有 `--disk-image <本地文件> --force-disk-image` —— 所以我们把
-// 基础镜像托到自己的 R2,先下到本地,再用 --disk-image 指过去,彻底绕开
-// github。--force-disk-image 让 colima 不去校验它「不是我预期版本」。镜像内容只要是
-// ubuntu-24.04 + docker 的 cloudimg 即可,和 colima 版本解耦(用稳定 key,不跟版本号)。
-const R2_BASE = process.env.CICY_R2_BASE || process.env.CICY_OSS_BASE || "https://r2.deepfetch.de5.net";
-const BASE_IMAGE_URL = process.env.CICY_COLIMA_BASE_URL ||
-  `${R2_BASE}/colima-base/ubuntu-2404-${ARCH_TAG}-docker.raw.gz`;
-function baseImagePath() { return path.join(os.homedir(), "cicy-ai", "colima", `ubuntu-2404-${ARCH_TAG}-docker.raw.gz`); }
+// Colima 基础 VM 镜像走 colima 自己的源(github.com/abiosoft/colima-core)。
+// 我们曾经自建过一份 cloudimg 并用 `--disk-image <本地文件> --force-disk-image`
+// 绕开 github(CN 拉 colima-core 会 EOF),但那份自建镜像没有任何构建产线,
+// 托管它的桶没了就再也补不回来 —— 方案已撤除。CN 网络下 colima 首启可能因此
+// 变慢或失败,需要时用代理,或重新引入一条能自动产出该镜像的流水线。
 
 // Electron 启动时 PATH 往往不含 Homebrew 的 bin,导致找不到 brew/colima/docker。
 // 显式把两个 Homebrew 前缀(Apple Silicon=/opt/homebrew,Intel=/usr/local)拼进 PATH。
@@ -198,40 +192,18 @@ async function engineUp() {
   catch { return false; }
 }
 
-// 确保 Colima 基础 VM 镜像已从 OSS 下到本地(只在 VM 不存在时需要;已有 VM 直接复用
-// 它的磁盘)。返回本地路径供 --disk-image 用。下过且大小一致就跳过(幂等续传)。
-async function ensureBaseImage({ emit } = {}) {
-  const dest = baseImagePath();
-  try {
-    const st = fs.statSync(dest);
-    // 简单完整性:>200MB 认为已下好(ubuntu-2404 docker cloudimg ~340MB)。
-    if (st.size > 200 * 1024 * 1024) return dest;
-  } catch {}
-  fs.mkdirSync(path.dirname(dest), { recursive: true });
-  // 用共享的 curlDownload(和 Windows 下载 rootfs/镜像同一个),它每秒 emit
-  // { progress, received, total } → 抽屉渲染**进度条**(之前我用裸 curl 没进度,
-  // 看到的就是没进度条)。续传 + 重试都在里头。
-  await docker.curlDownload(BASE_IMAGE_URL, dest, { emit, phase: "image", label: "下载运行环境基础镜像(约 340MB,从 OSS)" });
-  return dest;
-}
-
 // 启动(或创建)Colima VM。Apple Silicon 用 vz + rosetta 跑 amd64;Intel 原生。
 // 带 3 次干净重试:冷启动偶尔卡在初始化,重启一次就好(对应 wsl 端 startEngine 的
 // 「一次起不来、要点重试」根因)。vz 需要 macOS 13+,失败则回退默认(qemu)。
 //
 // 不再 --mount $HOME:w:/home/cicy 改用 docker **named volume**(见 runContainer 注释),
-// 不需要把宿主目录挂进来;docker load / --disk-image 都由宿主侧的 CLI/colima 读本地文件,
-// 也不需要挂载。少挂一个 $HOME 更干净更安全。
+// 不需要把宿主目录挂进来;docker load 由宿主侧的 CLI 读本地文件,也不需要挂载。
+// 少挂一个 $HOME 更干净更安全。
 async function startVM({ emit } = {}) {
-  // 基础镜像从 OSS 下到本地,用 --disk-image 指过去(绕开 github),--force-disk-image
-  // 让 colima 不校验版本。已有 VM 时 ensureBaseImage 仍是幂等的(命中本地缓存秒过)。
-  let diskArgs = "";
-  try { const img = await ensureBaseImage({ emit }); diskArgs = `--disk-image ${JSON.stringify(img)} --force-disk-image`; }
-  catch (e) { emit && emit({ phase: "image", status: "running", message: `基础镜像下载异常(${e.message}),尝试用 colima 默认源…` }); }
   const vzArgs = IS_ARM
     ? `--vm-type vz --vz-rosetta --mount-type virtiofs`
     : `--vm-type vz --mount-type virtiofs`;
-  const common = `--cpus ${VM_CPUS} --memory ${VM_MEMORY} --disk ${VM_DISK} ${diskArgs}`;
+  const common = `--cpus ${VM_CPUS} --memory ${VM_MEMORY} --disk ${VM_DISK}`;
   for (let attempt = 1; attempt <= 3; attempt++) {
     emit && emit({ phase: "container", status: "running", message: `启动 Colima 运行环境(首次较慢,请耐心)…${attempt > 1 ? `(重试 ${attempt})` : ""}` });
     try {
