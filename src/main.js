@@ -964,6 +964,8 @@ function seedCloudflaredToLocalBin() {
 electronApp.whenReady().then(async () => {
   // Serve cicy://newtab (tab-browser start page) — must be after ready.
   require("./tabbrowser/newtab-protocol").installHandler();
+  // Dev: edits to the cicyui://panel page files reload open panel tabs in place.
+  try { require("./tabbrowser/panel-live-reload").start(log); } catch (e) { log.warn(`[panel-live-reload] ${e.message}`); }
 
   // Re-init i18n now that app is ready — getLocale() returns reliable values
   // only after the ready event. The module-load init may have picked English
