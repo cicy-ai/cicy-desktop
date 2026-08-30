@@ -6,7 +6,7 @@
 #   scripts/deploy-exe-fleet.sh [path/to/CiCy Desktop Setup X.Y.Z.exe] [node...]
 #
 # Per node (ssh alias from ~/.ssh/config, e.g. xs-1001 — frp via ws-hub):
-#   1. scp the exe into the node's ~/projects (= C:\ of its Windows host)
+#   1. scp the exe into the node's ~/projects (= C:\projects of its Windows host)
 #   2. ssh -L tunnel to the node's cicy-code :8008, ask it for connected
 #      cicy-desktop clients (agent-desktop clients)
 #   3. agent-desktop exec-file a tiny .bat on each Windows client that runs the
@@ -25,7 +25,7 @@ fi
 shift || true
 VER=$(basename "$EXE" | sed -E 's/.*Setup ([0-9.]+)\.exe/\1/')
 REMOTE_NAME="CiCy-Desktop-Setup-$VER.exe"
-WIN_PATH="C:\\$REMOTE_NAME"
+WIN_PATH="C:\\projects\\$REMOTE_NAME"
 
 if [ $# -gt 0 ]; then NODES="$*"; fi
 if [ -z "${NODES:-}" ]; then
