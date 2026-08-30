@@ -19,6 +19,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      # First — actions/checkout cleans the workspace, so it has to run before
+      # anything writes build artifacts into it. Needed for scripts/r2.mjs
+      # (this job used to fetch a standalone ossutil binary and never checked
+      # the repo out at all).
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Build base rootfs image (Ubuntu + Docker + autostart)
         run: |
           mkdir -p ctx
