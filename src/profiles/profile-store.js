@@ -194,6 +194,7 @@ function chromeView(idx, entry) {
     rpaDir: typeof e.rpaDir === "string" ? e.rpaDir : `~/chrome/profile_${idx}`,
     platform: e.platform && typeof e.platform === "object" ? e.platform : {},
     ipInfo: normalizeIpInfo(e.ipInfo),
+    telegramLogin: { phone: String((e.telegramLogin || {}).phone || ""), codeUrl: String((e.telegramLogin || {}).codeUrl || "") },
   };
 }
 
@@ -253,6 +254,7 @@ function electronView(idx, data) {
     accounts,
     partition: `persist:sandbox-${idx}`,
     ipInfo: normalizeIpInfo(d.ipInfo),
+    telegramLogin: { phone: String((d.telegramLogin || {}).phone || ""), codeUrl: String((d.telegramLogin || {}).codeUrl || "") },
   };
 }
 
@@ -332,6 +334,24 @@ function setNote(backend, idx, note) {
   throw new Error(`Unknown backend: ${backend}`);
 }
 
+// setTelegramLogin — the phone number this profile signs in to Telegram with
+// and the SMS-code (接码) URL that returns its verification code. Stored as
+// `telegramLogin: { phone, codeUrl }`; either field may be empty.
+function normalizeTelegramLogin(login) {
+  const src = login && typeof login === "object" ? login : {};
+  const phone = String(src.phone || "").replace(/[\s-]/g, "").trim();
+  const codeUrl = String(src.codeUrl || "").trim();
+  if (phone && !/^\+?\d{5,20}$/.test(phone)) throw new Error("手机号格式不对（示例 +8801700000000）");
+  if (codeUrl) { let u; try { u = new URL(codeUrl); } catch (e) { throw new Error("接码 URL 必须是完整的 http(s) 地址"); } if (!/^https?:$/.test(u.protocol)) throw new Error("接码 URL 必须是 http(s)"); }
+  return { phone, codeUrl };
+}
+function setTelegramLogin(backend, idx, login) {
+  const v = normalizeTelegramLogin(login);
+  if (backend === "chrome") return mutateChrome(idx, (e) => ({ ...e, telegramLogin: v }));
+  if (backend === "electron") return mutateElectron(idx, (d) => ({ ...d, telegramLogin: v }));
+  throw new Error(`Unknown backend: ${backend}`);
+}
+
 // setLogin — upsert a rich login record (any subset of LOGIN_FIELDS). Keyed by
 // `name` (site name). Works identically for both backends.
 function setLogin(backend, idx, login) {
@@ -373,6 +393,8 @@ module.exports = {
   getProfile,
   setProxy,
   setNote,
+  setTelegramLogin,
+  normalizeTelegramLogin,
   removeProfile,
   setLogin,
   addLogin,

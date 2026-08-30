@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld("panelAPI", {
   addProfile: () => ipcRenderer.invoke("panelcells:add-profile"),
   setProfileProxy: (accountIdx, proxy) => ipcRenderer.invoke("panelcells:set-profile-proxy", { accountIdx, proxy }),
   setProfileNote: (accountIdx, note) => ipcRenderer.invoke("panelcells:set-profile-note", { accountIdx, note }),
+  setProfileLogin: (accountIdx, phone, codeUrl) => ipcRenderer.invoke("panelcells:set-profile-login", { accountIdx, phone, codeUrl }),
+  openCodeUrl: (accountIdx, url) => ipcRenderer.invoke("panelcells:open-code-url", { accountIdx, url }),
   probeIp: (accountIdx) => ipcRenderer.invoke("panelcells:probe-ip", { accountIdx }),
   removeProfile: (accountIdx) => ipcRenderer.invoke("panelcells:remove-profile", { accountIdx }),
   snapshots: () => ipcRenderer.invoke("panelcells:snapshots"),

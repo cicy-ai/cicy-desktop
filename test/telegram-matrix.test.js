@@ -137,5 +137,19 @@ test("opened Telegram profile views are retained and only the selected one is at
   assert.match(html, /openedProfiles\s*=\s*new Set/);
   assert.match(html, /id:\s*cellId\(profileId\)/);
   assert.match(html, /`telegram-preview-\$\{idx\}`/);
-  assert.match(html, /visible:\s*!!selected\s*&&\s*profileId\s*===\s*selected\.accountIdx/);
+  // single-preview mode: only the selected profile is visible; batch mode: every grid cell.
+  assert.match(html, /else if \(selected && profileId === selected\.accountIdx\) \{ visible = true;/);
+  assert.match(html, /if \(g && batch\.has\(profileId\)\) \{ visible = true;/);
+});
+
+test("telegramLogin: phone + 接码 URL are validated and stored per profile", () => {
+  const { normalizeTelegramLogin } = require("../src/profiles/profile-store");
+  assert.deepEqual(normalizeTelegramLogin({ phone: "+88 0170 929-9917", codeUrl: "https://jiema.example/getcode?id=abc" }), { phone: "+8801709299917", codeUrl: "https://jiema.example/getcode?id=abc" });
+  assert.deepEqual(normalizeTelegramLogin({}), { phone: "", codeUrl: "" });
+  assert.throws(() => normalizeTelegramLogin({ phone: "abc" }), /手机号/);
+  assert.throws(() => normalizeTelegramLogin({ codeUrl: "ftp://x" }), /http/);
+  assert.throws(() => normalizeTelegramLogin({ codeUrl: "not a url" }), /URL/);
+  const html = require("fs").readFileSync(require("path").join(__dirname, "..", "src", "tabbrowser", "telegram-matrix.html"), "utf8");
+  assert.match(html, /id="cfg-phone"/); assert.match(html, /id="cfg-code"/);
+  assert.match(html, /panelAPI\.openCodeUrl\(/);
 });

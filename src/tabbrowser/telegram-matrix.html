@@ -42,6 +42,10 @@
     /* 编辑态就地变成可输入,尺寸/位置与只读态完全一致,不发生位移 */
     .line2 .ip { flex: none; max-width: 45%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 6px; border-radius: 999px; background: var(--head); color: #b4b4bb; font: 11px ui-monospace, monospace; line-height: 16px; }
     .line2 .ip.none { display: none; }
+    .line2 .phone { flex: none; color: #b4b4bb; font: 11px ui-monospace, monospace; white-space: nowrap; }
+    .line2 .phone.none { display: none; }
+    button.code { background: #1f6feb; padding: 3px 8px; font-size: 11px; }
+    .ghead .phone { color: #b4b4bb; font: 11px ui-monospace, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
     /* 代理设置弹窗 */
     .modal { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.55); }
     .modal[hidden] { display: none; }
@@ -121,7 +125,7 @@
     <div id="grid"></div>
     <div id="preview-title">
       <div class="left"><span class="dot" id="sel-dot"></span><span id="selected-name">未选择 Profile</span><span id="status"></span></div>
-      <div class="actions"><button class="ghost" id="probe-ip" title="经该 Profile 的代理探测出口 IP / 地区">测 IP</button><button class="ghost" id="reload" title="重新加载 Telegram Web">重新加载</button></div>
+      <div class="actions"><button class="code" id="open-code" title="在该 Profile 的 tab 里打开接码 URL">接码</button><button class="ghost" id="probe-ip" title="经该 Profile 的代理探测出口 IP / 地区">测 IP</button><button class="ghost" id="reload" title="重新加载 Telegram Web">重新加载</button></div>
     </div>
     <div id="phone">
       <div id="phone-preview"></div>
@@ -139,6 +143,10 @@
   <div id="cfg-modal" class="modal" hidden>
     <div class="modal-card">
       <div class="modal-head"><span id="cfg-title">Profile 设置</span><button class="icon" id="cfg-x" title="关闭">✕</button></div>
+      <label class="modal-label">手机号</label>
+      <div class="modal-row"><input id="cfg-phone" placeholder="+8801700000000" spellcheck="false"></div>
+      <label class="modal-label">接码 URL</label>
+      <div class="modal-row"><input id="cfg-code" placeholder="https://…/getcode?id=…" spellcheck="false"><button class="ghost" id="cfg-code-open" title="在该 Profile 的 tab 里打开">打开</button></div>
       <label class="modal-label">代理地址</label>
       <div class="modal-row"><input id="cfg-proxy" placeholder="留空 = 直连，例如 http://127.0.0.1:20001" spellcheck="false"><button id="cfg-save">保存</button></div>
       <div class="modal-row"><button class="ghost" id="cfg-test">测 IP</button><span class="modal-ip" id="cfg-ip"></span></div>
@@ -199,7 +207,21 @@
     }
     // 身份:优先用本次会话探到的(cellState.identity),否则用 profile 里存的(上次登录)。
     const identityOf = (p) => stateOf(p.accountIdx).identity || p.telegram || null;
+    const phoneOf = (p) => (p.login && p.login.phone) || '';
+    const codeUrlOf = (p) => (p.login && p.login.codeUrl) || '';
+    function renderPhone(p) {
+      const row = rows.get(p.accountIdx); if (!row) return;
+      const el = row.querySelector('.phone'); const ph = phoneOf(p);
+      el.classList.toggle('none', !ph); el.textContent = ph; el.title = codeUrlOf(p) ? `接码：${codeUrlOf(p)}` : '';
+      const g = gcells.get(p.accountIdx); if (g) { g.el.querySelector('.phone').textContent = ph; g.el.querySelector('.code').disabled = !codeUrlOf(p); }
+    }
+    async function openCode(p) {
+      if (!codeUrlOf(p)) { flash(`#${p.accountIdx} 还没有接码 URL，点 ⚙ 填写`, 4000); return; }
+      try { await window.panelAPI.openCodeUrl(p.accountIdx, codeUrlOf(p)); flash(`#${p.accountIdx} 接码页已在 Profile 窗口打开`); }
+      catch (e) { flash(e.message || String(e), 6000); }
+    }
     function renderIdentity(p) {
+      renderPhone(p);
       const row = rows.get(p.accountIdx); if (!row) return;
       const el = row.querySelector('.tg');
       const it = identityOf(p);
@@ -267,8 +289,10 @@
     function buildGridCell(p) {
       const el = document.createElement('div');
       el.className = 'gcell'; el.dataset.id = String(p.accountIdx);
-      el.innerHTML = `<div class="ghead"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="st"></span><button class="icon reload" title="重新加载">⟳</button></div><div class="gbody"></div>`;
+      el.innerHTML = `<div class="ghead"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="phone">${esc(phoneOf(p))}</span><span class="st"></span><button class="code" title="在该 Profile 的 tab 里打开接码 URL">接码</button><button class="icon reload" title="重新加载">⟳</button></div><div class="gbody"></div>`;
       el.querySelector('.reload').onclick = () => reloadProfile(p.accountIdx);
+      el.querySelector('.code').onclick = () => openCode(p);
+      el.querySelector('.code').disabled = !codeUrlOf(p);
       el.querySelector('.ghead').onclick = (e) => { if (!e.target.closest('button')) { exitBatch(); selectProfile(p.accountIdx); } };
       return { el, body: el.querySelector('.gbody') };
     }
@@ -314,7 +338,7 @@
       row.className = 'row'; row.dataset.id = String(p.accountIdx); row.title = `persist:sandbox-${p.accountIdx}`;
       row.innerHTML = `
         <div class="line1"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="st"></span><button class="icon gear" title="代理设置">⚙</button><button class="icon reload" title="重新加载">⟳</button></div>
-        <div class="line2"><span class="tg none">—</span><span class="ip none"></span></div>`;
+        <div class="line2"><span class="tg none">—</span><span class="phone none"></span><span class="ip none"></span></div>`;
       // ⚙ 打开设置弹窗(代理 / 测 IP / 删除),不再 inline。
       row.querySelector('.gear').onclick = (e) => { e.stopPropagation(); openCfgModal(p); };
       row.onclick = () => { exitBatch(); selectProfile(p.accountIdx); };
@@ -419,6 +443,7 @@
       finally { addButton.disabled = false; }
     };
     document.getElementById('reload').onclick = () => { if (selected) reloadProfile(selected.accountIdx); };
+    document.getElementById('open-code').onclick = () => { if (selected) openCode(selected); };
     document.getElementById('err-retry').onclick = () => { if (selected) reloadProfile(selected.accountIdx); };
     document.getElementById('err-cfg').onclick = () => { if (selected) openCfgModal(selected); };
     document.getElementById('probe-ip').onclick = async () => {
@@ -435,11 +460,15 @@
     const cfgIp = document.getElementById('cfg-ip');
     const cfgDel = document.getElementById('cfg-del');
     let cfgP = null, delArmed = false;
+    const cfgPhone = document.getElementById('cfg-phone');
+    const cfgCode = document.getElementById('cfg-code');
+    document.getElementById('cfg-code-open').onclick = () => { if (cfgP) openCode({ ...cfgP, login: { phone: cfgPhone.value, codeUrl: cfgCode.value.trim() } }); };
     const cfgIpText = (p) => p && p.ipInfo && p.ipInfo.ip ? (p.ipInfo.area ? `${p.ipInfo.area} · ${p.ipInfo.ip}` : p.ipInfo.ip) : '未探测';
     function openCfgModal(p) {
       if (!p) return; cfgP = p; delArmed = false;
       document.getElementById('cfg-title').textContent = `${p.name} · #${p.accountIdx} 设置`;
       cfgProxy.value = p.proxy || ''; cfgErr.textContent = ''; cfgIp.textContent = cfgIpText(p);
+      cfgPhone.value = phoneOf(p); cfgCode.value = codeUrlOf(p);
       cfgDel.textContent = '删除此 Profile'; cfgDel.disabled = false;
       cfgModal.hidden = false; cfgProxy.focus();
       // BrowserView 预览永远浮在页面 DOM 之上,会盖住弹窗 —— 打开弹窗时把 cells 脱离(复用拖拽逻辑),关闭时贴回。
@@ -455,6 +484,8 @@
     document.getElementById('cfg-save').onclick = async () => {
       if (!cfgP) return; const b = document.getElementById('cfg-save'); b.disabled = true; cfgErr.textContent = '';
       try {
+        const lg = await window.panelAPI.setProfileLogin(cfgP.accountIdx, cfgPhone.value.trim(), cfgCode.value.trim());
+        cfgP.login = lg.login; renderPhone(cfgP);
         const u = await window.panelAPI.setProfileProxy(cfgP.accountIdx, cfgProxy.value.trim());
         cfgP.proxy = u.proxy; cfgP.ipInfo = null; renderIp(cfgP);
         if (openedProfiles.has(cfgP.accountIdx)) { reloadProfile(cfgP.accountIdx); flash(`#${cfgP.accountIdx} 代理已应用，重新加载中`); }

@@ -398,6 +398,7 @@ function installIpc(findTab) {
           name: String(p.name || ""),
           proxy: p.proxy && p.proxy.enabled ? String(p.proxy.url || "") : "",
           note: String(p.note || ""),
+          login: { phone: String((p.telegramLogin || {}).phone || ""), codeUrl: String((p.telegramLogin || {}).codeUrl || "") },
           telegram: telegramIdentity.telegramIdentityFromProfile(p),
           facebook: facebookIdentity.facebookIdentityFromProfile(p),
           ipInfo: p.ipInfo && p.ipInfo.ip ? { ip: String(p.ipInfo.ip), area: String(p.ipInfo.area || ""), probedAt: String(p.ipInfo.probedAt || "") } : null,
@@ -461,6 +462,26 @@ function installIpc(findTab) {
     const text = String(note || "").trim().slice(0, 500);
     const profile = require("../profiles/profile-store").setNote("electron", id, text);
     return { accountIdx: id, note: String(profile.note || "") };
+  });
+  // 手机号 + 接码 URL(telegramLogin)。
+  ipcMain.handle("panelcells:set-profile-login", async (e, { accountIdx, phone, codeUrl }) => {
+    if (!ctx(e)) throw new Error("Invalid panel");
+    const id = Number(accountIdx);
+    if (!Number.isInteger(id) || id <= 0) throw new Error("Invalid Electron profile ID");
+    const profile = require("../profiles/profile-store").setTelegramLogin("electron", id, { phone, codeUrl });
+    const l = profile.telegramLogin || {};
+    return { accountIdx: id, login: { phone: String(l.phone || ""), codeUrl: String(l.codeUrl || "") } };
+  });
+  // 在该 profile 自己的 tab 窗口里打开接码 URL(同一 persist:sandbox-N,走同一代理)。
+  ipcMain.handle("panelcells:open-code-url", async (e, { accountIdx, url }) => {
+    if (!ctx(e)) throw new Error("Invalid panel");
+    const id = Number(accountIdx);
+    if (!Number.isInteger(id) || id <= 0) throw new Error("Invalid Electron profile ID");
+    let target = String(url || "").trim();
+    if (!target) { const p = require("../profiles/profile-store").getProfile("electron", id); target = String((p && p.telegramLogin && p.telegramLogin.codeUrl) || ""); }
+    if (!/^https?:\/\//.test(target)) throw new Error("该 Profile 还没有接码 URL，先在 ⚙ 里填");
+    const r = await require("../tools/tab-browser-tools").openTab(id, target, { trusted: true, title: `接码 #${id}` });
+    return { accountIdx: id, url: target, tabId: r && r.tabId };
   });
   ipcMain.handle("panelcells:snapshots", async (e) => {
     const pc = ctx(e);
