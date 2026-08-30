@@ -1,0 +1,112 @@
+name: Seed R2 from a GitHub release
+
+# Republish one version's installers from its GitHub release into the R2
+# bucket, under the same keys the release workflows write.
+#
+# This exists because R2 can fall behind the GitHub release: a release
+# workflow can fail after uploading to GitHub but before uploading to R2 (that
+# is exactly what the dead Aliyun OSS bucket caused for 2.1.323), and because
+# the R2 side had to be rebuilt from scratch when that bucket was disabled.
+#
+# Run it on a runner rather than from a workstation: the runner pulls GitHub's
+# own release assets at LAN speed and reaches R2 directly, with none of the
+# local proxy hops that make a 180MB transfer a coin flip.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to publish, without the leading v (e.g. 2.1.323)
+        required: true
+      advance_latest:
+        description: Also move the latest/* aliases and version pointers to this version
+        type: boolean
+        default: true
+
+concurrency:
+  group: cicy-desktop-seed-r2
+  cancel-in-progress: false
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          mkdir -p assets
+          gh release download "v${{ inputs.version }}" --repo "$GITHUB_REPOSITORY" --dir assets --clobber
+          ls -lh assets
+
+      - name: Publish to R2
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_API_TOKEN:  ${{ secrets.R2_API_TOKEN }}
+        run: |
+          set -uo pipefail
+          VER="${{ inputs.version }}"
+          ADVANCE="${{ inputs.advance_latest }}"
+          BASE=releases
+          fail=0
+
+          put() {  # put <key> <file>
+            [ -f "$2" ] || { echo "::warning::missing $2 — skipping $1"; return 0; }
+            node scripts/r2.mjs put "$1" "$2" || { echo "::error::upload failed $1"; fail=1; }
+          }
+
+          EXE="assets/CiCy-Desktop-Setup-$VER.exe"
+          put "$BASE/cicy-desktop-$VER.exe" "$EXE"
+          put "$BASE/CiCy-Desktop-Setup-$VER.exe.blockmap" "assets/CiCy-Desktop-Setup-$VER.exe.blockmap"
+
+          for ARCH in x64 arm64; do
+            put "$BASE/cicy-desktop-$VER-$ARCH.pkg" "assets/cicy-desktop-$VER-$ARCH.pkg"
+          done
+
+          APP="assets/CiCy-Desktop-$VER.AppImage"
+          put "$BASE/CiCy-Desktop-$VER.AppImage" "$APP"
+
+          # electron-updater feeds — resolveFeedUrl() probes latest.yml to decide
+          # whether R2 is usable as the CN update feed at all, so these matter.
+          put "$BASE/latest.yml" "assets/latest.yml"
+          put "$BASE/latest-linux.yml" "assets/latest-linux.yml"
+
+          if [ "$ADVANCE" = "true" ]; then
+            put "$BASE/cicy-desktop-latest.exe"     "$EXE"
+            put "$BASE/cicy-desktop-win-latest.exe" "$EXE"
+            for ARCH in x64 arm64; do
+              put "$BASE/cicy-desktop-mac-$ARCH-latest.pkg" "assets/cicy-desktop-$VER-$ARCH.pkg"
+            done
+            put "$BASE/CiCy-Desktop-latest.AppImage" "$APP"
+
+            # Version pointers go LAST: a client that reads a new version number
+            # must find every installer already in place.
+            printf '%s' "$VER" > version.txt
+            for k in latest-version win-latest-version mac-latest-version linux-latest-version; do
+              put "$BASE/$k.txt" version.txt
+            done
+          fi
+
+          exit $fail
+
+      - name: Verify what is live
+        run: |
+          BASE=https://r2.deepfetch.de5.net/releases
+          VER="${{ inputs.version }}"
+          for k in \
+            "cicy-desktop-$VER.exe" "cicy-desktop-latest.exe" "cicy-desktop-win-latest.exe" \
+            "cicy-desktop-$VER-x64.pkg" "cicy-desktop-$VER-arm64.pkg" \
+            "cicy-desktop-mac-x64-latest.pkg" "cicy-desktop-mac-arm64-latest.pkg" \
+            "CiCy-Desktop-$VER.AppImage" "CiCy-Desktop-latest.AppImage" \
+            "latest.yml" "latest-linux.yml" "latest-version.txt"; do
+            code=$(curl -sI -o /dev/null -w '%{http_code}' "$BASE/$k")
+            printf '%-45s %s\n' "$k" "$code"
+          done
