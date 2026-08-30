@@ -77,6 +77,26 @@
     .overlay p { margin: 0 0 14px; font-size: 13px; line-height: 1.6; color: var(--muted); word-break: break-all; }
     .overlay code { color: var(--fg); font: 12px ui-monospace, monospace; }
     .overlay .btns { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+    /* 批量登录:未登录的会话一次全部铺开(最多 10 格),每格一个独立 BrowserView */
+    #grid-title { display: none; width: 100%; margin-bottom: 6px; align-items: center; justify-content: space-between; gap: 8px; color: #b4b4bb; font-size: 12px; }
+    #grid-title b { color: var(--fg); font-size: 13px; }
+    #grid { display: none; width: 100%; flex: 1 1 auto; min-height: 0; gap: 8px; grid-auto-rows: minmax(0, 1fr); }
+    /* 批量模式 = 整页只有 webview:侧栏整个隐藏,顶部一条细工具栏,其余全是格子 */
+    body.batch { grid-template-columns: 1fr; }
+    body.batch aside { display: none; }
+    main.batch { padding: 8px 10px 10px; }
+    main.batch #preview-title, main.batch #phone { display: none; }
+    main.batch #grid-title { display: flex; }
+    main.batch #grid { display: grid; }
+    .gcell { display: flex; flex-direction: column; min-width: 0; min-height: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--cell); overflow: hidden; }
+    .gcell.done { border-color: rgba(63,185,80,.6); }
+    .gcell.failed { border-color: rgba(255,92,92,.6); }
+    .ghead { flex: none; height: 30px; padding: 0 8px; display: flex; align-items: center; gap: 6px; font-size: 12px; border-bottom: 1px solid var(--line); background: var(--head); min-width: 0; }
+    .ghead .name { font-size: 12px; }
+    .ghead .st { margin-left: auto; }
+    .gcell.done .ghead .st { color: #3fb950; font-weight: 600; }
+    .gbody { flex: 1 1 auto; min-height: 0; background: #fff; }
+    #grid-empty { grid-column: 1 / -1; display: grid; place-items: center; color: var(--muted); }
     .spinner { width: 28px; height: 28px; border: 3px solid rgba(255,255,255,.12); border-top-color: var(--accent); border-radius: 50%; animation: spin .9s linear infinite; margin: 0 auto 12px; }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
@@ -85,7 +105,7 @@
   <aside>
     <header>
       <h1>Telegram 矩阵 <small id="count"></small></h1>
-      <button id="add-profile" title="新建一个独立会话（persist:sandbox-N）">+ 添加 Profile</button>
+      <div class="actions"><button class="ghost" id="batch-login" title="把所有未登录的 Profile 一次全部打开（最多 10 个）">批量登录</button><button id="add-profile" title="新建一个独立会话（persist:sandbox-N）">+ 添加 Profile</button></div>
     </header>
     <div class="list">
       <div id="rows"></div>
@@ -94,6 +114,11 @@
     <div class="hint">点击行切换预览；点 ⚙ 设置代理 / 测 IP / 删除。已打开过的会话会在后台保持登录。</div>
   </aside>
   <main>
+    <div id="grid-title">
+      <div class="left"><b>批量登录</b><span id="grid-count"></span></div>
+      <div class="actions"><button class="ghost" id="grid-reload" title="重新加载所有格子">全部重载</button><button class="ghost" id="grid-exit">退出批量</button></div>
+    </div>
+    <div id="grid"></div>
     <div id="preview-title">
       <div class="left"><span class="dot" id="sel-dot"></span><span id="selected-name">未选择 Profile</span><span id="status"></span></div>
       <div class="actions"><button class="ghost" id="probe-ip" title="经该 Profile 的代理探测出口 IP / 地区">测 IP</button><button class="ghost" id="reload" title="重新加载 Telegram Web">重新加载</button></div>
@@ -138,6 +163,13 @@
     const openedProfiles = new Set();   // 打开过的会话保留在后台(登录态不丢),只有选中的贴到预览区
     const cellState = new Map();        // accountIdx -> { loading, failed, error, url, title }
     const rows = new Map();             // accountIdx -> row element
+    const BATCH_MAX = 10;               // 一次最多铺开多少个登录格
+    const mainEl = document.querySelector('main');
+    const gridEl = document.getElementById('grid');
+    const gridCount = document.getElementById('grid-count');
+    let batchMode = false;
+    const batch = new Set();            // 批量模式下铺开的 accountIdx
+    const gcells = new Map();           // accountIdx -> { el, body }
 
     const esc = (value) => String(value || '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const cellId = (idx) => `telegram-preview-${idx}`;
@@ -191,13 +223,15 @@
     function syncPreview() {
       if (!window.panelAPI) return;
       const rect = preview.getBoundingClientRect();
-      const cells = [...openedProfiles].map((profileId) => ({
-        id: cellId(profileId),
-        url: TELEGRAM_URL,
-        profile: profileId,
-        visible: !!selected && profileId === selected.accountIdx,
-        rect: selected && profileId === selected.accountIdx ? { x: rect.x, y: rect.y, w: rect.width, h: rect.height } : null,
-      }));
+      const box = (r) => ({ x: r.x, y: r.y, w: r.width, h: r.height });
+      const cells = [...openedProfiles].map((profileId) => {
+        let visible = false, r = null;
+        if (batchMode) {
+          const g = gcells.get(profileId);
+          if (g && batch.has(profileId)) { visible = true; r = box(g.body.getBoundingClientRect()); }
+        } else if (selected && profileId === selected.accountIdx) { visible = true; r = box(rect); }
+        return { id: cellId(profileId), url: TELEGRAM_URL, profile: profileId, visible, rect: r };
+      });
       try { window.panelAPI.sync(cells); } catch (e) {}
     }
 
@@ -224,7 +258,56 @@
       row.classList.toggle('failed', !!st.failed && !st.loading);
       row.querySelector('.dot').className = `dot ${dotClass(st)}`;
       row.querySelector('.st').textContent = stateText(st, openedProfiles.has(idx));
+      renderGridCell(idx);
     }
+
+    // ── 批量登录:把未登录的 Profile 一次全部铺开 ──
+    const hasIdentity = (p) => { const it = identityOf(p); return !!(it && (it.username || it.displayName || it.phone)); };
+    const gridCols = (n) => n <= 1 ? 1 : n <= 4 ? 2 : n <= 6 ? 3 : n <= 8 ? 4 : 5;
+    function buildGridCell(p) {
+      const el = document.createElement('div');
+      el.className = 'gcell'; el.dataset.id = String(p.accountIdx);
+      el.innerHTML = `<div class="ghead"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="st"></span><button class="icon reload" title="重新加载">⟳</button></div><div class="gbody"></div>`;
+      el.querySelector('.reload').onclick = () => reloadProfile(p.accountIdx);
+      el.querySelector('.ghead').onclick = (e) => { if (!e.target.closest('button')) { exitBatch(); selectProfile(p.accountIdx); } };
+      return { el, body: el.querySelector('.gbody') };
+    }
+    function renderGridCell(idx) {
+      const g = gcells.get(idx); if (!g) return;
+      const p = profiles.find((x) => x.accountIdx === idx); const st = stateOf(idx);
+      const done = !!p && hasIdentity(p);
+      g.el.classList.toggle('done', done);
+      g.el.classList.toggle('failed', !!st.failed && !st.loading);
+      g.el.querySelector('.dot').className = `dot ${dotClass(st)}`;
+      g.el.querySelector('.st').textContent = done ? '✓ 已登录' : stateText(st, true);
+      if (batchMode) { const n = [...batch].filter((i) => { const q = profiles.find((x) => x.accountIdx === i); return q && hasIdentity(q); }).length; gridCount.textContent = `${batch.size} 个会话 · ${n} 已登录`; }
+    }
+    function enterBatch() {
+      const todo = profiles.filter((p) => !hasIdentity(p)).slice(0, BATCH_MAX);
+      if (!todo.length) { flash('没有未登录的 Profile'); return; }
+      batch.clear(); gridEl.innerHTML = ''; gcells.clear();
+      for (const p of todo) {
+        batch.add(p.accountIdx);
+        const g = buildGridCell(p); gcells.set(p.accountIdx, g); gridEl.appendChild(g.el);
+        if (!openedProfiles.has(p.accountIdx)) { openedProfiles.add(p.accountIdx); cellState.set(p.accountIdx, { loading: true }); }
+        renderRowState(p.accountIdx);
+      }
+      gridEl.style.gridTemplateColumns = `repeat(${gridCols(todo.length)}, minmax(0, 1fr))`;
+      batchMode = true; mainEl.classList.add('batch'); document.body.classList.add('batch'); document.getElementById('batch-login').textContent = '退出批量';
+      render();
+      requestAnimationFrame(syncPreview);
+      setTimeout(pullStates, 300);
+    }
+    function exitBatch() {
+      if (!batchMode) return;
+      batchMode = false; mainEl.classList.remove('batch'); document.body.classList.remove('batch'); document.getElementById('batch-login').textContent = '批量登录';
+      batch.clear(); gcells.clear(); gridEl.innerHTML = '';
+      render(); renderPreviewState(); syncPreview();   // 会话留在后台,登录态不丢
+    }
+    document.getElementById('batch-login').onclick = () => (batchMode ? exitBatch() : enterBatch());
+    document.getElementById('grid-exit').onclick = exitBatch;
+    document.getElementById('grid-reload').onclick = () => { for (const idx of batch) reloadProfile(idx); };
+    new ResizeObserver(() => requestAnimationFrame(syncPreview)).observe(gridEl);
 
     function buildRow(p) {
       const row = document.createElement('div');
@@ -234,7 +317,7 @@
         <div class="line2"><span class="tg none">—</span><span class="ip none"></span></div>`;
       // ⚙ 打开设置弹窗(代理 / 测 IP / 删除),不再 inline。
       row.querySelector('.gear').onclick = (e) => { e.stopPropagation(); openCfgModal(p); };
-      row.onclick = () => selectProfile(p.accountIdx);
+      row.onclick = () => { exitBatch(); selectProfile(p.accountIdx); };
       row.querySelector('.reload').onclick = (e) => { e.stopPropagation(); reloadProfile(p.accountIdx); };
       return row;
     }
@@ -286,6 +369,7 @@
       cellState.set(idx, next);
       renderRowState(idx);
       { const p = profiles.find((x) => x.accountIdx === idx); if (p) renderIdentity(p); }
+      renderGridCell(idx);
       if (selected && selected.accountIdx === idx) renderPreviewState();
     }
     async function pullStates({ adopt = false } = {}) {
