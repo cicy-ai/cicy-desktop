@@ -43,12 +43,19 @@ function readDaemonB64() {
 module.exports = (registerTool) => {
   registerTool(
     "desktop_snapshot",
-    "返回整屏桌面截图（base64 JPEG，≤600px 宽）。优先读 desktop-snapshot daemon 写的 desktop.b64（秒回、不弹 consent / 屏幕录制），过期或缺失时 mac/linux 即时抓屏。",
-    z.object({ maxWidth: z.number().optional().describe("最大宽度(px)，默认 600") }),
-    async ({ maxWidth }) => {
+    "返回整屏桌面截图（base64 JPEG）。默认读 desktop-snapshot daemon 写的 desktop.b64（600px/q60，秒回、不弹 consent / 屏幕录制）；请求更高 maxWidth/quality 时 mac/linux 即时抓屏。",
+    z.object({
+      maxWidth: z.number().optional().describe("最大宽度(px)，默认 600"),
+      quality: z.number().optional().describe("JPEG 质量 20-95，默认 60"),
+    }),
+    async ({ maxWidth, quality }) => {
       try {
         const fresh = readDaemonB64();
-        if (fresh && fresh.ageMs <= FRESH_MS) {
+        // The daemon file is ALWAYS the cheap 600px/q60 preset. Serving it for a
+        // request that asked for 高清/超清 would silently ignore the user's 画质
+        // choice, so only take the fast path when the cached preset is enough.
+        const cacheOk = snap.matchesDaemonPreset(maxWidth, quality);
+        if (cacheOk && fresh && fresh.ageMs <= FRESH_MS) {
           return { content: [{ type: "text", text: fresh.b64 }] };
         }
 
@@ -60,10 +67,10 @@ module.exports = (registerTool) => {
         // mac/linux:进程内即时抓屏(honor snapshotEnabled — mac 默认关避免授权弹窗)。
         if (process.platform !== "win32" && snap.snapshotEnabled()) {
           try {
-            const r = await snap.captureB64(maxWidth);
+            const r = await snap.captureB64(maxWidth, quality);
             return { content: [{ type: "text", text: r.b64 }] };
           } catch (e) {
-            if (fresh) return { content: [{ type: "text", text: fresh.b64 }] }; // stale but real
+            if (fresh && cacheOk) return { content: [{ type: "text", text: fresh.b64 }] }; // stale but real
             throw e;
           }
         }

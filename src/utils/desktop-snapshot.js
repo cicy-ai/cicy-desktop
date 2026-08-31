@@ -116,14 +116,35 @@ async function captureOnce() {
 // desktop.b64 file is missing/stale. NOT valid on win32 in the main process —
 // desktopCapturer needs the --disable-gpu daemon there (see grabScreenImage);
 // the tool guards that and reads the daemon file instead.
-async function captureB64(maxWidth) {
+//
+// maxWidth/quality are the cloud UI's 画质 picker (流畅 480/q45 → 超清 1920/q92).
+// The daemon file is always the cheap 600px/q60 preset, so a caller asking for
+// anything else MUST come through here to actually get it.
+async function captureB64(maxWidth, quality) {
   const mw = maxWidth > 0 ? maxWidth : MAX_W;
+  const q = clampQuality(quality);
   let img = await grabScreenImage();
   const o = img.getSize();
   if (o.width > mw) img = img.resize({ width: mw, quality: "good" });
-  const jpeg = img.toJPEG(QUALITY);
+  const jpeg = img.toJPEG(q);
   if (!jpeg || jpeg.length < 256) throw new Error("encoded jpeg too small");
   return { b64: jpeg.toString("base64"), w: o.width, h: o.height, bytes: jpeg.length };
+}
+
+// electron's toJPEG rejects anything outside 0-100; keep a sane floor so a bad
+// caller can't ask for an unreadable 1-quality frame.
+function clampQuality(q) {
+  const n = Number(q);
+  if (!Number.isFinite(n) || n <= 0) return QUALITY;
+  return Math.min(95, Math.max(20, Math.round(n)));
+}
+
+// Does this request match what the daemon file already holds? If so the cached
+// frame is good enough and we skip a live grab; if not (the user picked 高清),
+// the caller must capture live or it would silently serve the coarse preset.
+function matchesDaemonPreset(maxWidth, quality) {
+  const mw = maxWidth > 0 ? maxWidth : MAX_W;
+  return mw <= MAX_W && clampQuality(quality) <= QUALITY;
 }
 
 // ── parent (started from main.js) ─────────────────────────────────────────────
@@ -235,4 +256,4 @@ if (process.env.CICY_SNAP_DAEMON === "1") {
   app.on("render-process-gone", () => app.quit());
 }
 
-module.exports = { startDesktopSnapshots, stopDesktopSnapshots, snapDir, captureOnce, captureOnceWin, captureB64, snapshotEnabled, MAX_W };
+module.exports = { startDesktopSnapshots, stopDesktopSnapshots, snapDir, captureOnce, captureOnceWin, captureB64, snapshotEnabled, matchesDaemonPreset, MAX_W, QUALITY };
