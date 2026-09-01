@@ -21,7 +21,7 @@ const os = require("os");
 const { readGlobalConfig, updateGlobalConfig } = require("./utils/global-json");
 const https = require("https");
 const log = require("electron-log");
-const { R2_RELEASES_BASE } = require("./sidecar/mirrors");
+const { R2_RELEASES_BASE, buildUrlList } = require("./sidecar/mirrors");
 
 // ── 版本比较:>0 a 新于 b ─────────────────────────────────────────────────────
 function cmpVer(a, b) {
@@ -74,25 +74,76 @@ function headOk(url, redirects = 0) {
 }
 
 // ── 最新版本号 ────────────────────────────────────────────────────────────────
+// R2 优先(win/mac/linux 各自指针,两条 CI 版本可能不同步,所以各读各的),GitHub 兜底。
+//
+// 原先这里是「一律读 OSS,彻底不碰 GitHub」,理由是仓库可能私有。代价是 R2 一旦不可达,
+// 自更新就整条断掉 —— 而 fleet 里确实有一批 Windows 节点连 r2.deepfetch.de5.net 直接
+// ECONNRESET(GitHub 反而 ~300ms 可达),它们因此永远停在旧版、只能人工推包。
+// 现在 R2 仍是首选(仓库若再转私有,这条路不受影响),失败才回退 GitHub Release;
+// 两边都不通才算真失败。
+const GH_REPO = "cicy-ai/cicy-desktop";
+
+function fetchLatestVersionFromGitHub() {
+  return new Promise((resolve, reject) => {
+    const req = https.get(
+      `https://api.github.com/repos/${GH_REPO}/releases/latest`,
+      { headers: { "User-Agent": "cicy-desktop-updater", Accept: "application/vnd.github+json" }, timeout: 10000 },
+      (res) => {
+        if (res.statusCode !== 200) { res.resume(); return reject(new Error(`GitHub HTTP ${res.statusCode}`)); }
+        let body = "";
+        res.setEncoding("utf8");
+        res.on("data", (d) => (body += d));
+        res.on("end", () => {
+          try {
+            const tag = String((JSON.parse(body) || {}).tag_name || "").replace(/^v/, "");
+            tag ? resolve(tag) : reject(new Error("no tag_name"));
+          } catch (e) { reject(e); }
+        });
+      },
+    );
+    req.on("error", reject);
+    req.on("timeout", () => { req.destroy(); reject(new Error("timeout")); });
+  });
+}
+
 async function fetchLatestVersion() {
-  // 版本清单**一律读 OSS**(win/mac/linux 各自指针),与网络判定无关 —— 彻底不碰 GitHub,
-  // 这样 cicy-desktop 仓库私有也不影响更新检查。win/mac 是两条独立 CI、版本可能不同步,读错
-  // 平台会 404,所以各读各的指针文件。
   const file = process.platform === "win32" ? "win-latest-version.txt"
     : process.platform === "darwin" ? "mac-latest-version.txt"
     : "linux-latest-version.txt";
-  return (await getText(`${R2_RELEASES_BASE}/${file}`)).trim().replace(/^v/, "");
+  try {
+    return (await getText(`${R2_RELEASES_BASE}/${file}`)).trim().replace(/^v/, "");
+  } catch (e) {
+    log.warn(`[app-updater] R2 版本指针不可达(${e.message}),回退 GitHub Release`);
+    return await fetchLatestVersionFromGitHub();
+  }
 }
 
-// ── 安装包 URL(分平台 + 分网络)+ 本地文件名 ────────────────────────────────
+// ── 安装包来源(有序候选)+ 本地文件名 ──────────────────────────────────────
+// 返回 { file, urls } —— urls 是按优先级排好的候选:R2 → GitHub 直连 → ghproxy 镜像。
+// 调用方依次尝试,第一个能下的算数(见 check() 的 HEAD 探测和 downloadUpdate 的重试)。
+//
+// 注意 Windows 两边**文件名不同**:R2 上是 cicy-desktop-<ver>.exe(CI 传的版本化副本),
+// GitHub Release 里是 electron-builder 产出的 CiCy-Desktop-Setup-<ver>.exe。
+// mac 的 pkg 和 linux 的 AppImage 两边同名。`file` 只是本地落盘名,保持原样不变。
 function assetFor(version) {
   const plat = process.platform;
   const arch = process.arch === "arm64" ? "arm64" : "x64";
-  // 三端安装包**全部从 OSS 拉**,与网络无关 —— 不再拼 GitHub 下载 URL,仓库私有也能更新。
   const file = plat === "win32" ? `cicy-desktop-${version}.exe`
     : plat === "darwin" ? `cicy-desktop-${version}-${arch}.pkg`
     : `CiCy-Desktop-${version}.AppImage`;
-  return { url: `${R2_RELEASES_BASE}/${file}`, file };
+  const ghName = plat === "win32" ? `CiCy-Desktop-Setup-${version}.exe` : file;
+  const ghUrl = `https://github.com/${GH_REPO}/releases/download/v${version}/${ghName}`;
+  // buildUrlList("global") = [直连, ...镜像];R2 排在最前面。
+  const urls = [`${R2_RELEASES_BASE}/${file}`, ...buildUrlList(ghUrl, "global")];
+  return { file, urls, url: urls[0] };
+}
+
+// 第一个 HEAD 得到 200/206 的候选;都不行返回 null。
+async function firstReachable(urls) {
+  for (const u of urls) {
+    if (await headOk(u)) return u;
+  }
+  return null;
 }
 
 // ── 下载(带进度,跟随重定向)──────────────────────────────────────────────────
@@ -179,9 +230,10 @@ async function check() {
     if (latest && cmpVer(latest, current) > 0) {
       // 「先出包再更新版本」客户端保险:版本号涨了不代表包传完了。先 HEAD 确认本平台安装包
       // 真能下(200),否则当成「还没就绪」继续显已是最新,避免用户点下载 404。
-      const { url } = assetFor(latest);
-      const ready = await headOk(url);
+      const { urls } = assetFor(latest);
+      const ready = await firstReachable(urls);
       if (ready) {
+        log.info(`[app-updater] ${latest} 安装包就绪:${ready}`);
         broadcast({ status: "available", version: latest, current, progress: null, filePath: null, autoUpdate: getAutoUpdate(), auto: false });
         if (getAutoUpdate()) {
           log.info(`[app-updater] auto-update on → downloading ${latest} and installing without asking`);
@@ -189,7 +241,7 @@ async function check() {
           await downloadUpdate();
           if (_state.status === "ready") installNow();
         }
-      } else { log.info(`[app-updater] ${latest} 版本号已更新但安装包未就位(HEAD 非 200):${url} — 暂不提示更新`); broadcast({ status: "up-to-date", version: current, current }); }
+      } else { log.info(`[app-updater] ${latest} 版本号已更新但所有来源都拿不到安装包(HEAD 非 200):${urls.join(" , ")} — 暂不提示更新`); broadcast({ status: "up-to-date", version: current, current }); }
     } else {
       broadcast({ status: "up-to-date", version: latest || current, current });
     }
@@ -208,16 +260,26 @@ async function downloadUpdate() {
   if (!version) { broadcast({ status: "error", error: "no version" }); return _state; }
   _downloading = true;
   try {
-    const { url, file } = assetFor(version);
+    const { urls, file } = assetFor(version);
     // 下到 ~/Downloads(用户能直接找到安装包);目录不存在则建。
     const dir = app.getPath("downloads");
     try { fs.mkdirSync(dir, { recursive: true }); } catch {}
     const dest = path.join(dir, file);
-    log.info(`[app-updater] downloading ${url} → ${dest}`);
     broadcast({ status: "downloading", progress: { percent: 0, transferred: 0, total: 0 }, filePath: null });
-    await download(url, dest, (p) => broadcast({ status: "downloading", progress: p }));
-    broadcast({ status: "ready", filePath: dest, progress: { percent: 100 } });
-    return _state;
+    // 逐个候选试(R2 → GitHub → 镜像):一个源断了就换下一个,全断才算失败。
+    let lastErr = null;
+    for (const url of urls) {
+      try {
+        log.info(`[app-updater] downloading ${url} → ${dest}`);
+        await download(url, dest, (p) => broadcast({ status: "downloading", progress: p }));
+        broadcast({ status: "ready", filePath: dest, progress: { percent: 100 } });
+        return _state;
+      } catch (e) {
+        lastErr = e;
+        log.warn(`[app-updater] 源失败(${url}):${e.message}`);
+      }
+    }
+    throw lastErr || new Error("no source available");
   } catch (e) {
     log.warn("[app-updater] download failed:", e.message);
     broadcast({ status: "error", error: e.message });
