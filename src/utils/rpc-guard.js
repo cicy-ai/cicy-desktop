@@ -20,21 +20,61 @@
 // its nodeIntegration, tracked separately.
 const { dialog, BrowserWindow } = require("electron");
 const { audit } = require("./rpc-audit");
+const hubTrust = require("./hub-trust");
 
 // Host code-exec + host filesystem tools = the RCE surface.
 const DANGEROUS_TOOLS = new Set([
-  "exec_shell", "exec_python", "exec_node",
-  "exec_shell_file", "exec_python_file", "exec_node_file",
-  "file_read", "file_write", "file_upload", "file_download",
+  "exec_shell",
+  "exec_python",
+  "exec_node",
+  "exec_shell_file",
+  "exec_python_file",
+  "exec_node_file",
+  "file_read",
+  "file_write",
+  "file_upload",
+  "file_download",
   "electron_inject",
 ]);
-function isDangerousTool(t) { return DANGEROUS_TOOLS.has(t); }
+function isDangerousTool(t) {
+  return DANGEROUS_TOOLS.has(t);
+}
 
 // webContents.id -> granted origin (page-scoped; cleared on cross-doc nav / destroy).
 const _grants = new Map();
+// wc.id -> in-flight danger-consent promise (dedup: an unattended fleet node was
+// stacking one modal per agent retry — the origin gate already dedups this way).
+const _pendingGrantByWc = new Map();
+// wc.id -> { origin, at } — short-lived record of a "允许一次" click so the
+// non-blocking (polling) transport's very next retry gets through. The click
+// resolves a promise nobody awaits, so without this the next poll just re-pops
+// the modal forever. Expires on its own; origin-scoped (see grantDecision).
+const _grantOnceByWc = new Map();
+const GRANT_ONCE_MS = 20 * 1000;
 
-function originOf(wc) {
-  try { return new URL(wc.getURL()).origin; } catch { return wc.getURL() || "(unknown)"; }
+// The URL of the FRAME that actually sent the IPC. An <iframe> has its own URL,
+// distinct from the top-level webContents (wc.getURL()). Every trust decision
+// MUST key on this: otherwise a subframe (third-party embed, or an injected
+// <iframe src=attacker>) inherits the top page's trust — and on the owner-hub
+// origin that means zero-click exec_* (RCE). Falls back to the top-frame URL only
+// when senderFrame is gone (frame disposed mid-call), where the call fails anyway.
+function frameUrl(event) {
+  try {
+    const f = event && event.senderFrame;
+    if (f && typeof f.url === "string" && f.url) return f.url;
+  } catch {}
+  try {
+    const wc = event && event.sender;
+    if (wc && !wc.isDestroyed()) return wc.getURL() || "";
+  } catch {}
+  return "";
+}
+function originFromUrl(url) {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return url || "(unknown)";
+  }
 }
 
 function previewArgs(tool, args) {
@@ -51,16 +91,66 @@ function previewArgs(tool, args) {
   return "";
 }
 
+// Synchronous danger verdict WITHOUT prompting: "allow" | "unknown".
+// (There is no sticky "deny" for the per-tool gate — a denial is a one-off.)
+// Lets the non-blocking agent transport decide instantly: proceed, or pop the
+// modal in the background and hand back a PENDING sentinel the caller polls on.
+function grantDecision(event, toolName) {
+  if (!isDangerousTool(toolName)) return "allow";
+  const wc = event && event.sender;
+  if (!wc || wc.isDestroyed()) return "unknown";
+  const url = frameUrl(event); // the ACTUAL calling frame, not the top page
+  const origin = originFromUrl(url);
+  // Owner's own ws-hub control surface (logged in + host proven by a hub grant)
+  // → the operator commanding their own machine; no click to gate on.
+  if (hubTrust.isOwnerHubOrigin(url)) return "allow";
+  if (_grants.get(wc.id) === origin) return "allow"; // granted earlier this page
+  // A recent "允许一次" for this exact origin, still within its short window.
+  const once = _grantOnceByWc.get(wc.id);
+  if (once && once.origin === origin && Date.now() - once.at < GRANT_ONCE_MS) return "allow";
+  if (once) _grantOnceByWc.delete(wc.id); // expired or origin changed
+  let host = "";
+  try {
+    host = new URL(url).hostname;
+  } catch {}
+  let store = null;
+  try {
+    store = require("../profiles/trusted-origins-store");
+  } catch {}
+  if (store && host && store.isDangerousAllowed(host)) return "allow"; // 白名单 + 「始终允许」
+  return "unknown";
+}
+
 // Returns true if the dangerous call is allowed (granted now or earlier for this
-// page), false if the user denied it.
+// page / owner-trusted), false if the user denied it. Blocking path for in-page
+// callers; the modal is deduped per wc so retries can't stack consent dialogs.
 async function ensureRpcGrant(event, toolName, args) {
   const wc = event && event.sender;
   if (!wc || wc.isDestroyed()) return false;
-  const origin = originOf(wc);
-  if (_grants.get(wc.id) === origin) return true; // already allowed for this page
-  let host = ""; try { host = new URL(wc.getURL()).hostname; } catch {}
-  let store = null; try { store = require("../profiles/trusted-origins-store"); } catch {}
-  if (store && host && store.isDangerousAllowed(host)) return true; // 白名单站点 + 用户选过「始终允许」
+  if (grantDecision(event, toolName) === "allow") return true;
+  if (_pendingGrantByWc.has(wc.id)) return _pendingGrantByWc.get(wc.id); // dedup in-flight
+  const p = _runGrantModal(event, toolName, args);
+  _pendingGrantByWc.set(wc.id, p);
+  p.finally(() => {
+    if (_pendingGrantByWc.get(wc.id) === p) _pendingGrantByWc.delete(wc.id);
+  });
+  return p;
+}
+
+// The actual consent dialog (only reached for an undecided origin).
+async function _runGrantModal(event, toolName, args) {
+  const wc = event && event.sender;
+  if (!wc || wc.isDestroyed()) return false;
+  const url = frameUrl(event);
+  const origin = originFromUrl(url);
+  let host = "";
+  try {
+    host = new URL(url).hostname;
+  } catch {}
+  let store = null;
+  try {
+    store = require("../profiles/trusted-origins-store");
+  } catch {}
   const canAlways = !!(store && host && store.listAll().includes(host));
 
   const win = BrowserWindow.fromWebContents(wc) || BrowserWindow.getFocusedWindow() || null;
@@ -74,35 +164,85 @@ async function ensureRpcGrant(event, toolName, args) {
     choice = await dialog.showMessageBox(win, {
       type: "warning",
       noLink: true,
-      buttons: canAlways ? ["拒绝", "允许一次", "本页面内允许", "此站点始终允许（不再询问）"] : ["拒绝", "允许一次", "本页面内允许"],
+      buttons: canAlways
+        ? ["拒绝", "允许一次", "本页面内允许", "此站点始终允许（不再询问）"]
+        : ["拒绝", "允许一次", "本页面内允许"],
       defaultId: 0,
       cancelId: 0,
       title: "敏感操作请求",
       message: "站点要在本机执行敏感操作",
       detail: detail.join("\n"),
     });
-  } catch { return false; }
+  } catch {
+    return false;
+  }
 
   const response = choice && choice.response;
-  if (response === 3 && canAlways) { // persistent: allowlisted site, never ask again for dangerous tools
-    try { store.allowDangerous(host); } catch {}
+  if (response === 3 && canAlways) {
+    // persistent: allowlisted site, never ask again for dangerous tools
+    try {
+      store.allowDangerous(host);
+    } catch {}
     _grants.set(wc.id, origin);
-    audit({ kind: "auth", gate: "dangerous-tool", origin, tool: toolName, decision: "always-allow", temporary: false, args: pv });
+    audit({
+      kind: "auth",
+      gate: "dangerous-tool",
+      origin,
+      tool: toolName,
+      decision: "always-allow",
+      temporary: false,
+      args: pv,
+    });
     return true;
   }
-  if (response === 2) { // remember for this page
+  if (response === 2) {
+    // remember for this page
     _grants.set(wc.id, origin);
     if (!wc.__rpcGuardWired) {
       wc.__rpcGuardWired = true;
       const clear = () => _grants.delete(wc.id);
-      wc.on("did-start-navigation", (_e, _url, isInPlace, isMainFrame) => { if (isMainFrame && !isInPlace) clear(); });
+      wc.on("did-start-navigation", (_e, _url, isInPlace, isMainFrame) => {
+        if (isMainFrame && !isInPlace) clear();
+      });
       wc.once("destroyed", clear);
     }
-    audit({ kind: "auth", gate: "dangerous-tool", origin, tool: toolName, decision: "page-allow", temporary: true, args: pv });
+    audit({
+      kind: "auth",
+      gate: "dangerous-tool",
+      origin,
+      tool: toolName,
+      decision: "page-allow",
+      temporary: true,
+      args: pv,
+    });
     return true;
   }
-  audit({ kind: "auth", gate: "dangerous-tool", origin, tool: toolName, decision: response === 1 ? "allow-once" : "deny", temporary: true, args: pv });
-  return response === 1; // allow once
+  if (response === 1) {
+    // 允许一次 — an in-page awaiter gets `true` returned directly (as before);
+    // the non-blocking poller has already been handed PENDING, so record the
+    // grant briefly here or its next retry would just re-pop this modal.
+    _grantOnceByWc.set(wc.id, { origin, at: Date.now() });
+    audit({
+      kind: "auth",
+      gate: "dangerous-tool",
+      origin,
+      tool: toolName,
+      decision: "allow-once",
+      temporary: true,
+      args: pv,
+    });
+    return true;
+  }
+  audit({
+    kind: "auth",
+    gate: "dangerous-tool",
+    origin,
+    tool: toolName,
+    decision: "deny",
+    temporary: true,
+    args: pv,
+  });
+  return false;
 }
 
 // ── Origin allowlist gate (domain-level trust-on-demand) ──────────────────────
@@ -128,15 +268,20 @@ const _pendingByOrigin = new Map(); // origin -> in-flight modal promise (dedup 
 function originDecision(event) {
   const wc = event && event.sender;
   if (!wc || wc.isDestroyed()) return "deny";
-  const url = wc.getURL();
+  const url = frameUrl(event); // the ACTUAL calling frame, not the top page
+  // Owner's own ws-hub control surface (logged in + host proven by a hub grant)
+  // may use the bridge without an allowlist entry — it IS the operator.
+  if (hubTrust.isOwnerHubOrigin(url)) return "allow";
   let isTrustedUrl;
-  try { ({ isTrustedUrl } = require("./window-utils")); } catch {}
+  try {
+    ({ isTrustedUrl } = require("./window-utils"));
+  } catch {}
   if (isTrustedUrl && isTrustedUrl(url)) return "allow"; // on the allowlist
-  const origin = originOf(wc);
+  const origin = originFromUrl(url);
   if (_sessionOrigins.has(origin)) return "allow"; // "本次允许" earlier
   const deniedAt = _deniedOrigins.get(origin);
   if (deniedAt && Date.now() - deniedAt < DENY_COOLDOWN_MS) return "deny"; // recently refused
-  if (deniedAt) _deniedOrigins.delete(origin);       // cooldown over → ask again
+  if (deniedAt) _deniedOrigins.delete(origin); // cooldown over → ask again
   return "unknown";
 }
 
@@ -147,12 +292,17 @@ function originDecision(event) {
 function startOriginModal(event) {
   const wc = event && event.sender;
   if (!wc || wc.isDestroyed()) return Promise.resolve(false);
-  const origin = originOf(wc);
+  const url = frameUrl(event);
+  const origin = originFromUrl(url);
   if (_pendingByOrigin.has(origin)) return _pendingByOrigin.get(origin); // dedup
   let host = "";
-  try { host = new URL(wc.getURL()).hostname; } catch {}
+  try {
+    host = new URL(url).hostname;
+  } catch {}
   let refreshTrustedOrigins;
-  try { ({ refreshTrustedOrigins } = require("./window-utils")); } catch {}
+  try {
+    ({ refreshTrustedOrigins } = require("./window-utils"));
+  } catch {}
 
   const p = (async () => {
     const win = BrowserWindow.fromWebContents(wc) || BrowserWindow.getFocusedWindow() || null;
@@ -174,16 +324,25 @@ function startOriginModal(event) {
           "「信任此站点」会把该域名加入白名单，以后不再询问。",
         ].join("\n"),
       });
-    } catch { return false; }
+    } catch {
+      return false;
+    }
     const r = choice && choice.response;
-    if (r === 1) { // 本次允许 — temporary (process lifetime), record it so it isn't trace-less
+    if (r === 1) {
+      // 本次允许 — temporary (process lifetime), record it so it isn't trace-less
       _sessionOrigins.add(origin);
       audit({ kind: "auth", gate: "origin", origin, decision: "session-allow", temporary: true });
       return true;
     }
-    if (r === 2 && host) { // 加入白名单（持久）— trusted-origins-store.add() logs the allowlist change
-      let res = null, err = "";
-      try { res = require("../profiles/trusted-origins-store").add(host); } catch (e) { err = e && e.message; }
+    if (r === 2 && host) {
+      // 加入白名单（持久）— trusted-origins-store.add() logs the allowlist change
+      let res = null,
+        err = "";
+      try {
+        res = require("../profiles/trusted-origins-store").add(host);
+      } catch (e) {
+        err = e && e.message;
+      }
       if (res && res.ok !== false) {
         if (refreshTrustedOrigins) refreshTrustedOrigins();
         _sessionOrigins.add(origin);
@@ -193,14 +352,25 @@ function startOriginModal(event) {
       // failed, honour the intent for this run and SAY why — silently returning
       // false here made the modal reappear on every call with no explanation.
       _sessionOrigins.add(origin);
-      audit({ kind: "auth", gate: "origin", origin, decision: "session-allow", temporary: true, error: `allowlist-add-failed: ${(res && res.error) || err || "unknown"}` });
+      audit({
+        kind: "auth",
+        gate: "origin",
+        origin,
+        decision: "session-allow",
+        temporary: true,
+        error: `allowlist-add-failed: ${(res && res.error) || err || "unknown"}`,
+      });
       try {
-        dialog.showMessageBox(win, {
-          type: "error", noLink: true, buttons: ["知道了"],
-          title: "加入白名单失败",
-          message: `无法把 ${host} 加入受信任站点`,
-          detail: `${(res && res.error) || err || "未知错误"}\n\n本次已允许该站点；下次启动会再次询问。你也可以在 头像 → 受信任站点 里手动添加。`,
-        }).catch(() => {});
+        dialog
+          .showMessageBox(win, {
+            type: "error",
+            noLink: true,
+            buttons: ["知道了"],
+            title: "加入白名单失败",
+            message: `无法把 ${host} 加入受信任站点`,
+            detail: `${(res && res.error) || err || "未知错误"}\n\n本次已允许该站点；下次启动会再次询问。你也可以在 头像 → 受信任站点 里手动添加。`,
+          })
+          .catch(() => {});
       } catch {}
       return true;
     }
@@ -221,4 +391,29 @@ async function ensureOriginAuthorized(event) {
   return await startOriginModal(event);
 }
 
-module.exports = { DENY_COOLDOWN_MS, DANGEROUS_TOOLS, isDangerousTool, ensureRpcGrant, ensureOriginAuthorized, originDecision, startOriginModal };
+// Background danger-consent for the non-blocking transport: ensure the modal is
+// running (deduped per wc) and record its outcome, so a later grantDecision()
+// resolves — same poll-until-granted contract as startOriginModal().
+function startGrantModal(event, toolName, args) {
+  const wc = event && event.sender;
+  if (!wc || wc.isDestroyed()) return Promise.resolve(false);
+  if (_pendingGrantByWc.has(wc.id)) return _pendingGrantByWc.get(wc.id);
+  const p = _runGrantModal(event, toolName, args);
+  _pendingGrantByWc.set(wc.id, p);
+  p.finally(() => {
+    if (_pendingGrantByWc.get(wc.id) === p) _pendingGrantByWc.delete(wc.id);
+  });
+  return p;
+}
+
+module.exports = {
+  DENY_COOLDOWN_MS,
+  DANGEROUS_TOOLS,
+  isDangerousTool,
+  ensureRpcGrant,
+  grantDecision,
+  startGrantModal,
+  ensureOriginAuthorized,
+  originDecision,
+  startOriginModal,
+};

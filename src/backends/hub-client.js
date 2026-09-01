@@ -22,6 +22,7 @@ const path = require("path");
 const crypto = require("crypto");
 const log = require("electron-log");
 const { readGlobalConfig, updateGlobalConfig } = require("../utils/global-json");
+const hubTrust = require("../utils/hub-trust");
 
 const GLOBAL_JSON = path.join(os.homedir(), "cicy-ai", "global.json");
 const DEFAULT_ORIGIN = "https://ws.cicy-ai.com";
@@ -48,17 +49,26 @@ function readAuth() {
     const c = readGlobalConfig(GLOBAL_JSON);
     const a = c && c.hubAuth;
     return a && a.token ? a : null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 // Stable per-machine hub instance id for this desktop (hub requires `code-` +
 // 16..96 [A-Za-z0-9_-]).
 function desktopInstanceId() {
   let id = "";
-  try { id = String(readGlobalConfig(GLOBAL_JSON)?.hubDesktopInstanceId || ""); } catch {}
+  try {
+    id = String(readGlobalConfig(GLOBAL_JSON)?.hubDesktopInstanceId || "");
+  } catch {}
   if (/^code-[A-Za-z0-9_-]{16,96}$/.test(id)) return id;
   id = "code-desktop-" + crypto.randomBytes(12).toString("hex");
-  try { updateGlobalConfig(GLOBAL_JSON, (c) => { c.hubDesktopInstanceId = id; return c; }); } catch {}
+  try {
+    updateGlobalConfig(GLOBAL_JSON, (c) => {
+      c.hubDesktopInstanceId = id;
+      return c;
+    });
+  } catch {}
   return id;
 }
 
@@ -67,7 +77,10 @@ function desktopInstanceId() {
 // fetch ignores them, which showed up as "fetch failed" on PCs that can only
 // reach the hub through a proxy. Falls back to global fetch outside Electron.
 function pickFetch() {
-  try { const { net, app } = require("electron"); if (net && typeof net.fetch === "function" && app && app.isReady()) return net.fetch.bind(net); } catch {}
+  try {
+    const { net, app } = require("electron");
+    if (net && typeof net.fetch === "function" && app && app.isReady()) return net.fetch.bind(net);
+  } catch {}
   return fetch;
 }
 
@@ -80,19 +93,33 @@ async function hubFetch(route, { method = "GET", token = "", body = null, tries 
       const headers = { accept: "application/json" };
       if (token) headers.authorization = "Bearer " + token;
       if (body != null) headers["content-type"] = "application/json";
-      const r = await pickFetch()(hubOrigin() + route, { method, headers, body: body == null ? undefined : JSON.stringify(body), signal: ctrl.signal, cache: "no-store" });
+      const r = await pickFetch()(hubOrigin() + route, {
+        method,
+        headers,
+        body: body == null ? undefined : JSON.stringify(body),
+        signal: ctrl.signal,
+        cache: "no-store",
+      });
       const text = await r.text();
       let json = null;
-      try { json = text ? JSON.parse(text) : null; } catch {}
+      try {
+        json = text ? JSON.parse(text) : null;
+      } catch {}
       return { status: r.status, ok: r.ok, json, text };
     } catch (e) {
       lastErr = e;
       log.warn(`[hub] ${method} ${route} failed (${attempt + 1}/${tries}): ${e.message}`);
       if (attempt + 1 < tries) await new Promise((r) => setTimeout(r, 1500));
-    } finally { clearTimeout(t); }
+    } finally {
+      clearTimeout(t);
+    }
   }
   const msg = String((lastErr && lastErr.message) || lastErr || "fetch failed");
-  throw new Error(/fetch failed|ECONN|ENOTFOUND|abort/i.test(msg) ? `hub unreachable (${hubOrigin()}): ${msg}` : msg);
+  throw new Error(
+    /fetch failed|ECONN|ENOTFOUND|abort/i.test(msg)
+      ? `hub unreachable (${hubOrigin()}): ${msg}`
+      : msg
+  );
 }
 
 // ── fallback: the local cicy-code sidecar ───────────────────────────────────
@@ -106,9 +133,17 @@ let _sidecarTok = { value: "", at: 0 };
 async function sidecarToken() {
   if (_sidecarTok.value && Date.now() - _sidecarTok.at < 5 * 60 * 1000) return _sidecarTok.value;
   let tok = "";
-  try { tok = String(readGlobalConfig(GLOBAL_JSON)?.api_token || "").trim(); } catch {}
+  try {
+    tok = String(readGlobalConfig(GLOBAL_JSON)?.api_token || "").trim();
+  } catch {}
   if (!tok && process.platform === "win32") {
-    try { tok = String(await require("../sidecar/wsl-docker").readContainerToken(SIDECAR_PORT) || "").trim(); } catch (e) { log.warn(`[hub] sidecar token: ${e.message}`); }
+    try {
+      tok = String(
+        (await require("../sidecar/wsl-docker").readContainerToken(SIDECAR_PORT)) || ""
+      ).trim();
+    } catch (e) {
+      log.warn(`[hub] sidecar token: ${e.message}`);
+    }
   }
   if (tok) _sidecarTok = { value: tok, at: Date.now() };
   return tok;
@@ -121,16 +156,32 @@ async function sidecarFetch(route, { method = "GET", body = null } = {}) {
   try {
     const headers = { accept: "application/json", authorization: "Bearer " + tok };
     if (body != null) headers["content-type"] = "application/json";
-    const r = await fetch(`http://127.0.0.1:${SIDECAR_PORT}${route}`, { method, headers, body: body == null ? undefined : JSON.stringify(body), signal: ctrl.signal, cache: "no-store" });
+    const r = await fetch(`http://127.0.0.1:${SIDECAR_PORT}${route}`, {
+      method,
+      headers,
+      body: body == null ? undefined : JSON.stringify(body),
+      signal: ctrl.signal,
+      cache: "no-store",
+    });
     const text = await r.text();
-    let json = null; try { json = text ? JSON.parse(text) : null; } catch {}
+    let json = null;
+    try {
+      json = text ? JSON.parse(text) : null;
+    } catch {}
     return { status: r.status, ok: r.ok, json, text };
-  } finally { clearTimeout(t); }
+  } finally {
+    clearTimeout(t);
+  }
 }
-const isNetErr = (e) => /unreachable|fetch failed|ECONN|ENOTFOUND|abort/i.test(String((e && e.message) || e));
+const isNetErr = (e) =>
+  /unreachable|fetch failed|ECONN|ENOTFOUND|abort/i.test(String((e && e.message) || e));
 
 function errorOf(res, fallback) {
-  return (res && res.json && (res.json.error || res.json.message)) || fallback || `HTTP ${res && res.status}`;
+  return (
+    (res && res.json && (res.json.error || res.json.message)) ||
+    fallback ||
+    `HTTP ${res && res.status}`
+  );
 }
 
 function stopPending(reason) {
@@ -140,7 +191,9 @@ function stopPending(reason) {
 }
 
 function fire(payload) {
-  try { _onResult && _onResult(payload); } catch {}
+  try {
+    _onResult && _onResult(payload);
+  } catch {}
 }
 
 function status() {
@@ -154,14 +207,19 @@ function status() {
 }
 
 async function loginStart({ email, onResult } = {}) {
-  const addr = String(email || "").trim().toLowerCase();
+  const addr = String(email || "")
+    .trim()
+    .toLowerCase();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr)) throw new Error("invalid_email");
   stopPending("new login");
   _onResult = onResult;
   const instanceId = desktopInstanceId();
   const host = (os.hostname() || "desktop").split(".")[0];
   const name = `desktop-${host}-${instanceId.slice(-4)}`;
-  const res = await hubFetch("/api/login/start", { method: "POST", body: { email: addr, instanceId, name, platform: "desktop-" + process.platform } });
+  const res = await hubFetch("/api/login/start", {
+    method: "POST",
+    body: { email: addr, instanceId, name, platform: "desktop-" + process.platform },
+  });
   if (!res.ok || !res.json || !res.json.state) throw new Error(errorOf(res, "login_start_failed"));
   const state = res.json.state;
   _pending = { state, email: addr, startedAt: Date.now(), timer: null };
@@ -177,19 +235,36 @@ function schedulePoll(state, delay = POLL_EVERY_MS) {
 
 async function pollOnce(state) {
   if (!_pending || _pending.state !== state) return;
-  if (Date.now() - _pending.startedAt > LOGIN_TIMEOUT_MS) { stopPending("timeout"); fire({ error: "timeout" }); return; }
+  if (Date.now() - _pending.startedAt > LOGIN_TIMEOUT_MS) {
+    stopPending("timeout");
+    fire({ error: "timeout" });
+    return;
+  }
   try {
     const res = await hubFetch("/api/login/poll?state=" + encodeURIComponent(state));
     const j = res.json || {};
     if (j.status === "ready" && j.token) {
-      const auth = { origin: hubOrigin(), token: j.token, owner: j.owner || _pending.email, instanceId: j.instanceId || desktopInstanceId(), savedAt: Date.now() };
-      updateGlobalConfig(GLOBAL_JSON, (c) => { c.hubAuth = auth; return c; });
+      const auth = {
+        origin: hubOrigin(),
+        token: j.token,
+        owner: j.owner || _pending.email,
+        instanceId: j.instanceId || desktopInstanceId(),
+        savedAt: Date.now(),
+      };
+      updateGlobalConfig(GLOBAL_JSON, (c) => {
+        c.hubAuth = auth;
+        return c;
+      });
       stopPending("ready");
       log.info(`[hub] signed in as ${auth.owner}`);
       fire({ ok: true, owner: auth.owner });
       return;
     }
-    if (j.status === "expired") { stopPending("expired"); fire({ error: "expired" }); return; }
+    if (j.status === "expired") {
+      stopPending("expired");
+      fire({ error: "expired" });
+      return;
+    }
   } catch (e) {
     log.warn(`[hub] poll error (retrying): ${e.message}`);
   }
@@ -200,7 +275,10 @@ async function loginCode({ code } = {}) {
   if (!_pending) throw new Error("no_pending_login");
   const c = String(code || "").replace(/\D/g, "");
   if (c.length !== 6) throw new Error("invalid_code");
-  const res = await hubFetch("/api/login/code", { method: "POST", body: { state: _pending.state, code: c } });
+  const res = await hubFetch("/api/login/code", {
+    method: "POST",
+    body: { state: _pending.state, code: c },
+  });
   if (!res.ok) throw new Error(errorOf(res, "invalid_code"));
   // approved → the very next poll hands over the token
   if (_pending.timer) clearTimeout(_pending.timer);
@@ -209,27 +287,48 @@ async function loginCode({ code } = {}) {
 }
 
 function cancel() {
-  if (_pending) { stopPending("cancelled"); fire({ error: "cancelled" }); }
+  if (_pending) {
+    stopPending("cancelled");
+    fire({ error: "cancelled" });
+  }
   return { ok: true };
 }
 
 function clearAuth() {
-  try { updateGlobalConfig(GLOBAL_JSON, (c) => { delete c.hubAuth; return c; }); } catch {}
+  try {
+    updateGlobalConfig(GLOBAL_JSON, (c) => {
+      delete c.hubAuth;
+      return c;
+    });
+  } catch {}
+  try {
+    hubTrust.clearOwnerHubHost();
+  } catch {}
 }
 
 async function instances() {
   const a = readAuth();
   if (!a) return { ok: false, error: "not_logged_in", instances: [] };
-  let res, viaSidecar = false;
-  try { res = await hubFetch("/api/instances", { token: a.token }); }
-  catch (e) {
+  let res,
+    viaSidecar = false;
+  try {
+    res = await hubFetch("/api/instances", { token: a.token });
+  } catch (e) {
     if (!isNetErr(e)) return { ok: false, error: e.message, instances: [] };
     log.warn(`[hub] direct instance list failed (${e.message}); trying the local cicy-code`);
-    try { res = await sidecarFetch("/api/im/cicy-cloud/instances"); viaSidecar = true; }
-    catch (e2) { return { ok: false, error: `${e.message}; sidecar: ${e2.message}`, instances: [] }; }
+    try {
+      res = await sidecarFetch("/api/im/cicy-cloud/instances");
+      viaSidecar = true;
+    } catch (e2) {
+      return { ok: false, error: `${e.message}; sidecar: ${e2.message}`, instances: [] };
+    }
   }
-  if (res.status === 401 && !viaSidecar) { clearAuth(); return { ok: false, error: "unauthorized", instances: [] }; }
-  if (!res.ok || !res.json) return { ok: false, error: errorOf(res, "instances_failed"), instances: [] };
+  if (res.status === 401 && !viaSidecar) {
+    clearAuth();
+    return { ok: false, error: "unauthorized", instances: [] };
+  }
+  if (!res.ok || !res.json)
+    return { ok: false, error: errorOf(res, "instances_failed"), instances: [] };
   const list = Array.isArray(res.json.instances) ? res.json.instances : [];
   const out = list
     // direct: `self` is this desktop's hidden pseudo-instance; via sidecar: `self` is the
@@ -261,22 +360,45 @@ async function grantUrl({ id, port = 0, next = "/" } = {}) {
   const a = readAuth();
   if (!a) throw new Error("not_logged_in");
   let res;
-  try { res = await hubFetch("/api/gateway/grant", { method: "POST", token: a.token, body: { instanceId: String(id || ""), port: Number(port) || 0, next: String(next || "/") } }); }
-  catch (e) {
+  try {
+    res = await hubFetch("/api/gateway/grant", {
+      method: "POST",
+      token: a.token,
+      body: { instanceId: String(id || ""), port: Number(port) || 0, next: String(next || "/") },
+    });
+  } catch (e) {
     if (!isNetErr(e)) throw e;
     log.warn(`[hub] direct grant failed (${e.message}); trying the local cicy-code`);
-    res = await sidecarFetch("/api/im/cicy-cloud/open", { method: "POST", body: { instance_id: String(id || ""), port: Number(port) || 0, next: String(next || "/") } });
+    res = await sidecarFetch("/api/im/cicy-cloud/open", {
+      method: "POST",
+      body: { instance_id: String(id || ""), port: Number(port) || 0, next: String(next || "/") },
+    });
     if (!res.ok || !res.json || !res.json.url) throw new Error(errorOf(res, "grant_failed"));
+    try {
+      hubTrust.recordOwnerHubHost(res.json.host);
+    } catch {}
     return { url: res.json.url, host: res.json.host };
   }
-  if (res.status === 401) { clearAuth(); throw new Error("unauthorized"); }
+  if (res.status === 401) {
+    clearAuth();
+    throw new Error("unauthorized");
+  }
   if (!res.ok || !res.json || !res.json.url) throw new Error(errorOf(res, "grant_failed"));
+  // The grant was minted with THIS desktop's own hubAuth token, so its host
+  // provably belongs to the owner email — trust it for owner-scoped dangerous RPC.
+  try {
+    hubTrust.recordOwnerHubHost(res.json.host);
+  } catch {}
   return { url: res.json.url, host: res.json.host };
 }
 
 async function logout() {
   const a = readAuth();
-  if (a) { try { await hubFetch("/api/logout", { method: "POST", token: a.token }); } catch {} }
+  if (a) {
+    try {
+      await hubFetch("/api/logout", { method: "POST", token: a.token });
+    } catch {}
+  }
   clearAuth();
   stopPending("logout");
   return { ok: true };

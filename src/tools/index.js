@@ -25,5 +25,6 @@ module.exports = [
   require("./hook-gemini"),
   require("./chrome-tools"),
   require("./tab-browser-tools"),
+  require("./hub-team-tools"),
   require("./list-tools"),
 ];

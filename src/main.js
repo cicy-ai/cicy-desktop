@@ -47,9 +47,16 @@ electronApp.on("web-contents-created", (_e, wc) => {
   try {
     if (wc.getType && wc.getType() === "webview") {
       wc.on("before-input-event", (_ev, input) => {
-        if (input.type === "keyDown" && (input.control || input.meta) &&
-            !input.alt && !input.shift && (input.key === "c" || input.key === "C")) {
-          try { wc.copy(); } catch (_) {}
+        if (
+          input.type === "keyDown" &&
+          (input.control || input.meta) &&
+          !input.alt &&
+          !input.shift &&
+          (input.key === "c" || input.key === "C")
+        ) {
+          try {
+            wc.copy();
+          } catch (_) {}
         }
       });
     }
@@ -86,10 +93,14 @@ const log = require("electron-log");
 // (= cicy-desktop 本体)带走。曾复现:agent 操作系统 Chrome 失败 → CDP client 的 WS 抛 error
 // → uncaughtException → cicy-desktop 连带被杀。worker 必须对工具级错误免疫。
 process.on("uncaughtException", (err) => {
-  try { log.error("[uncaughtException] kept alive:", (err && err.stack) || err); } catch {}
+  try {
+    log.error("[uncaughtException] kept alive:", (err && err.stack) || err);
+  } catch {}
 });
 process.on("unhandledRejection", (reason) => {
-  try { log.error("[unhandledRejection] kept alive:", (reason && reason.stack) || reason); } catch {}
+  try {
+    log.error("[unhandledRejection] kept alive:", (reason && reason.stack) || reason);
+  } catch {}
 });
 
 const { config } = require("./config");
@@ -122,8 +133,11 @@ setupErrorHandlers();
 // detection fails.
 const i18n = require("./i18n");
 const __initialLocale = (() => {
-  try { return electronApp.getLocale ? electronApp.getLocale() : (process.env.LANG || ""); }
-  catch { return process.env.LANG || ""; }
+  try {
+    return electronApp.getLocale ? electronApp.getLocale() : process.env.LANG || "";
+  } catch {
+    return process.env.LANG || "";
+  }
 })();
 i18n.init(__initialLocale);
 
@@ -153,7 +167,9 @@ if (!__singleLock) {
 // this the taskbar shows the stock Electron icon even when each BrowserWindow
 // sets its own. Must be set before any window is created. (No-op off Windows.)
 if (process.platform === "win32") {
-  try { electronApp.setAppUserModelId("com.cicy.desktop"); } catch {}
+  try {
+    electronApp.setAppUserModelId("com.cicy.desktop");
+  } catch {}
 }
 
 // Register cicy-desktop:// as the desktop's URL protocol. We MOVED off the bare
@@ -171,9 +187,14 @@ const isDeepLink = (u) =>
 // Source/dev runs (`electron <appdir>`) must register execPath + the app dir,
 // otherwise Windows stores a bare `electron.exe "%1"` handler that launches an
 // empty Electron shell — and clobbers the installed app's registration.
-const deeplinkArgs = electronApp.isPackaged ? [] : [process.execPath, [path.resolve(process.argv[1] || electronApp.getAppPath())]];
+const deeplinkArgs = electronApp.isPackaged
+  ? []
+  : [process.execPath, [path.resolve(process.argv[1] || electronApp.getAppPath())]];
 for (const s of DEEPLINK_SCHEMES) {
-  try { if (!electronApp.isDefaultProtocolClient(s, ...deeplinkArgs)) electronApp.setAsDefaultProtocolClient(s, ...deeplinkArgs); } catch {}
+  try {
+    if (!electronApp.isDefaultProtocolClient(s, ...deeplinkArgs))
+      electronApp.setAsDefaultProtocolClient(s, ...deeplinkArgs);
+  } catch {}
 }
 
 // Deep links can arrive before any BrowserWindow exists (cold start via
@@ -204,7 +225,9 @@ function broadcastDeepLink(channel, payload) {
     return;
   }
   for (const wc of targets) {
-    try { wc.send(channel, payload); } catch {}
+    try {
+      wc.send(channel, payload);
+    } catch {}
   }
 }
 
@@ -218,7 +241,9 @@ function flushPendingDeepLinks() {
   const drained = __pendingDeepLinks.splice(0, __pendingDeepLinks.length);
   for (const { channel, payload } of drained) {
     for (const wc of targets) {
-      try { wc.send(channel, payload); } catch {}
+      try {
+        wc.send(channel, payload);
+      } catch {}
     }
   }
 }
@@ -239,7 +264,7 @@ async function handleDeepLink(url) {
     if (action === "addteam") {
       const payload = {
         title: u.searchParams.get("title") || "",
-        url:   u.searchParams.get("url")   || "",
+        url: u.searchParams.get("url") || "",
         token: u.searchParams.get("token") || "",
       };
       // Add the team HERE in the main process — robust and independent of
@@ -272,7 +297,9 @@ async function handleDeepLink(url) {
         } catch {}
       }
     }
-  } catch (e) { log.warn(`[deeplink] parse error: ${e.message}`); }
+  } catch (e) {
+    log.warn(`[deeplink] parse error: ${e.message}`);
+  }
 }
 
 // macOS: fired when app is already running OR cold-launched via cicy:// URL.
@@ -285,13 +312,13 @@ electronApp.on("open-url", (_e, url) => {
 // Cold start on Windows/Linux: protocol URL is the last argv element. macOS
 // also gets the argv copy on some launchers, so this is harmless there.
 {
-  const coldUrl = process.argv.find(a => isDeepLink(a));
+  const coldUrl = process.argv.find((a) => isDeepLink(a));
   if (coldUrl) handleDeepLink(coldUrl);
 }
 
 electronApp.on("second-instance", (_e, argv) => {
   // argv may include a cicy-desktop:// (or legacy cicy://) URL on Windows/Linux
-  const cicyUrl = argv.find(a => isDeepLink(a));
+  const cicyUrl = argv.find((a) => isDeepLink(a));
   if (cicyUrl) handleDeepLink(cicyUrl);
 
   try {
@@ -303,8 +330,21 @@ electronApp.on("second-instance", (_e, argv) => {
   // 别的 app 里时不会被莫名跳到前台;想看 app 的用户点托盘/任务栏即可。
   const { BrowserWindow } = require("electron");
   const wins = BrowserWindow.getAllWindows();
-  if (!wins.some((w) => { try { return w.isVisible() && !w.isMinimized(); } catch { return false; } })) {
-    for (const w of wins) { try { if (w.isMinimized()) w.restore(); if (!w.isVisible()) w.showInactive(); } catch {} }
+  if (
+    !wins.some((w) => {
+      try {
+        return w.isVisible() && !w.isMinimized();
+      } catch {
+        return false;
+      }
+    })
+  ) {
+    for (const w of wins) {
+      try {
+        if (w.isMinimized()) w.restore();
+        if (!w.isVisible()) w.showInactive();
+      } catch {}
+    }
   }
 });
 
@@ -369,8 +409,14 @@ try {
     if (typeof orig !== "function") continue;
     _BW.prototype[method] = function (...args) {
       try {
-        const frames = String(new Error().stack || "").split("\n").slice(2, 6).map((l) => l.trim().replace(/^at /, "")).join(" ← ");
-        log.info(`[focus-audit] ${method}() win=${this.id} title="${(this.getTitle && this.getTitle()) || ""}" visible=${this.isVisible && this.isVisible()} focused=${this.isFocused && this.isFocused()} ← ${frames}`);
+        const frames = String(new Error().stack || "")
+          .split("\n")
+          .slice(2, 6)
+          .map((l) => l.trim().replace(/^at /, ""))
+          .join(" ← ");
+        log.info(
+          `[focus-audit] ${method}() win=${this.id} title="${(this.getTitle && this.getTitle()) || ""}" visible=${this.isVisible && this.isVisible()} focused=${this.isFocused && this.isFocused()} ← ${frames}`
+        );
       } catch (e) {}
       return orig.apply(this, args);
     };
@@ -548,7 +594,9 @@ const server = http.createServer(app);
 if (cdpEnabled) {
   electronApp.commandLine.appendSwitch("remote-debugging-port", "9221");
   electronApp.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
-  log.info("[MCP] Remote debugging enabled on 127.0.0.1:9221 (default on; set CICY_DESKTOP_CDP=0 to disable)");
+  log.info(
+    "[MCP] Remote debugging enabled on 127.0.0.1:9221 (default on; set CICY_DESKTOP_CDP=0 to disable)"
+  );
 } else {
   log.info("[MCP] Remote debugging port NOT opened (CICY_DESKTOP_CDP=0)");
 }
@@ -558,15 +606,37 @@ require("./tabbrowser/newtab-protocol").registerScheme();
 
 // IPC Bridge: expose all RPC tools to renderer via ipcMain.handle
 const { ipcMain } = require("electron");
-const { isDangerousTool, ensureRpcGrant, ensureOriginAuthorized, originDecision, startOriginModal } = require("./utils/rpc-guard");
+const {
+  isDangerousTool,
+  ensureRpcGrant,
+  grantDecision,
+  startGrantModal,
+  ensureOriginAuthorized,
+  originDecision,
+  startOriginModal,
+} = require("./utils/rpc-guard");
 // Sentinels returned (as normal tool results, so useDesktopEvents forwards their
 // text verbatim) to a NON-BLOCKING caller while origin consent is undecided/denied.
 // The agent/skill CLI polls on __CICY_AUTH_PENDING__ and stops on __CICY_AUTH_DENIED__.
-const AUTH_PENDING_RESULT = { content: [{ type: "text", text: "__CICY_AUTH_PENDING__" }], isError: false };
-const AUTH_DENIED_RESULT = { content: [{ type: "text", text: "__CICY_AUTH_DENIED__" }], isError: false };
+const AUTH_PENDING_RESULT = {
+  content: [{ type: "text", text: "__CICY_AUTH_PENDING__" }],
+  isError: false,
+};
+const AUTH_DENIED_RESULT = {
+  content: [{ type: "text", text: "__CICY_AUTH_DENIED__" }],
+  isError: false,
+};
 const { audit, argsPreview } = require("./utils/rpc-audit");
 function rpcOrigin(event) {
-  try { return new URL(event.sender.getURL()).origin; } catch { return (event && event.sender && event.sender.getURL && event.sender.getURL()) || "(unknown)"; }
+  // Audit the frame that actually sent the call (an <iframe> has its own URL),
+  // matching what the rpc-guard trust gate keys on; fall back to the top frame.
+  try {
+    const f = event && event.senderFrame;
+    const u = (f && f.url) || (event.sender && event.sender.getURL());
+    return new URL(u).origin;
+  } catch {
+    return (event && event.sender && event.sender.getURL && event.sender.getURL()) || "(unknown)";
+  }
 }
 async function dispatchRpc(event, toolName, args) {
   const result = await executeTool(toolName, args || {}, {
@@ -590,11 +660,28 @@ ipcMain.handle("rpc", async (event, toolName, args) => {
   try {
     const result = await dispatchRpc(event, toolName, args);
     console.log("[IPC Bridge] success:", toolName);
-    audit({ kind: "rpc", channel: "rpc", origin, tool: toolName, dangerous: danger, ok: true, args: argsPreview(toolName, args) });
+    audit({
+      kind: "rpc",
+      channel: "rpc",
+      origin,
+      tool: toolName,
+      dangerous: danger,
+      ok: true,
+      args: argsPreview(toolName, args),
+    });
     return result;
   } catch (e) {
     console.error("[IPC Bridge] error:", toolName, e.message);
-    audit({ kind: "rpc", channel: "rpc", origin, tool: toolName, dangerous: danger, ok: false, error: e.message, args: argsPreview(toolName, args) });
+    audit({
+      kind: "rpc",
+      channel: "rpc",
+      origin,
+      tool: toolName,
+      dangerous: danger,
+      ok: false,
+      error: e.message,
+      args: argsPreview(toolName, args),
+    });
     throw e;
   }
 });
@@ -611,13 +698,27 @@ function makeLimiter(max) {
     while (active < max && q.length) {
       active++;
       const { fn, resolve, reject } = q.shift();
-      Promise.resolve().then(fn).then(
-        (v) => { active--; resolve(v); pump(); },
-        (e) => { active--; reject(e); pump(); },
-      );
+      Promise.resolve()
+        .then(fn)
+        .then(
+          (v) => {
+            active--;
+            resolve(v);
+            pump();
+          },
+          (e) => {
+            active--;
+            reject(e);
+            pump();
+          }
+        );
     }
   };
-  return (fn) => new Promise((resolve, reject) => { q.push({ fn, resolve, reject }); pump(); });
+  return (fn) =>
+    new Promise((resolve, reject) => {
+      q.push({ fn, resolve, reject });
+      pump();
+    });
 }
 const guardedDispatchLimit = makeLimiter(6);
 
@@ -645,41 +746,120 @@ ipcMain.handle("rpc:guarded", async (event, toolName, args) => {
   if (nonBlockingAuth) {
     const decision = originDecision(event); // "allow" | "deny" | "unknown" (no prompt)
     if (decision === "deny") {
-      audit({ kind: "rpc", channel: "rpc:guarded", origin, tool: toolName, dangerous: danger, ok: false, error: "origin-denied", args: argsPreview(toolName, args) });
+      audit({
+        kind: "rpc",
+        channel: "rpc:guarded",
+        origin,
+        tool: toolName,
+        dangerous: danger,
+        ok: false,
+        error: "origin-denied",
+        args: argsPreview(toolName, args),
+      });
       return AUTH_DENIED_RESULT;
     }
     if (decision === "unknown") {
       startOriginModal(event); // background consent, deduped per origin
-      audit({ kind: "rpc", channel: "rpc:guarded", origin, tool: toolName, dangerous: danger, ok: false, error: "origin-pending", args: argsPreview(toolName, args) });
+      audit({
+        kind: "rpc",
+        channel: "rpc:guarded",
+        origin,
+        tool: toolName,
+        dangerous: danger,
+        ok: false,
+        error: "origin-pending",
+        args: argsPreview(toolName, args),
+      });
       return AUTH_PENDING_RESULT;
     }
     // "allow" → fall through to the normal path
   } else {
     const originOk = await ensureOriginAuthorized(event);
     if (!originOk) {
-      audit({ kind: "rpc", channel: "rpc:guarded", origin, tool: toolName, dangerous: danger, ok: false, error: "origin-unauthorized", args: argsPreview(toolName, args) });
-      throw new Error(`未授权站点访问桌面 RPC（${origin} 未加入白名单或刚被拒绝；请在 CiCy Desktop 头像 → 受信任站点 中添加该域名，或稍后重试并在弹框中选择允许）`);
+      audit({
+        kind: "rpc",
+        channel: "rpc:guarded",
+        origin,
+        tool: toolName,
+        dangerous: danger,
+        ok: false,
+        error: "origin-unauthorized",
+        args: argsPreview(toolName, args),
+      });
+      throw new Error(
+        `未授权站点访问桌面 RPC（${origin} 未加入白名单或刚被拒绝；请在 CiCy Desktop 头像 → 受信任站点 中添加该域名，或稍后重试并在弹框中选择允许）`
+      );
     }
   }
   if (danger) {
-    const ok = await ensureRpcGrant(event, toolName, args);
-    if (!ok) {
-      audit({ kind: "rpc", channel: "rpc:guarded", origin, tool: toolName, dangerous: true, ok: false, error: "grant-denied", args: argsPreview(toolName, args) });
-      throw new Error(`已拒绝敏感操作 ${toolName}（rpc:guarded：来源未获授权）`);
+    if (nonBlockingAuth) {
+      // Agent/hub transport can't sit on a blocking modal (one fixed-timeout HTTP
+      // request). Owner-hub / already-granted → "allow"; otherwise pop the consent
+      // in the BACKGROUND (deduped per wc) and hand back a PENDING sentinel the
+      // caller polls on — NOT a wait_ack deadlock on an unattended fleet node.
+      const gd = grantDecision(event, toolName); // "allow" | "unknown" (no prompt)
+      if (gd !== "allow") {
+        startGrantModal(event, toolName, args);
+        audit({
+          kind: "rpc",
+          channel: "rpc:guarded",
+          origin,
+          tool: toolName,
+          dangerous: true,
+          ok: false,
+          error: "grant-pending",
+          args: argsPreview(toolName, args),
+        });
+        return AUTH_PENDING_RESULT;
+      }
+    } else {
+      const ok = await ensureRpcGrant(event, toolName, args);
+      if (!ok) {
+        audit({
+          kind: "rpc",
+          channel: "rpc:guarded",
+          origin,
+          tool: toolName,
+          dangerous: true,
+          ok: false,
+          error: "grant-denied",
+          args: argsPreview(toolName, args),
+        });
+        throw new Error(`已拒绝敏感操作 ${toolName}（rpc:guarded：来源未获授权）`);
+      }
     }
   }
   try {
     // Throttled so a post-allow backlog drains a few at a time, not all at once.
     const result = await guardedDispatchLimit(() => dispatchRpc(event, toolName, args));
-    audit({ kind: "rpc", channel: "rpc:guarded", origin, tool: toolName, dangerous: danger, ok: true, args: argsPreview(toolName, args) });
+    audit({
+      kind: "rpc",
+      channel: "rpc:guarded",
+      origin,
+      tool: toolName,
+      dangerous: danger,
+      ok: true,
+      args: argsPreview(toolName, args),
+    });
     return result;
   } catch (e) {
     console.error("[IPC Bridge] guarded error:", toolName, e.message);
-    audit({ kind: "rpc", channel: "rpc:guarded", origin, tool: toolName, dangerous: danger, ok: false, error: e.message, args: argsPreview(toolName, args) });
+    audit({
+      kind: "rpc",
+      channel: "rpc:guarded",
+      origin,
+      tool: toolName,
+      dangerous: danger,
+      ok: false,
+      error: e.message,
+      args: argsPreview(toolName, args),
+    });
     throw e;
   }
 });
-console.log("[IPC Bridge] RPC tools available via ipcRenderer.invoke('rpc'|'rpc:guarded', toolName, args)");
+console.log(
+  "[IPC Bridge] RPC tools available via ipcRenderer.invoke('rpc'|'rpc:guarded', toolName, args)"
+);
 
 const workerClient = maybeCreateWorkerClient(authManager);
 
@@ -718,21 +898,21 @@ function ensureWindowsDesktopLauncher() {
     "@echo off",
     "setlocal",
     `cd /d \"${PROJECT_ROOT}\"`,
-    'if not exist package.json (',
-    '  echo [ERROR] package.json not found in project directory',
-    '  pause',
-    '  exit /b 1',
-    ')',
-    'echo =========================================',
-    'echo   CiCy Desktop Master + Worker',
-    'echo   Project: %CD%',
-    'echo =========================================',
-    'npm start',
-    'if errorlevel 1 (',
-    '  echo.',
-    '  echo [ERROR] Startup failed',
-    '  pause',
-    ')',
+    "if not exist package.json (",
+    "  echo [ERROR] package.json not found in project directory",
+    "  pause",
+    "  exit /b 1",
+    ")",
+    "echo =========================================",
+    "echo   CiCy Desktop Master + Worker",
+    "echo   Project: %CD%",
+    "echo =========================================",
+    "npm start",
+    "if errorlevel 1 (",
+    "  echo.",
+    "  echo [ERROR] Startup failed",
+    "  pause",
+    ")",
   ].join("\r\n");
 
   fs.writeFileSync(WINDOWS_LAUNCHER_TARGET, `${launcherContent}\r\n`, "utf8");
@@ -776,10 +956,14 @@ function ensureAutoLaunch() {
       } else {
         opts = { openAtLogin: want, args: ["--hidden"] };
       }
-      const cur = electronApp.getLoginItemSettings(fromSource ? { path: opts.path, args: opts.args } : undefined);
+      const cur = electronApp.getLoginItemSettings(
+        fromSource ? { path: opts.path, args: opts.args } : undefined
+      );
       if (cur.openAtLogin !== want) {
         electronApp.setLoginItemSettings(opts);
-        log.info(`[autostart] openAtLogin → ${want}${fromSource ? ` (source: ${opts.path} ${opts.args.join(" ")})` : ""}`);
+        log.info(
+          `[autostart] openAtLogin → ${want}${fromSource ? ` (source: ${opts.path} ${opts.args.join(" ")})` : ""}`
+        );
       }
     } else if (process.platform === "linux") {
       if (!electronApp.isPackaged) return;
@@ -798,11 +982,9 @@ function writeSourceAutostartVbs() {
   const vbs = path.join(dir, "autostart.vbs");
   const appDir = electronApp.getAppPath();
   const q = (s) => String(s).replace(/"/g, '""');
-  const lines = [
-    'Set sh = CreateObject("WScript.Shell")',
-    `sh.CurrentDirectory = "${q(appDir)}"`,
-  ];
-  if (process.env.CICY_DEBUG) lines.push(`sh.Environment("Process")("CICY_DEBUG") = "${q(process.env.CICY_DEBUG)}"`);
+  const lines = ['Set sh = CreateObject("WScript.Shell")', `sh.CurrentDirectory = "${q(appDir)}"`];
+  if (process.env.CICY_DEBUG)
+    lines.push(`sh.Environment("Process")("CICY_DEBUG") = "${q(process.env.CICY_DEBUG)}"`);
   lines.push(`sh.Run "cmd /c node .\\bin\\cicy-desktop", 0, False`);
   fs.writeFileSync(vbs, lines.join("\r\n") + "\r\n");
   return vbs;
@@ -831,9 +1013,13 @@ function ensureMacLoginItem(want) {
   try {
     const { execFileSync } = require("child_process");
     const osa = (script) => execFileSync("osascript", ["-e", script], { stdio: "ignore" });
-    osa(`tell application "System Events" to if login item "${name}" exists then delete login item "${name}"`);
+    osa(
+      `tell application "System Events" to if login item "${name}" exists then delete login item "${name}"`
+    );
     if (want && fs.existsSync(appletPath)) {
-      osa(`tell application "System Events" to make login item at end with properties {name:"${name}", path:"${appletPath}", hidden:false}`);
+      osa(
+        `tell application "System Events" to make login item at end with properties {name:"${name}", path:"${appletPath}", hidden:false}`
+      );
       log.info(`[autostart] mac login item → ${appletPath}`);
     } else {
       log.info(`[autostart] mac login item ${want ? "skipped (applet missing)" : "removed"}`);
@@ -868,18 +1054,24 @@ function ensureLinuxAutostart(want) {
   const dir = path.join(os.homedir(), ".config", "autostart");
   const file = path.join(dir, "cicy-desktop.desktop");
   if (!want) {
-    try { fs.unlinkSync(file); } catch {}
+    try {
+      fs.unlinkSync(file);
+    } catch {}
     return;
   }
   fs.mkdirSync(dir, { recursive: true });
   if (fs.existsSync(file)) return;
   const exec = process.execPath;
-  fs.writeFileSync(file, `[Desktop Entry]
+  fs.writeFileSync(
+    file,
+    `[Desktop Entry]
 Type=Application
 Name=CiCy Desktop
 Exec=${exec} --hidden
 X-GNOME-Autostart-enabled=true
-`, "utf8");
+`,
+    "utf8"
+  );
   log.info(`[autostart] wrote ${file}`);
 }
 
@@ -907,12 +1099,20 @@ function startSidecarWatchdog({ intervalMs = 30_000 } = {}) {
       // still on the old version). Pause until the update releases the flag.
       // 任一主动生命周期操作(update / restart,含启用 LAN 的重启)进行中都暂停 —— 否则
       // watchdog 会在 stop→start 的空窗里自己再拉一个默认实例,双开抢 :8008。
-      const busy = cicyCodeSidecar.isBusy ? cicyCodeSidecar.isBusy() : (cicyCodeSidecar.isUpdating && cicyCodeSidecar.isUpdating());
-      if (busy) { consecutiveFailures = 0; return; }
+      const busy = cicyCodeSidecar.isBusy
+        ? cicyCodeSidecar.isBusy()
+        : cicyCodeSidecar.isUpdating && cicyCodeSidecar.isUpdating();
+      if (busy) {
+        consecutiveFailures = 0;
+        return;
+      }
       const ok = await cicyCodeSidecar.probeExisting();
-      if (ok) { consecutiveFailures = 0; return; }
+      if (ok) {
+        consecutiveFailures = 0;
+        return;
+      }
       consecutiveFailures++;
-      if (consecutiveFailures < 2) return;          // tolerate one transient failure
+      if (consecutiveFailures < 2) return; // tolerate one transient failure
       if (restartInFlight) return;
       restartInFlight = true;
       log.warn(`[watchdog] sidecar unreachable for ${consecutiveFailures} ticks — restarting`);
@@ -944,28 +1144,53 @@ function startSidecarWatchdog({ intervalMs = 30_000 } = {}) {
 function seedCloudflaredToLocalBin() {
   if (process.platform === "win32") return;
   try {
-    const fs = require("fs"), path = require("path"), os = require("os");
+    const fs = require("fs"),
+      path = require("path"),
+      os = require("os");
     const dest = path.join(os.homedir(), ".local", "bin", "cloudflared");
-    try { if (fs.existsSync(dest) && fs.statSync(dest).size > 0) return; } catch {}
+    try {
+      if (fs.existsSync(dest) && fs.statSync(dest).size > 0) return;
+    } catch {}
     const arch = process.arch === "arm64" ? "arm64" : "x64";
     const cands = [
       path.join(process.resourcesPath || "", "cloudflared", `cloudflared-darwin-${arch}`),
       path.join(__dirname, "..", "resources", "cloudflared", `cloudflared-darwin-${arch}`),
     ];
-    const src = cands.find((p) => { try { return fs.existsSync(p) && fs.statSync(p).size > 0; } catch { return false; } });
-    if (!src) { try { log.info("[cft] bundled cloudflared not found — cicy-code self-downloads if needed"); } catch {} return; }
+    const src = cands.find((p) => {
+      try {
+        return fs.existsSync(p) && fs.statSync(p).size > 0;
+      } catch {
+        return false;
+      }
+    });
+    if (!src) {
+      try {
+        log.info("[cft] bundled cloudflared not found — cicy-code self-downloads if needed");
+      } catch {}
+      return;
+    }
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.copyFileSync(src, dest);
     fs.chmodSync(dest, 0o755);
-    try { log.info(`[cft] seeded cloudflared → ${dest}`); } catch {}
-  } catch (e) { try { log.warn(`[cft] seed cloudflared failed: ${e.message}`); } catch {} }
+    try {
+      log.info(`[cft] seeded cloudflared → ${dest}`);
+    } catch {}
+  } catch (e) {
+    try {
+      log.warn(`[cft] seed cloudflared failed: ${e.message}`);
+    } catch {}
+  }
 }
 
 electronApp.whenReady().then(async () => {
   // Serve cicy://newtab (tab-browser start page) — must be after ready.
   require("./tabbrowser/newtab-protocol").installHandler();
   // Dev: edits to the cicyui://panel page files reload open panel tabs in place.
-  try { require("./tabbrowser/panel-live-reload").start(log); } catch (e) { log.warn(`[panel-live-reload] ${e.message}`); }
+  try {
+    require("./tabbrowser/panel-live-reload").start(log);
+  } catch (e) {
+    log.warn(`[panel-live-reload] ${e.message}`);
+  }
 
   // Re-init i18n now that app is ready — getLocale() returns reliable values
   // only after the ready event. The module-load init may have picked English
@@ -975,7 +1200,9 @@ electronApp.whenReady().then(async () => {
     const realLocale = electronApp.getLocale && electronApp.getLocale();
     if (realLocale) await i18n.i18next.changeLanguage(i18n.pickLocale(realLocale));
     log.info(`[i18n] locale = ${i18n.i18next.language} (raw: ${realLocale})`);
-  } catch (e) { log.warn(`[i18n] ready-time relocale failed: ${e.message}`); }
+  } catch (e) {
+    log.warn(`[i18n] ready-time relocale failed: ${e.message}`);
+  }
 
   // Rebrand the host (unpackaged) Electron bundle → "CiCy Desktop" name + icon.
   // May relaunch once on first run to apply the menu-bar name; everything after
@@ -995,8 +1222,13 @@ electronApp.whenReady().then(async () => {
     // 占位卡("先有一个 :8008 占位"): 开机**立刻无条件**注册本地团队,homepage 永远有
     // 这张卡 —— :8008 启动期间显示「未运行」;起来后下面的自动启动流程 upsert 一次,
     // 状态翻 running + 触发 gateway key/teamId 注入。addTeam 幂等。
-    lt.addTeam({ base_url: `http://127.0.0.1:${sidecarPort}`, name: i18n.t("localTeams.defaultName") })
-      .then((r) => { if (r && r.id) log.info(`[Sidecar] local team placeholder registered (${r.id})`); })
+    lt.addTeam({
+      base_url: `http://127.0.0.1:${sidecarPort}`,
+      name: i18n.t("localTeams.defaultName"),
+    })
+      .then((r) => {
+        if (r && r.id) log.info(`[Sidecar] local team placeholder registered (${r.id})`);
+      })
       .catch((e) => log.warn(`[Sidecar] placeholder register failed: ${e.message}`));
 
     // 打开 cicy-desktop 就保证本地 :8008 自动启动。start() 自带 child 去重:
@@ -1020,7 +1252,10 @@ electronApp.whenReady().then(async () => {
           log.warn(`[Sidecar] 自动启动后 :${sidecarPort} 在 180s 内仍未就绪`);
           return;
         }
-        const r = await lt.addTeam({ base_url: `http://127.0.0.1:${sidecarPort}`, name: i18n.t("localTeams.defaultName") });
+        const r = await lt.addTeam({
+          base_url: `http://127.0.0.1:${sidecarPort}`,
+          name: i18n.t("localTeams.defaultName"),
+        });
         if (r && r.id) log.info(`[Sidecar] running cicy-code adopted → local team ready (${r.id})`);
         startSidecarWatchdog();
       } catch (e) {
@@ -1031,8 +1266,12 @@ electronApp.whenReady().then(async () => {
 
   // Backend launcher: app menu + IPC handlers. Menu adds a Backends top-level
   // entry; IPC powers the launcher window (src/backends/launcher.html).
-  backendsIPC.register({ sidecarLogPath: path.join(os.homedir(), "logs", "cicy-code-sidecar.log") });
-  require("./backends/sidecar-ipc").register({ sidecarLogPath: path.join(os.homedir(), "logs", "cicy-code-sidecar.log") });
+  backendsIPC.register({
+    sidecarLogPath: path.join(os.homedir(), "logs", "cicy-code-sidecar.log"),
+  });
+  require("./backends/sidecar-ipc").register({
+    sidecarLogPath: path.join(os.homedir(), "logs", "cicy-code-sidecar.log"),
+  });
 
   // Browser-login loopback listener. Renderer calls auth:login-start when
   // the user clicks Login; main opens a 127.0.0.1 server + the browser,
@@ -1065,7 +1304,9 @@ electronApp.whenReady().then(async () => {
           return c;
         });
         log.info("[auth] desktop login persisted to global.json (origin-independent)");
-      } catch (e) { log.warn(`[auth] persist failed: ${e.message}`); }
+      } catch (e) {
+        log.warn(`[auth] persist failed: ${e.message}`);
+      }
     };
 
     // Shared result hook for BOTH login flows — the 127.0.0.1 loopback window AND
@@ -1079,10 +1320,12 @@ electronApp.whenReady().then(async () => {
         // the new account's uid (device-level :8008 stays; the other account's
         // remote/private-cloud teams are hidden, not removed).
         try {
-          const prevUid = String((readGlobalConfig(GLOBAL_JSON)?.desktopAuth?.userId) || "");
+          const prevUid = String(readGlobalConfig(GLOBAL_JSON)?.desktopAuth?.userId || "");
           const nextUid = payload.userId != null ? String(payload.userId) : "";
           if (prevUid && nextUid && prevUid !== nextUid) {
-            try { require("./backends/local-teams").invalidateForAccountChange(); } catch {}
+            try {
+              require("./backends/local-teams").invalidateForAccountChange();
+            } catch {}
           }
         } catch {}
         saveDesktopAuth(payload);
@@ -1099,12 +1342,16 @@ electronApp.whenReady().then(async () => {
             .registerDevice()
             .then(() => require("./backends/local-teams").syncAllLocalTeams({ force: true }))
             .catch((e) => log.warn(`[cloud] device/team register (on login) failed: ${e.message}`));
-        } catch (e) { log.warn(`[cloud] device register hook failed: ${e.message}`); }
+        } catch (e) {
+          log.warn(`[cloud] device register hook failed: ${e.message}`);
+        }
       }
       const hw = require("./backends/homepage-window");
       const w = hw.getHomepageWindow && hw.getHomepageWindow();
       if (w && !w.isDestroyed()) {
-        try { w.webContents.send("auth:complete", payload); } catch {}
+        try {
+          w.webContents.send("auth:complete", payload);
+        } catch {}
       }
     };
 
@@ -1119,7 +1366,10 @@ electronApp.whenReady().then(async () => {
         return { ok: false, error: e.message };
       }
     });
-    __ipcMainAuth.handle("auth:login-cancel", () => { auth.cancel(); return { ok: true }; });
+    __ipcMainAuth.handle("auth:login-cancel", () => {
+      auth.cancel();
+      return { ok: true };
+    });
 
     // Email magic-link DEVICE-POLL login. Cross-device safe: the link can be
     // clicked on a phone and the desktop still completes via cloud polling
@@ -1134,7 +1384,10 @@ electronApp.whenReady().then(async () => {
         return { ok: false, error: e.message };
       }
     });
-    __ipcMainAuth.handle("auth:email-cancel", () => { authEmail.cancel(); return { ok: true }; });
+    __ipcMainAuth.handle("auth:email-cancel", () => {
+      authEmail.cancel();
+      return { ok: true };
+    });
 
     // Origin-independent restore. The homepage SPA calls this on mount; if its
     // own (origin-scoped) localStorage has no token, it adopts this one — so a
@@ -1146,20 +1399,29 @@ electronApp.whenReady().then(async () => {
         if (a && a.token) {
           return { token: a.token, accessToken: a.accessToken || "", userId: a.userId || "" };
         }
-      } catch (e) { log.warn(`[auth] get-saved failed: ${e.message}`); }
+      } catch (e) {
+        log.warn(`[auth] get-saved failed: ${e.message}`);
+      }
       return null;
     });
 
     // Explicit logout is the ONLY thing that clears the durable store.
     __ipcMainAuth.handle("auth:logout", () => {
       try {
-        updateGlobalConfig(GLOBAL_JSON, (c) => { delete c.desktopAuth; return c; });
+        updateGlobalConfig(GLOBAL_JSON, (c) => {
+          delete c.desktopAuth;
+          return c;
+        });
         // Logout: **don't delete** teams — they stay in teams.json. Just invalidate the
         // list cache so the next list() re-filters (logged-out uid="" → device-level
         // :8008 + untagged teams show; account-tagged remote teams hidden until re-login).
-        try { require("./backends/local-teams").invalidateForAccountChange(); } catch {}
+        try {
+          require("./backends/local-teams").invalidateForAccountChange();
+        } catch {}
         log.info("[auth] desktop login cleared (explicit logout)");
-      } catch (e) { log.warn(`[auth] logout clear failed: ${e.message}`); }
+      } catch (e) {
+        log.warn(`[auth] logout clear failed: ${e.message}`);
+      }
       return { ok: true };
     });
 
@@ -1174,22 +1436,47 @@ electronApp.whenReady().then(async () => {
         } catch {}
       };
       const wrap = (fn) => async (_e, arg) => {
-        try { return { ok: true, ...(await fn(arg)) }; }
-        catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+        try {
+          return { ok: true, ...(await fn(arg)) };
+        } catch (e) {
+          return { ok: false, error: String((e && e.message) || e) };
+        }
       };
       __ipcMainAuth.handle("hub:status", () => hub.status());
-      __ipcMainAuth.handle("hub:login-start", wrap((email) => hub.loginStart({ email, onResult: notify })));
-      __ipcMainAuth.handle("hub:login-code", wrap((code) => hub.loginCode({ code })));
+      __ipcMainAuth.handle(
+        "hub:login-start",
+        wrap((email) => hub.loginStart({ email, onResult: notify }))
+      );
+      __ipcMainAuth.handle(
+        "hub:login-code",
+        wrap((code) => hub.loginCode({ code }))
+      );
       __ipcMainAuth.handle("hub:cancel", () => hub.cancel());
-      __ipcMainAuth.handle("hub:instances", async () => { try { return await hub.instances(); } catch (e) { return { ok: false, error: String((e && e.message) || e), instances: [] }; } });
+      __ipcMainAuth.handle("hub:instances", async () => {
+        try {
+          return await hub.instances();
+        } catch (e) {
+          return { ok: false, error: String((e && e.message) || e), instances: [] };
+        }
+      });
       __ipcMainAuth.handle("hub:logout", () => hub.logout());
       // Grant → open as a team tab in profile 0 (same place local/custom teams open).
-      __ipcMainAuth.handle("hub:open", wrap(async (input) => {
-        const { url, host } = await hub.grantUrl(input || {});
-        const tb = require("./tools/tab-browser-tools");
-        const r = await tb.openTab(0, url, { systemOpen: true, trusted: false, title: (input && input.title) || host, avatar: "", team: true, colorKey: (input && input.id) || host });
-        return { url: "https://" + host, host, winId: r.winId, tabId: r.tabId };
-      }));
+      __ipcMainAuth.handle(
+        "hub:open",
+        wrap(async (input) => {
+          const { url, host } = await hub.grantUrl(input || {});
+          const tb = require("./tools/tab-browser-tools");
+          const r = await tb.openTab(0, url, {
+            systemOpen: true,
+            trusted: false,
+            title: (input && input.title) || host,
+            avatar: "",
+            team: true,
+            colorKey: (input && input.id) || host,
+          });
+          return { url: "https://" + host, host, winId: r.winId, tabId: r.tabId };
+        })
+      );
     }
 
     // First-run terms gate (合规第一道整体同意). Persist acceptance in
@@ -1201,7 +1488,9 @@ electronApp.whenReady().then(async () => {
         const c = readGlobalConfig(GLOBAL_JSON);
         const a = c && c.termsAccepted;
         return { accepted: !!(a && a.version === version), version: a?.version || null };
-      } catch { return { accepted: false, version: null }; }
+      } catch {
+        return { accepted: false, version: null };
+      }
     });
     __ipcMainAuth.handle("terms:agree", (_e, version) => {
       try {
@@ -1211,7 +1500,9 @@ electronApp.whenReady().then(async () => {
         });
         log.info(`[terms] accepted v${version}`);
         return { ok: true };
-      } catch (e) { return { ok: false, error: e.message }; }
+      } catch (e) {
+        return { ok: false, error: e.message };
+      }
     });
     __ipcMainAuth.handle("terms:decline", () => {
       log.info("[terms] declined — quitting");
@@ -1236,12 +1527,16 @@ electronApp.whenReady().then(async () => {
     // 3) THEN sync local teams (device must register first or /api/team/register 404s).
     const cc = require("./cloud/cloud-client");
     let sysLang = "";
-    try { sysLang = (electronApp.getLocale && electronApp.getLocale()) || ""; } catch (_) {}
+    try {
+      sysLang = (electronApp.getLocale && electronApp.getLocale()) || "";
+    } catch (_) {}
     cc.detectAndPersistDeviceInfo({ systemLanguage: sysLang })
       .then(() => cc.registerDevice())
       .then(() => require("./backends/local-teams").syncAllLocalTeams({ force: true }))
       .catch((e) => log.warn(`[cloud] device-info/register (on launch) failed: ${e.message}`));
-  } catch (e) { log.warn(`[cloud] device-info launch hook failed: ${e.message}`); }
+  } catch (e) {
+    log.warn(`[cloud] device-info launch hook failed: ${e.message}`);
+  }
 
   // Periodic device heartbeat → lets the ops backend show per-device liveness.
   // Re-POST /api/device/register every 60s (idempotent upsert by owner+deviceId;
@@ -1252,9 +1547,15 @@ electronApp.whenReady().then(async () => {
   try {
     const cc = require("./cloud/cloud-client");
     const HEARTBEAT_MS = Math.max(15000, Number(process.env.CICY_DEVICE_HEARTBEAT_MS || 60000));
-    const beat = setInterval(() => { try { cc.registerDevice().catch(() => {}); } catch (_) {} }, HEARTBEAT_MS);
+    const beat = setInterval(() => {
+      try {
+        cc.registerDevice().catch(() => {});
+      } catch (_) {}
+    }, HEARTBEAT_MS);
     if (beat && typeof beat.unref === "function") beat.unref();
-  } catch (e) { log.warn(`[cloud] device heartbeat setup failed: ${e.message}`); }
+  } catch (e) {
+    log.warn(`[cloud] device heartbeat setup failed: ${e.message}`);
+  }
 
   // Cloud↔desktop title reconcile. The homepage drives the FAST cadence by window
   // visibility (聚焦 ~3s / 切回立即,见 App.jsx + localTeams:syncCloud IPC). This
@@ -1262,7 +1563,11 @@ electronApp.whenReady().then(async () => {
   // hidden / logged-in-but-idle. Best-effort, no-op when logged out.
   if (!global.__cicyTitleSyncTimer) {
     global.__cicyTitleSyncTimer = setInterval(() => {
-      try { require("./backends/local-teams").syncAllLocalTeams().catch(() => {}); } catch {}
+      try {
+        require("./backends/local-teams")
+          .syncAllLocalTeams()
+          .catch(() => {});
+      } catch {}
     }, 30_000);
     if (global.__cicyTitleSyncTimer.unref) global.__cicyTitleSyncTimer.unref();
   }
@@ -1276,15 +1581,21 @@ electronApp.whenReady().then(async () => {
     global.__cicyDesktopSnapStarted = true;
     try {
       const info = require("./utils/desktop-snapshot").startDesktopSnapshots();
-      log.info(`[desktop-snap] continuous desktop snapshots → ${info.dir} (every ${info.intervalMs}ms, mode ${info.mode})`);
-    } catch (e) { log.warn(`[desktop-snap] start failed: ${e.message}`); }
+      log.info(
+        `[desktop-snap] continuous desktop snapshots → ${info.dir} (every ${info.intervalMs}ms, mode ${info.mode})`
+      );
+    } catch (e) {
+      log.warn(`[desktop-snap] start failed: ${e.message}`);
+    }
   }
   if (process.env.CICY_WINDOW_THUMBS === "1" && !global.__cicyThumbStarted) {
     global.__cicyThumbStarted = true;
     try {
       const info = require("./utils/window-thumbnails").startWindowThumbnails();
       log.info(`[thumbs] window thumbnails → ${info.dir} (every ${info.intervalMs}ms)`);
-    } catch (e) { log.warn(`[thumbs] start failed: ${e.message}`); }
+    } catch (e) {
+      log.warn(`[thumbs] start failed: ${e.message}`);
+    }
   }
 
   // Local-team discovery — reads ~/cicy-ai/global.json's cicyDesktopNodes
@@ -1293,22 +1604,33 @@ electronApp.whenReady().then(async () => {
   {
     const lt = require("./backends/local-teams");
     const { ipcMain: __ipcLT } = require("electron");
-    __ipcLT.handle("localTeams:list",    (_e, opts) => lt.list(opts || {}));
-    __ipcLT.handle("localTeams:open",    (_e, id)   => lt.openTeam(id));
-    __ipcLT.handle("localTeams:reload",  (_e, id, opts) => lt.reloadTeam(id, opts));
-    __ipcLT.handle("localTeams:add",     (_e, spec)    => lt.addTeam(spec || {}));
-    __ipcLT.handle("localTeams:remove",  (_e, id)      => lt.removeTeam(id));
-    __ipcLT.handle("localTeams:update",  (_e, payload) => lt.updateTeam(payload?.id, payload?.patch || {}));
+    __ipcLT.handle("localTeams:list", (_e, opts) => lt.list(opts || {}));
+    __ipcLT.handle("localTeams:open", (_e, id) => lt.openTeam(id));
+    __ipcLT.handle("localTeams:reload", (_e, id, opts) => lt.reloadTeam(id, opts));
+    __ipcLT.handle("localTeams:add", (_e, spec) => lt.addTeam(spec || {}));
+    __ipcLT.handle("localTeams:remove", (_e, id) => lt.removeTeam(id));
+    __ipcLT.handle("localTeams:update", (_e, payload) =>
+      lt.updateTeam(payload?.id, payload?.patch || {})
+    );
     __ipcLT.handle("localTeams:setAvatar", async (_e, payload) => {
       const r = await lt.setAvatar(payload?.id, payload?.dataUrl || "");
-      try { require("./tools/tab-browser-tools").refreshTabAvatars(); } catch (e) {} // 即时刷新已开 tab 的 icon
+      try {
+        require("./tools/tab-browser-tools").refreshTabAvatars();
+      } catch (e) {} // 即时刷新已开 tab 的 icon
       return r;
     });
     __ipcLT.handle("localTeams:avatars", () => lt.getAvatars());
-    __ipcLT.handle("localTeams:upgrade", (_e, id)      => lt.upgradeTeam(id));
+    __ipcLT.handle("localTeams:upgrade", (_e, id) => lt.upgradeTeam(id));
     // Pull cloud title NOW (homepage calls this on window focus so a dash rename
     // reflects immediately instead of waiting for the 15s background tick).
-    __ipcLT.handle("localTeams:syncCloud", async () => { try { await lt.syncAllLocalTeams(); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; } });
+    __ipcLT.handle("localTeams:syncCloud", async () => {
+      try {
+        await lt.syncAllLocalTeams();
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: e.message };
+      }
+    });
 
     // Webview → host-renderer relay. The Team Helper <webview> can't
     // directly mutate localTeams: instead its preload (webview-preload.js)
@@ -1402,14 +1724,20 @@ electronApp.whenReady().then(async () => {
   const profileStore = require("./profiles/profile-store");
   const electronProfiles = () => {
     let rows = [];
-    try { rows = profileStore.listProfiles("electron"); } catch {}
+    try {
+      rows = profileStore.listProfiles("electron");
+    } catch {}
     // Profile 0 is the resident CiCy system window and must not be exposed in
     // the macOS title/top-bar launcher. Profile 9 is Chrome's source template.
     rows = rows.filter((p) => ![0, 9].includes(Number(p.accountIdx)));
     return rows;
   };
   const chromeProfiles = () => {
-    try { return profileStore.listProfiles("chrome"); } catch { return []; }
+    try {
+      return profileStore.listProfiles("chrome");
+    } catch {
+      return [];
+    }
   };
   const showProfileError = (kind, e) => {
     dialog.showMessageBox({
@@ -1427,7 +1755,9 @@ electronApp.whenReady().then(async () => {
       if (m.win.isMinimized()) m.win.restore();
       m.win.show();
       m.win.focus();
-    } catch (e) { showProfileError("Electron", e); }
+    } catch (e) {
+      showProfileError("Electron", e);
+    }
   };
   const openCicyAi = () => openElectronProfile(1, "https://cicy-ai.com");
   const openChromeProfile = async (accountIdx) => {
@@ -1444,17 +1774,25 @@ electronApp.whenReady().then(async () => {
     }
   };
   const openNativeChrome = () => {
-    try { require("./tools/chrome-tools").launchNativeChrome(); }
-    catch (e) { showProfileError("Chrome", e); }
+    try {
+      require("./tools/chrome-tools").launchNativeChrome();
+    } catch (e) {
+      showProfileError("Chrome", e);
+    }
   };
 
   let installApplicationMenu = () => {};
   const addProfileFromMenu = async (kind) => {
     try {
-      const result = await executeTool(kind === "Electron" ? "electron_add_profile" : "chrome_add_profile", {});
+      const result = await executeTool(
+        kind === "Electron" ? "electron_add_profile" : "chrome_add_profile",
+        {}
+      );
       const text = result && result.content && result.content[0] && result.content[0].text;
       let data = {};
-      try { data = JSON.parse(text || "{}"); } catch {}
+      try {
+        data = JSON.parse(text || "{}");
+      } catch {}
       if (result && result.isError) throw new Error(data.error || text || "unknown error");
       const accountIdx = Number(data.accountIdx ?? (data.created && data.created.accountIdx));
       installApplicationMenu(); // the new profile appears immediately in the native menu
@@ -1476,88 +1814,96 @@ electronApp.whenReady().then(async () => {
     const electronRows = electronProfiles();
     const chromeRows = chromeProfiles();
     const menuTemplate = [
-    ...(process.platform === "darwin" ? [{
-      label: electronApp.name,
-      submenu: [
-        { role: "about" },
-        { label: "打开 cicy-ai.com", click: openCicyAi },
-        { type: "separator" },
-        { role: "services" },
-        { type: "separator" },
-        { role: "hide" },
-        { role: "hideOthers" },
-        { role: "unhide" },
-        { type: "separator" },
-        { role: "quit" },
-      ],
-    }] : []),
-    {
-      label: i18n.t("menu.file"),
-      submenu: [
-        { label: i18n.t("menu.checkForUpdates"), click: onCheckForUpdatesClicked },
-        { type: "separator" },
-        { label: i18n.t("menu.close"), role: "close" },
-        { label: i18n.t("menu.quit"), role: "quit" },
-      ],
-    },
-    {
-      label: i18n.t("menu.edit"),
-      submenu: [
-        { label: i18n.t("menu.undo"), role: "undo" },
-        { label: i18n.t("menu.redo"), role: "redo" },
-        { type: "separator" },
-        { label: i18n.t("menu.cut"), role: "cut" },
-        { label: i18n.t("menu.copy"), role: "copy" },
-        { label: i18n.t("menu.paste"), role: "paste" },
-        { label: i18n.t("menu.selectAll"), role: "selectAll" },
-      ],
-    },
-    {
-      label: i18n.t("menu.view"),
-      submenu: [
-        { label: i18n.t("menu.reload"), role: "reload" },
-        { label: i18n.t("menu.forceReload"), role: "forceReload" },
-        { label: i18n.t("menu.toggleDevTools"), role: "toggleDevTools" },
-        { type: "separator" },
-        { label: i18n.t("menu.actualSize"), role: "resetZoom" },
-        { label: i18n.t("menu.zoomIn"), role: "zoomIn" },
-        { label: i18n.t("menu.zoomOut"), role: "zoomOut" },
-        { type: "separator" },
-        { label: i18n.t("menu.toggleFullscreen"), role: "togglefullscreen" },
-      ],
-    },
-    {
-      label: "Electron",
-      submenu: [
-        { label: "新增 Profile", click: () => addProfileFromMenu("Electron") },
-        ...(electronRows.length ? [{ type: "separator" }] : []),
-        ...electronRows.map((p) => ({
-          label: `Profile ${p.accountIdx}${p.name ? ` · ${p.name}` : ""}`,
-          click: () => openElectronProfile(Number(p.accountIdx)),
-        })),
-      ],
-    },
-    {
-      label: "Chrome",
-      submenu: [
-        { label: "新增 Profile", click: () => addProfileFromMenu("Chrome") },
-        { label: "原生 Chrome", click: openNativeChrome },
-        ...(chromeRows.length ? [{ type: "separator" }] : []),
-        ...chromeRows.map((p) => ({
-          label: `Profile ${p.accountIdx}${p.gmail ? ` · ${p.gmail}` : p.note ? ` · ${p.note}` : ""}`,
-          click: () => openChromeProfile(Number(p.accountIdx)),
-        })),
-      ],
-    },
-    {
-      label: i18n.t("menu.window"),
-      submenu: [
-        { label: i18n.t("menu.minimize"), role: "minimize" },
-        ...(process.platform === "darwin"
-          ? [{ label: i18n.t("menu.zoom"), role: "zoom" }, { type: "separator" }, { label: i18n.t("menu.front"), role: "front" }]
-          : [{ label: i18n.t("menu.close"), role: "close" }]),
-      ],
-    },
+      ...(process.platform === "darwin"
+        ? [
+            {
+              label: electronApp.name,
+              submenu: [
+                { role: "about" },
+                { label: "打开 cicy-ai.com", click: openCicyAi },
+                { type: "separator" },
+                { role: "services" },
+                { type: "separator" },
+                { role: "hide" },
+                { role: "hideOthers" },
+                { role: "unhide" },
+                { type: "separator" },
+                { role: "quit" },
+              ],
+            },
+          ]
+        : []),
+      {
+        label: i18n.t("menu.file"),
+        submenu: [
+          { label: i18n.t("menu.checkForUpdates"), click: onCheckForUpdatesClicked },
+          { type: "separator" },
+          { label: i18n.t("menu.close"), role: "close" },
+          { label: i18n.t("menu.quit"), role: "quit" },
+        ],
+      },
+      {
+        label: i18n.t("menu.edit"),
+        submenu: [
+          { label: i18n.t("menu.undo"), role: "undo" },
+          { label: i18n.t("menu.redo"), role: "redo" },
+          { type: "separator" },
+          { label: i18n.t("menu.cut"), role: "cut" },
+          { label: i18n.t("menu.copy"), role: "copy" },
+          { label: i18n.t("menu.paste"), role: "paste" },
+          { label: i18n.t("menu.selectAll"), role: "selectAll" },
+        ],
+      },
+      {
+        label: i18n.t("menu.view"),
+        submenu: [
+          { label: i18n.t("menu.reload"), role: "reload" },
+          { label: i18n.t("menu.forceReload"), role: "forceReload" },
+          { label: i18n.t("menu.toggleDevTools"), role: "toggleDevTools" },
+          { type: "separator" },
+          { label: i18n.t("menu.actualSize"), role: "resetZoom" },
+          { label: i18n.t("menu.zoomIn"), role: "zoomIn" },
+          { label: i18n.t("menu.zoomOut"), role: "zoomOut" },
+          { type: "separator" },
+          { label: i18n.t("menu.toggleFullscreen"), role: "togglefullscreen" },
+        ],
+      },
+      {
+        label: "Electron",
+        submenu: [
+          { label: "新增 Profile", click: () => addProfileFromMenu("Electron") },
+          ...(electronRows.length ? [{ type: "separator" }] : []),
+          ...electronRows.map((p) => ({
+            label: `Profile ${p.accountIdx}${p.name ? ` · ${p.name}` : ""}`,
+            click: () => openElectronProfile(Number(p.accountIdx)),
+          })),
+        ],
+      },
+      {
+        label: "Chrome",
+        submenu: [
+          { label: "新增 Profile", click: () => addProfileFromMenu("Chrome") },
+          { label: "原生 Chrome", click: openNativeChrome },
+          ...(chromeRows.length ? [{ type: "separator" }] : []),
+          ...chromeRows.map((p) => ({
+            label: `Profile ${p.accountIdx}${p.gmail ? ` · ${p.gmail}` : p.note ? ` · ${p.note}` : ""}`,
+            click: () => openChromeProfile(Number(p.accountIdx)),
+          })),
+        ],
+      },
+      {
+        label: i18n.t("menu.window"),
+        submenu: [
+          { label: i18n.t("menu.minimize"), role: "minimize" },
+          ...(process.platform === "darwin"
+            ? [
+                { label: i18n.t("menu.zoom"), role: "zoom" },
+                { type: "separator" },
+                { label: i18n.t("menu.front"), role: "front" },
+              ]
+            : [{ label: i18n.t("menu.close"), role: "close" }]),
+        ],
+      },
     ];
     Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate));
   };
@@ -1609,32 +1955,33 @@ electronApp.whenReady().then(async () => {
     // Persistent window registry: re-open windows that were still open when the
     // app last quit. DEFAULT OFF — startup opens ONLY the homepage (不再一次拉起
     // 上次所有窗口)。Opt back in with CICY_REOPEN_WINDOWS=1.
-    if (process.env.CICY_REOPEN_WINDOWS === "1") try {
-      const { BrowserWindow } = require("electron");
-      const registry = require("./utils/window-registry");
-      const liveSet = new Set(
-        BrowserWindow.getAllWindows()
-          .map((w) => {
-            try {
-              const acc = accountIdxOfWebContents(w.webContents);
-              return `${acc}::${registry.normalizeUrl(w.webContents.getURL())}`;
-            } catch {
-              return null;
-            }
-          })
-          .filter(Boolean)
-      );
-      for (const e of registry.staleOpenEntries()) {
-        if (!e.url) continue;
-        if (liveSet.has(`${e.accountIdx || 0}::${registry.normalizeUrl(e.url)}`)) continue;
-        log.info(`[WindowRegistry] Reopening ${e.url} (account ${e.accountIdx || 0})`);
-        const opts = { url: e.url, background: true }; // 启动时自动重开:后台,不抢焦点
-        if (e.bounds && typeof e.bounds === "object") Object.assign(opts, e.bounds);
-        createWindow(opts, e.accountIdx || 0, true);
+    if (process.env.CICY_REOPEN_WINDOWS === "1")
+      try {
+        const { BrowserWindow } = require("electron");
+        const registry = require("./utils/window-registry");
+        const liveSet = new Set(
+          BrowserWindow.getAllWindows()
+            .map((w) => {
+              try {
+                const acc = accountIdxOfWebContents(w.webContents);
+                return `${acc}::${registry.normalizeUrl(w.webContents.getURL())}`;
+              } catch {
+                return null;
+              }
+            })
+            .filter(Boolean)
+        );
+        for (const e of registry.staleOpenEntries()) {
+          if (!e.url) continue;
+          if (liveSet.has(`${e.accountIdx || 0}::${registry.normalizeUrl(e.url)}`)) continue;
+          log.info(`[WindowRegistry] Reopening ${e.url} (account ${e.accountIdx || 0})`);
+          const opts = { url: e.url, background: true }; // 启动时自动重开:后台,不抢焦点
+          if (e.bounds && typeof e.bounds === "object") Object.assign(opts, e.bounds);
+          createWindow(opts, e.accountIdx || 0, true);
+        }
+      } catch (err) {
+        log.error(`[WindowRegistry] reopen failed: ${err.message}`);
       }
-    } catch (err) {
-      log.error(`[WindowRegistry] reopen failed: ${err.message}`);
-    }
 
     if (workerClient) {
       try {
@@ -1651,22 +1998,24 @@ electronApp.whenReady().then(async () => {
     log.info(`[MCP] Remote debugger NOT running (automation disabled)`);
     onAppStarted();
   } else {
-    server.listen(PORT, async () => {
-      log.info(`[MCP] Log file: ${config.logFilePath}`);
-      log.info(`[MCP] Server listening on http://localhost:${PORT}`);
-      log.info(`[MCP] SSE endpoint: http://localhost:${PORT}/mcp`);
-      log.info(`[MCP] REST API docs: http://localhost:${PORT}/docs`);
-      log.info(`[MCP] Remote debugger: http://localhost:9221`);
-      await onAppStarted();
-    }).on("error", (err) => {
-      if (err.code === "EADDRINUSE") {
-        log.error(`[MCP] Port ${PORT} is already in use — continuing without HTTP server`);
-        // Don't exit; the homepage doesn't need this port. Run startup anyway.
-        onAppStarted();
-      } else {
-        log.error("[MCP] Server error:", err);
-      }
-    });
+    server
+      .listen(PORT, async () => {
+        log.info(`[MCP] Log file: ${config.logFilePath}`);
+        log.info(`[MCP] Server listening on http://localhost:${PORT}`);
+        log.info(`[MCP] SSE endpoint: http://localhost:${PORT}/mcp`);
+        log.info(`[MCP] REST API docs: http://localhost:${PORT}/docs`);
+        log.info(`[MCP] Remote debugger: http://localhost:9221`);
+        await onAppStarted();
+      })
+      .on("error", (err) => {
+        if (err.code === "EADDRINUSE") {
+          log.error(`[MCP] Port ${PORT} is already in use — continuing without HTTP server`);
+          // Don't exit; the homepage doesn't need this port. Run startup anyway.
+          onAppStarted();
+        } else {
+          log.error("[MCP] Server error:", err);
+        }
+      });
   }
 });
 
@@ -1691,14 +2040,18 @@ function cleanup() {
       // Windows: native cicy-code 不用(走 docker),只清 legacy host 残留。EXACT image
       // name,never wsl.exe / dockerd / vmmem / the WSL distro。
       for (const t of ["ttyd", "gotty", "code-server"]) {
-        try { execSync(`taskkill /F /IM ${t}.exe`, { stdio: "ignore", windowsHide: true }); } catch {}
+        try {
+          execSync(`taskkill /F /IM ${t}.exe`, { stdio: "ignore", windowsHide: true });
+        } catch {}
       }
     } else {
       // macOS / Linux: 只清 legacy host strays。CRITICAL: never `pkill -f cicy-code` —
       // 既会杀 native :8008 daemon(保活),又会误杀 colima 的 Lima hostagent
       // (`limactl ... colima-cicy-code`)。也不动 tmux(agent 会话保活)。
       for (const p of ["ttyd", "gotty", "code-server"]) {
-        try { execSync(`pkill -f '${p}'`, { stdio: "ignore" }); } catch {}
+        try {
+          execSync(`pkill -f '${p}'`, { stdio: "ignore" });
+        } catch {}
       }
     }
   } catch (e) {
@@ -1708,7 +2061,9 @@ function cleanup() {
   if (workerClient) {
     workerClient.stop();
   }
-  try { server.close(); } catch {}
+  try {
+    server.close();
+  } catch {}
 }
 
 let __isCleaningUp = false;
@@ -1719,8 +2074,16 @@ electronApp.on("before-quit", () => {
   cleanup();
 });
 
-process.on("SIGTERM", () => { electronApp.isQuitting = true; cleanup(); electronApp.quit(); });
-process.on("SIGINT",  () => { electronApp.isQuitting = true; cleanup(); electronApp.quit(); });
+process.on("SIGTERM", () => {
+  electronApp.isQuitting = true;
+  cleanup();
+  electronApp.quit();
+});
+process.on("SIGINT", () => {
+  electronApp.isQuitting = true;
+  cleanup();
+  electronApp.quit();
+});
 
 // 为所有 session（包括 webview partition）设置代理
 electronApp.on("session-created", (session) => {
