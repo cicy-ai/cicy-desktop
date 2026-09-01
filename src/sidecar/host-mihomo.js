@@ -233,14 +233,23 @@ function start({ force = false } = {}) {
 
 // Full enable: ensure binary → copy+adapt container config → (re)start.
 // containerYaml is fetched by the caller (sidecar-ipc) via appDocker.
+// A missing container config is NOT fatal on its own: when the WSL/docker
+// cicy-code isn't installed (or is down) we run STANDALONE on the host's own
+// mihomo-host.yaml if one is already there, so the per-profile proxies keep
+// working instead of dying with the container — that's what lets Windows run
+// without WSL at all. Only "no container config AND no host config" leaves us
+// nothing to start. Standalone has no authoritative selection source, so the
+// selection sync is skipped rather than overriding whatever the host holds.
 async function enable({ containerYaml, selections = {}, emit } = {}) {
   await ensureBinary({ emit });
-  if (!containerYaml) throw new Error(tt("noContainerConfig"));
-  const changed = writeConfig(containerYaml);
+  let changed = false, standalone = false;
+  if (containerYaml) changed = writeConfig(containerYaml);
+  else if (fs.existsSync(HOST_CONFIG)) standalone = true;
+  else throw new Error(tt("noContainerConfig"));
   const res = start({ force: changed });
-  const synced = await syncSelections(selections);
+  const synced = standalone ? { updated: [] } : await syncSelections(selections);
   emit && emit({ phase: "chrome-proxy", status: "running", message: tt("ready") });
-  return { ok: true, ...res, ...synced };
+  return { ok: true, standalone, ...res, ...synced };
 }
 
 module.exports = {
