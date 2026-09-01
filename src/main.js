@@ -1460,6 +1460,17 @@ electronApp.whenReady().then(async () => {
         }
       });
       __ipcMainAuth.handle("hub:logout", () => hub.logout());
+      // "+ 面板" dropdown config, edited from the homepage: which panels show, in
+      // what order, under what name. panel-menu-store validates every id against
+      // the built-in set, so the homepage can reorder/rename/disable but can never
+      // save an entry that would open a panel with no page behind it.
+      __ipcMainAuth.handle("panelMenu:get", () =>
+        require("./tabbrowser/panel-menu-store").list()
+      );
+      __ipcMainAuth.handle(
+        "panelMenu:set",
+        wrap((items) => require("./tabbrowser/panel-menu-store").save(items))
+      );
       // Grant → open as a team tab in profile 0 (same place local/custom teams open).
       __ipcMainAuth.handle(
         "hub:open",

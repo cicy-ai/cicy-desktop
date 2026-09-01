@@ -26,5 +26,6 @@ module.exports = [
   require("./chrome-tools"),
   require("./tab-browser-tools"),
   require("./hub-team-tools"),
+  require("./panel-menu-tools"),
   require("./list-tools"),
 ];

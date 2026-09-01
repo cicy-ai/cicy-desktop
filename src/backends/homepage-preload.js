@@ -316,6 +316,14 @@ contextBridge.exposeInMainWorld("cicy", {
   cloud: {
     fetch: (url, opts) => logInvoke("cloud:fetch", { url, ...(opts || {}) }),
   },
+  // "+ 面板" dropdown config — which panels the menu offers, in what order, under
+  // what name. get() returns every built-in with its current title/enabled state
+  // (so the settings UI can render the full list, not just the enabled ones);
+  // set() persists and returns the merged result.
+  panelMenu: {
+    get: ()      => logInvoke("panelMenu:get"),
+    set: (items) => logInvoke("panelMenu:set", items),
+  },
   // CiCy Hub — email sign-in, then every cicy-code instance of that account.
   hub: {
     status:     ()      => logInvoke("hub:status"),

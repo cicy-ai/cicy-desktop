@@ -5,9 +5,17 @@ const path = require("node:path");
 const read = (p) => fs.readFileSync(path.join(__dirname, "..", p), "utf8");
 
 test("facebook-matrix preset is registered everywhere the telegram one is", () => {
-  assert.match(read("src/tabbrowser/panel-presets.js"), /"facebook-matrix": \{ preset: "facebook-matrix", title: "Facebook 矩阵"/);
+  const presets = read("src/tabbrowser/panel-presets.js");
+  assert.match(presets, /"facebook-matrix":\s*\{[\s\S]*?preset:\s*"facebook-matrix"/);
+  assert.match(presets, /"facebook-matrix":\s*\{[\s\S]*?title:\s*"Facebook 矩阵"/);
   assert.match(read("src/tabbrowser/panel-page-router.js"), /"facebook-matrix": "facebook-matrix\.html"/);
-  assert.match(read("src/tabbrowser/panel-menu.js"), /label: "Facebook 矩阵"/);
+  // The dropdown is no longer a hard-coded array in panel-menu.js — entries are
+  // registered in panel-menu-store's built-in list, which the homepage then
+  // reorders/renames/disables. Registration lives there now.
+  assert.match(
+    read("src/tabbrowser/panel-menu-store.js"),
+    /id:\s*"facebook-matrix",\s*title:\s*"Facebook 矩阵"/
+  );
 });
 
 test("facebook-matrix page targets facebook and its own cell ids / storage key", () => {

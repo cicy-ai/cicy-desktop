@@ -1160,6 +1160,155 @@ export default function App() {
 // Backed by window.cicy.trustedOrigins.{list,add,remove}; built-ins (localhost)
 // are greyed + non-removable; the default list is just the built-ins. Inline
 // styles keep it self-contained (no dependency on App.css classes).
+// ── "+ 面板" 菜单配置 ─────────────────────────────────────────────────────────
+// Reorder / rename / switch off the entries of the tab strip's "+" dropdown
+// (面板 / Telegram 矩阵 / Redroid 矩阵 / Facebook 矩阵).
+//
+// Deliberately transport-agnostic, because this exact component runs in two very
+// different places:
+//   • the SHIPPED snapshot (file://) → homepage-preload gives window.cicy.panelMenu
+//     (ipcMain channels panelMenu:get/set);
+//   • the WEB build on desktop.cicy-ai.com embedded via <webview> → webview-preload
+//     gives only window.electronRPC, which dispatches registered TOOLS — hence the
+//     get_panel_menu / set_panel_menu tools.
+// panelApi() picks whichever bridge the current host exposes, so one UI covers
+// the bundled app, the webview, and (bridge-less) a plain browser preview.
+function panelApi() {
+  const w = typeof window !== "undefined" ? window : {};
+  if (w.cicy && w.cicy.panelMenu) {
+    return {
+      kind: "ipc",
+      get: () => w.cicy.panelMenu.get(),
+      set: (items) => w.cicy.panelMenu.set(items),
+    };
+  }
+  if (typeof w.electronRPC === "function") {
+    // Tool results arrive as { content:[{type:"text",text:"<json>"}] }.
+    const call = async (tool, args) => {
+      const res = await w.electronRPC(tool, args || {});
+      const txt = ((res && res.content) || []).map((c) => c && c.text).filter(Boolean).join("");
+      try { return JSON.parse(txt); } catch { return null; }
+    };
+    return {
+      kind: "rpc",
+      get: async () => (await call("get_panel_menu"))?.items || [],
+      set: async (items) => (await call("set_panel_menu", { items }))?.items || [],
+    };
+  }
+  return null;
+}
+
+function PanelMenuModal({ onClose }) {
+  const [rows, setRows] = useState(null); // [{id,title,enabled}] | null(loading)
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [saved, setSaved] = useState(false);
+  const api = panelApi();
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const r = api ? await api.get() : [];
+        if (alive) setRows(Array.isArray(r) ? r : []);
+      } catch (e) { if (alive) { setRows([]); setErr(String((e && e.message) || e)); } }
+    })();
+    return () => { alive = false; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const mutate = (next) => { setRows(next); setSaved(false); };
+  const move = (i, d) => {
+    const j = i + d;
+    if (!rows || j < 0 || j >= rows.length) return;
+    const next = rows.slice();
+    [next[i], next[j]] = [next[j], next[i]];
+    mutate(next);
+  };
+  const rename = (i, title) => { const next = rows.slice(); next[i] = { ...next[i], title }; mutate(next); };
+  const toggle = (i) => { const next = rows.slice(); next[i] = { ...next[i], enabled: !next[i].enabled }; mutate(next); };
+
+  const doSave = async () => {
+    if (!rows || busy || !api) return;
+    setBusy(true); setErr("");
+    try {
+      const out = await api.set(rows.map((r) => ({ id: r.id, title: r.title, enabled: r.enabled !== false })));
+      if (Array.isArray(out) && out.length) setRows(out);
+      setSaved(true);
+    } catch (e) { setErr(String((e && e.message) || e)); }
+    finally { setBusy(false); }
+  };
+
+  const S = {
+    overlay: { position: "fixed", inset: 0, zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.62)", backdropFilter: "blur(3px)" },
+    card: { width: 560, maxWidth: "94vw", maxHeight: "82vh", display: "flex", flexDirection: "column", background: "#101012", border: "1px solid rgba(255,255,255,.09)", borderRadius: 16, boxShadow: "0 24px 64px rgba(0,0,0,.55)", overflow: "hidden", color: "#e4e4e7" },
+    head: { display: "flex", alignItems: "center", gap: 8, padding: "14px 16px", borderBottom: "1px solid rgba(255,255,255,.06)" },
+    title: { margin: 0, fontSize: 15, fontWeight: 600, flex: 1 },
+    x: { background: "transparent", border: "none", color: "#a1a1aa", fontSize: 16, cursor: "pointer", lineHeight: 1, padding: 4 },
+    hint: { margin: "14px 16px 0", padding: "10px 12px", fontSize: 12.5, lineHeight: 1.55, color: "#a1a1aa", background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.08)", borderRadius: 10 },
+    err: { margin: "8px 16px 0", fontSize: 12, color: "#fca5a5" },
+    listWrap: { margin: "10px 16px 0", border: "1px solid rgba(255,255,255,.07)", borderRadius: 10, overflow: "auto", flex: 1, minHeight: 80 },
+    row: { display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderTop: "1px solid rgba(255,255,255,.05)" },
+    input: { flex: 1, minWidth: 0, background: "#161618", border: "1px solid rgba(255,255,255,.1)", borderRadius: 8, padding: "7px 10px", color: "#e4e4e7", fontSize: 13, outline: "none" },
+    id: { fontSize: 11, color: "#71717a", fontFamily: "ui-monospace,SFMono-Regular,Menlo,monospace", minWidth: 108 },
+    ico: { background: "transparent", border: "none", color: "#a1a1aa", fontSize: 13, cursor: "pointer", padding: "3px 6px", borderRadius: 6 },
+    foot: { display: "flex", alignItems: "center", gap: 10, padding: "12px 16px 16px" },
+    save: { background: "rgba(255,255,255,.1)", border: "none", borderRadius: 9, padding: "9px 18px", color: "#fff", fontSize: 13, fontWeight: 500, cursor: "pointer" },
+    ok: { fontSize: 12, color: "#86efac" },
+    muted: { padding: 16, textAlign: "center", color: "#71717a", fontSize: 12.5 },
+  };
+
+  return createPortal(
+    <div style={S.overlay} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }} data-id="PanelMenuModal">
+      <div style={S.card} onClick={(e) => e.stopPropagation()}>
+        <div style={S.head}>
+          <h2 style={S.title}>{tr("panelMenu.title", "面板菜单")}</h2>
+          <button type="button" style={S.x} onClick={onClose} aria-label="close">✕</button>
+        </div>
+        <div style={S.hint}>
+          {tr("panelMenu.hint", '配置标签栏右上角「+」下拉里的面板项:拖动顺序、改名、关掉不用的。每项都对应一个内置面板页,不能新增。')}
+        </div>
+        {err && <div style={S.err}>{err}</div>}
+        <div style={S.listWrap}>
+          {rows === null ? (
+            <div style={S.muted}>{tr("panelMenu.loading", "加载中…")}</div>
+          ) : !api ? (
+            <div style={S.muted}>{tr("panelMenu.noBridge", "需要在 CiCy Desktop 中打开才能配置")}</div>
+          ) : rows.length === 0 ? (
+            <div style={S.muted}>{tr("panelMenu.empty", "暂无")}</div>
+          ) : (
+            rows.map((r, i) => (
+              <div key={r.id} style={S.row} data-id="panel-menu-row">
+                <input
+                  type="checkbox"
+                  checked={r.enabled !== false}
+                  onChange={() => toggle(i)}
+                  title={tr("panelMenu.toggle", "在菜单中显示")}
+                />
+                <input
+                  style={{ ...S.input, opacity: r.enabled === false ? 0.5 : 1 }}
+                  value={r.title || ""}
+                  onChange={(e) => rename(i, e.target.value)}
+                  placeholder={r.id}
+                />
+                <span style={S.id}>{r.id}</span>
+                <button type="button" style={S.ico} onClick={() => move(i, -1)} disabled={i === 0} title={tr("panelMenu.up", "上移")}>↑</button>
+                <button type="button" style={S.ico} onClick={() => move(i, 1)} disabled={i === rows.length - 1} title={tr("panelMenu.down", "下移")}>↓</button>
+              </div>
+            ))
+          )}
+        </div>
+        <div style={S.foot}>
+          <button type="button" data-id="panel-menu-save" style={{ ...S.save, opacity: busy || !api || !rows ? 0.5 : 1 }} onClick={doSave} disabled={busy || !api || !rows}>
+            {busy ? tr("panelMenu.saving", "保存中…") : tr("panelMenu.save", "保存")}
+          </button>
+          {saved && <span style={S.ok}>{tr("panelMenu.saved", "已保存,菜单立即生效")}</span>}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 function TrustedSitesModal({ onClose }) {
   const [rows, setRows] = useState(null);   // [{host, builtin}] | null(loading)
   const [input, setInput] = useState("");
@@ -1438,6 +1587,7 @@ function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin, hub }
   const [trustOpen, setTrustOpen] = useState(false);
   const [auditOpen, setAuditOpen] = useState(false);
   const [termsOpen, setTermsOpen] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(false);
   const [checkingUpd, setCheckingUpd] = useState(false);
   const [appVer, setAppVer] = useState("");
   const wrap = useRef(null);
@@ -1545,6 +1695,9 @@ function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin, hub }
             <button type="button" data-id="UserChip-trusted-sites" className="user-chip__menu-item" onClick={() => { setOpen(false); setTrustOpen(true); }}>
               {tr("trustedSites.menu", "受信任站点")}
             </button>
+            <button type="button" data-id="UserChip-panel-menu" className="user-chip__menu-item" onClick={() => { setOpen(false); setPanelOpen(true); }}>
+              {tr("panelMenu.menu", "面板菜单")}
+            </button>
             <button type="button" data-id="UserChip-audit-log" className="user-chip__menu-item" onClick={() => { setOpen(false); setAuditOpen(true); }}>
               {tr("audit.menu", "审计日志")}
             </button>
@@ -1582,6 +1735,7 @@ function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin, hub }
         position:fixed 的包含块,放在里面会让 modal 被限制在顶栏区域(位置不对)。 */}
     {trustOpen && <TrustedSitesModal onClose={() => setTrustOpen(false)} />}
     {auditOpen && <AuditLogModal onClose={() => setAuditOpen(false)} />}
+    {panelOpen && <PanelMenuModal onClose={() => setPanelOpen(false)} />}
     {termsOpen && <FirstRunTermsGate onClose={() => setTermsOpen(false)} />}
     </>
   );
