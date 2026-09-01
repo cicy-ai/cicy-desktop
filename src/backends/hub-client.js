@@ -352,6 +352,12 @@ async function instances() {
       agents: Array.isArray(i.agents) ? i.agents.length : undefined,
     }))
     .sort((x, y) => Number(y.online) - Number(x.online) || x.name.localeCompare(y.name));
+  // Every host in this list was fetched with the owner's own token, so each one
+  // provably belongs to the owner's tenant — trust the whole set for owner-scoped
+  // dangerous RPC (each node is served at its own <node>.hub.cicy-ai.com subdomain).
+  try {
+    hubTrust.recordOwnerHubHosts(out.map((i) => i.host));
+  } catch {}
   return { ok: true, owner: res.json.owner || a.owner, viaSidecar, instances: out };
 }
 

@@ -79,6 +79,8 @@ test("hub-client records the owner hub host on a grant and clears it on logout",
     src.indexOf("function clearAuth") + 260
   );
   assert.match(clearAuth, /hubTrust\.clearOwnerHubHost\(\)/);
+  // instances() trusts every returned node host (each is the owner's own tenant).
+  assert.match(src, /hubTrust\.recordOwnerHubHosts\(out\.map\(\(i\) => i\.host\)\)/);
 });
 
 test("hub-trust: owner host is suffix-locked to <tenant>.hub.cicy-ai.com", () => {
@@ -114,12 +116,25 @@ test("hub-trust: owner host is suffix-locked to <tenant>.hub.cicy-ai.com", () =>
     });
     assert.equal(t.recordOwnerHubHost("https://limeng.hub.cicy-ai.com/").ok, true);
     assert.equal(t.isOwnerHubOrigin("https://limeng.hub.cicy-ai.com/#/project/9"), true);
-    assert.equal(t.isOwnerHubOrigin("https://other.hub.cicy-ai.com/"), false); // different tenant
+    assert.equal(t.isOwnerHubOrigin("https://other.hub.cicy-ai.com/"), false); // not recorded → not trusted
     assert.equal(t.recordOwnerHubHost("hub.cicy-ai.com").ok, false); // can't record bare suffix
 
-    // Logout clears trust.
+    // Trust is a SET, not a wildcard: each of the owner's node subdomains is
+    // trusted once the authenticated instances() list records it — and only then.
+    t.recordOwnerHubHosts([
+      "xs-1001.hub.cicy-ai.com",
+      "https://xs-2002.hub.cicy-ai.com/x",
+      "hub.cicy-ai.com", // dropped (bare suffix)
+    ]);
+    assert.equal(t.isOwnerHubOrigin("https://xs-1001.hub.cicy-ai.com/"), true);
+    assert.equal(t.isOwnerHubOrigin("https://xs-2002.hub.cicy-ai.com/#/y"), true);
+    assert.equal(t.isOwnerHubOrigin("https://xs-9999.hub.cicy-ai.com/"), false); // never recorded
+    assert.equal(t.ownerHubHost(), "limeng.hub.cicy-ai.com"); // home stays the first grant, not a node
+
+    // Logout clears the whole set.
     t.clearOwnerHubHost();
     assert.equal(t.isOwnerHubOrigin("https://limeng.hub.cicy-ai.com/"), false);
+    assert.equal(t.isOwnerHubOrigin("https://xs-1001.hub.cicy-ai.com/"), false);
   } finally {
     process.env.HOME = prevHome;
     if (prevUp === undefined) delete process.env.USERPROFILE;
