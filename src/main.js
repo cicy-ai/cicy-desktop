@@ -949,28 +949,56 @@ function ensureAutoLaunch() {
       // (它先起 master 再起 worker,直接起 electron.exe 会缺 master)。登录项指向一个
       // wscript 隐藏启动的 VBS → `cmd /c node .\bin\cicy-desktop`,全程无控制台窗口。
       const fromSource = !electronApp.isPackaged;
-      let opts;
+      let opts, runCmd;
       if (fromSource) {
         const vbs = writeSourceAutostartVbs();
         opts = { openAtLogin: want, path: "wscript.exe", args: ["//B", "//Nologo", vbs] };
+        runCmd = `wscript.exe //B //Nologo "${vbs}"`;
       } else {
         opts = { openAtLogin: want, args: ["--hidden"] };
+        runCmd = `"${process.execPath}" --hidden`;
       }
-      const cur = electronApp.getLoginItemSettings(
-        fromSource ? { path: opts.path, args: opts.args } : undefined
-      );
-      if (cur.openAtLogin !== want) {
+      const probe = () =>
+        electronApp.getLoginItemSettings(fromSource ? { path: opts.path, args: opts.args } : undefined);
+      if (probe().openAtLogin !== want) {
         electronApp.setLoginItemSettings(opts);
         log.info(
           `[autostart] openAtLogin → ${want}${fromSource ? ` (source: ${opts.path} ${opts.args.join(" ")})` : ""}`
         );
       }
+      // Read it back. setLoginItemSettings() returns without throwing on every
+      // Windows node of this fleet and still leaves openAtLogin false, with
+      // HKCU\...\Run untouched — so autostart silently never existed, and a node
+      // whose app went away (e.g. an installer closed it) never came back, not
+      // even after a reboot. When the API did not take, write the Run key.
+      if (probe().openAtLogin !== want) ensureWindowsRunKey(want, runCmd);
     } else if (process.platform === "linux") {
       if (!electronApp.isPackaged) return;
       ensureLinuxAutostart(want);
     }
   } catch (e) {
     log.warn(`[autostart] ensureAutoLaunch failed: ${e.message}`);
+  }
+}
+
+// Fallback for the silently-failing setLoginItemSettings (see ensureAutoLaunch):
+// own the HKCU Run entry directly. Async so a slow reg.exe never delays startup;
+// failures are logged, never thrown — autostart is best-effort.
+const WIN_RUN_KEY = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+const WIN_RUN_NAME = "CiCy Desktop";
+function ensureWindowsRunKey(want, command) {
+  try {
+    const { execFile } = require("child_process");
+    const args = want
+      ? ["add", WIN_RUN_KEY, "/v", WIN_RUN_NAME, "/t", "REG_SZ", "/d", command, "/f"]
+      : ["delete", WIN_RUN_KEY, "/v", WIN_RUN_NAME, "/f"];
+    execFile("reg", args, { windowsHide: true }, (err) => {
+      // deleting an absent value exits non-zero — that is the wanted end state.
+      if (err && want) log.warn(`[autostart] Run-key fallback failed: ${err.message}`);
+      else if (want) log.info(`[autostart] Run-key fallback wrote ${WIN_RUN_NAME} → ${command}`);
+    });
+  } catch (e) {
+    log.warn(`[autostart] Run-key fallback threw: ${e.message}`);
   }
 }
 
