@@ -38,3 +38,7 @@ workers/desktop-render/
 
 # cloudflared bundle binaries (build assets, per-arch) — not source
 resources/cloudflared/cloudflared-darwin-*
+
+# Panel pages copied from src/tabbrowser by scripts/build-homepage.cjs — generated,
+# never edit here (src/tabbrowser is the source of truth).
+workers/render/public/panel/

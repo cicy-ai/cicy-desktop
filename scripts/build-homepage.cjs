@@ -28,6 +28,26 @@ function run(cmd, cwd) {
   execSync(cmd, { cwd, stdio: "inherit" });
 }
 
+// 0) panel pages: src/tabbrowser is the SINGLE SOURCE. cicyui://panel now
+//    fetches them from the Worker (newtab-protocol) with the bundled copy as
+//    the fallback, so the Worker needs its own copy — generated here, never
+//    hand-maintained. Two hand-kept copies is exactly how the stale homepage
+//    shipped before; this one is regenerated on every build and gitignored.
+const PANEL_SRC = path.join(ROOT, "src", "tabbrowser");
+const PANEL_OUT = path.join(RENDER, "public", "panel");
+const PANEL_PAGES = [
+  "telegram-matrix.html",
+  "redroid-matrix.html",
+  "facebook-matrix.html",
+  "split-panel.html",
+];
+fs.rmSync(PANEL_OUT, { recursive: true, force: true });
+fs.mkdirSync(PANEL_OUT, { recursive: true });
+for (const page of PANEL_PAGES) {
+  fs.copyFileSync(path.join(PANEL_SRC, page), path.join(PANEL_OUT, page));
+}
+console.log(`[build-homepage] panel pages synced: ${PANEL_PAGES.join(", ")}`);
+
 // 1) build the SPA from source (install deps on a cold runner)
 if (!fs.existsSync(path.join(RENDER, "node_modules"))) {
   run("npm install --no-audit --no-fund", RENDER);

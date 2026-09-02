@@ -21,6 +21,8 @@ const _handled = new WeakSet(); // sessions that already have the cicyui handler
 // origin+pathname reuse never collapses two panels into one; the page keys its
 // persisted layout off the same path.
 const { panelPageForUrl } = require("./panel-page-router");
+const PANEL_REMOTE_BASE =
+  process.env.CICY_PANEL_BASE || "https://desktop.cicy-ai.com/panel";
 
 // NOTE: scheme is "cicyui", NOT "cicy" — "cicy" is already an OS deep-link
 // protocol client (setAsDefaultProtocolClient), so navigating a webContents to
@@ -68,10 +70,41 @@ function handlerFor(ses, partition) {
       let host = "";
       try { host = new URL(request.url).hostname; } catch (e) {}
       if (host === "panel") {
-        // read per request (not cached) so dev edits to split-panel.html land on
-        // a simple tab reload, no Electron restart.
+        // The panel pages (矩阵 / split panel) are also published by the
+        // desktop-render Worker, so their UI ships by deploying rather than by
+        // releasing the app. Fetching them here — instead of pointing the tab at
+        // an https:// URL — keeps the URL, and therefore the panel preload and
+        // the page origin, exactly as they were: only the HTML travels. Same
+        // shape the newtab branch below already uses.
+        //
+        // The bundled copy under src/tabbrowser stays the fallback, so a CDN
+        // outage (or a dev editing the local file) still works. Local edits land
+        // on a tab reload with CICY_PANEL_LOCAL=1.
+        const name = panelPageForUrl(request.url);
+        if (process.env.CICY_PANEL_LOCAL !== "1") {
+          try {
+            const ctl = new AbortController();
+            const t = setTimeout(() => ctl.abort(), 4000);
+            // Workers Assets serves extensionless paths and 307s /x.html → /x,
+            // so ask for the canonical form and skip the redirect hop.
+            const remoteName = name.replace(/\.html$/, "");
+            const up = await fetch(`${PANEL_REMOTE_BASE}/${remoteName}`, { signal: ctl.signal, cache: "no-store" });
+            clearTimeout(t);
+            const body = up.ok ? await up.text() : "";
+            // The Worker serves the SPA with single-page-application fallback, so
+            // an unknown path answers 200 + index.html. Take the body only when it
+            // is NOT that shell — the shell is the one page carrying both #root
+            // and a hashed assets/index-*.js, neither of which any panel page has.
+            const spaShell = /id="root"/.test(body) && /assets\/index-[A-Za-z0-9_-]+\.js/.test(body);
+            if (body && /<!doctype html>/i.test(body) && !spaShell) {
+              return new Response(body, { headers: { "content-type": "text/html; charset=utf-8" } });
+            }
+          } catch (e) {
+            // fall through to the bundled copy
+          }
+        }
         try {
-          const file = path.join(__dirname, panelPageForUrl(request.url));
+          const file = path.join(__dirname, name);
           const html = await fs.promises.readFile(file, "utf8");
           return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } });
         } catch (e) { return new Response("panel page missing", { status: 500 }); }
