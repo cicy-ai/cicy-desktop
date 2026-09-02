@@ -146,30 +146,45 @@ async function firstReachable(urls) {
   return null;
 }
 
-// ── 下载(带进度,跟随重定向)──────────────────────────────────────────────────
-function download(url, dest, onProgress, redirects = 0) {
+// ── 下载(带进度、跟随重定向、断点续传)────────────────────────────────────
+// A single https.get with a 30s socket timeout used to BE the download: one
+// stall on a slow mirror and the update failed for good. That is not
+// theoretical — a fleet node sat on an old build for several releases with
+// "download failed: timeout" every 30 minutes, because its link to the CDN
+// could serve ranges fine but never sustained the whole 125MB inside one
+// socket. So: retry, and resume from what already landed instead of starting
+// over. A slow link now takes several passes and still finishes.
+function downloadOnce(url, dest, onProgress, startAt, redirects = 0) {
   return new Promise((resolve, reject) => {
     if (redirects > 6) return reject(new Error("too many redirects"));
-    const f = fs.createWriteStream(dest);
-    const req = https.get(url, { headers: { "User-Agent": "cicy-desktop" }, timeout: 30000 }, (res) => {
+    const headers = { "User-Agent": "cicy-desktop" };
+    if (startAt > 0) headers.Range = `bytes=${startAt}-`;
+    const req = https.get(url, { headers, timeout: 30000 }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        f.close(); try { fs.unlinkSync(dest); } catch {}
-        return download(res.headers.location, dest, onProgress, redirects + 1).then(resolve, reject);
+        res.resume();
+        return downloadOnce(res.headers.location, dest, onProgress, startAt, redirects + 1).then(resolve, reject);
       }
-      if (res.statusCode !== 200) { f.close(); try { fs.unlinkSync(dest); } catch {} return reject(new Error(`HTTP ${res.statusCode}`)); }
-      const total = parseInt(res.headers["content-length"] || "0", 10) || 0;
-      let transferred = 0, lastEmit = 0;
+      // 206 = the server honoured the range → append. 200 with startAt means it
+      // ignored it → start the file over rather than corrupt it by appending.
+      const resuming = res.statusCode === 206;
+      if (res.statusCode !== 200 && !resuming) {
+        res.resume();
+        return reject(new Error(`HTTP ${res.statusCode}`));
+      }
+      const base = resuming ? startAt : 0;
+      const f = fs.createWriteStream(dest, resuming ? { flags: "a" } : {});
+      const len = parseInt(res.headers["content-length"] || "0", 10) || 0;
+      const total = base + len;
+      let transferred = base, lastEmit = 0;
       const startT = Date.now();
-      let winT = startT, winBytes = 0, bytesPerSec = 0;
+      let winT = startT, winBytes = transferred, bytesPerSec = 0;
       res.on("data", (chunk) => {
         transferred += chunk.length;
         const now = Date.now();
-        // 速度按 ~500ms 滑窗算,平滑不抖。
         if (now - winT >= 500) {
           bytesPerSec = (transferred - winBytes) / ((now - winT) / 1000);
           winT = now; winBytes = transferred;
         }
-        // 节流:每 ~120ms 或下载完才推一次(够顺滑又不刷爆 IPC)。
         if (now - lastEmit >= 120 || transferred === total) {
           lastEmit = now;
           const percent = total ? Math.min(100, Math.floor((transferred / total) * 100)) : 0;
@@ -177,13 +192,41 @@ function download(url, dest, onProgress, redirects = 0) {
           try { onProgress && onProgress({ percent, transferred, total, bytesPerSec, etaSec }); } catch {}
         }
       });
+      res.on("error", (e) => { f.close(); reject(e); });
       res.pipe(f);
-      f.on("finish", () => f.close(() => resolve()));
-      f.on("error", (e) => { try { fs.unlinkSync(dest); } catch {} reject(e); });
+      f.on("finish", () => f.close(() => resolve({ transferred, total })));
+      f.on("error", (e) => reject(e));
     });
-    req.on("error", (e) => { try { fs.unlinkSync(dest); } catch {} reject(e); });
+    req.on("error", reject);
     req.on("timeout", () => { req.destroy(); reject(new Error("timeout")); });
   });
+}
+
+const DOWNLOAD_ATTEMPTS = 6;
+
+async function download(url, dest, onProgress) {
+  let lastErr = null;
+  for (let attempt = 1; attempt <= DOWNLOAD_ATTEMPTS; attempt++) {
+    let have = 0;
+    try { have = fs.statSync(dest).size; } catch {}
+    try {
+      const r = await downloadOnce(url, dest, onProgress, have);
+      // A truncated body that ends cleanly still resolves, so only stop when the
+      // file is actually as long as the server said.
+      if (!r.total || r.transferred >= r.total) return;
+      lastErr = new Error(`short read ${r.transferred}/${r.total}`);
+    } catch (e) {
+      lastErr = e;
+    }
+    let now = 0;
+    try { now = fs.statSync(dest).size; } catch {}
+    log.warn(`[app-updater] download attempt ${attempt}/${DOWNLOAD_ATTEMPTS} failed (${lastErr.message}); have ${now} bytes`);
+    if (now <= have && attempt > 1) {
+      // two passes in a row moved nothing — the source is not just slow.
+      try { fs.unlinkSync(dest); } catch {}
+    }
+  }
+  throw lastErr || new Error("download failed");
 }
 
 // ── 状态机 + 广播 ─────────────────────────────────────────────────────────────
@@ -269,6 +312,12 @@ async function downloadUpdate() {
     // 逐个候选试(R2 → GitHub → 镜像):一个源断了就换下一个,全断才算失败。
     let lastErr = null;
     for (const url of urls) {
+      // Resume is per-SOURCE. The candidates are the same artifact today (CI
+      // uploads one exe under two names), but appending bytes from a second host
+      // onto a partial from the first would silently produce a corrupt installer
+      // the moment that stops being true — and nothing here verifies a hash
+      // before running it. Start each source from zero.
+      try { fs.unlinkSync(dest); } catch {}
       try {
         log.info(`[app-updater] downloading ${url} → ${dest}`);
         await download(url, dest, (p) => broadcast({ status: "downloading", progress: p }));
