@@ -4,24 +4,23 @@
 // Homepage window — primary CiCy Desktop window. Singleton; closing it
 // does NOT quit the app.
 //
-// URL selection: the bundled local file:// SPA by DEFAULT — works offline, fast,
-// no remote dependency, no mixed-content concerns when embedding the
-// team-assistant webview (the cicy-desktop preload's IPC bridge still attaches).
+// URL selection: the homepage IS the deployed web build
+// (https://desktop.cicy-ai.com — the desktop-render Worker). Shipping homepage
+// changes then means deploying the Worker, not shipping a new desktop build.
 //
-// The same SPA is also deployed as the desktop-render Worker on
-// https://desktop.cicy-ai.com, which is what makes "ship UI without shipping the
-// app" possible. Pointing the homepage at it is OPT-IN, and deliberately not the
-// default: the home tab runs homepage-preload, whose bridge is the UNGUARDED
-// "rpc" channel (no origin gate, no dangerous-tool gate — see utils/rpc-guard),
-// because it was only ever loaded from file://. A remote origin on that channel
-// gets ungated exec_*/file_* on every desktop, so whoever controls the domain
-// controls the fleet. Turn it on per machine with CICY_HOMEPAGE_URL (any URL) or
-// prefs.homepageRemote:true (uses REMOTE_HOMEPAGE), and only for an origin you
-// trust exactly as much as the bundled bundle itself.
+// The bundled file:// snapshot stays in the package as the FALLBACK: a
+// main-frame load failure, or a load that never commits within 15s (a blank 200
+// from a broken deploy), swaps to it — a CDN outage can never leave the app with
+// no homepage. Set CICY_HOMEPAGE_URL to point somewhere else (e.g. a vite dev
+// server), or prefs.homepageRemote:false to pin a machine to the snapshot.
 //
-// Either way the remote load is never a one-way door: a main-frame failure (or a
-// load that never commits) falls back to the bundled snapshot, so a CDN outage
-// cannot leave the app with no homepage.
+// Note what this grants: the home tab runs homepage-preload, whose bridge is the
+// UNGUARDED "rpc" channel — no origin gate, no dangerous-tool gate (see
+// utils/rpc-guard), because it predates the homepage ever being remote. The
+// homepage origin therefore has ungated exec_*/file_* on the machine, so
+// desktop.cicy-ai.com must be treated as first-party code, exactly like the
+// bundle it replaces: whoever can deploy that Worker can run commands on every
+// desktop.
 
 const path = require("path");
 const { BrowserWindow } = require("electron");
@@ -49,10 +48,11 @@ function readHomepagePrefs() {
 function pickHomepageURL() {
   const env = String(process.env.CICY_HOMEPAGE_URL || "").trim();
   if (env) return env;
+  // Opt OUT only: an explicit false pins this machine to the bundled snapshot.
   try {
-    if (readHomepagePrefs().homepageRemote === true) return REMOTE_HOMEPAGE;
+    if (readHomepagePrefs().homepageRemote === false) return LOCAL_URL;
   } catch {}
-  return LOCAL_URL;
+  return REMOTE_HOMEPAGE;
 }
 
 // Fall back to the bundled snapshot when a remote homepage fails to load or

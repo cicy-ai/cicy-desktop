@@ -54,23 +54,36 @@ function loadPicker() {
   return mod.exports;
 }
 
-test("defaults to the bundled file:// snapshot", () => {
+test("defaults to the deployed web build", () => {
   withHome(() => {
+    const { pickHomepageURL, REMOTE_HOMEPAGE } = loadPicker();
+    assert.equal(pickHomepageURL(), REMOTE_HOMEPAGE);
+    assert.equal(REMOTE_HOMEPAGE, "https://desktop.cicy-ai.com/");
+  });
+});
+
+test("prefs.homepageRemote:false pins a machine to the bundled snapshot", () => {
+  withHome((home) => {
+    fs.writeFileSync(
+      path.join(home, "cicy-ai", "db", "prefs.json"),
+      JSON.stringify({ homepageRemote: false })
+    );
     const { pickHomepageURL, LOCAL_URL } = loadPicker();
     assert.equal(pickHomepageURL(), LOCAL_URL);
     assert.match(pickHomepageURL(), /^file:\/\//);
   });
 });
 
-test("prefs.homepageRemote opts in to the deployed Worker", () => {
+test("any value other than an explicit false stays on the web build", () => {
   withHome((home) => {
-    fs.writeFileSync(
-      path.join(home, "cicy-ai", "db", "prefs.json"),
-      JSON.stringify({ homepageRemote: true })
-    );
-    const { pickHomepageURL, REMOTE_HOMEPAGE } = loadPicker();
-    assert.equal(pickHomepageURL(), REMOTE_HOMEPAGE);
-    assert.equal(REMOTE_HOMEPAGE, "https://desktop.cicy-ai.com/");
+    for (const v of [true, "false", 0, null]) {
+      fs.writeFileSync(
+        path.join(home, "cicy-ai", "db", "prefs.json"),
+        JSON.stringify({ homepageRemote: v })
+      );
+      const { pickHomepageURL, REMOTE_HOMEPAGE } = loadPicker();
+      assert.equal(pickHomepageURL(), REMOTE_HOMEPAGE, `homepageRemote=${JSON.stringify(v)}`);
+    }
   });
 });
 
@@ -78,7 +91,7 @@ test("CICY_HOMEPAGE_URL wins over prefs and the default", () => {
   withHome((home) => {
     fs.writeFileSync(
       path.join(home, "cicy-ai", "db", "prefs.json"),
-      JSON.stringify({ homepageRemote: true })
+      JSON.stringify({ homepageRemote: false })
     );
     process.env.CICY_HOMEPAGE_URL = "http://127.0.0.1:5173/";
     try {
@@ -89,11 +102,11 @@ test("CICY_HOMEPAGE_URL wins over prefs and the default", () => {
   });
 });
 
-test("a malformed prefs file falls back to local rather than throwing", () => {
+test("a malformed prefs file keeps the default rather than throwing", () => {
   withHome((home) => {
     fs.writeFileSync(path.join(home, "cicy-ai", "db", "prefs.json"), "{ not json");
-    const { pickHomepageURL, LOCAL_URL } = loadPicker();
-    assert.equal(pickHomepageURL(), LOCAL_URL);
+    const { pickHomepageURL, REMOTE_HOMEPAGE } = loadPicker();
+    assert.equal(pickHomepageURL(), REMOTE_HOMEPAGE);
   });
 });
 
