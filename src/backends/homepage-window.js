@@ -4,11 +4,24 @@
 // Homepage window — primary CiCy Desktop window. Singleton; closing it
 // does NOT quit the app.
 //
-// URL selection (HARDCODED — no env/dev-URL switch, no Vite, no remote): ALL
-// platforms load the bundled local file:// SPA — works offline, fast, no
-// remote dependency, no mixed-content concerns when embedding the
-// team-assistant webview (the cicy-desktop preload's IPC bridge still
-// attaches).
+// URL selection: the bundled local file:// SPA by DEFAULT — works offline, fast,
+// no remote dependency, no mixed-content concerns when embedding the
+// team-assistant webview (the cicy-desktop preload's IPC bridge still attaches).
+//
+// The same SPA is also deployed as the desktop-render Worker on
+// https://desktop.cicy-ai.com, which is what makes "ship UI without shipping the
+// app" possible. Pointing the homepage at it is OPT-IN, and deliberately not the
+// default: the home tab runs homepage-preload, whose bridge is the UNGUARDED
+// "rpc" channel (no origin gate, no dangerous-tool gate — see utils/rpc-guard),
+// because it was only ever loaded from file://. A remote origin on that channel
+// gets ungated exec_*/file_* on every desktop, so whoever controls the domain
+// controls the fleet. Turn it on per machine with CICY_HOMEPAGE_URL (any URL) or
+// prefs.homepageRemote:true (uses REMOTE_HOMEPAGE), and only for an origin you
+// trust exactly as much as the bundled bundle itself.
+//
+// Either way the remote load is never a one-way door: a main-frame failure (or a
+// load that never commits) falls back to the bundled snapshot, so a CDN outage
+// cannot leave the app with no homepage.
 
 const path = require("path");
 const { BrowserWindow } = require("electron");
@@ -19,9 +32,55 @@ const FIXED_WIDTH = 930;
 const FIXED_HEIGHT = 640;
 
 const LOCAL_INDEX = path.join(__dirname, "homepage-react", "index.html");
+const LOCAL_URL = `file://${LOCAL_INDEX}`;
+const REMOTE_HOMEPAGE = "https://desktop.cicy-ai.com/";
+const REMOTE_FALLBACK_MS = 15000;
+
+function readHomepagePrefs() {
+  try {
+    const os = require("os");
+    const p = path.join(os.homedir(), "cicy-ai", "db", "prefs.json");
+    return JSON.parse(require("fs").readFileSync(p, "utf8")) || {};
+  } catch {
+    return {};
+  }
+}
 
 function pickHomepageURL() {
-  return `file://${LOCAL_INDEX}`;
+  const env = String(process.env.CICY_HOMEPAGE_URL || "").trim();
+  if (env) return env;
+  try {
+    if (readHomepagePrefs().homepageRemote === true) return REMOTE_HOMEPAGE;
+  } catch {}
+  return LOCAL_URL;
+}
+
+// Fall back to the bundled snapshot when a remote homepage fails to load or
+// never commits. Idempotent per webContents; a no-op once we are already local.
+function wireRemoteFallback(wc) {
+  if (!wc || wc.isDestroyed() || wc.__cicyHomeFallbackWired) return;
+  let current = "";
+  try { current = wc.getURL(); } catch {}
+  if (!current || current.startsWith("file://")) {
+    // getURL() is empty until the first commit, so only skip a known-local load.
+    if (current) return;
+  }
+  wc.__cicyHomeFallbackWired = true;
+  let settled = false;
+  const toLocal = (reason) => {
+    if (settled || wc.isDestroyed()) return;
+    let url = "";
+    try { url = wc.getURL(); } catch {}
+    if (url.startsWith("file://")) { settled = true; return; }
+    settled = true;
+    log.warn(`[homepage] remote homepage unusable (${reason}) → bundled snapshot`);
+    try { wc.loadURL(LOCAL_URL); } catch (e) { log.error(`[homepage] fallback failed: ${e.message}`); }
+  };
+  wc.on("did-fail-load", (_e, code, desc, _url, isMainFrame) => {
+    if (isMainFrame) toLocal(`${code} ${desc}`);
+  });
+  wc.once("did-finish-load", () => { settled = true; });
+  setTimeout(() => toLocal(`no load within ${REMOTE_FALLBACK_MS}ms`), REMOTE_FALLBACK_MS);
 }
 
 let homepage = null;    // standalone fallback window (only if the tab engine fails)
@@ -40,6 +99,7 @@ async function openHomepage(opts = {}) {
     if (wc) {
       homeTabWc = wc;
       try { wc.once("destroyed", () => { if (homeTabWc === wc) homeTabWc = null; }); } catch {}
+      try { wireRemoteFallback(wc); } catch (e) { log.warn(`[homepage] fallback wiring: ${e.message}`); }
     }
     log.info(`[homepage] opened as profile-0 resident tab (wc=${wc && wc.id})`);
     return win;
@@ -103,6 +163,7 @@ async function openHomepageStandalone() {
 
   const target = pickHomepageURL();
   log.info(`[homepage] loading ${target}`);
+  try { wireRemoteFallback(homepage.webContents); } catch (e) { log.warn(`[homepage] fallback wiring: ${e.message}`); }
   homepage.loadURL(target);
 
   // Pipe renderer console + load failures to main-process stdout so we can
