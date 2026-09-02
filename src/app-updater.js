@@ -340,11 +340,40 @@ async function downloadUpdate() {
 
 // 用户点「安装」:拉起原生安装器(win NSIS / mac pkg)并退出 app;linux AppImage 在
 // 文件管理器里定位(AppImage 非安装器,用户自行替换运行)。
+// Windows install + relaunch, as ONE detached chain.
+//
+// shell.openPath() ran the NSIS installer INTERACTIVELY: on a machine with
+// nobody at the keyboard that is a wizard waiting forever for a click, and even
+// when it did install, nothing started the app again — NSIS runAfterFinish does
+// not fire on a /S install. Both together are why an unattended node that took
+// an update simply never came back; it had to be started by hand, and a headless
+// box has no hand. Observed on most of the fleet.
+//
+// So: /S for the install, and we own the relaunch. The chain is detached and in
+// its own process group, so it outlives the app the installer is about to kill;
+// cmd waits for the installer (no `start` on that leg), then gives Windows a
+// moment to release the files before launching the new exe hidden.
+function installWindows(installer) {
+  const { spawn } = require("child_process");
+  const exe = process.execPath;
+  const chain = `"${installer}" /S & timeout /t 20 /nobreak >nul & start "" "${exe}" --hidden`;
+  const ch = spawn(process.env.COMSPEC || "cmd.exe", ["/c", chain], {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  ch.unref();
+  log.info(`[app-updater] silent install + relaunch chain started (pid ${ch.pid})`);
+  // Quit so the installer can replace the files it is about to overwrite.
+  setTimeout(() => { try { app.quit(); } catch {} }, 1500);
+}
+
 function installNow() {
   const f = _state.filePath;
   if (!f) return;
   try {
     if (process.platform === "linux") { shell.showItemInFolder(f); return; }
+    if (process.platform === "win32") { installWindows(f); return; }
     shell.openPath(f).then((err) => {
       if (err) log.warn("[app-updater] openPath failed:", err);
       else setTimeout(() => { try { app.quit(); } catch {} }, 800);
