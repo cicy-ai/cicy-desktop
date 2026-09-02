@@ -340,30 +340,41 @@ async function downloadUpdate() {
 
 // 用户点「安装」:拉起原生安装器(win NSIS / mac pkg)并退出 app;linux AppImage 在
 // 文件管理器里定位(AppImage 非安装器,用户自行替换运行)。
-// Windows install + relaunch, as ONE detached chain.
+// Windows install + relaunch, as one hidden chain.
 //
 // shell.openPath() ran the NSIS installer INTERACTIVELY: on a machine with
 // nobody at the keyboard that is a wizard waiting forever for a click, and even
 // when it did install, nothing started the app again — NSIS runAfterFinish does
 // not fire on a /S install. Both together are why an unattended node that took
-// an update simply never came back; it had to be started by hand, and a headless
-// box has no hand. Observed on most of the fleet.
+// an update never came back; it had to be started by hand, and a headless box
+// has no hand.
 //
-// So: /S for the install, and we own the relaunch. The chain is detached and in
-// its own process group, so it outlives the app the installer is about to kill;
-// cmd waits for the installer (no `start` on that leg), then gives Windows a
-// moment to release the files before launching the new exe hidden.
+// The chain must also be INVISIBLE. Doing it with spawn(detached:true) put a
+// black console on screen counting down for 20 seconds during every update:
+// on Windows `detached` means CREATE_NEW_CONSOLE, which windowsHide cannot
+// suppress. So it goes through wscript + a one-line VBS with window style 0 —
+// the same hidden-launch trick writeSourceAutostartVbs() already uses — which
+// is genuinely windowless and detached from this process either way.
 function installWindows(installer) {
   const { spawn } = require("child_process");
   const exe = process.execPath;
-  const chain = `"${installer}" /S & timeout /t 20 /nobreak >nul & start "" "${exe}" --hidden`;
-  const ch = spawn(process.env.COMSPEC || "cmd.exe", ["/c", chain], {
+  const dir = path.join(process.env.LOCALAPPDATA || os.homedir(), "cicy-desktop");
+  fs.mkdirSync(dir, { recursive: true });
+  const vbs = path.join(dir, "update-install.vbs");
+  // VBS escapes a double quote by doubling it. cmd waits for the installer (no
+  // `start` on that leg), then the pause lets Windows release the replaced
+  // files before the new exe runs hidden.
+  const cmd =
+    `cmd /c ""${installer}" /S & timeout /t 20 /nobreak >nul & start "" "${exe}" --hidden"`;
+  const line = `sh.Run "${cmd.replace(/"/g, '""')}", 0, False`;
+  fs.writeFileSync(vbs, ['Set sh = CreateObject("WScript.Shell")', line, ""].join("\r\n"));
+  const ch = spawn("wscript.exe", ["//B", "//Nologo", vbs], {
     detached: true,
     stdio: "ignore",
     windowsHide: true,
   });
   ch.unref();
-  log.info(`[app-updater] silent install + relaunch chain started (pid ${ch.pid})`);
+  log.info(`[app-updater] hidden install + relaunch chain started (pid ${ch.pid})`);
   // Quit so the installer can replace the files it is about to overwrite.
   setTimeout(() => { try { app.quit(); } catch {} }, 1500);
 }

@@ -26,6 +26,17 @@ test("windows installs silently instead of opening a wizard nobody can click", (
   );
 });
 
+test("the chain is windowless — no console flashes during an update", () => {
+  // Regression: doing this with spawn(detached:true) put a black console on
+  // screen counting down for 20s on every update. On Windows `detached` means
+  // CREATE_NEW_CONSOLE, which windowsHide cannot suppress, so the runner has to
+  // be wscript + a window-style-0 VBS (same trick as writeSourceAutostartVbs).
+  assert.match(win, /spawn\("wscript\.exe", \["\/\/B", "\/\/Nologo", vbs\]/);
+  assert.match(win, /sh\.Run "\$\{cmd\.replace\(\/"\/g, '""'\)\}", 0, False/);
+  assert.match(win, /CreateObject\("WScript\.Shell"\)/);
+  assert.doesNotMatch(win, /spawn\(process\.env\.COMSPEC/); // the visible-console version
+});
+
 test("the relaunch is part of the same detached chain, so it outlives the app", () => {
   // The installer kills this process; a child in this process group would die
   // with it and the machine would stay down.
