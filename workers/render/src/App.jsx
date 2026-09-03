@@ -2090,7 +2090,18 @@ function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin, hub }
   // afterwards, so it stayed anonymous forever. Surface it in the menu.
   const [teamOpen, setTeamOpen] = useState(false);
   const [myTeam, setMyTeam] = useState(null); // null = still reading
-  useEffect(() => { let on = true; readTeam().then((t) => on && setMyTeam(t || "")); return () => { on = false; }; }, [teamOpen]);
+  useEffect(() => { let on = true; readTeam().then((t) => on && setMyTeam(t || "")); return () => { on = false; }; }, [teamOpen, hubIn]);
+  // A team belongs to a signed-in machine: it is stated at login and given up
+  // with it. Left behind, it makes a signed-out box claim an identity it no
+  // longer holds — which is exactly how the wrong machine gets acted on.
+  useEffect(() => {
+    if (hub?.available && hub.status && !hubIn && myTeam) { writeTeam("").then(() => setMyTeam("")).catch(() => {}); }
+  }, [hub?.available, hub?.status, hubIn, myTeam]);
+  // Signed in without one — an older install, or a name that was cleared —
+  // cannot stay that way: it is the only thing that says which machine this is.
+  useEffect(() => {
+    if (hubIn && myTeam === "") setTeamOpen(true);
+  }, [hubIn, myTeam]);
   const [checkingUpd, setCheckingUpd] = useState(false);
   const [appVer, setAppVer] = useState("");
   const wrap = useRef(null);
@@ -2207,6 +2218,7 @@ function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin, hub }
             <button type="button" data-id="UserChip-terms" className="user-chip__menu-item" onClick={() => { setOpen(false); setTermsOpen(true); }}>
               {tr("firstRunTerms.menu", "用户协议")}
             </button>
+            {hubIn && (
             <button type="button" data-id="UserChip-team" className="user-chip__menu-item" onClick={() => { setOpen(false); setTeamOpen(true); }}>
               {/* Reads as a value, so say it is editable — otherwise it looks
                   like a dead label and nobody discovers they can set it. */}
@@ -2215,6 +2227,7 @@ function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin, hub }
                 : tr("team.menuUnset", "本机 team:未设置")}</span>
               <span style={{ marginLeft: 8, opacity: .55, fontSize: 12 }}>{tr("team.edit", "修改")}</span>
             </button>
+            )}
             <button type="button" data-id="UserChip-check-update" className="user-chip__menu-item" disabled={checkingUpd} onClick={checkUpdate}>
               {checkingUpd ? tr("updateBanner.checkingShort", "检查中…") : tr("updateBanner.checkBtn", "检查更新")}
             </button>
