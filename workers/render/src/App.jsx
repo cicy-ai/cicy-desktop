@@ -1173,16 +1173,6 @@ export default function App() {
         )}
 
         {hub.loginOpen && <HubLoginModal hub={hub} />}
-        {hub.available && hub.status && !hub.loggedIn && !hub.loginOpen && hub.loginDismissed && (
-          <div className="error" data-id="HubNotLoggedInBanner"
-            style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <span>{tr("cicyHub.notLoggedIn", "这台机器未登录、也还没有 team 名 — 远程管不到它,出事只能到机器前面处理。")}</span>
-            <button type="button" className="btn-primary" data-id="HubNotLoggedInBanner-login"
-              style={{ marginLeft: "auto" }} onClick={() => hub.openLogin()}>
-              {tr("cicyHub.login", "登录 CiCy Hub")}
-            </button>
-          </div>
-        )}
         <div className="app__grid">
           {firstLoading && [0, 1, 2].map((i) => <SkeletonCard key={"skc" + i} />)}
           {!firstLoading && tab === "hub" && (!hub.loggedIn || (hub.instances && hub.instances.length === 0)) && (
@@ -4473,11 +4463,6 @@ function useHub() {
   useEffect(() => { let on = true; readTeam().then((t) => on && setTeam(t || "")); return () => { on = false; }; }, []);
   const [busy, setBusy] = useState(false);
   const [loginErr, setLoginErr] = useState("");
-  // A machine that is not signed in is unreachable AND unnamed, which is the
-  // state you least want to discover later — yet the only way in was a menu
-  // item at the bottom of a dropdown nobody opens. Ask on arrival, once. If
-  // it is dismissed a banner stays put, so it can be postponed but not lost.
-  const [loginDismissed, setLoginDismissed] = useState(false);
 
   const refreshStatus = useCallback(async () => {
     if (!bridge) return null;
@@ -4521,15 +4506,8 @@ function useHub() {
     return () => clearInterval(id);
   }, [status?.loggedIn, refresh]);
 
-  const promptedRef = useRef(false);
-  useEffect(() => {
-    if (!bridge || !status || status.loggedIn || promptedRef.current) return;
-    promptedRef.current = true;
-    setLoginErr(""); setStep("email"); setCode(""); setLoginOpen(true);
-  }, [bridge, status]);
-
   const openLogin = (prefill) => { setLoginErr(""); setStep("email"); setCode(""); if (prefill && !email.trim()) setEmail(String(prefill)); setLoginOpen(true); };
-  const closeLogin = () => { if (step === "code") { try { bridge?.cancel(); } catch {} } setLoginOpen(false); setBusy(false); setLoginDismissed(true); };
+  const closeLogin = () => { if (step === "code") { try { bridge?.cancel(); } catch {} } setLoginOpen(false); setBusy(false); };
   const sendCode = async () => {
     const addr = email.trim();
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr)) { setLoginErr(tr("auth.badEmail", "请输入有效的邮箱地址")); return; }
@@ -4571,7 +4549,7 @@ function useHub() {
     available: !!bridge, status, loggedIn: !!status?.loggedIn, owner: status?.owner || "",
     instances, loading, error, refresh, logout, open,
     loginOpen, openLogin, closeLogin, email, setEmail, code, setCode, step, busy, loginErr, sendCode, verify,
-    team, setTeam, loginDismissed,
+    team, setTeam,
   };
 }
 
