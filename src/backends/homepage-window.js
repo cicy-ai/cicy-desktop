@@ -33,7 +33,14 @@ const FIXED_HEIGHT = 640;
 const LOCAL_INDEX = path.join(__dirname, "homepage-react", "index.html");
 const LOCAL_URL = `file://${LOCAL_INDEX}`;
 const REMOTE_HOMEPAGE = "https://desktop.cicy-ai.com/";
-const REMOTE_FALLBACK_MS = 15000;
+// Boot is the slowest moment on a slow uplink (DNS, TLS, the app's own startup
+// traffic all at once), and 15s was short enough to fire on a machine whose
+// remote page loads in 10s a minute later. Give it real time.
+const REMOTE_FALLBACK_MS = 60 * 1000;
+// Once local, keep trying to get back. The snapshot is an old bundle with no
+// control channel, so a machine left on it is unreachable — a fallback that is
+// permanent turns one slow boot into a lost machine for the whole day.
+const REMOTE_RETRY_MS = 60 * 1000;
 
 function readHomepagePrefs() {
   try {
@@ -73,13 +80,43 @@ function wireRemoteFallback(wc) {
     try { url = wc.getURL(); } catch {}
     if (url.startsWith("file://")) { settled = true; return; }
     settled = true;
-    log.warn(`[homepage] remote homepage unusable (${reason}) → bundled snapshot`);
+    log.warn(`[homepage] remote homepage unusable (${reason}) → bundled snapshot; will keep retrying remote`);
     try { wc.loadURL(LOCAL_URL); } catch (e) { log.error(`[homepage] fallback failed: ${e.message}`); }
+    scheduleRemoteRetry();
   };
+  // Probe the remote with a plain fetch first, so a retry never yanks the user
+  // off the (working) local page onto another failed load. Stops on its own
+  // once the page is remote again or the webContents is gone.
+  let retryTimer = null;
+  const scheduleRemoteRetry = () => {
+    if (retryTimer || wc.isDestroyed()) return;
+    retryTimer = setTimeout(async () => {
+      retryTimer = null;
+      if (wc.isDestroyed()) return;
+      let url = "";
+      try { url = wc.getURL(); } catch {}
+      if (!url.startsWith("file://")) return; // already back on remote
+      let ok = false;
+      try {
+        const { net } = require("electron");
+        const res = await net.fetch(REMOTE_HOMEPAGE + "api/version", { cache: "no-store", signal: AbortSignal.timeout(15000) });
+        ok = res.ok;
+      } catch {}
+      if (ok) {
+        log.info("[homepage] remote reachable again → leaving bundled snapshot");
+        settled = false;
+        try { wc.loadURL(REMOTE_HOMEPAGE); } catch {}
+        setTimeout(() => toLocal("remote retry did not load"), REMOTE_FALLBACK_MS);
+      } else {
+        scheduleRemoteRetry();
+      }
+    }, REMOTE_RETRY_MS);
+  };
+  wc.once("destroyed", () => { if (retryTimer) clearTimeout(retryTimer); });
   wc.on("did-fail-load", (_e, code, desc, _url, isMainFrame) => {
     if (isMainFrame) toLocal(`${code} ${desc}`);
   });
-  wc.once("did-finish-load", () => { settled = true; });
+  wc.on("did-finish-load", () => { settled = true; });
   setTimeout(() => toLocal(`no load within ${REMOTE_FALLBACK_MS}ms`), REMOTE_FALLBACK_MS);
 }
 
