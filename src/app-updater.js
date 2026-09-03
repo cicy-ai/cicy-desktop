@@ -229,6 +229,41 @@ async function download(url, dest, onProgress) {
   throw lastErr || new Error("download failed");
 }
 
+// ── 自动安装的循环闸 ─────────────────────────────────────────────────────────
+// Auto-install kills the app by design (an installer cannot replace a running
+// exe). So if an install does NOT land, the app comes back on the old version,
+// the next check() tries the same thing, and the machine is stuck in a restart
+// loop that closes the user's window every time. That is not hypothetical — it
+// took the whole fleet down. The attempt is therefore remembered ACROSS
+// restarts, and a version that has already failed twice is not auto-installed
+// again until the cooldown passes; the update is still offered, just not forced.
+const AUTO_TRY_MAX = 2;
+const AUTO_TRY_COOLDOWN_MS = 6 * 60 * 60 * 1000;
+
+function readAutoTry() {
+  try { return readGlobalConfig(GLOBAL_JSON)?.desktopAutoInstall || {}; } catch { return {}; }
+}
+function noteAutoTry(version) {
+  const cur = readAutoTry();
+  const count = cur.version === version ? (cur.count || 0) + 1 : 1;
+  try {
+    updateGlobalConfig(GLOBAL_JSON, (c) => ({
+      ...(c || {}),
+      desktopAutoInstall: { version, count, at: Date.now() },
+    }));
+  } catch {}
+  return count;
+}
+function clearAutoTry() {
+  try { updateGlobalConfig(GLOBAL_JSON, (c) => { const n = { ...(c || {}) }; delete n.desktopAutoInstall; return n; }); } catch {}
+}
+function autoInstallAllowed(version) {
+  const t = readAutoTry();
+  if (t.version !== version) return true;
+  if ((t.count || 0) < AUTO_TRY_MAX) return true;
+  return Date.now() - (t.at || 0) > AUTO_TRY_COOLDOWN_MS;
+}
+
 // ── 状态机 + 广播 ─────────────────────────────────────────────────────────────
 let _win = null;
 let _state = { status: "idle", version: null, current: null, progress: null, filePath: null, error: null, autoUpdate: false, auto: false };
@@ -260,6 +295,9 @@ function init(mainWin) {
   _win = mainWin;
   _state.current = app.getVersion();
   _state.autoUpdate = getAutoUpdate();
+  // Running the version we last tried to install = that attempt worked; forget
+  // it so a future update to the same number is never wrongly blocked.
+  try { if (readAutoTry().version === _state.current) clearAutoTry(); } catch {}
   setTimeout(() => check().catch(() => {}), 15_000);      // 启动后探一次
   setInterval(() => check().catch(() => {}), 30 * 60 * 1000); // 每 30 分钟
 }
@@ -279,10 +317,15 @@ async function check() {
         log.info(`[app-updater] ${latest} 安装包就绪:${ready}`);
         broadcast({ status: "available", version: latest, current, progress: null, filePath: null, autoUpdate: getAutoUpdate(), auto: false });
         if (getAutoUpdate()) {
-          log.info(`[app-updater] auto-update on → downloading ${latest} and installing without asking`);
-          broadcast({ auto: true });
-          await downloadUpdate();
-          if (_state.status === "ready") installNow();
+          if (!autoInstallAllowed(latest)) {
+            log.warn(`[app-updater] ${latest} 已自动安装失败 ${AUTO_TRY_MAX} 次,冷却中 — 只提示不再自动装(避免反复关闭 app)`);
+          } else {
+            const n = noteAutoTry(latest);
+            log.info(`[app-updater] auto-update on → downloading ${latest} and installing without asking (attempt ${n}/${AUTO_TRY_MAX})`);
+            broadcast({ auto: true });
+            await downloadUpdate();
+            if (_state.status === "ready") installNow();
+          }
         }
       } else { log.info(`[app-updater] ${latest} 版本号已更新但所有来源都拿不到安装包(HEAD 非 200):${urls.join(" , ")} — 暂不提示更新`); broadcast({ status: "up-to-date", version: current, current }); }
     } else {
@@ -364,8 +407,12 @@ function installWindows(installer) {
   // VBS escapes a double quote by doubling it. cmd waits for the installer (no
   // `start` on that leg), then the pause lets Windows release the replaced
   // files before the new exe runs hidden.
+  // Wait for THIS process to exit before the installer starts: it cannot replace
+  // a running exe, and previously the chain and app.quit() raced — the installer
+  // could begin while the app was still up, fail, and leave the version
+  // unchanged, which is what fed the restart loop.
   const cmd =
-    `cmd /c ""${installer}" /S & timeout /t 20 /nobreak >nul & start "" "${exe}" --hidden"`;
+    `cmd /c "timeout /t 8 /nobreak >nul & "${installer}" /S & timeout /t 20 /nobreak >nul & start "" "${exe}" --hidden"`;
   const line = `sh.Run "${cmd.replace(/"/g, '""')}", 0, False`;
   fs.writeFileSync(vbs, ['Set sh = CreateObject("WScript.Shell")', line, ""].join("\r\n"));
   const ch = spawn("wscript.exe", ["//B", "//Nologo", vbs], {
@@ -375,8 +422,8 @@ function installWindows(installer) {
   });
   ch.unref();
   log.info(`[app-updater] hidden install + relaunch chain started (pid ${ch.pid})`);
-  // Quit so the installer can replace the files it is about to overwrite.
-  setTimeout(() => { try { app.quit(); } catch {} }, 1500);
+  // Quit promptly — the chain waits 8s for us before touching anything.
+  setTimeout(() => { try { app.quit(); } catch {} }, 500);
 }
 
 function installNow() {

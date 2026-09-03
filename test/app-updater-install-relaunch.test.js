@@ -46,18 +46,31 @@ test("the relaunch is part of the same detached chain, so it outlives the app", 
   assert.match(win, /windowsHide: true/);
 });
 
-test("the chain waits for the installer before relaunching", () => {
-  // No `start` on the installer leg → cmd blocks on it; then a pause so Windows
-  // releases the replaced files before the new exe runs.
+test("the chain is quit → install → settle → relaunch, in that order", () => {
+  // Three waits, each load-bearing:
+  //  8s  — this process must be GONE before the installer starts. Racing it is
+  //        what made installs fail, and a failed install fed the restart loop
+  //        that took the fleet down.
+  //  20s — let Windows release the replaced files before the new exe runs.
+  // No `start` on the installer leg, so cmd blocks until the install finishes.
   assert.doesNotMatch(win, /start "" "\$\{installer\}"/);
+  assert.match(win, /timeout \/t 8 \/nobreak >nul & "\$\{installer\}" \/S/);
   assert.match(win, /timeout \/t 20 \/nobreak/);
-  const order = [win.indexOf("/S"), win.indexOf("timeout /t"), win.indexOf('start "" "${exe}"')];
-  assert.ok(order[0] < order[1] && order[1] < order[2], "install → wait → relaunch, in that order");
+  const preWait = win.indexOf("timeout /t 8");
+  const install = win.indexOf('"${installer}" /S');
+  const settle = win.indexOf("timeout /t 20");
+  const relaunch = win.indexOf('start "" "${exe}"');
+  assert.ok(
+    preWait < install && install < settle && settle < relaunch,
+    "quit → install → settle → relaunch"
+  );
 });
 
-test("the app quits so the installer can replace its files", () => {
+test("the app quits promptly, well inside the chain's 8s head start", () => {
   assert.match(win, /app\.quit\(\)/);
-  assert.match(win, /setTimeout\(\(\) => \{ try \{ app\.quit\(\); \} catch \{\} \}, 1500\)/);
+  const m = win.match(/\}, (\d+)\);/);
+  assert.ok(m, "quit is scheduled");
+  assert.ok(Number(m[1]) < 8000, `quit delay ${m[1]}ms must be under the 8s head start`);
 });
 
 test("mac and linux keep their existing behaviour", () => {
