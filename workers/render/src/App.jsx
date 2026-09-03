@@ -2088,20 +2088,14 @@ function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin, hub }
   // The team is asked for at login, but a machine that signed in before that
   // existed never gets asked — and there was nowhere to see or change it
   // afterwards, so it stayed anonymous forever. Surface it in the menu.
-  const [teamOpen, setTeamOpen] = useState(false);
   const [myTeam, setMyTeam] = useState(null); // null = still reading
-  useEffect(() => { let on = true; readTeam().then((t) => on && setMyTeam(t || "")); return () => { on = false; }; }, [teamOpen, hubIn]);
+  useEffect(() => { let on = true; readTeam().then((t) => on && setMyTeam(t || "")); return () => { on = false; }; }, [hubIn]);
   // A team belongs to a signed-in machine: it is stated at login and given up
   // with it. Left behind, it makes a signed-out box claim an identity it no
   // longer holds — which is exactly how the wrong machine gets acted on.
   useEffect(() => {
     if (hub?.available && hub.status && !hubIn && myTeam) { writeTeam("").then(() => setMyTeam("")).catch(() => {}); }
   }, [hub?.available, hub?.status, hubIn, myTeam]);
-  // Signed in without one — an older install, or a name that was cleared —
-  // cannot stay that way: it is the only thing that says which machine this is.
-  useEffect(() => {
-    if (hubIn && myTeam === "") setTeamOpen(true);
-  }, [hubIn, myTeam]);
   const [checkingUpd, setCheckingUpd] = useState(false);
   const [appVer, setAppVer] = useState("");
   const wrap = useRef(null);
@@ -2206,6 +2200,12 @@ function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin, hub }
                 {me.email}
               </button>
             )}
+            {hubIn && myTeam && (
+              <div data-id="UserChip-team" className="user-chip__menu-item"
+                style={{ opacity: .7, cursor: "default", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {tr("team.menu", "本机 team:{{name}}", { name: myTeam })}
+              </div>
+            )}
             <button type="button" data-id="UserChip-trusted-sites" className="user-chip__menu-item" onClick={() => { setOpen(false); setTrustOpen(true); }}>
               {tr("trustedSites.menu", "受信任站点")}
             </button>
@@ -2218,16 +2218,6 @@ function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin, hub }
             <button type="button" data-id="UserChip-terms" className="user-chip__menu-item" onClick={() => { setOpen(false); setTermsOpen(true); }}>
               {tr("firstRunTerms.menu", "用户协议")}
             </button>
-            {hubIn && (
-            <button type="button" data-id="UserChip-team" className="user-chip__menu-item" onClick={() => { setOpen(false); setTeamOpen(true); }}>
-              {/* Reads as a value, so say it is editable — otherwise it looks
-                  like a dead label and nobody discovers they can set it. */}
-              <span>{myTeam
-                ? tr("team.menu", "本机 team:{{name}}", { name: myTeam })
-                : tr("team.menuUnset", "本机 team:未设置")}</span>
-              <span style={{ marginLeft: 8, opacity: .55, fontSize: 12 }}>{tr("team.edit", "修改")}</span>
-            </button>
-            )}
             <button type="button" data-id="UserChip-check-update" className="user-chip__menu-item" disabled={checkingUpd} onClick={checkUpdate}>
               {checkingUpd ? tr("updateBanner.checkingShort", "检查中…") : tr("updateBanner.checkBtn", "检查更新")}
             </button>
@@ -2260,51 +2250,8 @@ function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin, hub }
     {trustOpen && <TrustedSitesModal onClose={() => setTrustOpen(false)} />}
     {auditOpen && <AuditLogModal onClose={() => setAuditOpen(false)} />}
     {panelOpen && <PanelMenuModal onClose={() => setPanelOpen(false)} />}
-    {teamOpen && <TeamNameModal current={myTeam || ""} onClose={() => setTeamOpen(false)} />}
     {termsOpen && <FirstRunTermsGate onClose={() => setTermsOpen(false)} />}
     </>
-  );
-}
-
-// Name this machine. The hostname cannot do it — "computer" is a Windows
-// default and more than one box here answers to it — so an operator states it
-// once and everything downstream addresses the machine by that.
-function TeamNameModal({ current, onClose }) {
-  const [name, setName] = useState(current || "");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-  const save = async () => {
-    const declared = name.trim();
-    if (!TEAM_RE.test(declared)) { setErr(tr("team.invalid", "只能用字母、数字和 . _ -,最长 64")); return; }
-    setBusy(true); setErr("");
-    try {
-      await writeTeam(declared);
-      // Re-announce now; the name is carried in the socket's hello frame, so
-      // without this the change would not show until the next reconnect.
-      try { window.__cicyFleetRelabel && window.__cicyFleetRelabel(); } catch {}
-      onClose();
-    } catch (e) { setErr(String((e && e.message) || e)); setBusy(false); }
-  };
-  return createPortal(
-    <div data-id="TeamNameModal" style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.5)" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ width: 400, maxWidth: "92vw", background: "var(--card, #1b1d22)", border: "1px solid var(--border, #2c2f36)", borderRadius: 14, padding: 22, boxShadow: "0 20px 60px rgba(0,0,0,.5)" }}>
-        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{tr("team.title", "本机 team 名")}</div>
-        <div style={{ fontSize: 12, opacity: .6, marginBottom: 16 }}>
-          {tr("team.sub", "这台机器的身份。主机名不作数 —— 好几台都叫 computer,认错机器就会操作错机器。")}
-        </div>
-        <input data-id="TeamNameModal-input" className="login-email-input" style={{ width: "100%", marginBottom: 6 }}
-          type="text" autoFocus spellCheck={false} value={name} placeholder={tr("team.placeholder", "例如 xs-1001")}
-          onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") save(); }} />
-        {err && <div className="error" style={{ marginTop: 10 }}>{err}</div>}
-        <div className="modal-actions">
-          <button type="button" className="btn-ghost" data-id="TeamNameModal-cancel" onClick={onClose}>{tr("cicyHub.cancel", "取消")}</button>
-          <button type="button" className="btn-primary" data-id="TeamNameModal-save" disabled={busy} onClick={save}>
-            {busy ? tr("team.saving", "保存中…") : tr("team.save", "保存")}
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body
   );
 }
 
