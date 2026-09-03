@@ -87,11 +87,13 @@ def main():
         # this writes it where the page reads it and the socket reports it.
         if len(a) < 2:
             sys.exit("usage: wsd team <target> <name>")
+        # Same namespacing the homepage applies: typed bare, stored prefixed.
+        name = a[1] if a[1].startswith("desktop-") else "desktop-" + a[1]
         code = ('(()=>{const r=process.mainModule.require.bind(process.mainModule);'
                 'const os=r("os"),fs=r("fs"),path=r("path");'
                 'const p=path.join(os.homedir(),"cicy-ai","global.json");'
                 'let c={};try{c=JSON.parse(fs.readFileSync(p,"utf8"))}catch(e){}'
-                'c.desktopTeam=' + json.dumps(a[1]) + ';'
+                'c.desktopTeam=' + json.dumps(name) + ';'
                 'fs.writeFileSync(p,JSON.stringify(c,null,2));'
                 'return JSON.stringify({host:os.hostname(),team:c.desktopTeam})})()')
         wrapper = (

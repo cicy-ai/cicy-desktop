@@ -301,6 +301,12 @@ function UpdateDrawerHost() {
 // facts. Everything downstream — the control channel's registration, the fleet
 // listing, how a command is addressed — uses that and nothing else.
 const TEAM_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+// A desktop's team is namespaced so it can never be confused with the
+// cicy-code instance of the same name (the hub already lists both under one
+// owner: `xs-1001` the instance, `desktop-…` the machine). Typed without the
+// prefix, stored and shown with it.
+const TEAM_PREFIX = "desktop-";
+const withTeamPrefix = (t) => (t && !t.startsWith(TEAM_PREFIX) ? TEAM_PREFIX + t : t || "");
 
 // global.json is the main process's file; the page cannot touch it directly.
 // The homepage bridge is the unguarded one, so this is a plain call. There is
@@ -333,6 +339,7 @@ async function readTeam() {
 }
 
 async function writeTeam(name) {
+  name = withTeamPrefix(String(name || "").trim());
   const code = `(()=>{const r=process.mainModule.require.bind(process.mainModule);
 const os=r("os"),fs=r("fs"),path=r("path");
 const p=path.join(os.homedir(),"cicy-ai","global.json");
@@ -4588,9 +4595,12 @@ function HubLoginModal({ hub }) {
         {!codeStep ? (
           <>
             <label style={{ display: "block", fontSize: 12, opacity: .75, marginBottom: 6 }}>{tr("cicyHub.team", "本机 team 名(必填)")}</label>
-            <input data-id="HubLoginModal-team" className="login-email-input" style={{ width: "100%", marginBottom: 12 }} type="text" autoFocus spellCheck={false}
-              value={hub.team || ""} onChange={(e) => hub.setTeam(e.target.value)} placeholder={tr("cicyHub.teamPlaceholder", "例如 xs-1001")}
-              onKeyDown={(e) => { if (e.key === "Enter") hub.sendCode(); }} />
+            <div style={{ display: "flex", alignItems: "center", marginBottom: 12 }}>
+              <span style={{ fontSize: 13, opacity: .55, paddingRight: 6, whiteSpace: "nowrap" }}>{TEAM_PREFIX}</span>
+              <input data-id="HubLoginModal-team" className="login-email-input" style={{ flex: 1, marginBottom: 0 }} type="text" autoFocus spellCheck={false}
+                value={(hub.team || "").replace(TEAM_PREFIX, "")} onChange={(e) => hub.setTeam(e.target.value)} placeholder={tr("cicyHub.teamPlaceholder", "例如 xs-1001")}
+                onKeyDown={(e) => { if (e.key === "Enter") hub.sendCode(); }} />
+            </div>
             <label style={{ display: "block", fontSize: 12, opacity: .75, marginBottom: 6 }}>{tr("cicyHub.email", "邮箱")}</label>
             <input data-id="HubLoginModal-email" className="login-email-input" style={{ width: "100%", marginBottom: 6 }} type="email" spellCheck={false}
               value={hub.email} onChange={(e) => hub.setEmail(e.target.value)} placeholder="you@example.com"
