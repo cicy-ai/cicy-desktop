@@ -1048,26 +1048,31 @@ function ensureWindowsWatchdog(want) {
     ];
     fs.writeFileSync(vbs, lines.join("\r\n"), "latin1");
 
-    execFile(
-      "schtasks",
-      ["/create", "/f", "/tn", WIN_WATCHDOG_TASK, "/sc", "minute", "/mo", "1", "/it",
-       "/tr", `wscript.exe //B //Nologo ${vbs}`],
-      { windowsHide: true },
-      (err) => {
-        if (err) return log.warn(`[watchdog] schtasks failed: ${err.message}`);
-        log.info(`[watchdog] ${WIN_WATCHDOG_TASK} every 1 min → ${vbs}`);
-        // schtasks cannot express these; the Scheduler COM object can.
-        execFile(
-          "powershell.exe",
-          ["-NoProfile", "-NonInteractive", "-Command",
-           `$t=Get-ScheduledTask -TaskName ${WIN_WATCHDOG_TASK} -ErrorAction Stop;` +
-           "$t.Settings.DisallowStartIfOnBatteries=$false;$t.Settings.StopIfGoingOnBatteries=$false;" +
-           `Set-ScheduledTask -TaskName ${WIN_WATCHDOG_TASK} -Settings $t.Settings | Out-Null`],
-          { windowsHide: true },
-          (e2) => { if (e2) log.warn(`[watchdog] battery settings not applied: ${e2.message}`); }
-        );
+    // Build the whole task through the Scheduler COM object in one shot.
+    // `schtasks /mo 1` looks like it sets a one-minute cadence and does not —
+    // the service normalises it back to five, so a killed app could sit dead
+    // for up to five minutes. New-ScheduledTaskTrigger with an explicit
+    // RepetitionInterval is the only thing that actually takes (verified live:
+    // interval=PT1M). The battery flags, which schtasks cannot express at all,
+    // are set in the same call.
+    const q = (str) => "'" + String(str).replace(/'/g, "''") + "'";
+    const ps =
+      `$a=New-ScheduledTaskAction -Execute 'wscript.exe' -Argument ('//B //Nologo ' + ${q(vbs)});` +
+      `$t=New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 1);` +
+      `$p=New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive;` +
+      `$s=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew;` +
+      `Register-ScheduledTask -TaskName ${WIN_WATCHDOG_TASK} -Action $a -Trigger $t -Principal $p -Settings $s -Force | Out-Null`;
+    execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { windowsHide: true }, (err) => {
+      if (err) {
+        // Fall back to schtasks (five-minute cadence, but a live watchdog beats
+        // none) so a PowerShell-less box is still covered.
+        log.warn(`[watchdog] Register-ScheduledTask failed (${err.message}); falling back to schtasks`);
+        execFile("schtasks", ["/create", "/f", "/tn", WIN_WATCHDOG_TASK, "/sc", "minute", "/mo", "1", "/it",
+          "/tr", `wscript.exe //B //Nologo ${vbs}`], { windowsHide: true }, () => {});
+        return;
       }
-    );
+      log.info(`[watchdog] ${WIN_WATCHDOG_TASK} every 1 min (PT1M) → ${vbs}`);
+    });
   } catch (e) {
     log.warn(`[watchdog] ensureWindowsWatchdog threw: ${e.message}`);
   }
