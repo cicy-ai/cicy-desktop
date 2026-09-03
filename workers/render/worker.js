@@ -39,7 +39,7 @@ function ident(request) {
 // the shell always carries the id of the deployment that served it, and
 // /api/version reports the same value — a page can therefore always tell whether
 // it is stale, with nothing to keep in sync by hand.
-const BUILD = "20260903072703"; // replaced at deploy time, monotonic
+const BUILD = "20260903073532"; // replaced at deploy time, monotonic
 
 const json = (o, status) =>
   new Response(JSON.stringify(o), {

@@ -1165,6 +1165,16 @@ export default function App() {
         )}
 
         {hub.loginOpen && <HubLoginModal hub={hub} />}
+        {hub.available && hub.status && !hub.loggedIn && !hub.loginOpen && hub.loginDismissed && (
+          <div className="error" data-id="HubNotLoggedInBanner"
+            style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <span>{tr("cicyHub.notLoggedIn", "这台机器未登录、也还没有 team 名 — 远程管不到它,出事只能到机器前面处理。")}</span>
+            <button type="button" className="btn-primary" data-id="HubNotLoggedInBanner-login"
+              style={{ marginLeft: "auto" }} onClick={() => hub.openLogin()}>
+              {tr("cicyHub.login", "登录 CiCy Hub")}
+            </button>
+          </div>
+        )}
         <div className="app__grid">
           {firstLoading && [0, 1, 2].map((i) => <SkeletonCard key={"skc" + i} />)}
           {!firstLoading && tab === "hub" && (!hub.loggedIn || (hub.instances && hub.instances.length === 0)) && (
@@ -2075,6 +2085,12 @@ function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin, hub }
   const [auditOpen, setAuditOpen] = useState(false);
   const [termsOpen, setTermsOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
+  // The team is asked for at login, but a machine that signed in before that
+  // existed never gets asked — and there was nowhere to see or change it
+  // afterwards, so it stayed anonymous forever. Surface it in the menu.
+  const [teamOpen, setTeamOpen] = useState(false);
+  const [myTeam, setMyTeam] = useState(null); // null = still reading
+  useEffect(() => { let on = true; readTeam().then((t) => on && setMyTeam(t || "")); return () => { on = false; }; }, [teamOpen]);
   const [checkingUpd, setCheckingUpd] = useState(false);
   const [appVer, setAppVer] = useState("");
   const wrap = useRef(null);
@@ -2191,6 +2207,11 @@ function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin, hub }
             <button type="button" data-id="UserChip-terms" className="user-chip__menu-item" onClick={() => { setOpen(false); setTermsOpen(true); }}>
               {tr("firstRunTerms.menu", "用户协议")}
             </button>
+            <button type="button" data-id="UserChip-team" className="user-chip__menu-item" onClick={() => { setOpen(false); setTeamOpen(true); }}>
+              {myTeam
+                ? tr("team.menu", "本机 team:{{name}}", { name: myTeam })
+                : tr("team.menuUnset", "本机 team:未设置")}
+            </button>
             <button type="button" data-id="UserChip-check-update" className="user-chip__menu-item" disabled={checkingUpd} onClick={checkUpdate}>
               {checkingUpd ? tr("updateBanner.checkingShort", "检查中…") : tr("updateBanner.checkBtn", "检查更新")}
             </button>
@@ -2223,8 +2244,51 @@ function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin, hub }
     {trustOpen && <TrustedSitesModal onClose={() => setTrustOpen(false)} />}
     {auditOpen && <AuditLogModal onClose={() => setAuditOpen(false)} />}
     {panelOpen && <PanelMenuModal onClose={() => setPanelOpen(false)} />}
+    {teamOpen && <TeamNameModal current={myTeam || ""} onClose={() => setTeamOpen(false)} />}
     {termsOpen && <FirstRunTermsGate onClose={() => setTermsOpen(false)} />}
     </>
+  );
+}
+
+// Name this machine. The hostname cannot do it — "computer" is a Windows
+// default and more than one box here answers to it — so an operator states it
+// once and everything downstream addresses the machine by that.
+function TeamNameModal({ current, onClose }) {
+  const [name, setName] = useState(current || "");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const save = async () => {
+    const declared = name.trim();
+    if (!TEAM_RE.test(declared)) { setErr(tr("team.invalid", "只能用字母、数字和 . _ -,最长 64")); return; }
+    setBusy(true); setErr("");
+    try {
+      await writeTeam(declared);
+      // Re-announce now; the name is carried in the socket's hello frame, so
+      // without this the change would not show until the next reconnect.
+      try { window.__cicyFleetRelabel && window.__cicyFleetRelabel(); } catch {}
+      onClose();
+    } catch (e) { setErr(String((e && e.message) || e)); setBusy(false); }
+  };
+  return createPortal(
+    <div data-id="TeamNameModal" style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.5)" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: 400, maxWidth: "92vw", background: "var(--card, #1b1d22)", border: "1px solid var(--border, #2c2f36)", borderRadius: 14, padding: 22, boxShadow: "0 20px 60px rgba(0,0,0,.5)" }}>
+        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{tr("team.title", "本机 team 名")}</div>
+        <div style={{ fontSize: 12, opacity: .6, marginBottom: 16 }}>
+          {tr("team.sub", "这台机器的身份。主机名不作数 —— 好几台都叫 computer,认错机器就会操作错机器。")}
+        </div>
+        <input data-id="TeamNameModal-input" className="login-email-input" style={{ width: "100%", marginBottom: 6 }}
+          type="text" autoFocus spellCheck={false} value={name} placeholder={tr("team.placeholder", "例如 xs-1001")}
+          onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") save(); }} />
+        {err && <div className="error" style={{ marginTop: 10 }}>{err}</div>}
+        <div className="modal-actions">
+          <button type="button" className="btn-ghost" data-id="TeamNameModal-cancel" onClick={onClose}>{tr("cicyHub.cancel", "取消")}</button>
+          <button type="button" className="btn-primary" data-id="TeamNameModal-save" disabled={busy} onClick={save}>
+            {busy ? tr("team.saving", "保存中…") : tr("team.save", "保存")}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
   );
 }
 
@@ -4396,6 +4460,11 @@ function useHub() {
   useEffect(() => { let on = true; readTeam().then((t) => on && setTeam(t || "")); return () => { on = false; }; }, []);
   const [busy, setBusy] = useState(false);
   const [loginErr, setLoginErr] = useState("");
+  // A machine that is not signed in is unreachable AND unnamed, which is the
+  // state you least want to discover later — yet the only way in was a menu
+  // item at the bottom of a dropdown nobody opens. Ask on arrival, once. If
+  // it is dismissed a banner stays put, so it can be postponed but not lost.
+  const [loginDismissed, setLoginDismissed] = useState(false);
 
   const refreshStatus = useCallback(async () => {
     if (!bridge) return null;
@@ -4439,8 +4508,15 @@ function useHub() {
     return () => clearInterval(id);
   }, [status?.loggedIn, refresh]);
 
+  const promptedRef = useRef(false);
+  useEffect(() => {
+    if (!bridge || !status || status.loggedIn || promptedRef.current) return;
+    promptedRef.current = true;
+    setLoginErr(""); setStep("email"); setCode(""); setLoginOpen(true);
+  }, [bridge, status]);
+
   const openLogin = (prefill) => { setLoginErr(""); setStep("email"); setCode(""); if (prefill && !email.trim()) setEmail(String(prefill)); setLoginOpen(true); };
-  const closeLogin = () => { if (step === "code") { try { bridge?.cancel(); } catch {} } setLoginOpen(false); setBusy(false); };
+  const closeLogin = () => { if (step === "code") { try { bridge?.cancel(); } catch {} } setLoginOpen(false); setBusy(false); setLoginDismissed(true); };
   const sendCode = async () => {
     const addr = email.trim();
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr)) { setLoginErr(tr("auth.badEmail", "请输入有效的邮箱地址")); return; }
@@ -4482,7 +4558,7 @@ function useHub() {
     available: !!bridge, status, loggedIn: !!status?.loggedIn, owner: status?.owner || "",
     instances, loading, error, refresh, logout, open,
     loginOpen, openLogin, closeLogin, email, setEmail, code, setCode, step, busy, loginErr, sendCode, verify,
-    team, setTeam,
+    team, setTeam, loginDismissed,
   };
 }
 
