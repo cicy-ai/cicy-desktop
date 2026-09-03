@@ -1014,7 +1014,7 @@ function ensureWindowsRunKey(want, command) {
 // again. That is precisely when the app is unreachable, so nothing inside it
 // can fix it: the watchdog has to live outside the process.
 //
-// A scheduled task every 5 minutes runs a VBS that asks WMI whether the exe is
+// A scheduled task every minute runs a VBS that asks WMI whether the exe is
 // running and starts it hidden if not. /it (interactive only) because it
 // launches a GUI app — a session-less run would start something invisible that
 // nobody can use. The battery defaults are cleared afterwards: a watchdog that
@@ -1050,12 +1050,12 @@ function ensureWindowsWatchdog(want) {
 
     execFile(
       "schtasks",
-      ["/create", "/f", "/tn", WIN_WATCHDOG_TASK, "/sc", "minute", "/mo", "5", "/it",
+      ["/create", "/f", "/tn", WIN_WATCHDOG_TASK, "/sc", "minute", "/mo", "1", "/it",
        "/tr", `wscript.exe //B //Nologo ${vbs}`],
       { windowsHide: true },
       (err) => {
         if (err) return log.warn(`[watchdog] schtasks failed: ${err.message}`);
-        log.info(`[watchdog] ${WIN_WATCHDOG_TASK} every 5 min → ${vbs}`);
+        log.info(`[watchdog] ${WIN_WATCHDOG_TASK} every 1 min → ${vbs}`);
         // schtasks cannot express these; the Scheduler COM object can.
         execFile(
           "powershell.exe",
