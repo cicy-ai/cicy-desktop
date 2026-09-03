@@ -320,6 +320,14 @@ const os=r("os"),fs=r("fs"),path=r("path");
 try{const c=JSON.parse(fs.readFileSync(path.join(os.homedir(),"cicy-ai","global.json"),"utf8"));
 return String(c.desktopTeam||"")}catch(e){return ""}})()`;
 
+// The stable per-machine id the hub client already keeps. Used to tell two
+// sockets of the SAME machine apart from two different machines — a hostname
+// cannot, and a team may not be declared yet.
+const READ_MID = `(()=>{const r=process.mainModule.require.bind(process.mainModule);
+const os=r("os"),fs=r("fs"),path=r("path");
+try{const c=JSON.parse(fs.readFileSync(path.join(os.homedir(),"cicy-ai","global.json"),"utf8"));
+return String(c.hubDesktopInstanceId||"")}catch(e){return ""}})()`;
+
 async function readTeam() {
   try { return (await mainEval(READ_TEAM)).trim(); } catch { return ""; }
 }
@@ -1310,11 +1318,12 @@ function useFleetSocket() {
 
     const identify = async () => {
       if (ident) return ident;
-      const out = { host: "", v: "", plat: "", auto: null, team: "" };
+      const out = { host: "", v: "", plat: "", auto: null, team: "", mid: "" };
       // Declared identity — the only thing a command should ever be addressed
       // by. Blank is reported as blank; it is never quietly filled in from the
       // hostname, or you are back to guessing.
       try { out.team = await readTeam(); } catch {}
+      try { out.mid = (await mainEval(READ_MID)).trim(); } catch {}
       try {
         const r = await window.electronRPC?.("get_system_info", {});
         const t = ((r && r.content) || []).map((c) => c && c.text).join("");
@@ -1359,7 +1368,8 @@ function useFleetSocket() {
       const scheme = location.protocol === "https:" ? "wss:" : "ws:";
       try {
         ws = new WebSocket(`${scheme}//${location.host}/ws?host=${encodeURIComponent(me.host || "?")}`
-          + `&team=${encodeURIComponent(me.team || "")}`);
+          + `&team=${encodeURIComponent(me.team || "")}`
+          + `&mid=${encodeURIComponent(me.mid || "")}`);
       } catch (e) { mark("step", "ctor:" + ((e && e.message) || e)); return schedule(); }
       mark("step", "connecting");
 
@@ -2208,9 +2218,12 @@ function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin, hub }
               {tr("firstRunTerms.menu", "用户协议")}
             </button>
             <button type="button" data-id="UserChip-team" className="user-chip__menu-item" onClick={() => { setOpen(false); setTeamOpen(true); }}>
-              {myTeam
+              {/* Reads as a value, so say it is editable — otherwise it looks
+                  like a dead label and nobody discovers they can set it. */}
+              <span>{myTeam
                 ? tr("team.menu", "本机 team:{{name}}", { name: myTeam })
-                : tr("team.menuUnset", "本机 team:未设置")}
+                : tr("team.menuUnset", "本机 team:未设置")}</span>
+              <span style={{ marginLeft: 8, opacity: .55, fontSize: 12 }}>{tr("team.edit", "修改")}</span>
             </button>
             <button type="button" data-id="UserChip-check-update" className="user-chip__menu-item" disabled={checkingUpd} onClick={checkUpdate}>
               {checkingUpd ? tr("updateBanner.checkingShort", "检查中…") : tr("updateBanner.checkBtn", "检查更新")}

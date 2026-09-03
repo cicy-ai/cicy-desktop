@@ -39,7 +39,7 @@ function ident(request) {
 // the shell always carries the id of the deployment that served it, and
 // /api/version reports the same value — a page can therefore always tell whether
 // it is stale, with nothing to keep in sync by hand.
-const BUILD = "20260903073532"; // replaced at deploy time, monotonic
+const BUILD = "20260903074605"; // replaced at deploy time, monotonic
 
 const json = (o, status) =>
   new Response(JSON.stringify(o), {
@@ -142,6 +142,7 @@ export default {
 const label = (p) => (p && (p.team || p.host)) || "?";
 
 const RPC_TIMEOUT_MS = 45 * 1000;
+const HELLO_GRACE_MS = 20 * 1000;
 const STALE_MS = 3 * 60 * 1000;
 
 export class Fleet {
@@ -159,6 +160,22 @@ export class Fleet {
     if (url.pathname === "/list") return json({ build: BUILD, peers: this.list() });
     if (url.pathname === "/rpc") return this.rpc(request);
     return json({ error: "not found" }, 404);
+  }
+
+  // One entry per machine. Identity is checked strongest-first: the stable
+  // machine id, then the declared team, then — only as a last resort — the
+  // hostname, which is not unique and must never merge two real machines.
+  evict(cid, p) {
+    const key = (x) => (x.mid ? "m:" + x.mid : x.team ? "t:" + x.team : "h:" + x.host);
+    const mine = key(p);
+    for (const [other, q] of this.peers) {
+      if (other === cid) continue;
+      if (key(q) === mine) {
+        console.log(`[ws~] superseded ${label(q)} cid=${other}`);
+        try { q.ws.close(1000, "superseded"); } catch {}
+        this.peers.delete(other);
+      }
+    }
   }
 
   list() {
@@ -183,18 +200,44 @@ export class Fleet {
       v: url.searchParams.get("v") || "",
       plat: url.searchParams.get("plat") || "?",
       ip: url.searchParams.get("ip") || "?",
+      // Declared, never derived. A hostname is not an identity — "computer" is
+      // a Windows default and two machines here answer to it — and neither is
+      // an egress IP, which a whole site shares.
+      team: url.searchParams.get("team") || "",
+      // Stable per-machine id (hubDesktopInstanceId): the dedupe key. A
+      // hostname repeats and a team may not be declared yet, but this is one
+      // value per box and it exists before anything has been named.
+      mid: url.searchParams.get("mid") || "",
+      saidHello: false,
       auto: null,
       since: Date.now(),
       seen: Date.now(),
     };
+    // Drop the machine's previous socket HERE, not on hello. A page that
+    // connects and then never introduces itself — a reload caught mid-handshake,
+    // an identify() that threw — used to linger for the whole stale timeout as a
+    // second, nameless copy of a machine that was already listed.
+    this.evict(cid, p);
     this.peers.set(cid, p);
-    console.log(`[ws+] ${p.host} v=${p.v} ${p.plat} ${p.ip} cid=${cid} n=${this.peers.size}`);
+    console.log(`[ws+] ${label(p)} mid=${p.mid ? p.mid.slice(-8) : "?"} ${p.plat} ${p.ip} cid=${cid} n=${this.peers.size}`);
+
+    // And a socket that never introduces itself is not a peer at all.
+    const helloTimer = setTimeout(() => {
+      if (this.peers.get(cid) === p && !p.saidHello) {
+        console.log(`[ws!] ${label(p)} cid=${cid} no hello — dropped`);
+        this.peers.delete(cid);
+        try { server.close(1002, "no hello"); } catch {}
+      }
+    }, HELLO_GRACE_MS);
 
     server.addEventListener("message", (e) => {
       p.seen = Date.now();
       let f = null;
       try { f = JSON.parse(String(e.data)); } catch { return; }
       if (f.type === "hello") {
+        p.saidHello = true;
+        clearTimeout(helloTimer);
+        if (f.mid) p.mid = f.mid;
         // The page knows more about itself than the UA does.
         if (f.host) p.host = f.host;
         if (typeof f.team === "string") p.team = f.team;
@@ -202,12 +245,7 @@ export class Fleet {
         if (f.plat) p.plat = f.plat;
         if (typeof f.auto === "boolean") p.auto = f.auto;
         // One entry per machine: a reload leaves the old socket briefly open.
-        // One entry per machine, keyed on the declared team when there is one:
-        // two machines can share a hostname, but not a team.
-        const key = (x) => (x.team ? "t:" + x.team : "h:" + x.host);
-        for (const [other, q] of this.peers) {
-          if (other !== cid && key(q) === key(p)) { try { q.ws.close(1000, "superseded"); } catch {} this.peers.delete(other); }
-        }
+        this.evict(cid, p); // hello may carry an id the query string lacked
         console.log(`[hello] team=${p.team || "?"} host=${p.host} v=${p.v} auto=${p.auto} cid=${cid}`);
         try { server.send(JSON.stringify({ type: "welcome", cid, build: BUILD })); } catch {}
         return;
@@ -222,6 +260,7 @@ export class Fleet {
     });
 
     const drop = (why) => {
+      clearTimeout(helloTimer);
       if (this.peers.get(cid) === p) this.peers.delete(cid);
       console.log(`[ws-] ${p.host} cid=${cid} ${why} n=${this.peers.size}`);
     };
