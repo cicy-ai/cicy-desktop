@@ -336,9 +336,13 @@ class TabManager {
     this.win.on("enter-full-screen", () => this.sendFullscreen(true));
     this.win.on("leave-full-screen", () => this.sendFullscreen(false));
     this.win.on("resize", () => this.layout());
+    // `closed` fires after the window's webContents is gone, so reading
+    // this.win.webContents there throws "Object has been destroyed" and the
+    // manager registries never get cleaned up. Capture the id up front.
+    const hostWcId = this.win.webContents.id;
     this.win.on("closed", () => {
       managers.delete(accountIdx);
-      managerByHost.delete(this.win.webContents.id);
+      managerByHost.delete(hostWcId);
     });
   }
 
