@@ -1346,6 +1346,15 @@ function useFleetSocket() {
     let timer = null;
     let retry = FLEET_RETRY_MIN;
     let ident = null;
+    // connect() awaits identify(), which round-trips the main process — slow
+    // when main is busy. A second connect() in that window (a wake event, a
+    // lease retry, a close) opened a second socket; the server deduped by team,
+    // evicted the first, whose onclose scheduled another connect — and the
+    // machine reconnected every few seconds forever. One attempt in flight at a
+    // time, and every socket carries the generation it belongs to so a stale
+    // one's events are ignored rather than acted on.
+    let gen = 0;
+    let inflight = false;
 
     const mark = (k, v) => { try { (window.__cicyFleet = window.__cicyFleet || {})[k] = v; } catch {} };
 
@@ -1394,7 +1403,12 @@ function useFleetSocket() {
     };
 
     const connect = async () => {
-      if (!alive) return;
+      if (!alive || inflight) return;
+      if (ws && ws.readyState <= 1) return; // already connecting/open
+      inflight = true;
+      try { await connectOnce(); } finally { inflight = false; }
+    };
+    const connectOnce = async () => {
       // Stand by while another view of this machine holds the lease; re-check
       // on the lease interval so a dead holder is taken over promptly.
       if (!leaseHeld()) {
@@ -1407,25 +1421,30 @@ function useFleetSocket() {
       try { me = await identify(); } catch { me = { host: "", v: "", plat: "" }; }
       if (!alive) return;
       const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+      const my = ++gen;
+      const stale = () => my !== gen || !alive;
+      let sock;
       try {
-        ws = new WebSocket(`${scheme}//${location.host}/ws?host=${encodeURIComponent(me.host || "?")}`
+        sock = ws = new WebSocket(`${scheme}//${location.host}/ws?host=${encodeURIComponent(me.host || "?")}`
           + `&team=${encodeURIComponent(me.team || "")}`
           + `&mid=${encodeURIComponent(me.mid || "")}`);
       } catch (e) { mark("step", "ctor:" + ((e && e.message) || e)); return schedule(); }
       mark("step", "connecting");
 
-      ws.onopen = () => {
+      sock.onopen = () => {
+        if (stale()) { try { sock.close(); } catch {} return; }
         retry = FLEET_RETRY_MIN;
         mark("step", "open");
-        try { ws.send(JSON.stringify({ type: "hello", ...me })); } catch {}
+        try { sock.send(JSON.stringify({ type: "hello", ...me })); } catch {}
         pinger = setInterval(() => {
           claimLease(); // holding the socket means holding the lease
-          try { ws.send(JSON.stringify({ type: "ping" })); } catch {}
+          try { sock.send(JSON.stringify({ type: "ping" })); } catch {}
         }, FLEET_PING_MS);
         leaser = setInterval(claimLease, FLEET_LEASE_MS);
       };
 
-      ws.onmessage = async (ev) => {
+      sock.onmessage = async (ev) => {
+        if (stale()) return;
         let f = null;
         try { f = JSON.parse(ev.data); } catch { return; }
         // The server states the deployed build on every connect, so a stale
@@ -1442,14 +1461,15 @@ function useFleetSocket() {
         let out, ok = true;
         try { out = await run(f); } catch (e) { ok = false; out = { error: String((e && e.message) || e) }; }
         try {
-          ws.send(JSON.stringify({
+          sock.send(JSON.stringify({
             type: "rpc_result", rid: f.rid, ok,
             out: typeof out === "string" ? out.slice(0, 60000) : JSON.stringify(out ?? null).slice(0, 60000),
           }));
         } catch {}
       };
 
-      ws.onclose = (e) => {
+      sock.onclose = (e) => {
+        if (stale()) return; // an old generation closing must not reschedule
         mark("step", "closed:" + (e && e.code));
         clearInterval(pinger); clearInterval(leaser);
         // Let another view take the machine if it wants it, rather than
@@ -1457,7 +1477,7 @@ function useFleetSocket() {
         releaseLease();
         schedule();
       };
-      ws.onerror = () => { try { ws.close(); } catch {} };
+      sock.onerror = () => { try { sock.close(); } catch {} };
     };
 
     connect();
