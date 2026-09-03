@@ -8,6 +8,7 @@ whenever the app is running at all.
 
   wsd ls | nodes                          who is connected right now
   wsd exec <target> <shell command...>    run a shell command there
+  wsd ipc  <target> <channel> [json-args] full IPC: ipcRenderer.invoke(channel,...)
   wsd team <target> <name>                declare which machine this is
   wsd rpc <target> <tool> [json-args]     call an Electron tool there
   wsd js  <target> <file|-|'code'>        run async JS in the page
@@ -129,6 +130,13 @@ def main():
             sys.exit("usage: wsd exec <target> <shell command...>")
         return show(call("/api/rpc", {"target": a[0], "tool": "exec_shell",
                                       "args": {"command": " ".join(a[1:])}}))
+
+    if cmd == "ipc":
+        # Full IPC over the id channel: wsd ipc <target> <channel> [json-args]
+        if len(a) < 2:
+            sys.exit("usage: wsd ipc <target> <channel> [json-args]")
+        args = json.loads(a[2]) if len(a) > 2 else []
+        return show(call("/api/rpc", {"target": a[0], "ipc": a[1], "args": args}))
 
     if cmd == "rpc":
         if len(a) < 2:

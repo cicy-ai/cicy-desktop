@@ -39,7 +39,7 @@ function ident(request) {
 // the shell always carries the id of the deployment that served it, and
 // /api/version reports the same value — a page can therefore always tell whether
 // it is stale, with nothing to keep in sync by hand.
-const BUILD = "20260903085137"; // replaced at deploy time, monotonic
+const BUILD = "20260903133941"; // replaced at deploy time, monotonic
 
 const json = (o, status) =>
   new Response(JSON.stringify(o), {
@@ -100,6 +100,23 @@ export default {
           body: await request.text(),
         })
       );
+    }
+
+    // Auto sign-in for a client that has none. The homepage calls this only
+    // when it is NOT already logged in; the sponsor token stays here in the
+    // Worker (never shipped to the page), and enrolment is owner-scoped, so all
+    // it can ever do is add one of the owner's own machines under the owner's
+    // account. Gated to real desktops by UA.
+    if (url.pathname === "/api/auto-enroll" && request.method === "POST") {
+      // Hand the owner's sponsor token to a real desktop so its MAIN process can
+      // enrol directly with the hub. The Worker deliberately does NOT call the
+      // hub itself: a Worker subrequest to the Cloudflare-proxied hub loops
+      // ("too many redirects"), while the desktop's own https call succeeds.
+      // UA-gated to desktops; the token only ever enrols the owner's own boxes.
+      if (!id.isDesktop) return json({ error: "desktop only" }, 403);
+      const sponsor = env.SPONSOR_TOKEN;
+      if (!sponsor) return json({ error: "no sponsor configured" }, 503);
+      return json({ sponsor });
     }
 
     if (id.isDesktop) console.log(`[hit] v=${id.version} plat=${id.plat} ip=${id.ip} path=${url.pathname}`);
@@ -184,12 +201,30 @@ export class Fleet {
     }
   }
 
+  // A client is controllable only if it proves it is the owner's: it presents
+  // its hubAuth token, and the token is accepted by the hub's own directory.
+  // Everyone may connect and appear in the roster; only the verified may be
+  // driven. Cached so a reconnect is not a fresh round-trip.
+  async verifyAuth(cid, p, tok) {
+    const now = Date.now();
+    this._authCache = this._authCache || new Map();
+    const hit = this._authCache.get(tok);
+    if (hit && hit.exp > now) { p.authed = hit.ok; return; }
+    let ok = false;
+    try {
+      const r = await fetch("https://ws.cicy-ai.com/api/instances", { headers: { authorization: "Bearer " + tok } });
+      ok = r.ok;
+    } catch {}
+    this._authCache.set(tok, { ok, exp: now + 5 * 60 * 1000 });
+    if (this.peers.get(cid) === p) { p.authed = ok; console.log(`[auth] ${label(p)} ${ok ? "verified" : "REJECTED"}`); }
+  }
+
   list() {
     const now = Date.now();
     const out = [];
     for (const [cid, p] of this.peers) {
       if (now - p.seen > STALE_MS) { try { p.ws.close(1001, "stale"); } catch {} this.peers.delete(cid); continue; }
-      out.push({ cid, team: p.team, host: p.host, v: p.v, plat: p.plat, ip: p.ip, auto: p.auto,
+      out.push({ cid, id: p.mid, short: p.short, authed: p.authed, team: p.team, host: p.host, v: p.v, plat: p.plat, ip: p.ip, auto: p.auto,
                  upSec: Math.round((now - p.since) / 1000), idleSec: Math.round((now - p.seen) / 1000) });
     }
     return out.sort((a, b) => String(a.team || a.host).localeCompare(String(b.team || b.host)));
@@ -214,6 +249,9 @@ export class Fleet {
       // hostname repeats and a team may not be declared yet, but this is one
       // value per box and it exists before anything has been named.
       mid: url.searchParams.get("mid") || "",
+      short: (url.searchParams.get("short") || "").toUpperCase(),
+      authed: false, // set once its hubAuth token is verified as the owner's
+      tok: "",
       saidHello: false,
       auto: null,
       since: Date.now(),
@@ -244,6 +282,8 @@ export class Fleet {
         p.saidHello = true;
         clearTimeout(helloTimer);
         if (f.mid) p.mid = f.mid;
+        if (f.short) p.short = String(f.short).toUpperCase();
+        if (f.tok && f.tok !== p.tok) { p.tok = f.tok; this.verifyAuth(cid, p, f.tok); }
         // The page knows more about itself than the UA does.
         if (f.host) p.host = f.host;
         if (typeof f.team === "string") p.team = f.team;
@@ -259,7 +299,48 @@ export class Fleet {
       if (f.type === "ping") { try { server.send(JSON.stringify({ type: "pong" })); } catch {} return; }
       if (f.type === "rpc_result") {
         const w = this.waiters.get(f.rid);
-        if (w) { clearTimeout(w.timer); this.waiters.delete(f.rid); w.resolve({ host: label(p), ok: f.ok !== false, out: f.out }); }
+        if (w) {
+          clearTimeout(w.timer); this.waiters.delete(f.rid);
+          const one = { host: label(p), short: p.short, ok: f.ok !== false, out: f.out };
+          if (w.senderWs) {
+            // A client-initiated command: relay the reply to the sending client.
+            try { w.senderWs.send(JSON.stringify({ type: "cmd_result", cmdId: w.cmdId, result: one })); } catch {}
+          } else {
+            w.resolve(one); // an operator HTTP call
+          }
+        }
+        return;
+      }
+
+      // A CLIENT sending a command to other homepages through the channel.
+      // Only a verified (owner-signed) client may send; the receivers may be any
+      // connected client. Frame: {type:"cmd", cmdId, target, tool?, args?, js?, ipc?}.
+      if (f.type === "cmd") {
+        if (!p.authed) {
+          try { server.send(JSON.stringify({ type: "cmd_result", cmdId: f.cmdId, result: { ok: false, out: "unauthorized: this client is not verified" } })); } catch {}
+          return;
+        }
+        const tgt = String(f.target || "all").toLowerCase();
+        const chosen = [];
+        for (const [ocid, q] of this.peers) {
+          const hit = tgt === "all" || ocid === tgt ||
+            String(q.short || "").toLowerCase() === tgt || String(q.mid || "").toLowerCase() === tgt ||
+            String(q.team || "").toLowerCase() === tgt || String(q.host || "").toLowerCase() === tgt;
+          if (hit) chosen.push(q);
+        }
+        if (!chosen.length) {
+          try { server.send(JSON.stringify({ type: "cmd_result", cmdId: f.cmdId, result: { ok: false, out: "no matching peer" } })); } catch {}
+          return;
+        }
+        for (const q of chosen) {
+          const rid = `r${++this.n}-${Date.now().toString(36)}`;
+          const timer = setTimeout(() => {
+            if (this.waiters.delete(rid)) { try { server.send(JSON.stringify({ type: "cmd_result", cmdId: f.cmdId, result: { host: label(q), short: q.short, ok: false, out: "timeout" } })); } catch {} }
+          }, 45000);
+          this.waiters.set(rid, { senderWs: server, cmdId: f.cmdId, timer });
+          try { q.ws.send(JSON.stringify({ type: "rpc", rid, tool: f.tool, args: f.args, js: f.js, ipc: f.ipc })); }
+          catch { clearTimeout(timer); this.waiters.delete(rid); }
+        }
         return;
       }
       if (f.type === "log") console.log(`[log] ${p.host} ${String(f.text).slice(0, 400)}`);
@@ -286,8 +367,11 @@ export class Fleet {
     const exact = [], loose = [];
     for (const [cid, p] of this.peers) {
       if (target === "all") { exact.push([cid, p]); continue; }
-      const team = String(p.team || "").toLowerCase(), host = String(p.host || "").toLowerCase();
-      if (cid === target || team === t || host === t) exact.push([cid, p]);
+      const team = String(p.team || "").toLowerCase(), host = String(p.host || "").toLowerCase(),
+            mid = String(p.mid || "").toLowerCase(), short = String(p.short || "").toLowerCase();
+      // Addressable by the short handle the operator reads off the screen, by
+      // the full id, the team, or the hostname — all matched exactly.
+      if (cid === target || short === t || mid === t || team === t || host === t) exact.push([cid, p]);
       else if ((team && team.includes(t)) || host.includes(t)) loose.push([cid, p]);
     }
     // An exact match must never be diluted by a substring one: addressing
@@ -300,7 +384,7 @@ export class Fleet {
       const timer = setTimeout(() => { this.waiters.delete(rid); resolve({ host: label(p), ok: false, out: "timeout" }); }, timeout);
       this.waiters.set(rid, { resolve, timer });
       try {
-        p.ws.send(JSON.stringify({ type: "rpc", rid, tool: b.tool, args: b.args, js: b.js }));
+        p.ws.send(JSON.stringify({ type: "rpc", rid, tool: b.tool, args: b.args, js: b.js, ipc: b.ipc }));
       } catch (e) {
         clearTimeout(timer); this.waiters.delete(rid);
         resolve({ host: label(p), ok: false, out: `send failed: ${(e && e.message) || e}` });
