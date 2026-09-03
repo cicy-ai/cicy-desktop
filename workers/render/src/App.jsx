@@ -288,6 +288,10 @@ function UpdateDrawerHost() {
 }
 
 export default function App() {
+  useSelfHeal(); // disarm a build whose auto-install can loop (see useSelfHeal)
+  useHomepageAutoReload(); // last-resort staleness check for a bundle too broken to hold a socket
+  useFleetSocket(); // realtime control channel — the primary way in (see useFleetSocket)
+  useHubControl(); // address-free control channel straight to ws.cicy-ai.com
   // First-run terms gate (合规第一道整体同意) — blocks the whole UI until
   // accepted. undefined = checking, false = must show gate, true = past it.
   // Distinct from the MITM CA opt-in; accepting terms never enables audit.
@@ -1160,6 +1164,392 @@ export default function App() {
 // Backed by window.cicy.trustedOrigins.{list,add,remove}; built-ins (localhost)
 // are greyed + non-removable; the default list is just the built-ins. Inline
 // styles keep it self-contained (no dependency on App.css classes).
+// ── Self-heal on load ────────────────────────────────────────────────────────
+// The homepage is served by the desktop-render Worker, so it is the ONE piece of
+// code that reaches every desktop without needing a channel into that machine.
+// 2.1.336–2.1.338 shipped an auto-install that could not stop: a failed install
+// left the version unchanged, the next check() retried it, and each attempt
+// closes the app — nodes flapped until they were gone, and reaching them again
+// afterwards required a person at the keyboard. A build that still has that loop
+// must therefore disarm itself the moment it renders this page; deploying here is
+// instant and needs nothing from the node.
+//
+// window.cicy is the homepage's (unguarded) bridge, so this is a plain call. It
+// runs once per load, is idempotent, and stays silent unless something is wrong.
+const SAFE_VERSION = "2.1.339"; // first build with the loop guard + quit-before-install
+// Deploying the Worker replaces the homepage, but a desktop that already has it
+// open keeps running the OLD bundle until someone reloads — which on a headless
+// node is nobody. So the page watches its own deployment: /version.json carries
+// the build stamp baked in at build time, and a stamp different from the one this
+// bundle was built with means a newer homepage is live → reload into it.
+// no-store, because the whole point is to see past the CDN cache.
+const BUILD_STAMP = __BUILD_STAMP__;
+const HOMEPAGE_POLL_MS = 5 * 60 * 1000;
+
+// ---------------------------------------------------------------------------
+// The control channel. One realtime socket, no polling.
+//
+// Every other way of reaching a desktop is conditional on that desktop having
+// registered somewhere first: a local cicy-code (agent-desktop) or the hub
+// (hub-desktop). A machine that is running perfectly but registered with
+// neither is invisible to both, and you cannot ask it why without already being
+// able to reach it. That is not a channel you can rely on to fix things.
+//
+// This one has no precondition at all. The page was served by the Worker, so it
+// dials straight back to the same origin: no hub login, no cicy-code, no
+// address, no inbound port, no token on the device. The socket is open exactly
+// while the app is running, so presence is observed rather than inferred, and
+// commands arrive the instant they are issued instead of on the next poll.
+//
+// Frames — page→server: hello (identity), ping, rpc_result, log.
+//          server→page: welcome (carries the deployed build), rpc, reload.
+const FLEET_PING_MS = 25 * 1000;
+const FLEET_RETRY_MIN = 3 * 1000;
+const FLEET_RETRY_MAX = 60 * 1000;
+
+function useFleetSocket() {
+  useEffect(() => {
+    if (typeof location === "undefined" || location.protocol === "file:") return;
+    let alive = true;
+    let ws = null;
+    let pinger = null;
+    let timer = null;
+    let retry = FLEET_RETRY_MIN;
+    let ident = null;
+
+    const mark = (k, v) => { try { (window.__cicyFleet = window.__cicyFleet || {})[k] = v; } catch {} };
+
+    const identify = async () => {
+      if (ident) return ident;
+      const out = { host: "", v: "", plat: "", auto: null };
+      try {
+        const r = await window.electronRPC?.("get_system_info", {});
+        const t = ((r && r.content) || []).map((c) => c && c.text).join("");
+        const j = JSON.parse(t) || {};
+        out.host = j.hostname || "";
+        out.plat = j.platform || "";
+      } catch {}
+      try {
+        const raw = await window.cicy?.app?.getVersion?.();
+        out.v = typeof raw === "string" ? raw : (raw && raw.desktop) || "";
+      } catch {}
+      try { out.auto = await window.cicy?.app?.getAutoUpdate?.(); } catch {}
+      ident = out;
+      return out;
+    };
+
+    // Same reach the RPC channels had: a named Electron tool, or arbitrary async
+    // JS in the page (which can itself call electronRPC, so nothing is lost).
+    const run = async (f) => {
+      if (f.js) {
+        // eslint-disable-next-line no-new-func
+        return await new Function(`return (async()=>{${f.js}})()`)();
+      }
+      if (!f.tool) return { error: "no tool" };
+      const r = await window.electronRPC?.(f.tool, f.args || {});
+      const txt = ((r && r.content) || []).map((c) => c && c.text).join("");
+      try { return JSON.parse(txt); } catch { return txt; }
+    };
+
+    const schedule = () => {
+      if (!alive) return;
+      clearTimeout(timer);
+      timer = setTimeout(connect, retry);
+      retry = Math.min(retry * 2, FLEET_RETRY_MAX);
+    };
+
+    const connect = async () => {
+      if (!alive) return;
+      let me;
+      try { me = await identify(); } catch { me = { host: "", v: "", plat: "" }; }
+      if (!alive) return;
+      const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+      try {
+        ws = new WebSocket(`${scheme}//${location.host}/ws?host=${encodeURIComponent(me.host || "?")}`);
+      } catch (e) { mark("step", "ctor:" + ((e && e.message) || e)); return schedule(); }
+      mark("step", "connecting");
+
+      ws.onopen = () => {
+        retry = FLEET_RETRY_MIN;
+        mark("step", "open");
+        try { ws.send(JSON.stringify({ type: "hello", ...me })); } catch {}
+        pinger = setInterval(() => { try { ws.send(JSON.stringify({ type: "ping" })); } catch {} }, FLEET_PING_MS);
+      };
+
+      ws.onmessage = async (ev) => {
+        let f = null;
+        try { f = JSON.parse(ev.data); } catch { return; }
+        // The server states the deployed build on every connect, so a stale
+        // bundle corrects itself the moment it reconnects — no version poll.
+        if (f.type === "welcome") {
+          mark("cid", f.cid);
+          const mine = parseInt(BUILD_STAMP, 10);
+          const theirs = parseInt(f.build, 10);
+          if (mine && theirs && theirs > mine) { try { location.reload(); } catch {} }
+          return;
+        }
+        if (f.type === "reload") { try { location.reload(); } catch {} return; }
+        if (f.type !== "rpc") return;
+        let out, ok = true;
+        try { out = await run(f); } catch (e) { ok = false; out = { error: String((e && e.message) || e) }; }
+        try {
+          ws.send(JSON.stringify({
+            type: "rpc_result", rid: f.rid, ok,
+            out: typeof out === "string" ? out.slice(0, 60000) : JSON.stringify(out ?? null).slice(0, 60000),
+          }));
+        } catch {}
+      };
+
+      ws.onclose = (e) => { mark("step", "closed:" + (e && e.code)); clearInterval(pinger); schedule(); };
+      ws.onerror = () => { try { ws.close(); } catch {} };
+    };
+
+    connect();
+    // A laptop that was asleep comes back with a dead socket that never fired
+    // onclose; reconnecting on wake is what keeps presence honest.
+    const wake = () => { if (!ws || ws.readyState > 1) { retry = FLEET_RETRY_MIN; connect(); } };
+    window.addEventListener("online", wake);
+    document.addEventListener("visibilitychange", wake);
+    return () => {
+      alive = false;
+      clearInterval(pinger); clearTimeout(timer);
+      window.removeEventListener("online", wake);
+      document.removeEventListener("visibilitychange", wake);
+      try { ws && ws.close(); } catch {}
+    };
+  }, []);
+}
+
+function useHomepageAutoReload() {
+  useEffect(() => {
+    // file:// (the bundled snapshot) has no deployment to track.
+    if (typeof location === "undefined" || location.protocol === "file:") return;
+    let alive = true;
+    let timer = null;
+    const check = async () => {
+      try {
+        const r = await fetch(`./version.json?t=${Date.now()}`, { cache: "no-store" });
+        if (!r.ok) return;
+        const j = await r.json();
+        if (!alive || !j || !j.stamp) return;
+        if (j.stamp !== BUILD_STAMP) {
+          console.warn(`[homepage] newer build live (${j.stamp} != ${BUILD_STAMP}) → reloading`);
+          location.reload();
+        }
+      } catch {}
+    };
+    timer = setInterval(check, HOMEPAGE_POLL_MS);
+    check();
+    return () => { alive = false; if (timer) clearInterval(timer); try { ws && ws.close(); } catch {} };
+  }, []);
+}
+
+// Liveness, independent of cicy-code. Both ways of finding a desktop —
+// agent-desktop and hub-desktop — only see machines that REGISTERED with some
+// cicy-code, so a desktop that is running fine but not registered is invisible;
+// that blind spot cost hours of guessing whether a machine was up. This page
+// talks straight to the Worker, so a heartbeat here means "this app is running
+// right now", whatever cicy-code thinks.
+const HEARTBEAT_MS = 60 * 1000;
+
+// Remote command channel, over the homepage instead of cicy-code.
+//
+// Both existing ways in (agent-desktop, hub-desktop) require the desktop to have
+// registered with some cicy-code; one that is running fine but registered
+// nowhere is unreachable, and there is no way to ask it why without already
+// being able to reach it. The homepage has no such dependency — it is loaded
+// directly from the Worker and holds the (unguarded) window.cicy bridge, so it
+// can run what the RPC channels would have run.
+//
+// The command is a deployed static file, so the Worker needs no state: publish
+// api/cmd.json with a new id and every desktop picks it up on its next poll.
+// Each id runs at most once per machine (localStorage), so a redeploy of the
+// same id is a no-op and a command can never turn into a loop.
+
+// Control channel: the homepage's own socket to ws.cicy-ai.com.
+//
+// Reaching a desktop used to mean going through a cicy-code — agent-desktop for
+// the local one, hub-desktop for a node's — which only works if that desktop
+// registered there. One that is running fine but registered nowhere is
+// unreachable, and you cannot ask it why without already being able to reach it.
+// This socket has no such dependency and needs no address: the desktop dials
+// OUT, the hub routes by instanceId, and commands arrive on the same socket.
+//
+// Auth: POST /api/register with the hubAuth token the desktop already has from
+// signing in → a 5-minute ticket → wss://…/ws?ticket=…. The ticket is short
+// lived by design, so the socket re-registers when it drops.
+//
+// Frames (hub protocol): {type:"ping"} → pong keeps it alive; an inbound
+// {type:"message", message:{kind:"rpc_request", text}} carries a tool call,
+// answered with kind:"rpc_reply" to the sender. Only the owner's own instances
+// can address each other — the hub pins the tenant to the ticket.
+const HUB_ORIGIN = "https://ws.cicy-ai.com";
+const HUB_PING_MS = 30 * 1000;
+
+function useHubControl() {
+  useEffect(() => {
+    if (typeof location === "undefined" || location.protocol === "file:") return;
+    let alive = true;
+    let ws = null;
+    let pinger = null;
+    let retry = 5000;
+
+    const rpc = async (payload) => {
+      // The homepage bridge is the unguarded one, so a tool call here is a
+      // plain call — same reach the RPC channels would have had.
+      const { tool, args, js } = payload || {};
+      if (js) {
+        // eslint-disable-next-line no-new-func
+        return await new Function(`return (async()=>{${js}})()`)();
+      }
+      if (!tool) return { error: "no tool" };
+      const r = await window.electronRPC?.(tool, args || {});
+      const txt = ((r && r.content) || []).map((c) => c && c.text).join("");
+      try { return JSON.parse(txt); } catch { return txt; }
+    };
+
+    const mark = (k, v) => { try { (window.__cicyHub = window.__cicyHub || {})[k] = v; } catch {} };
+    const connect = async () => {
+      if (!alive) return;
+      mark("step", "connect");
+      try {
+        const st = await window.cicy?.hub?.status?.();
+        mark("loggedIn", !!(st && st.loggedIn));
+        if (!st?.loggedIn) { mark("step", "not-logged-in"); return schedule(); }
+        // The ticket has to be minted with the hubAuth token, and that token
+        // lives in global.json — the page cannot read it and the hub bridge does
+        // not hand it out. So the register call runs in the main process (the
+        // homepage bridge is the unguarded one, so this is just a tool call) and
+        // only the short-lived ticket comes back to the page.
+        // The ticket must be minted with the hubAuth token, which lives in
+        // global.json: the page cannot read it and the hub bridge does not hand
+        // it out. So the request runs in the MAIN process and only the
+        // short-lived ticket comes back. It must run in-process rather than via
+        // exec_node — these machines ship Electron only, there is no `node` on
+        // PATH, and exec_node there fails with "'node' is not recognized".
+        const MAIN_REGISTER = [
+          '(async()=>{',
+          'const req=process.mainModule.require.bind(process.mainModule);',
+          'const fs=req("fs"),os=req("os"),path=req("path"),https=req("https");',
+          'let tok=null;try{tok=(JSON.parse(fs.readFileSync(path.join(os.homedir(),"cicy-ai","global.json"),"utf8")).hubAuth||{}).token}catch(e){}',
+          'if(!tok)return JSON.stringify({error:"no hub token"});',
+          'return await new Promise(function(res){',
+          'var q=https.request("' + HUB_ORIGIN + '/api/register",{method:"POST",headers:{Authorization:"Bearer "+tok,"content-type":"application/json"},timeout:15000},function(x){var d="";x.on("data",function(c){d+=c});x.on("end",function(){res(d)})});',
+          'q.on("error",function(e){res(JSON.stringify({error:e.message}))});',
+          'q.on("timeout",function(){q.destroy();res(JSON.stringify({error:"timeout"}))});',
+          'q.end(JSON.stringify({platform:"desktop-"+process.platform,runtime:"cicy-desktop"}));',
+          '})})()',
+        ].join("");
+        const reg = await (async () => {
+          try {
+            const r = await window.electronRPC?.("control_electron_BrowserWindow", { win_id: 1, code: MAIN_REGISTER });
+            const t = ((r && r.content) || []).map((c) => c && c.text).join("");
+            return JSON.parse(t);
+          } catch { return null; }
+        })();
+        mark("reg", reg ? (reg.ticket ? "ok" : JSON.stringify(reg).slice(0,120)) : "null");
+        if (!alive || !reg || !reg.ticket || !reg.wsUrl) { mark("step", "no-ticket"); return schedule(); }
+        ws = new WebSocket(`${reg.wsUrl}?ticket=${encodeURIComponent(reg.ticket)}`);
+        mark("step", "ws-created");
+        ws.onopen = () => {
+          mark("step", "ws-open");
+          retry = 5000;
+          pinger = setInterval(() => { try { ws.send(JSON.stringify({ type: "ping" })); } catch {} }, HUB_PING_MS);
+        };
+        ws.onmessage = async (ev) => {
+          let f = null;
+          try { f = JSON.parse(ev.data); } catch { return; }
+          if (f.type !== "message" || !f.message) return;
+          const m = f.message;
+          if (m.kind !== "rpc_request") return;
+          let out;
+          try { out = await rpc(JSON.parse(m.text)); } catch (e) { out = { error: String((e && e.message) || e) }; }
+          try {
+            ws.send(JSON.stringify({
+              type: "send",
+              targetInstanceId: m.senderInstanceId,
+              kind: "rpc_reply",
+              replyTo: m.id,
+              hopCount: 1,
+              text: JSON.stringify(out).slice(0, 60000),
+            }));
+            ws.send(JSON.stringify({ type: "ack", ids: [m.id] }));
+          } catch {}
+        };
+        ws.onclose = (e) => { mark("step", "ws-closed:" + (e && e.code)); if (pinger) clearInterval(pinger); schedule(); };
+        ws.onerror = () => { try { ws.close(); } catch {} };
+      } catch (e) {
+        mark("step", "threw:" + ((e && e.message) || e));
+        schedule();
+      }
+    };
+    const schedule = () => {
+      if (!alive) return;
+      setTimeout(connect, retry);
+      retry = Math.min(retry * 2, 5 * 60 * 1000);
+    };
+
+    connect();
+    return () => {
+      alive = false;
+      if (pinger) clearInterval(pinger);
+      try { ws && ws.close(); } catch {}
+    };
+  }, []);
+}
+
+function useSelfHeal() {
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const app = window.cicy?.app;
+      if (!app?.getVersion) return; // plain browser / no bridge
+      try {
+        const raw = await app.getVersion();
+        const v = typeof raw === "string" ? raw : String(raw?.desktop || "");
+        if (!alive || !v) return;
+        if (cmpVer(v, SAFE_VERSION) >= 0) return; // already has the guard
+        const on = await app.getAutoUpdate?.();
+        if (on === false) return; // already disarmed
+        // Auto-update stays ON. Disarming it stopped the loop but also stopped
+        // the machine from ever reaching the build that fixes the loop, which is
+        // a dead end. The one-shot below drives that upgrade instead, and the
+        // localStorage marker is what bounds it — one attempt, never a retry
+        // storm, even though the running build has no guard of its own.
+        console.warn(`[self-heal] ${v} predates ${SAFE_VERSION}; driving one controlled upgrade`);
+
+        // Disarming alone is a dead end: the fixed build is exactly what the
+        // (broken) auto-updater would have installed, so the machine can never
+        // reach it on its own. Drive ONE controlled upgrade from here instead.
+        //
+        // The marker is written BEFORE anything starts and lives in
+        // localStorage, which survives the restart the install causes — that is
+        // the whole point. A failed attempt therefore ends as one attempt, not
+        // as the retry loop that took the fleet down. Clearing the key by hand
+        // is the way to allow another try.
+        const KEY = `cicy-oneshot-${SAFE_VERSION}`;
+        try { if (localStorage.getItem(KEY)) return; localStorage.setItem(KEY, String(Date.now())); } catch { return; }
+        try {
+          await app.checkUpdate?.();
+          const st = await app.downloadUpdate?.();
+          if (!alive) return;
+          if (st && st.status === "ready") {
+            console.warn(`[self-heal] ${v} → ${SAFE_VERSION} downloaded; installing once (the app will restart)`);
+            await app.installUpdate?.();
+          } else {
+            console.warn("[self-heal] one-shot upgrade did not reach ready:", st && st.status, st && st.error);
+          }
+        } catch (e) {
+          console.warn("[self-heal] one-shot upgrade failed:", (e && e.message) || e);
+        }
+      } catch (e) {
+        console.warn("[self-heal] skipped:", (e && e.message) || e);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+}
+
 // ── "+ 面板" 菜单配置 ─────────────────────────────────────────────────────────
 // Reorder / rename / switch off the entries of the tab strip's "+" dropdown
 // (面板 / Telegram 矩阵 / Redroid 矩阵 / Facebook 矩阵).

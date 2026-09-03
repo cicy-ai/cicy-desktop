@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""wsd — drive the desktop fleet over the homepage's realtime socket.
+
+The primary channel. Unlike agent-desktop (needs a local cicy-code) and
+hub-desktop (needs a hub login), this one has no precondition: every desktop
+loads its homepage from the Worker and dials straight back, so it is reachable
+whenever the app is running at all.
+
+  wsd ls                                  who is connected right now
+  wsd rpc <target> <tool> [json-args]     call an Electron tool there
+  wsd js  <target> <file|-|'code'>        run async JS in the page
+  wsd main <target> <file|-|'code'>       run JS in the Electron MAIN process
+
+<target> is a hostname, a substring of one, a cid, or `all`.
+"""
+import json, os, sys, urllib.request, urllib.error
+
+CFG = os.path.expanduser("~/cicy-ai/db/desktop-ctrl.json")
+
+
+def cfg():
+    try:
+        with open(CFG) as f:
+            c = json.load(f)
+        return c["base"].rstrip("/"), c["token"]
+    except Exception as e:
+        sys.exit(f"wsd: cannot read {CFG}: {e}")
+
+
+def call(path, payload=None, timeout=130):
+    base, tok = cfg()
+    data = json.dumps(payload).encode() if payload is not None else None
+    req = urllib.request.Request(
+        base + path, data=data,
+        # Cloudflare's bot check answers urllib's default UA with 1010, so
+        # present a normal one — this is our own origin, not a third party.
+        headers={"x-cicy-ctrl": tok, "content-type": "application/json",
+                 "user-agent": "Mozilla/5.0 (X11; Linux x86_64) wsd/1"},
+        method="POST" if data else "GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()[:400]
+        sys.exit(f"wsd: HTTP {e.code} {body}")
+    except Exception as e:
+        sys.exit(f"wsd: {e}")
+
+
+def body(a):
+    """A literal, a file path, or - for stdin."""
+    if a == "-":
+        return sys.stdin.read()
+    return open(a).read() if os.path.exists(a) else a
+
+
+def show(res):
+    for r in res.get("results", []):
+        out = r.get("out")
+        if isinstance(out, str) and out and out[0] in "{[":
+            try:
+                out = json.dumps(json.loads(out), ensure_ascii=False)
+            except Exception:
+                pass
+        print(f"{'ok ' if r.get('ok') else 'ERR'} {r.get('host','?'):<18} {out}")
+
+
+def main():
+    if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help", "help"):
+        sys.exit(__doc__)
+    cmd, a = sys.argv[1], sys.argv[2:]
+
+    if cmd == "ls":
+        d = call("/api/fleet")
+        peers = d.get("peers", [])
+        print(f"build={d.get('build')}  peers={len(peers)}")
+        for p in peers:
+            print(f"  {p['host']:<18} v={p.get('v') or '?':<9} {p.get('plat','?'):<6} "
+                  f"auto={p.get('auto')} up={p.get('upSec')}s idle={p.get('idleSec')}s "
+                  f"ip={p.get('ip')} cid={p.get('cid')}")
+        return
+
+    if cmd == "rpc":
+        if len(a) < 2:
+            sys.exit("usage: wsd rpc <target> <tool> [json-args]")
+        args = json.loads(a[2]) if len(a) > 2 else {}
+        return show(call("/api/rpc", {"target": a[0], "tool": a[1], "args": args}))
+
+    if cmd == "js":
+        if len(a) < 2:
+            sys.exit("usage: wsd js <target> <file|-|code>")
+        return show(call("/api/rpc", {"target": a[0], "js": body(a[1])}))
+
+    if cmd == "main":
+        if len(a) < 2:
+            sys.exit("usage: wsd main <target> <file|-|code>")
+        # Reaches the Electron MAIN process. The homepage bridge is the
+        # unguarded one, so this is a plain call — no consent gate. Two things
+        # bite here: there is no bare `require` in the eval sandbox (use
+        # process.mainModule.require), and the window id is NOT 1 everywhere —
+        # it is per-process, so resolve it instead of assuming.
+        code = body(a[1])
+        wrapper = (
+            "const g = await window.electronRPC('get_windows', {});"
+            "const gt = ((g&&g.content)||[]).map(c=>c&&c.text).join('');"
+            "let wid = 1; try { const ws = JSON.parse(gt); if (ws && ws.length) wid = ws[0].id; } catch (e) {}"
+            "const r = await window.electronRPC('control_electron_BrowserWindow',"
+            "{win_id: wid, code: " + json.dumps(code) + "});"
+            "return ((r&&r.content)||[]).map(c=>c&&c.text).join('');")
+        return show(call("/api/rpc", {"target": a[0], "js": wrapper}))
+
+    sys.exit(f"wsd: unknown command {cmd!r}")
+
+
+if __name__ == "__main__":
+    main()

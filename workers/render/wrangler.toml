@@ -1,4 +1,5 @@
 name = "desktop-render"
+main = "worker.js"
 compatibility_date = "2025-01-01"
 
 # Custom domain — bind desktop.cicy-ai.com to this Worker.
@@ -11,5 +12,16 @@ routes = [
 # lives in ./dist; Workers serves index.html for navigation requests
 # (single-page-app mode) so client-side routes resolve.
 [assets]
+binding = "ASSETS"
 directory = "./dist"
 not_found_handling = "single-page-application"
+
+# The fleet control channel. One Durable Object holds every desktop socket, so
+# presence is a lookup and an RPC is a routed frame rather than a poll.
+[[durable_objects.bindings]]
+name = "FLEET"
+class_name = "Fleet"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Fleet"]

@@ -13,8 +13,21 @@ import obfuscator from "vite-plugin-javascript-obfuscator";
 // deadCodeInjection / selfDefending)以免搞坏 React 运行时。dev 与本地普通 build 不启用、零影响。
 const OBFUSCATE = process.env.CICY_OBFUSCATE === "1";
 
+// The inline deployment watchdog in index.html needs the build stamp; a plugin
+// substitutes it so the marker never ships unreplaced.
+const stampPlugin = () => ({
+  name: "cicy-build-stamp",
+  transformIndexHtml(html) {
+    return html.replaceAll("__BUILD_STAMP__", process.env.CICY_BUILD_STAMP || "dev");
+  },
+});
+
 export default defineConfig({
+  // Build stamp: the page compares it with what the server reports to notice a
+  // newer deployment and reload itself.
+  define: { __BUILD_STAMP__: JSON.stringify(process.env.CICY_BUILD_STAMP || "dev") },
   plugins: [
+    stampPlugin(),
     react(),
     ...(OBFUSCATE
       ? [obfuscator({

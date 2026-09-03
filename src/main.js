@@ -972,6 +972,10 @@ function ensureAutoLaunch() {
       // whose app went away (e.g. an installer closed it) never came back, not
       // even after a reboot. When the API did not take, write the Run key.
       if (probe().openAtLogin !== want) ensureWindowsRunKey(want, runCmd);
+      // The Run key only fires at logon, so it cannot recover a session that is
+      // already logged in — which is exactly the case that hurt (see
+      // ensureWindowsWatchdog). Packaged only: source mode starts via bin/.
+      if (!fromSource) ensureWindowsWatchdog(want);
     } else if (process.platform === "linux") {
       if (!electronApp.isPackaged) return;
       ensureLinuxAutostart(want);
@@ -999,6 +1003,73 @@ function ensureWindowsRunKey(want, command) {
     });
   } catch (e) {
     log.warn(`[autostart] Run-key fallback threw: ${e.message}`);
+  }
+}
+
+// Bring the app back while the user is still logged in.
+//
+// Autostart alone cannot do this. HKCU\...\Run fires at LOGON, so a machine
+// whose app went away mid-session — an update that installed but never
+// relaunched, a crash, a stray taskkill — stays down until somebody signs in
+// again. That is precisely when the app is unreachable, so nothing inside it
+// can fix it: the watchdog has to live outside the process.
+//
+// A scheduled task every 5 minutes runs a VBS that asks WMI whether the exe is
+// running and starts it hidden if not. /it (interactive only) because it
+// launches a GUI app — a session-less run would start something invisible that
+// nobody can use. The battery defaults are cleared afterwards: a watchdog that
+// stands down when a laptop is unplugged is not a watchdog.
+const WIN_WATCHDOG_TASK = "CiCyDesktopWatchdog";
+
+function ensureWindowsWatchdog(want) {
+  try {
+    const { execFile } = require("child_process");
+    if (!want) {
+      execFile("schtasks", ["/delete", "/tn", WIN_WATCHDOG_TASK, "/f"], { windowsHide: true }, () => {});
+      return;
+    }
+    // LOCALAPPDATA has no spaces, so the /tr value needs no inner quoting —
+    // which is where these commands usually break.
+    const dir = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
+    const vbs = path.join(dir, "cicy-desktop-watchdog.vbs");
+    const exe = process.execPath;
+    const lines = [
+      'Set sh = CreateObject("WScript.Shell")',
+      "On Error Resume Next",
+      'Set wmi = GetObject("winmgmts:\\\\.\\root\\cimv2")',
+      "If Err.Number <> 0 Then WScript.Quit",
+      `Set procs = wmi.ExecQuery("SELECT ProcessId FROM Win32_Process WHERE Name = '${path.basename(exe)}'")`,
+      "n = 0",
+      "For Each p In procs",
+      "  n = n + 1",
+      "Next",
+      `If n = 0 Then sh.Run """${exe}"" --hidden", 0, False`,
+      "",
+    ];
+    fs.writeFileSync(vbs, lines.join("\r\n"), "latin1");
+
+    execFile(
+      "schtasks",
+      ["/create", "/f", "/tn", WIN_WATCHDOG_TASK, "/sc", "minute", "/mo", "5", "/it",
+       "/tr", `wscript.exe //B //Nologo ${vbs}`],
+      { windowsHide: true },
+      (err) => {
+        if (err) return log.warn(`[watchdog] schtasks failed: ${err.message}`);
+        log.info(`[watchdog] ${WIN_WATCHDOG_TASK} every 5 min → ${vbs}`);
+        // schtasks cannot express these; the Scheduler COM object can.
+        execFile(
+          "powershell.exe",
+          ["-NoProfile", "-NonInteractive", "-Command",
+           `$t=Get-ScheduledTask -TaskName ${WIN_WATCHDOG_TASK} -ErrorAction Stop;` +
+           "$t.Settings.DisallowStartIfOnBatteries=$false;$t.Settings.StopIfGoingOnBatteries=$false;" +
+           `Set-ScheduledTask -TaskName ${WIN_WATCHDOG_TASK} -Settings $t.Settings | Out-Null`],
+          { windowsHide: true },
+          (e2) => { if (e2) log.warn(`[watchdog] battery settings not applied: ${e2.message}`); }
+        );
+      }
+    );
+  } catch (e) {
+    log.warn(`[watchdog] ensureWindowsWatchdog threw: ${e.message}`);
   }
 }
 
