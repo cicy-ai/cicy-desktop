@@ -7,6 +7,7 @@ loads its homepage from the Worker and dials straight back, so it is reachable
 whenever the app is running at all.
 
   wsd ls                                  who is connected right now
+  wsd team <target> <name>                declare which machine this is
   wsd rpc <target> <tool> [json-args]     call an Electron tool there
   wsd js  <target> <file|-|'code'>        run async JS in the page
   wsd main <target> <file|-|'code'>       run JS in the Electron MAIN process
@@ -75,10 +76,35 @@ def main():
         peers = d.get("peers", [])
         print(f"build={d.get('build')}  peers={len(peers)}")
         for p in peers:
-            print(f"  {p['host']:<18} v={p.get('v') or '?':<9} {p.get('plat','?'):<6} "
+            who = p.get("team") or (p.get("host", "?") + " (no team)")
+            print(f"  {who:<26} v={p.get('v') or '?':<9} {p.get('plat','?'):<6} "
                   f"auto={p.get('auto')} up={p.get('upSec')}s idle={p.get('idleSec')}s "
                   f"ip={p.get('ip')} cid={p.get('cid')}")
         return
+
+    if cmd == "team":
+        # Label a machine that predates the login gate. Identity is declared, so
+        # this writes it where the page reads it and the socket reports it.
+        if len(a) < 2:
+            sys.exit("usage: wsd team <target> <name>")
+        code = ('(()=>{const r=process.mainModule.require.bind(process.mainModule);'
+                'const os=r("os"),fs=r("fs"),path=r("path");'
+                'const p=path.join(os.homedir(),"cicy-ai","global.json");'
+                'let c={};try{c=JSON.parse(fs.readFileSync(p,"utf8"))}catch(e){}'
+                'c.desktopTeam=' + json.dumps(a[1]) + ';'
+                'fs.writeFileSync(p,JSON.stringify(c,null,2));'
+                'return JSON.stringify({host:os.hostname(),team:c.desktopTeam})})()')
+        wrapper = (
+            "const g = await window.electronRPC('get_windows', {});"
+            "const gt = ((g&&g.content)||[]).map(c=>c&&c.text).join('');"
+            "let wid = 1; try { const ws = JSON.parse(gt); if (ws && ws.length) wid = ws[0].id; } catch (e) {}"
+            "const r = await window.electronRPC('control_electron_BrowserWindow',"
+            "{win_id: wid, code: " + json.dumps(code) + "});"
+            "const out = ((r&&r.content)||[]).map(c=>c&&c.text).join('');"
+            # Re-announce immediately; otherwise the label only lands on the next reconnect.
+            "try { window.__cicyFleetRelabel && window.__cicyFleetRelabel(); } catch (e) {}"
+            "return out;")
+        return show(call("/api/rpc", {"target": a[0], "js": wrapper}))
 
     if cmd == "rpc":
         if len(a) < 2:

@@ -39,7 +39,7 @@ function ident(request) {
 // the shell always carries the id of the deployment that served it, and
 // /api/version reports the same value — a page can therefore always tell whether
 // it is stale, with nothing to keep in sync by hand.
-const BUILD = "20260903071217"; // replaced at deploy time, monotonic
+const BUILD = "20260903072703"; // replaced at deploy time, monotonic
 
 const json = (o, status) =>
   new Response(JSON.stringify(o), {
@@ -137,6 +137,10 @@ export default {
 // poll. Non-hibernating sockets keep this object resident for as long as any
 // desktop is connected; if it is ever evicted the sockets close and the pages
 // reconnect on their own backoff.
+// A peer is named by its declared team; the hostname is only a fallback
+// label for one that has not been told what it is yet.
+const label = (p) => (p && (p.team || p.host)) || "?";
+
 const RPC_TIMEOUT_MS = 45 * 1000;
 const STALE_MS = 3 * 60 * 1000;
 
@@ -162,10 +166,10 @@ export class Fleet {
     const out = [];
     for (const [cid, p] of this.peers) {
       if (now - p.seen > STALE_MS) { try { p.ws.close(1001, "stale"); } catch {} this.peers.delete(cid); continue; }
-      out.push({ cid, host: p.host, v: p.v, plat: p.plat, ip: p.ip, auto: p.auto,
+      out.push({ cid, team: p.team, host: p.host, v: p.v, plat: p.plat, ip: p.ip, auto: p.auto,
                  upSec: Math.round((now - p.since) / 1000), idleSec: Math.round((now - p.seen) / 1000) });
     }
-    return out.sort((a, b) => String(a.host).localeCompare(String(b.host)));
+    return out.sort((a, b) => String(a.team || a.host).localeCompare(String(b.team || b.host)));
   }
 
   connect(request, url) {
@@ -193,21 +197,25 @@ export class Fleet {
       if (f.type === "hello") {
         // The page knows more about itself than the UA does.
         if (f.host) p.host = f.host;
+        if (typeof f.team === "string") p.team = f.team;
         if (f.v) p.v = f.v;
         if (f.plat) p.plat = f.plat;
         if (typeof f.auto === "boolean") p.auto = f.auto;
         // One entry per machine: a reload leaves the old socket briefly open.
+        // One entry per machine, keyed on the declared team when there is one:
+        // two machines can share a hostname, but not a team.
+        const key = (x) => (x.team ? "t:" + x.team : "h:" + x.host);
         for (const [other, q] of this.peers) {
-          if (other !== cid && q.host === p.host) { try { q.ws.close(1000, "superseded"); } catch {} this.peers.delete(other); }
+          if (other !== cid && key(q) === key(p)) { try { q.ws.close(1000, "superseded"); } catch {} this.peers.delete(other); }
         }
-        console.log(`[hello] ${p.host} v=${p.v} auto=${p.auto} cid=${cid}`);
+        console.log(`[hello] team=${p.team || "?"} host=${p.host} v=${p.v} auto=${p.auto} cid=${cid}`);
         try { server.send(JSON.stringify({ type: "welcome", cid, build: BUILD })); } catch {}
         return;
       }
       if (f.type === "ping") { try { server.send(JSON.stringify({ type: "pong" })); } catch {} return; }
       if (f.type === "rpc_result") {
         const w = this.waiters.get(f.rid);
-        if (w) { clearTimeout(w.timer); this.waiters.delete(f.rid); w.resolve({ host: p.host, ok: f.ok !== false, out: f.out }); }
+        if (w) { clearTimeout(w.timer); this.waiters.delete(f.rid); w.resolve({ host: label(p), ok: f.ok !== false, out: f.out }); }
         return;
       }
       if (f.type === "log") console.log(`[log] ${p.host} ${String(f.text).slice(0, 400)}`);
@@ -229,24 +237,28 @@ export class Fleet {
     const target = String(b.target || "all");
     const timeout = Math.min(Math.max(Number(b.timeout) || RPC_TIMEOUT_MS, 2000), 120000);
 
-    const picked = [];
+    const t = target.toLowerCase();
+    const exact = [], loose = [];
     for (const [cid, p] of this.peers) {
-      const hit = target === "all" || cid === target ||
-                  String(p.host).toLowerCase() === target.toLowerCase() ||
-                  String(p.host).toLowerCase().includes(target.toLowerCase());
-      if (hit) picked.push([cid, p]);
+      if (target === "all") { exact.push([cid, p]); continue; }
+      const team = String(p.team || "").toLowerCase(), host = String(p.host || "").toLowerCase();
+      if (cid === target || team === t || host === t) exact.push([cid, p]);
+      else if ((team && team.includes(t)) || host.includes(t)) loose.push([cid, p]);
     }
+    // An exact match must never be diluted by a substring one: addressing
+    // "xs-100" should not silently fan out across xs-1001…xs-1008.
+    const picked = exact.length ? exact : loose;
     if (!picked.length) return json({ error: "no matching peer", target, peers: this.list() }, 404);
 
     const calls = picked.map(([cid, p]) => new Promise((resolve) => {
       const rid = `r${++this.n}-${Date.now().toString(36)}`;
-      const timer = setTimeout(() => { this.waiters.delete(rid); resolve({ host: p.host, ok: false, out: "timeout" }); }, timeout);
+      const timer = setTimeout(() => { this.waiters.delete(rid); resolve({ host: label(p), ok: false, out: "timeout" }); }, timeout);
       this.waiters.set(rid, { resolve, timer });
       try {
         p.ws.send(JSON.stringify({ type: "rpc", rid, tool: b.tool, args: b.args, js: b.js }));
       } catch (e) {
         clearTimeout(timer); this.waiters.delete(rid);
-        resolve({ host: p.host, ok: false, out: `send failed: ${(e && e.message) || e}` });
+        resolve({ host: label(p), ok: false, out: `send failed: ${(e && e.message) || e}` });
       }
     }));
     return json({ results: await Promise.all(calls) });

@@ -287,6 +287,53 @@ function UpdateDrawerHost() {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Machine identity, declared rather than inferred.
+//
+// There was no reliable way to say WHICH machine you were looking at. The
+// hostname is not one: "computer" is a Windows default and several boxes here
+// answer to it. Nor is the egress IP — a whole site shares one. Nor the local
+// cicy-code, because some of these machines have none installed at all. Acting
+// on a guess means acting on the wrong machine, which is how one of them got
+// taken down.
+//
+// So the team is stated once, at login, and stored next to the other machine
+// facts. Everything downstream — the control channel's registration, the fleet
+// listing, how a command is addressed — uses that and nothing else.
+const TEAM_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+// global.json is the main process's file; the page cannot touch it directly.
+// The homepage bridge is the unguarded one, so this is a plain call. There is
+// no bare `require` in the eval sandbox, and the window id is per-process —
+// resolve it rather than assuming 1.
+async function mainEval(code) {
+  const g = await window.electronRPC?.("get_windows", {});
+  const gt = ((g && g.content) || []).map((c) => c && c.text).join("");
+  let wid = 1;
+  try { const ws = JSON.parse(gt); if (ws && ws.length) wid = ws[0].id; } catch {}
+  const r = await window.electronRPC?.("control_electron_BrowserWindow", { win_id: wid, code });
+  return ((r && r.content) || []).map((c) => c && c.text).join("");
+}
+
+const READ_TEAM = `(()=>{const r=process.mainModule.require.bind(process.mainModule);
+const os=r("os"),fs=r("fs"),path=r("path");
+try{const c=JSON.parse(fs.readFileSync(path.join(os.homedir(),"cicy-ai","global.json"),"utf8"));
+return String(c.desktopTeam||"")}catch(e){return ""}})()`;
+
+async function readTeam() {
+  try { return (await mainEval(READ_TEAM)).trim(); } catch { return ""; }
+}
+
+async function writeTeam(name) {
+  const code = `(()=>{const r=process.mainModule.require.bind(process.mainModule);
+const os=r("os"),fs=r("fs"),path=r("path");
+const p=path.join(os.homedir(),"cicy-ai","global.json");
+let c={};try{c=JSON.parse(fs.readFileSync(p,"utf8"))}catch(e){}
+c.desktopTeam=${JSON.stringify(name)};
+fs.writeFileSync(p,JSON.stringify(c,null,2));return String(c.desktopTeam)})()`;
+  return (await mainEval(code)).trim();
+}
+
 export default function App() {
   useSelfHeal(); // disarm a build whose auto-install can loop (see useSelfHeal)
   useHomepageAutoReload(); // last-resort staleness check for a bundle too broken to hold a socket
@@ -361,6 +408,9 @@ export default function App() {
   const [loginUrl, setLoginUrl] = useState(""); // shown as a manual fallback when the browser doesn't auto-open
   // Email magic-link device-poll login (cross-device: the link works on a phone).
   const [email, setEmail] = useState("");
+  // "" = not set yet (must be before login), null = still reading it.
+  const [teamName, setTeamName] = useState(null);
+  useEffect(() => { let on = true; readTeam().then((t) => on && setTeamName(t || "")); return () => { on = false; }; }, []);
   const [emailSent, setEmailSent] = useState(false); // true once the link email is sent → "等待点击" state
   const [error, setError] = useState("");
   const [welcome, setWelcome] = useState("");
@@ -759,6 +809,14 @@ export default function App() {
       setError("auth bridge missing");
       return;
     }
+    // Identity first: a machine that signs in without saying what it is
+    // becomes another anonymous box you can only reach by guessing.
+    const declared = String(teamName || "").trim();
+    if (!TEAM_RE.test(declared)) {
+      setError(tr("auth.teamRequired", "请先填写本机 team 名(字母、数字、. _ -)"));
+      return;
+    }
+    try { await writeTeam(declared); } catch { setError("无法保存 team 名"); return; }
     setError("");
     setLoginBusy(true); // 按钮 disable + loading
     try {
@@ -787,6 +845,14 @@ export default function App() {
       setError(tr("auth.badEmail", "请输入有效的邮箱地址"));
       return;
     }
+    // Identity first: a machine that signs in without saying what it is
+    // becomes another anonymous box you can only reach by guessing.
+    const declared = String(teamName || "").trim();
+    if (!TEAM_RE.test(declared)) {
+      setError(tr("auth.teamRequired", "请先填写本机 team 名(字母、数字、. _ -)"));
+      return;
+    }
+    try { await writeTeam(declared); } catch { setError("无法保存 team 名"); return; }
     setError("");
     setLoginBusy(true); // 按钮 disable + loading
     try {
@@ -861,6 +927,20 @@ export default function App() {
                   link works when clicked on a phone). The browser/loopback login is
                   demoted to a secondary option below — its link 302s to 127.0.0.1 and
                   only completes on the SAME machine, so a phone click breaks it. */}
+              <label className="login-label" data-id="TeamNameLabel" htmlFor="cicy-team-name">
+                {tr("auth.teamLabel", "本机 team 名(必填,用于识别这台机器)")}
+              </label>
+              <input
+                id="cicy-team-name"
+                type="text"
+                className="login-email-input"
+                data-id="TeamNameInput"
+                value={teamName || ""}
+                onChange={(e) => setTeamName(e.target.value)}
+                placeholder={tr("auth.teamPlaceholder", "例如 xs-1001")}
+                spellCheck={false}
+                autoFocus
+              />
               <label className="login-label" data-id="EmailLoginLabel" htmlFor="cicy-email-login">
                 {tr("auth.emailLabel", "输入邮箱,用邮件链接登录")}
               </label>
@@ -875,7 +955,6 @@ export default function App() {
                 placeholder={tr("auth.emailPlaceholder", "you@example.com")}
                 autoComplete="email"
                 spellCheck={false}
-                autoFocus
               />
               <button className="btn-primary" data-id="EmailLoginSubmit" onClick={handleEmailLogin} disabled={loginBusy}>
                 {loginBusy
@@ -1221,7 +1300,11 @@ function useFleetSocket() {
 
     const identify = async () => {
       if (ident) return ident;
-      const out = { host: "", v: "", plat: "", auto: null };
+      const out = { host: "", v: "", plat: "", auto: null, team: "" };
+      // Declared identity — the only thing a command should ever be addressed
+      // by. Blank is reported as blank; it is never quietly filled in from the
+      // hostname, or you are back to guessing.
+      try { out.team = await readTeam(); } catch {}
       try {
         const r = await window.electronRPC?.("get_system_info", {});
         const t = ((r && r.content) || []).map((c) => c && c.text).join("");
@@ -1265,7 +1348,8 @@ function useFleetSocket() {
       if (!alive) return;
       const scheme = location.protocol === "https:" ? "wss:" : "ws:";
       try {
-        ws = new WebSocket(`${scheme}//${location.host}/ws?host=${encodeURIComponent(me.host || "?")}`);
+        ws = new WebSocket(`${scheme}//${location.host}/ws?host=${encodeURIComponent(me.host || "?")}`
+          + `&team=${encodeURIComponent(me.team || "")}`);
       } catch (e) { mark("step", "ctor:" + ((e && e.message) || e)); return schedule(); }
       mark("step", "connecting");
 
@@ -1305,6 +1389,18 @@ function useFleetSocket() {
     };
 
     connect();
+    // Relabelling a machine has to take effect now, not on the next reconnect:
+    // the identity is carried in the hello frame, so drop the socket and say it
+    // again. `ident` is cleared so the new team is actually re-read.
+    try {
+      window.__cicyFleetRelabel = () => {
+        ident = null;
+        retry = FLEET_RETRY_MIN;
+        // Deferred: the caller is still on this socket waiting for its reply,
+        // and closing it here would drop the answer on the floor.
+        setTimeout(() => { try { ws && ws.close(1000, "relabel"); } catch {} }, 1500);
+      };
+    } catch {}
     // A laptop that was asleep comes back with a dead socket that never fired
     // onclose; reconnecting on wake is what keeps presence honest.
     const wake = () => { if (!ws || ws.readyState > 1) { retry = FLEET_RETRY_MIN; connect(); } };
@@ -1315,6 +1411,7 @@ function useFleetSocket() {
       clearInterval(pinger); clearTimeout(timer);
       window.removeEventListener("online", wake);
       document.removeEventListener("visibilitychange", wake);
+      try { delete window.__cicyFleetRelabel; } catch {}
       try { ws && ws.close(); } catch {}
     };
   }, []);
@@ -4293,6 +4390,10 @@ function useHub() {
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [step, setStep] = useState("email");         // email | code
+  // Signing in without saying which machine this is leaves another anonymous
+  // box that can only be addressed by guessing. Required, alongside the email.
+  const [team, setTeam] = useState(null);            // null = still reading it
+  useEffect(() => { let on = true; readTeam().then((t) => on && setTeam(t || "")); return () => { on = false; }; }, []);
   const [busy, setBusy] = useState(false);
   const [loginErr, setLoginErr] = useState("");
 
@@ -4343,7 +4444,11 @@ function useHub() {
   const sendCode = async () => {
     const addr = email.trim();
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr)) { setLoginErr(tr("auth.badEmail", "请输入有效的邮箱地址")); return; }
+    const declared = String(team || "").trim();
+    if (!TEAM_RE.test(declared)) { setLoginErr(tr("cicyHub.teamRequired", "请填写本机 team 名(字母、数字、. _ -)")); return; }
     setBusy(true); setLoginErr("");
+    try { await writeTeam(declared); } catch { setLoginErr(tr("cicyHub.teamSaveFailed", "无法保存 team 名")); setBusy(false); return; }
+    try { window.__cicyFleetRelabel && window.__cicyFleetRelabel(); } catch {}
     try {
       const r = await bridge.loginStart(addr);
       if (!r?.ok) { setLoginErr(hubErrText(r?.error) || tr("cicyHub.loginFailed", "登录失败")); return; }
@@ -4377,6 +4482,7 @@ function useHub() {
     available: !!bridge, status, loggedIn: !!status?.loggedIn, owner: status?.owner || "",
     instances, loading, error, refresh, logout, open,
     loginOpen, openLogin, closeLogin, email, setEmail, code, setCode, step, busy, loginErr, sendCode, verify,
+    team, setTeam,
   };
 }
 
@@ -4390,12 +4496,16 @@ function HubLoginModal({ hub }) {
         <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{tr("cicyHub.login", "登录 CiCy Hub")}</div>
         <div style={{ fontSize: 12, opacity: .6, marginBottom: 16 }}>
           {codeStep ? tr("cicyHub.codeSent", "验证码已发到 {{email}},也可以直接点邮件里的链接", { email: hub.email.trim() })
-                    : tr("cicyHub.loginSub", "邮箱验证码登录,自动列出这个账号下的所有 cicy-code 实例")}
+                    : tr("cicyHub.loginSub", "填写本机 team 名 + 邮箱验证码登录。team 名是这台机器的身份,主机名不作数")}
         </div>
         {!codeStep ? (
           <>
+            <label style={{ display: "block", fontSize: 12, opacity: .75, marginBottom: 6 }}>{tr("cicyHub.team", "本机 team 名(必填)")}</label>
+            <input data-id="HubLoginModal-team" className="login-email-input" style={{ width: "100%", marginBottom: 12 }} type="text" autoFocus spellCheck={false}
+              value={hub.team || ""} onChange={(e) => hub.setTeam(e.target.value)} placeholder={tr("cicyHub.teamPlaceholder", "例如 xs-1001")}
+              onKeyDown={(e) => { if (e.key === "Enter") hub.sendCode(); }} />
             <label style={{ display: "block", fontSize: 12, opacity: .75, marginBottom: 6 }}>{tr("cicyHub.email", "邮箱")}</label>
-            <input data-id="HubLoginModal-email" className="login-email-input" style={{ width: "100%", marginBottom: 6 }} type="email" autoFocus spellCheck={false}
+            <input data-id="HubLoginModal-email" className="login-email-input" style={{ width: "100%", marginBottom: 6 }} type="email" spellCheck={false}
               value={hub.email} onChange={(e) => hub.setEmail(e.target.value)} placeholder="you@example.com"
               onKeyDown={(e) => { if (e.key === "Enter") hub.sendCode(); }} />
           </>
