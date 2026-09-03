@@ -6,13 +6,15 @@ hub-desktop (needs a hub login), this one has no precondition: every desktop
 loads its homepage from the Worker and dials straight back, so it is reachable
 whenever the app is running at all.
 
-  wsd ls                                  who is connected right now
+  wsd ls | nodes                          who is connected right now
+  wsd exec <target> <shell command...>    run a shell command there
   wsd team <target> <name>                declare which machine this is
   wsd rpc <target> <tool> [json-args]     call an Electron tool there
   wsd js  <target> <file|-|'code'>        run async JS in the page
   wsd main <target> <file|-|'code'>       run JS in the Electron MAIN process
 
-<target> is a hostname, a substring of one, a cid, or `all`.
+<target> is a team (desktop-xs-1001, or just xs-1001), a hostname, a cid, or `all`.
+Add --json anywhere for machine-readable output.
 """
 import json, os, sys, urllib.request, urllib.error
 
@@ -55,7 +57,16 @@ def body(a):
     return open(a).read() if os.path.exists(a) else a
 
 
+JSON = False
+
+
 def show(res):
+    if JSON:
+        print(json.dumps(res, ensure_ascii=False, indent=2)); return
+    _show(res)
+
+
+def _show(res):
     for r in res.get("results", []):
         out = r.get("out")
         if isinstance(out, str) and out and out[0] in "{[":
@@ -67,13 +78,18 @@ def show(res):
 
 
 def main():
-    if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help", "help"):
+    global JSON
+    argv = [x for x in sys.argv[1:] if x != "--json"]
+    JSON = "--json" in sys.argv
+    if not argv or argv[0] in ("-h", "--help", "help"):
         sys.exit(__doc__)
-    cmd, a = sys.argv[1], sys.argv[2:]
+    cmd, a = argv[0], argv[1:]
 
-    if cmd == "ls":
+    if cmd in ("ls", "nodes"):
         d = call("/api/fleet")
         peers = d.get("peers", [])
+        if JSON:
+            print(json.dumps(peers, ensure_ascii=False, indent=2)); return
         print(f"build={d.get('build')}  peers={len(peers)}")
         for p in peers:
             who = p.get("team") or (p.get("host", "?") + " (no team)")
@@ -107,6 +123,12 @@ def main():
             "try { window.__cicyFleetRelabel && window.__cicyFleetRelabel(); } catch (e) {}"
             "return out;")
         return show(call("/api/rpc", {"target": a[0], "js": wrapper}))
+
+    if cmd == "exec":
+        if len(a) < 2:
+            sys.exit("usage: wsd exec <target> <shell command...>")
+        return show(call("/api/rpc", {"target": a[0], "tool": "exec_shell",
+                                      "args": {"command": " ".join(a[1:])}}))
 
     if cmd == "rpc":
         if len(a) < 2:
