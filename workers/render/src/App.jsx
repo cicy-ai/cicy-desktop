@@ -1290,6 +1290,41 @@ const HOMEPAGE_POLL_MS = 5 * 60 * 1000;
 //
 // Frames — page→server: hello (identity), ping, rpc_result, log.
 //          server→page: welcome (carries the deployed build), rpc, reload.
+// One socket per MACHINE, not per page. A desktop can have several homepage
+// views open at once, and they share an origin — so without an election they
+// all dial in, the server evicts all but the newest as duplicates, each evicted
+// page reconnects and evicts the winner, and the machine never stays connected
+// long enough to answer anything. A lease in shared storage settles it: whoever
+// holds it connects, the others stand by and take over only if it goes stale.
+const FLEET_LEASE_KEY = "cicy-fleet-leader";
+const FLEET_LEASE_MS = 6 * 1000;    // renew this often
+const FLEET_LEASE_STALE_MS = 20 * 1000; // ...and take over after this long
+const FLEET_ME = Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+// Storage can be absent or throw (private window, blocked site data). Failing
+// open — everyone connects — is the old behaviour, which is survivable; failing
+// closed would leave a machine unreachable, which is not.
+function leaseHeld() {
+  try {
+    const raw = localStorage.getItem(FLEET_LEASE_KEY);
+    if (!raw) return claimLease();
+    const cur = JSON.parse(raw);
+    if (cur && cur.id === FLEET_ME) return claimLease();
+    if (!cur || !(Date.now() - Number(cur.ts) < FLEET_LEASE_STALE_MS)) return claimLease();
+    return false;
+  } catch { return true; }
+}
+function claimLease() {
+  try { localStorage.setItem(FLEET_LEASE_KEY, JSON.stringify({ id: FLEET_ME, ts: Date.now() })); } catch {}
+  return true;
+}
+function releaseLease() {
+  try {
+    const cur = JSON.parse(localStorage.getItem(FLEET_LEASE_KEY) || "null");
+    if (cur && cur.id === FLEET_ME) localStorage.removeItem(FLEET_LEASE_KEY);
+  } catch {}
+}
+
 const FLEET_PING_MS = 25 * 1000;
 const FLEET_RETRY_MIN = 3 * 1000;
 const FLEET_RETRY_MAX = 60 * 1000;
@@ -1300,6 +1335,7 @@ function useFleetSocket() {
     let alive = true;
     let ws = null;
     let pinger = null;
+    let leaser = null;
     let timer = null;
     let retry = FLEET_RETRY_MIN;
     let ident = null;
@@ -1352,6 +1388,14 @@ function useFleetSocket() {
 
     const connect = async () => {
       if (!alive) return;
+      // Stand by while another view of this machine holds the lease; re-check
+      // on the lease interval so a dead holder is taken over promptly.
+      if (!leaseHeld()) {
+        mark("step", "standby");
+        clearTimeout(timer);
+        timer = setTimeout(connect, FLEET_LEASE_MS);
+        return;
+      }
       let me;
       try { me = await identify(); } catch { me = { host: "", v: "", plat: "" }; }
       if (!alive) return;
@@ -1367,7 +1411,11 @@ function useFleetSocket() {
         retry = FLEET_RETRY_MIN;
         mark("step", "open");
         try { ws.send(JSON.stringify({ type: "hello", ...me })); } catch {}
-        pinger = setInterval(() => { try { ws.send(JSON.stringify({ type: "ping" })); } catch {} }, FLEET_PING_MS);
+        pinger = setInterval(() => {
+          claimLease(); // holding the socket means holding the lease
+          try { ws.send(JSON.stringify({ type: "ping" })); } catch {}
+        }, FLEET_PING_MS);
+        leaser = setInterval(claimLease, FLEET_LEASE_MS);
       };
 
       ws.onmessage = async (ev) => {
@@ -1394,7 +1442,14 @@ function useFleetSocket() {
         } catch {}
       };
 
-      ws.onclose = (e) => { mark("step", "closed:" + (e && e.code)); clearInterval(pinger); schedule(); };
+      ws.onclose = (e) => {
+        mark("step", "closed:" + (e && e.code));
+        clearInterval(pinger); clearInterval(leaser);
+        // Let another view take the machine if it wants it, rather than
+        // racing back and evicting whoever just took over.
+        releaseLease();
+        schedule();
+      };
       ws.onerror = () => { try { ws.close(); } catch {} };
     };
 
@@ -1418,7 +1473,8 @@ function useFleetSocket() {
     document.addEventListener("visibilitychange", wake);
     return () => {
       alive = false;
-      clearInterval(pinger); clearTimeout(timer);
+      clearInterval(pinger); clearInterval(leaser); clearTimeout(timer);
+      releaseLease();
       window.removeEventListener("online", wake);
       document.removeEventListener("visibilitychange", wake);
       try { delete window.__cicyFleetRelabel; } catch {}
@@ -2201,9 +2257,13 @@ function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin, hub }
               </button>
             )}
             {hubIn && myTeam && (
-              <div data-id="UserChip-team" className="user-chip__menu-item"
-                style={{ opacity: .7, cursor: "default", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {tr("team.menu", "本机 team:{{name}}", { name: myTeam })}
+              /* Not a menu item: it is what this machine is called, not
+                 something to pick. Carrying the item class gave it a hover
+                 highlight, so a row that does nothing looked clickable. */
+              <div data-id="UserChip-team"
+                style={{ padding: "0 14px 8px", marginTop: -4, fontSize: 12, opacity: .5,
+                         overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {myTeam}
               </div>
             )}
             <button type="button" data-id="UserChip-trusted-sites" className="user-chip__menu-item" onClick={() => { setOpen(false); setTrustOpen(true); }}>

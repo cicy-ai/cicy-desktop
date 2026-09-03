@@ -39,7 +39,7 @@ function ident(request) {
 // the shell always carries the id of the deployment that served it, and
 // /api/version reports the same value — a page can therefore always tell whether
 // it is stale, with nothing to keep in sync by hand.
-const BUILD = "20260903075904"; // replaced at deploy time, monotonic
+const BUILD = "20260903080740"; // replaced at deploy time, monotonic
 
 const json = (o, status) =>
   new Response(JSON.stringify(o), {
@@ -162,11 +162,17 @@ export class Fleet {
     return json({ error: "not found" }, 404);
   }
 
-  // One entry per machine. Identity is checked strongest-first: the stable
-  // machine id, then the declared team, then — only as a last resort — the
-  // hostname, which is not unique and must never merge two real machines.
+  // One entry per machine, keyed on the DECLARED team first.
+  //
+  // The machine id looked like the stronger key and is not: these Windows boxes
+  // were cloned from one image, so they carry an identical hubDesktopInstanceId
+  // and keying on it made two different machines evict each other forever —
+  // each one connecting knocked the other off, and neither stayed up long
+  // enough to answer anything. The team is assigned per machine by the person
+  // who owns it, so it is the only value here that is unique by construction.
+  // The id and the hostname remain as fallbacks for a machine not yet named.
   evict(cid, p) {
-    const key = (x) => (x.mid ? "m:" + x.mid : x.team ? "t:" + x.team : "h:" + x.host);
+    const key = (x) => (x.team ? "t:" + x.team : x.mid ? "m:" + x.mid : "h:" + x.host);
     const mine = key(p);
     for (const [other, q] of this.peers) {
       if (other === cid) continue;
