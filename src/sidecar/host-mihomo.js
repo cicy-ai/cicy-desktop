@@ -60,6 +60,11 @@ function ensureLink() {
   } catch {}
 }
 const HOST_CONFIG = path.join(os.homedir(), "cicy-ai", "db", "mihomo-host.yaml");
+// 「独立管理」开关:此标记文件存在时,不再从容器同步覆盖 mihomo-host.yaml,
+// host mihomo 用宿主自己的配置独立运行(见 sidecar-ipc maybeStartChromeProxy)。
+// 按机器可选,默认不存在=保持原有容器→宿主同步行为。删掉文件即恢复同步。
+const STANDALONE_FLAG = path.join(os.homedir(), "cicy-ai", "db", "mihomo-host.standalone");
+function standalonePinned() { try { return fs.existsSync(STANDALONE_FLAG); } catch { return false; } }
 // Log lives under ~/logs, NOT db/ — db/ holds data + config only (config below
 // stays in db/ as mihomo-host.yaml; this is just the runtime log).
 const HOST_LOG = path.join(os.homedir(), "logs", "mihomo-host.log");
@@ -255,6 +260,6 @@ async function enable({ containerYaml, selections = {}, emit } = {}) {
 module.exports = {
   VER, assetUrl, binPath, binPresent, ensureBinary,
   buildHostConfig, writeConfig, planSelectionUpdates, syncSelections,
-  start, stop, running, enable,
-  HOST_CONFIG, HOST_LOG,
+  start, stop, running, enable, standalonePinned,
+  HOST_CONFIG, HOST_LOG, STANDALONE_FLAG,
 };

@@ -369,6 +369,15 @@ function register({ sidecarLogPath } = {}) {
   // 已在跑也同步一次配置(容器侧节点可能被云端更新),变了才重启。幂等。二进制不在会自动下。
   async function maybeStartChromeProxy() {
     if (!APP_DOCKER_SUPPORTED) return;
+    // 「独立管理」开关:标记文件在 → 不从容器同步覆盖宿主配置,host mihomo
+    // 用宿主自己的 mihomo-host.yaml 独立跑(没跑就用现有宿主配置起来)。幂等。
+    if (hostMihomo.standalonePinned()) {
+      if (!hostMihomo.running() && hostMihomo.binPresent()) {
+        try { await hostMihomo.enable({ containerYaml: null }); }
+        catch (e) { log.warn(`[chrome-proxy] standalone start failed: ${e.message}`); }
+      }
+      return;
+    }
     const [yaml, selections] = await Promise.all([
       appDocker.readMihomoConfig(APP_CONTAINER),
       appDocker.readMihomoSelections(APP_CONTAINER),
