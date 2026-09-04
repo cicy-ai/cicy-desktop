@@ -24,6 +24,7 @@ const BUILTIN = [
   { id: "telegram-matrix", title: "Telegram 矩阵" },
   { id: "redroid-matrix", title: "Redroid 矩阵" },
   { id: "facebook-matrix", title: "Facebook 矩阵" },
+  { id: "tiktok-matrix", title: "TikTok 矩阵" },
 ];
 const BUILTIN_IDS = new Set(BUILTIN.map((b) => b.id));
 

@@ -48,6 +48,17 @@ function profileForCell(url, requested) {
 }
 const telegramIdentity = require("./telegram-identity");
 const facebookIdentity = require("./facebook-identity");
+const tiktokIdentity = require("./tiktok-identity");
+
+// 站点 → 身份模块。加平台只加一行,不再叠三元表达式。
+const IDENTITY_SITES = [
+  { match: (u) => telegramIdentity.isTelegramUrl(u), script: () => telegramIdentity.TELEGRAM_IDENTITY_SCRIPT,
+    normalize: (r) => telegramIdentity.normalizeTelegramIdentity(r), record: (it) => telegramIdentity.telegramLoginRecord(it) },
+  { match: (u) => facebookIdentity.isFacebookUrl(u), script: () => facebookIdentity.FACEBOOK_IDENTITY_SCRIPT,
+    normalize: (r) => facebookIdentity.normalizeFacebookIdentity(r), record: (it) => facebookIdentity.facebookLoginRecord(it) },
+  { match: (u) => tiktokIdentity.isTiktokUrl(u), script: () => tiktokIdentity.TIKTOK_IDENTITY_SCRIPT,
+    normalize: (r) => tiktokIdentity.normalizeTiktokIdentity(r), record: (it) => tiktokIdentity.tiktokLoginRecord(it) },
+];
 const appliedProxy = new Set(); // partitions whose proxy is already configured
 function ensureCellSessionProxy(idx) {
   const part = partitionFor(idx);
@@ -229,12 +240,12 @@ class PanelCells {
     const detectIdentity = () => {
       if (profileIdx === 0) return;
       let url = ""; try { url = wc.getURL(); } catch (e) {}
-      // 站点 → 身份模块(Telegram Web K / Facebook);其他站点不探。
-      const site = telegramIdentity.isTelegramUrl(url) ? telegramIdentity : facebookIdentity.isFacebookUrl(url) ? facebookIdentity : null;
+      // 站点 → 身份模块(Telegram / Facebook / TikTok);其他站点不探。
+      const site = IDENTITY_SITES.find((s) => s.match(url)) || null;
       if (!site) return;
-      const script = site === telegramIdentity ? telegramIdentity.TELEGRAM_IDENTITY_SCRIPT : facebookIdentity.FACEBOOK_IDENTITY_SCRIPT;
-      const normalize = site === telegramIdentity ? telegramIdentity.normalizeTelegramIdentity : facebookIdentity.normalizeFacebookIdentity;
-      const record = site === telegramIdentity ? telegramIdentity.telegramLoginRecord : facebookIdentity.facebookLoginRecord;
+      const script = site.script();
+      const normalize = site.normalize;
+      const record = site.record;
       const seq = ++identSeq;
       const delays = [2500, 8000, 20000, 45000];
       const tick = async (i) => {
@@ -401,6 +412,7 @@ function installIpc(findTab) {
           login: { phone: String((p.telegramLogin || {}).phone || ""), codeUrl: String((p.telegramLogin || {}).codeUrl || "") },
           telegram: telegramIdentity.telegramIdentityFromProfile(p),
           facebook: facebookIdentity.facebookIdentityFromProfile(p),
+          tiktok: tiktokIdentity.tiktokIdentityFromProfile(p),
           ipInfo: p.ipInfo && p.ipInfo.ip ? { ip: String(p.ipInfo.ip), area: String(p.ipInfo.area || ""), probedAt: String(p.ipInfo.probedAt || "") } : null,
         }));
     } catch (err) { return []; }

@@ -23,6 +23,11 @@ const PRESETS = {
     title: "Facebook 矩阵",
     query: "preset=facebook-matrix",
   },
+  "tiktok-matrix": {
+    preset: "tiktok-matrix",
+    title: "TikTok 矩阵",
+    query: "preset=tiktok-matrix",
+  },
 };
 
 function resolvePanelPreset(value) {

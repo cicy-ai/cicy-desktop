@@ -30,6 +30,6 @@ test("facebook-matrix page targets facebook and its own cell ids / storage key",
 
 test("panel-cells detects Facebook identities and lists them on profiles", () => {
   const src = read("src/tabbrowser/panel-cells.js");
-  assert.match(src, /facebookIdentity\.isFacebookUrl\(url\)/);
+  assert.match(src, /facebookIdentity\.isFacebookUrl\(u\)/);
   assert.match(src, /facebook: facebookIdentity\.facebookIdentityFromProfile\(p\),/);
 });

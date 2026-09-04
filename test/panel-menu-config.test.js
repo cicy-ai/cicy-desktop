@@ -34,10 +34,10 @@ test("panel menu: no config → every built-in, enabled, in shipped order", () =
     const list = store.list();
     assert.deepEqual(
       list.map((i) => i.id),
-      ["blank", "telegram-matrix", "redroid-matrix", "facebook-matrix"]
+      ["blank", "telegram-matrix", "redroid-matrix", "facebook-matrix", "tiktok-matrix"]
     );
     assert.ok(list.every((i) => i.enabled));
-    assert.equal(store.enabled().length, 4);
+    assert.equal(store.enabled().length, 5);
   });
 });
 
@@ -52,14 +52,14 @@ test("panel menu: homepage can reorder, rename and disable", () => {
     // configured order first, untouched built-ins appended
     assert.deepEqual(
       list.map((i) => i.id),
-      ["telegram-matrix", "blank", "redroid-matrix", "facebook-matrix"]
+      ["telegram-matrix", "blank", "redroid-matrix", "facebook-matrix", "tiktok-matrix"]
     );
     assert.equal(list[0].title, "我的 TG"); // rename honoured
     assert.equal(list.find((i) => i.id === "redroid-matrix").enabled, false);
     // the dropdown skips the disabled one
     assert.deepEqual(
       store.enabled().map((i) => i.id),
-      ["telegram-matrix", "blank", "facebook-matrix"]
+      ["telegram-matrix", "blank", "facebook-matrix", "tiktok-matrix"]
     );
     // a renamed entry also renames its tab
     assert.equal(store.titleFor("telegram-matrix"), "我的 TG");
@@ -84,7 +84,7 @@ test("panel menu: disabling everything falls back to built-ins, never an empty m
   withHome((store) => {
     store.save(store.list().map((i) => ({ ...i, enabled: false })));
     assert.ok(store.list().every((i) => !i.enabled)); // the setting is respected…
-    assert.equal(store.enabled().length, 4); // …but the menu still renders
+    assert.equal(store.enabled().length, 5); // …but the menu still renders
   });
 });
 
