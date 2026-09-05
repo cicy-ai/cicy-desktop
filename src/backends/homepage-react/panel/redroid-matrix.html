@@ -1,0 +1,668 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Redroid 矩阵</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg:#0b0b0d; --panel:#121215; --card:#17171b; --card2:#1d1d22; --line:rgba(255,255,255,.07); --line2:rgba(255,255,255,.12);
+      --fg:#ececf1; --fg2:#b6b6c0; --muted:#7c7c88; --accent:#4f8cff; --accent2:#3b6fd6;
+      --ok:#2ecc71; --warn:#f5a623; --bad:#ff5c5c; --info:#7aa2ff;
+      --gA:#2ecc71; --gB:#8fd14f; --gC:#f5a623; --gD:#ff5c5c;
+      font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: var(--bg); color: var(--fg); font-size: 13px; line-height: 1.45; }
+    body { display: grid; grid-template-columns: 296px minmax(0, 1fr) 380px; }
+    button { font: inherit; border: 0; border-radius: 8px; padding: 7px 12px; color: #fff; background: var(--accent); cursor: pointer; font-weight: 600; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; line-height: 1.2; transition: background .12s, filter .12s; }
+    button:hover { filter: brightness(1.08); }
+    button:disabled { opacity: .5; cursor: default; filter: none; }
+    button.ghost { background: var(--card2); color: var(--fg); border: 1px solid var(--line2); }
+    button.ghost:hover { background: #26262c; }
+    button.subtle { background: transparent; color: var(--fg2); border: 1px solid transparent; }
+    button.subtle:hover { background: var(--card2); color: var(--fg); }
+    button.sm { padding: 4px 9px; font-size: 12px; border-radius: 6px; }
+    button.danger { background: #b3261e; }
+    button svg { width: 15px; height: 15px; flex: none; }
+    input, select, textarea { font: inherit; background: #0e0e11; border: 1px solid var(--line2); color: var(--fg); border-radius: 7px; padding: 6px 9px; min-width: 0; }
+    input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(79,140,255,.2); }
+    ::-webkit-scrollbar { width: 8px; height: 8px; } ::-webkit-scrollbar-thumb { background: #2a2a31; border-radius: 8px; }
+    .ico { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+    /* ── sidebar ─────────────────────────────────────────────── */
+    aside { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-width: 0; }
+    .side-head { padding: 14px 14px 10px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .side-head h1 { margin: 0; font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+    .side-head h1 .cnt { font-size: 11px; color: var(--muted); font-weight: 500; background: var(--card2); padding: 1px 7px; border-radius: 999px; }
+    .side-tools { display: flex; gap: 6px; padding: 0 14px 10px; }
+    .side-tools input { flex: 1; padding: 5px 9px; font-size: 12px; }
+    .list { flex: 1; overflow: auto; padding: 4px 10px 10px; display: flex; flex-direction: column; gap: 6px; }
+    .card { position: relative; padding: 10px 12px; border-radius: 10px; background: var(--card); border: 1px solid var(--line); cursor: pointer; transition: border-color .12s, background .12s; }
+    .card:hover { background: var(--card2); }
+    .card.active { border-color: var(--accent); background: rgba(79,140,255,.08); }
+    .card .l1 { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .card .nm { font-weight: 650; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .card .ver { font-size: 10.5px; color: var(--fg2); background: var(--card2); border: 1px solid var(--line2); border-radius: 5px; padding: 1px 5px; flex: none; }
+    .card .st { margin-left: auto; font-size: 11px; color: var(--muted); white-space: nowrap; flex: none; }
+    .card .l2 { margin-top: 6px; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--fg2); min-width: 0; }
+    .card .geo { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .card .geo.none { color: var(--muted); }
+    .card .l3 { margin-top: 5px; display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+    .flag { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 16px; padding: 0 4px; border-radius: 4px; font-size: 10px; font-weight: 800; letter-spacing: .5px; color: #dfe6ff; background: rgba(122,162,255,.18); border: 1px solid rgba(122,162,255,.35); flex: none; }
+    .flag:empty { display: none; }
+    .grade { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 5px; border: 1px solid; letter-spacing: .2px; flex: none; }
+    .grade.A { color: var(--gA); border-color: rgba(46,204,113,.45); background: rgba(46,204,113,.1); }
+    .grade.B { color: var(--gB); border-color: rgba(143,209,79,.45); background: rgba(143,209,79,.1); }
+    .grade.C { color: var(--gC); border-color: rgba(245,166,35,.45); background: rgba(245,166,35,.1); }
+    .grade.D { color: var(--gD); border-color: rgba(255,92,92,.45); background: rgba(255,92,92,.1); }
+    .grade.none { color: var(--muted); border-color: var(--line2); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #3a3a42; flex: none; box-shadow: 0 0 0 2px rgba(0,0,0,.25); }
+    .dot.ok { background: var(--ok); } .dot.booting { background: var(--warn); animation: pulse 1s infinite; } .dot.bad { background: var(--bad); } .dot.off { background: #3a3a42; }
+    @keyframes pulse { 50% { opacity: .3; } }
+    #empty { display: none; padding: 40px 20px; color: var(--muted); text-align: center; line-height: 1.8; }
+    #empty.on { display: block; }
+    .side-foot { padding: 10px 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; line-height: 1.5; }
+
+    /* create form */
+    #create { display: none; margin: 0 10px 8px; padding: 12px; border: 1px solid var(--line2); border-radius: 10px; background: var(--card); }
+    #create.on { display: block; }
+    #create h3 { margin: 0 0 10px; font-size: 13px; }
+    #create .f { display: grid; grid-template-columns: 56px 1fr; gap: 8px; align-items: center; margin-bottom: 8px; }
+    #create .f label { color: var(--muted); font-size: 12px; }
+    #create .res { display: flex; gap: 6px; } #create .res input { width: 33%; }
+    #create .btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
+    .err { color: #ff8a8a; font-size: 11.5px; margin-top: 6px; white-space: pre-wrap; display: none; }
+    .err.on { display: block; }
+
+    /* ── stage ────────────────────────────────────────────────── */
+    main { min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+    .topbar { height: 52px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 18px; border-bottom: 1px solid var(--line); background: var(--panel); }
+    .topbar .title { display: flex; align-items: center; gap: 9px; min-width: 0; }
+    .topbar .title b { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .topbar .meta { color: var(--muted); font-size: 12px; white-space: nowrap; }
+    .topbar .sp { flex: 1; }
+    .topbar .actions { display: flex; gap: 6px; }
+    .stage { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; padding: 14px 18px 12px; gap: 12px; }
+    .stage-fit { flex: 1; min-height: 0; width: 100%; display: flex; align-items: center; justify-content: center; }
+    .frame { position: relative; height: 100%; aspect-ratio: 9 / 16; max-width: 100%; border-radius: 30px; padding: 10px; background: linear-gradient(180deg, #202026, #141418); border: 1px solid var(--line2); box-shadow: 0 30px 80px rgba(0,0,0,.55), inset 0 0 0 1px rgba(255,255,255,.04); }
+    .frame .glass { position: relative; width: 100%; height: 100%; border-radius: 21px; overflow: hidden; background: #000; }
+    #screen { display: block; width: 100%; height: 100%; object-fit: contain; cursor: default; user-select: none; -webkit-user-drag: none; }
+    #screen:active { cursor: grabbing; }
+    .overlay { position: absolute; inset: 0; display: none; place-items: center; text-align: center; padding: 28px; color: var(--fg); background: rgba(14,14,17,.92); z-index: 2; }
+    .overlay.on { display: grid; }
+    .overlay p { margin: 6px 0 0; color: var(--muted); font-size: 12.5px; line-height: 1.6; }
+    .overlay h4 { margin: 0; font-size: 14px; font-weight: 600; }
+    .spinner { width: 30px; height: 30px; border: 3px solid rgba(255,255,255,.1); border-top-color: var(--accent); border-radius: 50%; animation: spin .9s linear infinite; margin: 0 auto 12px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .fps { position: absolute; right: 12px; bottom: 12px; z-index: 3; font-size: 10.5px; color: rgba(255,255,255,.55); background: rgba(0,0,0,.45); padding: 2px 7px; border-radius: 999px; pointer-events: none; }
+    .controls { flex: none; display: flex; flex-direction: column; align-items: center; gap: 10px; width: min(560px, 100%); }
+    .navbar { display: flex; gap: 4px; padding: 5px; background: var(--card); border: 1px solid var(--line2); border-radius: 12px; }
+    .navbar button { background: transparent; color: var(--fg2); padding: 7px 12px; border-radius: 8px; font-weight: 500; font-size: 12px; flex-direction: column; gap: 3px; min-width: 62px; }
+    .navbar button svg { width: 18px; height: 18px; }
+    .navbar button:hover { background: var(--card2); color: var(--fg); filter: none; }
+    .navbar button.on { color: var(--accent); }
+    .navbar .sep { width: 1px; background: var(--line2); margin: 6px 3px; }
+    .textrow { display: flex; gap: 6px; width: 100%; }
+    .textrow input { flex: 1; }
+
+    /* ── inspector ───────────────────────────────────────────── */
+    .inspector { background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column; min-width: 0; }
+    .tabs { display: flex; padding: 8px 10px 0; gap: 2px; border-bottom: 1px solid var(--line); }
+    .tabs button { background: transparent; color: var(--muted); border-radius: 8px 8px 0 0; padding: 9px 13px; font-weight: 600; font-size: 12.5px; }
+    .tabs button:hover { color: var(--fg); background: var(--card); filter: none; }
+    .tabs button.on { color: var(--fg); background: var(--card); box-shadow: inset 0 -2px var(--accent); }
+    .pane { display: none; flex: 1; min-height: 0; overflow: auto; padding: 14px; }
+    .pane.on { display: block; }
+    .sec { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+    .sec h3 { margin: 0 0 10px; font-size: 12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .5px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .sec h3 .r { display: flex; gap: 6px; text-transform: none; letter-spacing: 0; }
+    .kv { display: grid; grid-template-columns: 78px 1fr; gap: 7px 10px; align-items: center; font-size: 12.5px; }
+    .kv label { color: var(--muted); }
+    .kv .v { display: flex; align-items: center; gap: 7px; min-width: 0; flex-wrap: wrap; }
+    code, .mono { font: 11.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .kv code { color: #cfcfd8; background: #0e0e11; padding: 2px 6px; border-radius: 5px; border: 1px solid var(--line); word-break: break-all; }
+    .badge { font-size: 11px; border-radius: 999px; padding: 2px 8px; border: 1px solid var(--line2); color: var(--fg2); display: inline-flex; align-items: center; gap: 5px; }
+    .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .9; }
+    .badge.ok { color: #7fe3a5; border-color: rgba(46,204,113,.4); } .badge.bad { color: #ff9a9a; border-color: rgba(255,92,92,.4); } .badge.warn { color: #ffcf7a; border-color: rgba(245,166,35,.4); } .badge.dim { color: var(--muted); }
+    .switch { position: relative; width: 36px; height: 20px; border-radius: 999px; background: #3a3a42; border: 0; padding: 0; cursor: pointer; flex: none; }
+    .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform .15s; }
+    .switch.on { background: var(--ok); } .switch.on::after { transform: translateX(16px); }
+    .switch:disabled { opacity: .4; }
+    .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .danger-zone { border-color: rgba(255,92,92,.25); }
+    .danger-zone p { margin: 0 0 8px; color: var(--muted); font-size: 12px; }
+    .confirm { display: none; margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: rgba(255,92,92,.1); color: #ffb3b3; font-size: 12px; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .confirm.on { display: flex; }
+    .confirm .sp { flex: 1; }
+
+    /* ip report */
+    .ipcard { border-radius: 10px; padding: 14px; background: linear-gradient(160deg, #1b1b21, #141418); border: 1px solid var(--line2); }
+    .ipcard .top { display: flex; align-items: center; gap: 12px; }
+    .ipcard .big { font-size: 20px; font-weight: 700; letter-spacing: .3px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .ipcard .geo { color: var(--fg2); font-size: 12.5px; margin-top: 2px; display: flex; align-items: center; gap: 6px; }
+    .ipcard .gbox { margin-left: auto; text-align: center; min-width: 64px; padding: 8px 10px; border-radius: 10px; border: 1px solid; }
+    .ipcard .gbox b { display: block; font-size: 24px; line-height: 1; }
+    .ipcard .gbox span { font-size: 10.5px; }
+    .ipcard .gbox.A { color: var(--gA); border-color: rgba(46,204,113,.5); background: rgba(46,204,113,.08); }
+    .ipcard .gbox.B { color: var(--gB); border-color: rgba(143,209,79,.5); background: rgba(143,209,79,.08); }
+    .ipcard .gbox.C { color: var(--gC); border-color: rgba(245,166,35,.5); background: rgba(245,166,35,.08); }
+    .ipcard .gbox.D { color: var(--gD); border-color: rgba(255,92,92,.5); background: rgba(255,92,92,.08); }
+    .ipcard .gbox.none { color: var(--muted); border-color: var(--line2); }
+    .ipcard .verdict { margin-top: 12px; padding: 9px 10px; border-radius: 8px; background: rgba(255,255,255,.04); font-size: 12px; color: var(--fg2); line-height: 1.55; }
+    .checks { margin-top: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 5px 10px; }
+    .chk { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg2); }
+    .chk i { width: 16px; height: 16px; border-radius: 50%; display: inline-grid; place-items: center; font-style: normal; font-size: 10px; font-weight: 800; flex: none; }
+    .chk.good i { background: rgba(46,204,113,.18); color: var(--gA); } .chk.badf i { background: rgba(255,92,92,.2); color: var(--gD); } .chk.dim i { background: var(--card2); color: var(--muted); }
+    .ipcard .foot { margin-top: 10px; display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--muted); }
+    .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+    .chip { font-size: 11px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line2); background: var(--card2); color: var(--fg2); cursor: pointer; }
+    .chip:hover { color: var(--fg); border-color: var(--accent); }
+    .legend { margin-top: 10px; font-size: 11px; color: var(--muted); line-height: 1.7; }
+    .legend b { font-weight: 700; }
+
+    /* apps */
+    .apps-top { display: flex; gap: 6px; margin-bottom: 10px; } .apps-top input { flex: 1; }
+    .app { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; background: var(--card); border: 1px solid var(--line); margin-bottom: 5px; }
+    .app .pk { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .app .pk small { display: block; color: var(--muted); font-size: 11px; }
+    .app-ico { width: 28px; height: 28px; border-radius: 8px; background: var(--card2); display: grid; place-items: center; color: var(--fg2); font-weight: 700; font-size: 12px; flex: none; }
+
+    /* terminal */
+    .term { display: flex; flex-direction: column; height: 100%; }
+    .term-out { flex: 1; overflow: auto; background: #0a0a0c; border: 1px solid var(--line2); border-radius: 8px; padding: 10px; white-space: pre-wrap; word-break: break-all; color: #d0d0d8; margin-bottom: 8px; }
+    .term-out .cmd { color: #8fb4ff; } .term-out .er { color: #ff8a8a; }
+    .term-in { display: flex; gap: 6px; } .term-in input { flex: 1; }
+
+    /* toasts */
+    #toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 50; pointer-events: none; }
+    .toast { background: #202027; border: 1px solid var(--line2); color: var(--fg); padding: 9px 13px; border-radius: 9px; font-size: 12.5px; box-shadow: 0 10px 30px rgba(0,0,0,.4); max-width: 380px; display: flex; gap: 8px; align-items: center; animation: in .15s ease-out; }
+    .toast.bad { border-color: rgba(255,92,92,.5); } .toast.ok { border-color: rgba(46,204,113,.5); }
+    .toast .sp { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.15); border-top-color: var(--accent); border-radius: 50%; animation: spin .9s linear infinite; flex: none; }
+    @keyframes in { from { transform: translateY(6px); opacity: 0; } }
+  </style>
+</head>
+<body>
+  <svg style="display:none">
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M6 4l14 8-14 8z"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/></symbol>
+    <symbol id="i-restart" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 15.5-6.3"/><path d="M21 12a9 9 0 0 1-15.5 6.3"/><path d="M18 2v5h-5M6 22v-5h5"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 4L7 12l8 8"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></symbol>
+    <symbol id="i-recents" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2.5"/></symbol>
+    <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3v9"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="M3 12l18-8-8 18-2-8z"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol>
+    <symbol id="i-vol-up" viewBox="0 0 24 24"><path d="M4 10v4h4l5 4V6L8 10z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></symbol>
+    <symbol id="i-vol-down" viewBox="0 0 24 24"><path d="M4 10v4h4l5 4V6L8 10z"/><path d="M16 9a4 4 0 0 1 0 6"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></symbol>
+    <symbol id="i-box" viewBox="0 0 24 24"><path d="M3 7l9-4 9 4-9 4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/></symbol>
+  </svg>
+
+  <aside>
+    <div class="side-head">
+      <h1>Redroid 矩阵 <span class="cnt" id="count">0</span></h1>
+      <button id="new-btn" class="sm" title="新建一台 redroid Android 容器"><svg class="ico"><use href="#i-plus"/></svg>新建设备</button>
+    </div>
+    <div class="side-tools"><input id="filter" placeholder="筛选设备"><button class="ghost sm" id="a-refresh" title="刷新列表与状态"><svg class="ico"><use href="#i-refresh"/></svg></button></div>
+    <div id="create">
+      <h3>新建设备</h3>
+      <div class="f"><label>名称</label><input id="c-name" placeholder="例如 tg-01" spellcheck="false"></div>
+      <div class="f"><label>Android</label><select id="c-ver"><option value="11">11 · 有 ARM 转译，兼容 armeabi APK</option><option value="13" selected>13 · 新，仅 x86_64 APK</option><option value="14">14</option></select></div>
+      <div class="f"><label>分辨率</label><div class="res"><input id="c-w" value="720" title="宽"><input id="c-h" value="1280" title="高"><input id="c-dpi" value="320" title="DPI"></div></div>
+      <div class="f"><label>代理</label><input id="c-proxy" placeholder="host:port，留空 = 直连" spellcheck="false"></div>
+      <div class="btns"><button class="ghost sm" id="c-cancel">取消</button><button class="sm" id="c-ok">创建</button></div>
+      <div class="err" id="c-err"></div>
+    </div>
+    <div class="list" id="list"></div>
+    <div id="empty">还没有设备<br>点「新建设备」创建第一台 Android</div>
+    <div class="side-foot">设备 = docker 容器（redroid）。adb 端口从 15555 起分配。出口 IP 会自动探测并给出纯净度等级。</div>
+  </aside>
+
+  <main>
+    <div class="topbar">
+      <div class="title"><span class="dot" id="sel-dot"></span><b id="selected-name">未选择设备</b><span class="meta" id="sel-meta"></span></div>
+      <div class="sp"></div>
+      <div class="actions">
+        <button class="ghost sm" id="a-start"><svg class="ico"><use href="#i-play"/></svg>启动</button>
+        <button class="ghost sm" id="a-stop"><svg class="ico"><use href="#i-stop"/></svg>停止</button>
+        <button class="ghost sm" id="a-restart"><svg class="ico"><use href="#i-restart"/></svg>重启</button>
+      </div>
+    </div>
+    <div class="stage">
+      <div class="stage-fit"><div class="frame">
+        <div class="glass">
+          <img id="screen" alt="" draggable="false">
+          <div class="fps" id="fps"></div>
+          <div class="overlay on" id="ov-empty"><div><h4>选择左侧一台设备</h4><p>画面可直接点按、拖动滑动、键盘输入、粘贴</p></div></div>
+          <div class="overlay" id="ov-wait"><div><div class="spinner"></div><h4 id="ov-wait-text">连接中…</h4><p id="ov-wait-sub"></p></div></div>
+        </div>
+      </div></div>
+      <div class="controls">
+        <div class="navbar">
+          <button data-key="back" title="返回"><svg class="ico"><use href="#i-back"/></svg>返回</button>
+          <button data-key="home" title="主页"><svg class="ico"><use href="#i-home"/></svg>主页</button>
+          <button data-key="recents" title="最近任务"><svg class="ico"><use href="#i-recents"/></svg>最近</button>
+          <div class="sep"></div>
+          <button data-key="volup" title="音量+"><svg class="ico"><use href="#i-vol-up"/></svg>音量+</button>
+          <button data-key="voldown" title="音量−"><svg class="ico"><use href="#i-vol-down"/></svg>音量−</button>
+          <button data-key="power" title="电源键"><svg class="ico"><use href="#i-power"/></svg>电源</button>
+          <div class="sep"></div>
+          <button id="shot-btn" title="把当前画面另存为 PNG"><svg class="ico"><use href="#i-camera"/></svg>截图</button>
+          <button id="live-btn" title="暂停 / 继续实时画面"><svg class="ico"><use href="#i-pause"/></svg>暂停</button>
+        </div>
+        <div class="textrow"><input id="send-text" placeholder="向设备输入文本（ASCII），Enter 发送；也可直接在画面上打字或粘贴" spellcheck="false"><button class="ghost sm" id="send-btn"><svg class="ico"><use href="#i-send"/></svg>发送</button></div>
+      </div>
+    </div>
+  </main>
+
+  <section class="inspector">
+    <div class="tabs"><button class="on" data-pane="info">概览</button><button data-pane="net">网络</button><button data-pane="apps">应用</button><button data-pane="term">终端</button></div>
+
+    <div class="pane on" id="pane-info">
+      <div class="sec">
+        <h3>设备</h3>
+        <div class="kv">
+          <label>容器</label><div class="v"><code id="i-name">—</code><span id="i-status" class="badge dim">—</span></div>
+          <label>Android</label><div class="v"><span id="i-android">—</span></div>
+          <label>镜像</label><div class="v"><code id="i-image">—</code></div>
+          <label>分辨率</label><div class="v"><span id="i-size">—</span></div>
+          <label>运行时长</label><div class="v"><span id="i-uptime">—</span></div>
+          <label>指纹</label><div class="v"><code id="i-fp" title="ro.build.fingerprint">—</code></div>
+        </div>
+      </div>
+      <div class="sec">
+        <h3>调试</h3>
+        <div class="kv">
+          <label>adb</label><div class="v"><code id="i-adb">—</code><span id="i-adbst" class="badge dim">—</span></div>
+          <label>Root</label><div class="v"><span id="i-root" class="badge dim">—</span><span style="color:var(--muted);font-size:11.5px">AOSP 原生：<code>su 0 &lt;cmd&gt;</code></span></div>
+          <label>Frida</label><div class="v"><button class="switch" id="frida-sw" title="启动 / 停止 frida-server"></button><span id="i-frida" class="badge dim">—</span></div>
+          <label></label><div class="v"><code id="i-frida-addr" style="display:none"></code></div>
+        </div>
+        <div class="err" id="i-err"></div>
+      </div>
+      <div class="sec danger-zone">
+        <h3>危险操作</h3>
+        <p>删除会移除容器；勾选「连同数据」会一并删除 /data（登录态、已装应用）。</p>
+        <div class="row-actions"><label style="display:flex;align-items:center;gap:6px;color:var(--fg2);font-size:12px"><input type="checkbox" id="rm-purge"> 连同数据</label><button class="ghost sm" id="rm-btn"><svg class="ico"><use href="#i-trash"/></svg>删除设备</button></div>
+        <div class="confirm" id="rm-confirm"><span>确认删除 <b id="rm-name"></b>？</span><span class="sp"></span><button class="sm danger" id="rm-yes">确认删除</button><button class="sm ghost" id="rm-no">取消</button></div>
+      </div>
+    </div>
+
+    <div class="pane" id="pane-net">
+      <div class="sec">
+        <h3>出口 IP <span class="r"><button class="ghost sm" id="ip-btn"><svg class="ico"><use href="#i-refresh"/></svg>重新检测</button></span></h3>
+        <div class="ipcard" id="ipcard">
+          <div class="top">
+            <div><div class="big" id="ip-ip">—</div><div class="geo" id="ip-geo"><span class="flag"></span><span>尚未检测</span></div></div>
+            <div class="gbox none" id="ip-grade"><b>?</b><span>纯净度</span></div>
+          </div>
+          <div class="kv" style="margin-top:12px">
+            <label>运营商</label><div class="v" id="ip-isp">—</div>
+            <label>ASN</label><div class="v" id="ip-as">—</div>
+            <label>类型</label><div class="v" id="ip-kind">—</div>
+            <label>检测路径</label><div class="v" id="ip-via">—</div>
+          </div>
+          <div class="checks" id="ip-checks"></div>
+          <div class="verdict" id="ip-verdict">点「重新检测」通过该设备当前代理探测出口 IP；结果合并 ip-api.com 与 ipapi.is 两个情报源。</div>
+          <div class="foot"><span id="ip-time"></span><span>A 住宅/移动 · B 骨干 · C 机房 · D 已标记</span></div>
+        </div>
+        <div class="legend"><b>纯净度怎么看：</b>注册 Facebook / Google / Telegram 一类账号时，风控首先看 IP 的 ASN 类型与黑名单。<b>A</b> 最友好；<b>B</b> 未被标记但非住宅线路，成功率一般；<b>C</b> 机房 IP 大概率被拦；<b>D</b> 已被情报库标记，基本必拦。</div>
+      </div>
+      <div class="sec">
+        <h3>设备代理</h3>
+        <div class="kv">
+          <label>http_proxy</label><div class="v"><input id="i-proxy" placeholder="host:port，留空 = 直连" spellcheck="false" style="width:200px"><button class="sm" id="proxy-save">应用</button></div>
+        </div>
+        <div class="chips"><span class="chip" id="chip-mihomo" title="本机 mihomo 的 redroid 监听（172.18.0.x:20011）">用本机 mihomo</span><span class="chip" id="chip-direct">直连</span></div>
+        <div class="legend">这是 Android 全局 <code>settings put global http_proxy</code>，应用层代理。切换节点请在 mihomo 的 <code>redroid-group</code> 里选。</div>
+        <div class="err" id="net-err"></div>
+      </div>
+    </div>
+
+    <div class="pane" id="pane-apps">
+      <div class="apps-top"><input id="apps-filter" placeholder="筛选包名"><button class="sm" id="apps-install"><svg class="ico"><use href="#i-box"/></svg>安装 APK / XAPK</button><button class="ghost sm" id="apps-refresh"><svg class="ico"><use href="#i-refresh"/></svg></button></div>
+      <div id="apps-list"></div>
+      <div class="err" id="apps-err"></div>
+    </div>
+
+    <div class="pane" id="pane-term">
+      <div class="term">
+        <div class="term-out mono" id="term-out"></div>
+        <div class="term-in"><input id="term-cmd" class="mono" placeholder="adb shell 命令，↑↓ 翻历史" spellcheck="false"><button class="sm" id="term-run">运行</button></div>
+      </div>
+    </div>
+  </section>
+  <div id="toasts"></div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const api = window.redroidAPI;
+    const listEl = $('list'), empty = $('empty'), countEl = $('count');
+    const screen = $('screen'), ovEmpty = $('ov-empty'), ovWait = $('ov-wait'), ovWaitText = $('ov-wait-text'), ovWaitSub = $('ov-wait-sub');
+    let devices = [];        // [{name, image, state, status, version, port, running, info, ipInfo}]
+    let selected = null;
+    let defaults = { proxyHint: '' };
+    let live = true, shotTimer = null, shotBusy = false, shotSize = { w: 720, h: 1280 }, fpsT = [], probing = new Set();
+    const cards = new Map();
+    const esc = (v) => String(v || '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const dev = () => devices.find((d) => d.name === selected) || null;
+    const short = (n) => n.replace(/^redroid-?/, '') || n;
+    const flag = (cc) => cc ? String(cc).toUpperCase().slice(0, 3) : '';
+    const fmtUp = (s) => s == null ? '—' : s < 3600 ? `${Math.floor(s / 60)} 分钟` : s < 86400 ? `${(s / 3600).toFixed(1)} 小时` : `${(s / 86400).toFixed(1)} 天`;
+    const fmtAgo = (iso) => { const t = Date.parse(iso || ''); if (!t) return ''; const m = Math.round((Date.now() - t) / 60000); return m < 1 ? '刚刚' : m < 60 ? `${m} 分钟前` : m < 1440 ? `${Math.round(m / 60)} 小时前` : `${Math.round(m / 1440)} 天前`; };
+
+    // ── toasts ────────────────────────────────────────────────────────────
+    function toast(text, { kind = '', ms = 3000, spin = false } = {}) {
+      const el = document.createElement('div'); el.className = `toast ${kind}`;
+      el.innerHTML = (spin ? '<span class="sp"></span>' : '') + `<span>${esc(text)}</span>`;
+      $('toasts').appendChild(el);
+      const t = { el, update(txt, k) { el.querySelector('span:last-child').textContent = txt; if (k) el.className = `toast ${k}`; el.querySelector('.sp') && el.querySelector('.sp').remove(); }, close() { el.remove(); } };
+      if (ms) setTimeout(() => el.remove(), ms);
+      return t;
+    }
+    const oops = (e) => toast((e && e.message) || String(e), { kind: 'bad', ms: 6000 });
+    function showErr(el, e) { el.textContent = e ? ((e.message) || String(e)) : ''; el.classList.toggle('on', !!e); }
+
+    // ── ip cache (per device + proxy) ─────────────────────────────────────
+    const ipKey = (d) => `redroid-ip:${d.name}:${(d.info && d.info.proxy) || 'direct'}`;
+    const loadIp = (d) => { try { return JSON.parse(localStorage.getItem(ipKey(d)) || 'null'); } catch { return null; } };
+    const saveIp = (d, v) => { try { localStorage.setItem(ipKey(d), JSON.stringify(v)); } catch {} };
+
+    // ── device list ───────────────────────────────────────────────────────
+    function dotOf(d) { if (!d.running) return 'off'; if (!d.info || d.info.adb !== 'device') return 'bad'; return d.info.booted ? 'ok' : 'booting'; }
+    function stateText(d) {
+      if (!d.running) return '已停止';
+      if (!d.info || d.info.adb !== 'device') return d.info && d.info.adb === 'offline' ? 'adb offline' : '开机中';
+      return d.info.booted ? '运行中' : '开机中';
+    }
+    function buildCard(d) {
+      const c = document.createElement('div'); c.className = 'card'; c.dataset.name = d.name;
+      c.innerHTML = `<div class="l1"><span class="dot"></span><span class="nm"></span><span class="ver"></span><span class="st"></span></div>
+        <div class="l2"><span class="flag"></span><span class="geo none">出口未检测</span><span class="grade none" style="margin-left:auto">?</span></div>
+        <div class="l3"><span class="port"></span><span>·</span><span class="proxy"></span></div>`;
+      c.onclick = () => select(d.name);
+      return c;
+    }
+    function renderCard(d) {
+      let c = cards.get(d.name);
+      if (!c) { c = buildCard(d); cards.set(d.name, c); listEl.appendChild(c); }
+      c.classList.toggle('active', d.name === selected);
+      c.querySelector('.dot').className = `dot ${dotOf(d)}`;
+      c.querySelector('.nm').textContent = short(d.name); c.querySelector('.nm').title = d.name;
+      c.querySelector('.ver').textContent = `Android ${d.version || '?'}`;
+      c.querySelector('.st').textContent = stateText(d);
+      c.querySelector('.port').textContent = d.port ? `adb :${d.port}` : '—';
+      c.querySelector('.proxy').textContent = d.info && d.info.proxy ? `代理 ${d.info.proxy}` : (d.running ? '直连' : '');
+      const ip = d.ipInfo, g = c.querySelector('.grade'), geo = c.querySelector('.geo'), fl = c.querySelector('.flag');
+      if (ip && ip.ip) {
+        fl.textContent = flag(ip.cc);
+        geo.className = 'geo'; geo.textContent = `${[ip.country, ip.city || ip.region].filter(Boolean).join(' · ')} · ${ip.ip}`; geo.title = `${ip.isp}${ip.as ? ' · ' + ip.as : ''}`;
+        g.className = `grade ${ip.grade}`; g.textContent = `${ip.grade} ${ip.kind}`;
+      } else {
+        fl.textContent = ''; geo.className = 'geo none'; geo.textContent = probing.has(d.name) ? '检测出口中…' : (d.running ? '出口未检测' : ''); g.className = 'grade none'; g.textContent = '?';
+      }
+      const f = $('filter').value.trim().toLowerCase();
+      c.style.display = !f || d.name.toLowerCase().includes(f) || (ip && (ip.ip + ip.country + ip.city).toLowerCase().includes(f)) ? '' : 'none';
+    }
+    function render() {
+      const names = new Set(devices.map((d) => d.name));
+      for (const [n, c] of cards) if (!names.has(n)) { c.remove(); cards.delete(n); }
+      devices.forEach(renderCard);
+      empty.classList.toggle('on', devices.length === 0);
+      countEl.textContent = devices.length;
+      renderSelected();
+    }
+    async function refresh({ quiet = false } = {}) {
+      if (!quiet) $('a-refresh').disabled = true;
+      try {
+        const list = await api.list();
+        const prev = new Map(devices.map((d) => [d.name, d]));
+        devices = list.map((d) => { const p = prev.get(d.name); const next = { ...d, ipInfo: null }; next.ipInfo = loadIp(next) || (p && p.ipInfo && p.info && p.info.proxy === (d.info && d.info.proxy) ? p.ipInfo : null); return next; });
+        if (selected && !devices.some((d) => d.name === selected)) selected = null;
+        if (!selected && devices[0]) selected = (devices.find((d) => d.name === localStorage.getItem('redroid-matrix-sel')) || devices[0]).name;
+        render();
+        // auto-probe egress for booted devices without a cached result
+        for (const d of devices) if (d.running && d.info && d.info.booted && !d.ipInfo && !probing.has(d.name)) probeIp(d, { silent: true });
+      } catch (e) { oops(e); }
+      finally { $('a-refresh').disabled = false; }
+    }
+    $('filter').oninput = render;
+
+    // ── selection ─────────────────────────────────────────────────────────
+    function select(name) {
+      if (selected === name) return;
+      selected = name; localStorage.setItem('redroid-matrix-sel', name);
+      screen.removeAttribute('src'); fpsT = [];
+      render(); apps = []; renderApps(); loadApps(); $('term-out').innerHTML = '';
+      kickShots();
+    }
+    const badge = (el, txt, cls) => { el.textContent = txt; el.className = `badge ${cls}`; };
+    function renderSelected() {
+      const d = dev();
+      $('selected-name').textContent = d ? short(d.name) : '未选择设备';
+      $('sel-dot').className = `dot ${d ? dotOf(d) : ''}`;
+      $('sel-meta').textContent = d ? `Android ${d.version} · ${stateText(d)}${d.info && d.info.size ? ' · ' + d.info.size : ''}` : '';
+      ovEmpty.classList.toggle('on', !d);
+      ['a-start', 'a-stop', 'a-restart', 'ip-btn', 'proxy-save', 'apps-install', 'shot-btn'].forEach((id) => { $(id).disabled = !d; });
+      if (!d) return;
+      $('a-start').style.display = d.running ? 'none' : ''; $('a-stop').style.display = d.running ? '' : 'none';
+      const i = d.info || {};
+      $('i-name').textContent = d.name; badge($('i-status'), d.status, d.running ? 'ok' : 'dim');
+      $('i-android').textContent = `Android ${i.release || d.version || '?'}${i.model ? ' · ' + i.model : ''}`;
+      $('i-image').textContent = d.image; $('i-size').textContent = i.size || '—'; $('i-uptime').textContent = d.running ? fmtUp(i.uptime) : '—';
+      $('i-fp').textContent = i.fingerprint || '—';
+      $('i-adb').textContent = d.port ? `127.0.0.1:${d.port}` : '—';
+      badge($('i-adbst'), i.adb === 'device' ? (i.booted ? '已连接' : '开机中') : (i.adb || '未连接'), i.adb === 'device' ? (i.booted ? 'ok' : 'warn') : 'bad');
+      badge($('i-root'), i.root == null ? '—' : i.root ? '可用' : '不可用', i.root == null ? 'dim' : i.root ? 'ok' : 'bad');
+      badge($('i-frida'), i.frida ? '运行中' : '未运行', i.frida ? 'ok' : 'dim');
+      $('frida-sw').className = `switch ${i.frida ? 'on' : ''}`; $('frida-sw').disabled = !d.running || i.adb !== 'device';
+      $('i-frida-addr').style.display = i.frida ? '' : 'none'; $('i-frida-addr').textContent = i.frida ? `frida -H 127.0.0.1:${i.fridaPort}` : '';
+      if (document.activeElement !== $('i-proxy')) $('i-proxy').value = i.proxy || '';
+      $('rm-name').textContent = d.name;
+      renderIp(d);
+      const ready = d.running && i.adb === 'device';
+      ovWait.classList.toggle('on', !ready);
+      ovWaitText.textContent = !d.running ? '设备已停止' : '等待 adb 连接';
+      ovWaitSub.textContent = !d.running ? '点右上角「启动」' : '开机约需 30–60 秒';
+      screen.style.visibility = ready ? '' : 'hidden';
+    }
+
+    // ── ip report ─────────────────────────────────────────────────────────
+    function renderIp(d) {
+      const ip = d && d.ipInfo;
+      const busy = d && probing.has(d.name);
+      $('ip-btn').disabled = !d || busy;
+      if (!ip) {
+        $('ip-ip').textContent = busy ? '检测中…' : '—'; $('ip-geo').innerHTML = `<span class="flag"></span><span>${busy ? '经设备代理探测出口…' : '尚未检测'}</span>`;
+        $('ip-grade').className = 'gbox none'; $('ip-grade').innerHTML = '<b>?</b><span>纯净度</span>';
+        ['ip-isp', 'ip-as', 'ip-kind', 'ip-via'].forEach((id) => { $(id).textContent = '—'; }); $('ip-checks').innerHTML = ''; $('ip-time').textContent = '';
+        $('ip-verdict').textContent = '点「重新检测」通过该设备当前代理探测出口 IP；结果合并 ip-api.com 与 ipapi.is 两个情报源。';
+        return;
+      }
+      $('ip-ip').textContent = ip.ip;
+      $('ip-geo').innerHTML = `<span class="flag">${flag(ip.cc)}</span><span>${esc([ip.country, ip.region, ip.city].filter(Boolean).join(' · ') || '未知地区')}</span>`;
+      $('ip-grade').className = `gbox ${ip.grade}`; $('ip-grade').innerHTML = `<b>${ip.grade}</b><span>${esc(ip.kind)}</span>`;
+      $('ip-isp').textContent = ip.isp || ip.org || '—'; $('ip-as').textContent = ip.as || '—';
+      $('ip-kind').textContent = `${ip.kind}${ip.residential ? '（住宅/移动线路）' : ''}`;
+      $('ip-via').textContent = ip.via === 'direct' ? '直连（宿主出口）' : `经设备代理 ${ip.via}`;
+      const f = ip.flags || {};
+      const chk = (label, bad, good, dim) => `<div class="chk ${dim ? 'dim' : bad ? 'badf' : 'good'}"><i>${dim ? '·' : bad ? '!' : '✓'}</i>${label}${dim ? '' : bad ? '' : ''}</div>`;
+      $('ip-checks').innerHTML = [
+        chk(f.datacenter ? '机房 / 云主机' : '非机房', f.datacenter), chk(f.proxy ? '被标记为代理' : '未标记代理', f.proxy),
+        chk(f.vpn ? '被标记为 VPN' : '未标记 VPN', f.vpn), chk(f.tor ? 'Tor 出口' : '非 Tor', f.tor),
+        chk(f.abuser ? '滥用来源' : '无滥用记录', f.abuser), chk(f.mobile ? '移动网络' : (ip.residential ? '住宅线路' : '非住宅线路'), !f.mobile && !ip.residential, false, false),
+      ].join('');
+      $('ip-verdict').textContent = ip.verdict;
+      $('ip-time').textContent = `${fmtAgo(ip.probedAt)}检测${ip.sources && !ip.sources.ipapis ? '（ipapi.is 未响应，仅 ip-api）' : ''}`;
+    }
+    async function probeIp(d, { silent = false } = {}) {
+      if (!d || probing.has(d.name)) return;
+      probing.add(d.name); renderCard(d); if (dev() === d) renderIp(d);
+      try {
+        const r = await api.probeIp(d.name);
+        d.ipInfo = r; saveIp(d, r);
+        if (!silent) toast(`${short(d.name)} 出口 ${r.ip} · ${r.country || ''} · 纯净度 ${r.grade}`, { kind: r.grade === 'A' || r.grade === 'B' ? 'ok' : 'bad' });
+      } catch (e) { if (!silent) oops(e); }
+      finally { probing.delete(d.name); renderCard(d); if (dev() === d) renderIp(d); }
+    }
+    $('ip-btn').onclick = () => { const d = dev(); if (d) { d.ipInfo = null; localStorage.removeItem(ipKey(d)); probeIp(d); } };
+
+    // ── screen stream + input ─────────────────────────────────────────────
+    function kickShots() { clearTimeout(shotTimer); shot(); }
+    async function shot() {
+      clearTimeout(shotTimer);
+      const d = dev();
+      if (!d || !live || !d.running || !d.info || d.info.adb !== 'device') { shotTimer = setTimeout(shot, 1500); return; }
+      if (shotBusy) return;
+      shotBusy = true;
+      try {
+        const src = await api.screenshot(d.name);
+        if (dev() && dev().name === d.name) { screen.src = src; fpsT.push(Date.now()); fpsT = fpsT.filter((t) => Date.now() - t < 3000); $('fps').textContent = `${(fpsT.length / 3).toFixed(1)} fps`; }
+      } catch (e) { /* keep last frame */ }
+      finally { shotBusy = false; shotTimer = setTimeout(shot, 250); }
+    }
+    // size the phone frame to whatever height is left above the controls (aspect-ratio does the width)
+    { const fit = $('stage-fit') || document.querySelector('.stage-fit'); const fr = document.querySelector('.frame');
+      const doFit = () => { const h = fit.clientHeight, w = fit.clientWidth; const hh = Math.min(h, (w - 20) * 16 / 9); fr.style.height = `${Math.max(240, hh)}px`; };
+      new ResizeObserver(doFit).observe(fit); doFit(); }
+    screen.onload = () => { shotSize = { w: screen.naturalWidth, h: screen.naturalHeight }; };
+    function toDevice(ev) {
+      const r = screen.getBoundingClientRect();
+      const scale = Math.min(r.width / shotSize.w, r.height / shotSize.h);
+      const ox = (r.width - shotSize.w * scale) / 2, oy = (r.height - shotSize.h * scale) / 2;
+      return { x: Math.max(0, Math.min(shotSize.w, (ev.clientX - r.left - ox) / scale)), y: Math.max(0, Math.min(shotSize.h, (ev.clientY - r.top - oy) / scale)) };
+    }
+    let down = null;
+    screen.onpointerdown = (e) => { down = { ...toDevice(e), t: Date.now() }; screen.setPointerCapture(e.pointerId); screen.focus(); };
+    screen.onpointerup = async (e) => {
+      if (!down || !dev()) return;
+      const up = toDevice(e); const start = down; down = null;
+      const dist = Math.hypot(up.x - start.x, up.y - start.y);
+      const ev = dist < 12 ? { type: 'tap', x: up.x, y: up.y } : { type: 'swipe', x1: start.x, y1: start.y, x2: up.x, y2: up.y, ms: Math.min(1200, Math.max(120, Date.now() - start.t)) };
+      try { await api.input(dev().name, ev); setTimeout(kickShots, 100); } catch (err) { oops(err); }
+    };
+    screen.tabIndex = 0;
+    screen.onkeydown = async (e) => {
+      const d = dev(); if (!d) return;
+      const map = { Enter: 'enter', Backspace: 'del', Escape: 'back', Home: 'home' };
+      let ev = null;
+      if (map[e.key]) ev = { type: 'key', key: map[e.key] };
+      else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && /[\x20-\x7e]/.test(e.key)) ev = { type: 'text', text: e.key };
+      if (!ev) return;
+      e.preventDefault();
+      try { await api.input(d.name, ev); setTimeout(kickShots, 120); } catch (err) { oops(err); }
+    };
+    screen.onpaste = (e) => { const t = e.clipboardData && e.clipboardData.getData('text'); if (t) { e.preventDefault(); sendText(t); } };
+    async function sendText(t) {
+      const d = dev(); if (!d || !t) return;
+      if (/[^\x20-\x7e]/.test(t)) return toast('adb 只能输入 ASCII 文本（中文请在设备内输入法里打）', { kind: 'bad', ms: 5000 });
+      try { await api.input(d.name, { type: 'text', text: t }); setTimeout(kickShots, 150); } catch (err) { oops(err); }
+    }
+    $('send-btn').onclick = () => { sendText($('send-text').value); $('send-text').value = ''; };
+    $('send-text').onkeydown = (e) => { if (e.key === 'Enter') $('send-btn').click(); };
+    document.querySelectorAll('.navbar [data-key]').forEach((b) => { b.onclick = async () => { const d = dev(); if (!d) return; try { await api.input(d.name, { type: 'key', key: b.dataset.key }); setTimeout(kickShots, 200); } catch (e) { oops(e); } }; });
+    $('live-btn').onclick = () => { live = !live; $('live-btn').classList.toggle('on', !live); $('live-btn').querySelector('use').setAttribute('href', live ? '#i-pause' : '#i-play'); $('live-btn').lastChild.textContent = live ? '暂停' : '继续'; if (live) kickShots(); };
+    $('shot-btn').onclick = () => { const d = dev(); if (!d || !screen.src) return; const a = document.createElement('a'); a.href = screen.src; a.download = `${d.name}-${new Date().toISOString().replace(/[:.]/g, '-')}.png`; a.click(); toast('截图已保存到下载目录', { kind: 'ok' }); };
+
+    // ── actions ───────────────────────────────────────────────────────────
+    async function act(btnId, fn, okText) {
+      const b = $(btnId); b.disabled = true;
+      try { await fn(); if (okText) toast(okText, { kind: 'ok' }); await refresh({ quiet: true }); }
+      catch (e) { oops(e); }
+      finally { b.disabled = false; }
+    }
+    $('a-start').onclick = () => act('a-start', () => api.start(dev().name), '已启动，等待开机');
+    $('a-stop').onclick = () => act('a-stop', () => api.stop(dev().name), '已停止');
+    $('a-restart').onclick = () => act('a-restart', () => api.restart(dev().name), '重启中');
+    $('a-refresh').onclick = () => refresh();
+    $('proxy-save').onclick = () => act('proxy-save', async () => { const d = dev(); const v = await api.setProxy(d.name, $('i-proxy').value); d.ipInfo = null; toast(v ? `代理已设为 ${v}，正在重新检测出口` : '已切为直连，正在重新检测出口', { kind: 'ok' }); setTimeout(() => refresh({ quiet: true }), 800); });
+    $('chip-mihomo').onclick = () => { if (defaults.proxyHint) $('i-proxy').value = defaults.proxyHint; else toast('未找到本机 mihomo 容器 IP', { kind: 'bad' }); };
+    $('chip-direct').onclick = () => { $('i-proxy').value = ''; };
+    $('frida-sw').onclick = () => act('frida-sw', async () => { const d = dev(); const on = await api.frida(d.name, !(d.info && d.info.frida)); toast(on ? `frida-server 已启动 · 宿主用 frida -H 127.0.0.1:${d.info.fridaPort}` : 'frida-server 已停止', { kind: 'ok', ms: 6000 }); });
+    $('rm-btn').onclick = () => $('rm-confirm').classList.add('on');
+    $('rm-no').onclick = () => $('rm-confirm').classList.remove('on');
+    $('rm-yes').onclick = () => act('rm-yes', async () => { const n = dev().name; await api.remove(n, $('rm-purge').checked); $('rm-confirm').classList.remove('on'); selected = null; toast(`${n} 已删除`, { kind: 'ok' }); });
+
+    // ── create ────────────────────────────────────────────────────────────
+    $('new-btn').onclick = () => { const on = !$('create').classList.contains('on'); $('create').classList.toggle('on', on); if (on) { if (!$('c-proxy').value && defaults.proxyHint) $('c-proxy').value = defaults.proxyHint; $('c-name').focus(); } };
+    $('c-cancel').onclick = () => $('create').classList.remove('on');
+    $('c-ok').onclick = async () => {
+      const b = $('c-ok'); b.disabled = true; showErr($('c-err'), null);
+      const t = toast('正在创建设备…', { ms: 0, spin: true });
+      try {
+        const r = await api.create({ name: $('c-name').value, version: $('c-ver').value, width: $('c-w').value, height: $('c-h').value, dpi: $('c-dpi').value, proxy: $('c-proxy').value });
+        $('create').classList.remove('on'); $('c-name').value = '';
+        t.update(`${r.name} 已创建（adb :${r.port}），开机中`, 'ok'); setTimeout(t.close, 6000);
+        await refresh({ quiet: true }); select(r.name);
+      } catch (e) { showErr($('c-err'), e); t.update('创建失败', 'bad'); setTimeout(t.close, 3000); }
+      finally { b.disabled = false; }
+    };
+    $('c-name').onkeydown = (e) => { if (e.key === 'Enter') $('c-ok').click(); };
+    let progressToast = null;
+    api.onProgress((m) => { if (!m || !m.message) return; if (progressToast) progressToast.update(m.message); else progressToast = toast(m.message, { ms: 0, spin: true }); clearTimeout(api._pt); api._pt = setTimeout(() => { progressToast && progressToast.close(); progressToast = null; }, 15000); });
+
+    // ── apps ──────────────────────────────────────────────────────────────
+    let apps = [];
+    const appName = (p) => { const s = p.split('.'); const last = s[s.length - 1]; const known = { katana: 'Facebook', 'org.telegram.messenger.web': 'Telegram', 'org.telegram.messenger': 'Telegram', 'com.whatsapp': 'WhatsApp', 'com.instagram.android': 'Instagram', 'com.twitter.android': 'X (Twitter)', 'com.google.android.youtube': 'YouTube', 'com.zhiliaoapp.musically': 'TikTok' }; return known[p] || known[last] || last.charAt(0).toUpperCase() + last.slice(1); };
+    function renderApps() {
+      const f = $('apps-filter').value.trim().toLowerCase();
+      const d = dev();
+      $('apps-list').innerHTML = apps.filter((p) => !f || p.includes(f) || appName(p).toLowerCase().includes(f)).map((p) => `<div class="app"><div class="app-ico">${esc(appName(p).charAt(0))}</div><div class="pk"><span>${esc(appName(p))}</span><small class="mono" title="${esc(p)}">${esc(p)}</small></div><button class="ghost sm" data-launch="${esc(p)}">打开</button><button class="subtle sm" data-un="${esc(p)}" title="卸载"><svg class="ico"><use href="#i-trash"/></svg></button></div>`).join('')
+        || `<div style="color:var(--muted);padding:14px 4px">${!d ? '未选择设备' : !d.running ? '设备未运行' : apps.length ? '无匹配' : '没有第三方应用'}</div>`;
+    }
+    async function loadApps() {
+      const d = dev(); apps = []; renderApps(); if (!d || !d.running || !d.info || d.info.adb !== 'device') return;
+      try { apps = await api.apps(d.name); showErr($('apps-err'), null); } catch (e) { showErr($('apps-err'), e); }
+      renderApps();
+    }
+    $('apps-filter').oninput = renderApps;
+    $('apps-refresh').onclick = loadApps;
+    $('apps-install').onclick = () => act('apps-install', async () => { const r = await api.install(dev().name); if (!r.canceled) { toast(`已安装：${r.installed.join(', ')}`, { kind: 'ok', ms: 6000 }); loadApps(); } });
+    $('apps-list').onclick = async (e) => {
+      const b = e.target.closest('button'); const d = dev(); if (!b || !d) return;
+      b.disabled = true;
+      try {
+        if (b.dataset.launch) { await api.launch(d.name, b.dataset.launch); setTimeout(kickShots, 600); }
+        if (b.dataset.un) { await api.uninstall(d.name, b.dataset.un); toast(`已卸载 ${b.dataset.un}`, { kind: 'ok' }); loadApps(); }
+      } catch (err) { showErr($('apps-err'), err); } finally { b.disabled = false; }
+    };
+
+    // ── terminal ──────────────────────────────────────────────────────────
+    const hist = []; let hi = 0;
+    async function runCmd() {
+      const d = dev(); const c = $('term-cmd').value.trim(); if (!d || !c) return;
+      $('term-cmd').value = ''; hist.push(c); hi = hist.length;
+      const out = $('term-out');
+      out.innerHTML += `<div class="cmd">$ ${esc(c)}</div>`;
+      try { const r = await api.shell(d.name, c); out.innerHTML += `<div>${esc(r)}</div>`; } catch (e) { out.innerHTML += `<div class="er">${esc(e.message)}</div>`; }
+      out.scrollTop = out.scrollHeight;
+    }
+    $('term-run').onclick = runCmd;
+    $('term-cmd').onkeydown = (e) => {
+      if (e.key === 'Enter') runCmd();
+      if (e.key === 'ArrowUp' && hist.length) { e.preventDefault(); hi = Math.max(0, hi - 1); $('term-cmd').value = hist[hi] || ''; }
+      if (e.key === 'ArrowDown') { e.preventDefault(); hi = Math.min(hist.length, hi + 1); $('term-cmd').value = hist[hi] || ''; }
+    };
+
+    // ── tabs ──────────────────────────────────────────────────────────────
+    document.querySelectorAll('.tabs button').forEach((b) => { b.onclick = () => {
+      document.querySelectorAll('.tabs button').forEach((x) => x.classList.toggle('on', x === b));
+      document.querySelectorAll('.pane').forEach((p) => p.classList.toggle('on', p.id === `pane-${b.dataset.pane}`));
+      localStorage.setItem('redroid-matrix-tab', b.dataset.pane);
+      if (b.dataset.pane === 'apps' && !apps.length) loadApps();
+    }; });
+    { const t = localStorage.getItem('redroid-matrix-tab'); const b = t && document.querySelector(`.tabs [data-pane="${t}"]`); if (b) b.click(); }
+
+    // ── boot ──────────────────────────────────────────────────────────────
+    api.defaults().then((d) => { defaults = d || defaults; }).catch(() => {});
+    refresh().then(() => { if (selected) { loadApps(); kickShots(); } });
+    setInterval(() => refresh({ quiet: true }), 8000);
+  </script>
+</body>
+</html>

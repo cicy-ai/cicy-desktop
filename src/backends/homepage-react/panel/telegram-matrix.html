@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Telegram 矩阵</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: var(--bg); color: var(--fg); }
+    body { display: grid; grid-template-columns: minmax(320px, 34%) 1fr; }
+    aside { min-width: 0; border-right: 1px solid var(--line); background: var(--bg); display: flex; flex-direction: column; }
+    header { flex: none; height: 56px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); }
+    h1 { margin: 0; font-size: 15px; display: flex; align-items: baseline; gap: 8px; }
+    h1 small { color: var(--muted); font-weight: 500; font-size: 12px; }
+    button { border: 0; border-radius: 8px; padding: 7px 12px; color: white; background: var(--accent); cursor: pointer; font-weight: 600; font-size: 13px; white-space: nowrap; line-height: 1.2; }
+    button:hover { filter: brightness(1.08); }
+    button:disabled { opacity: .55; cursor: wait; }
+    button.ghost { background: var(--head); color: var(--fg); border: 1px solid var(--line); }
+    button.sm { padding: 4px 8px; font-size: 12px; }
+    .icon { background: transparent; color: #b4b4bb; padding: 3px 6px; font-size: 13px; border-radius: 6px; }
+    .icon:hover { background: var(--hover); color: #fff; }
+    .list { flex: 1; overflow: auto; padding: 8px; }
+    #rows { display: flex; flex-direction: column; gap: 4px; }
+    .row { padding: 9px 10px; border-radius: 10px; cursor: pointer; border: 1px solid transparent; min-width: 0; }
+    .row:hover { background: var(--hover); }
+    .row.active { background: var(--cell); border-color: rgba(59,130,246,.55); }
+    .row.failed .name { color: #ff9e9e; }
+    .line1 { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #3a3a40; flex: none; }
+    .dot.loading { background: #f0b429; animation: pulse 1s infinite alternate; }
+    .dot.ok { background: #3fb950; }
+    .dot.failed { background: #ff5c5c; }
+    @keyframes pulse { from { opacity: .35; } to { opacity: 1; } }
+    .name { font-weight: 650; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    .chip { flex: none; padding: 1px 6px; border-radius: 999px; background: var(--head); color: #b4b4bb; font: 11px ui-monospace, monospace; }
+    .st { flex: none; color: var(--muted); font-size: 11px; white-space: nowrap; margin-left: auto; }
+    .line2 { display: flex; align-items: center; gap: 8px; margin-top: 4px; padding-left: 16px; font-size: 11.5px; color: var(--muted); min-width: 0; }
+    .line2 .tg { flex: none; max-width: 55%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #b4b4bb; }
+    .line2 .tg b { color: var(--fg); font-weight: 600; }
+    .line2 .tg.none { color: #6b6b72; }
+    /* 编辑态就地变成可输入,尺寸/位置与只读态完全一致,不发生位移 */
+    .line2 .ip { flex: none; max-width: 45%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 6px; border-radius: 999px; background: var(--head); color: #b4b4bb; font: 11px ui-monospace, monospace; line-height: 16px; }
+    .line2 .ip.none { display: none; }
+    .line2 .phone { flex: none; color: #b4b4bb; font: 11px ui-monospace, monospace; white-space: nowrap; }
+    .line2 .phone.none { display: none; }
+    button.code { background: #1f6feb; padding: 3px 8px; font-size: 11px; }
+    .ghead .phone { color: #b4b4bb; font: 11px ui-monospace, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    /* 代理设置弹窗 */
+    .modal { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.55); }
+    .modal[hidden] { display: none; }
+    .modal-card { width: 380px; max-width: 92vw; background: var(--cell); border: 1px solid var(--line); border-radius: 14px; padding: 18px; box-shadow: 0 24px 70px rgba(0,0,0,.5); }
+    .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; font-size: 15px; font-weight: 650; }
+    .modal-head .icon { background: transparent; color: #b4b4bb; padding: 2px 6px; font-size: 14px; border-radius: 6px; }
+    .modal-head .icon:hover { background: var(--hover); color: #fff; }
+    .modal-label { display: block; font-size: 12px; color: var(--muted); margin: 4px 0 6px; }
+    .modal-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+    .modal-row input { flex: 1; min-width: 0; height: 32px; border: 1px solid var(--line); border-radius: 8px; padding: 0 10px; background: #111113; color: var(--fg); font: 12px ui-monospace, monospace; outline: 0; }
+    .modal-row input:focus { border-color: var(--accent); }
+    .modal-ip { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: #b4b4bb; }
+    .modal-err { color: #ff8a8a; font-size: 12px; min-height: 16px; margin-bottom: 4px; word-break: break-all; }
+    .modal-danger { margin-top: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+    button.del { background: #b3261e; }
+    .row-err { padding: 4px 0 0 16px; color: #ff8a8a; font-size: 11px; display: none; }
+    .row-err.on { display: block; }
+    #empty { display: none; padding: 40px 24px; color: var(--muted); text-align: center; line-height: 1.8; }
+    #empty.on { display: block; }
+    .hint { flex: none; padding: 8px 16px; color: var(--muted); font-size: 11px; border-top: 1px solid var(--line); }
+    main { min-width: 0; display: flex; flex-direction: column; align-items: center; padding: 14px 18px; background: var(--bg); }
+    #preview-title { width: min(410px, calc(100% - 20px)); margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #b4b4bb; font-size: 12px; }
+    #preview-title .left { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    #selected-name { color: var(--fg); font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #status { color: var(--muted); white-space: nowrap; }
+    .actions { display: flex; gap: 6px; flex: none; }
+    .actions button { padding: 5px 9px; font-size: 12px; }
+    #phone { position: relative; width: min(410px, calc(100% - 20px)); flex: 1 1 auto; min-height: 420px; padding: 10px; overflow: hidden; border: 1px solid var(--line); border-radius: 28px; background: var(--cell); box-shadow: 0 24px 70px rgba(0,0,0,.45); }
+    #phone-preview { width: 100%; height: 100%; overflow: hidden; border-radius: 19px; background: #fff; }
+    .overlay { position: absolute; inset: 10px; border-radius: 19px; display: none; place-items: center; text-align: center; padding: 28px; color: var(--fg); background: var(--head); z-index: 2; }
+    .overlay.on { display: grid; }
+    .overlay h2 { margin: 0 0 8px; font-size: 16px; color: #ff8a8a; }
+    .overlay p { margin: 0 0 14px; font-size: 13px; line-height: 1.6; color: var(--muted); word-break: break-all; }
+    .overlay code { color: var(--fg); font: 12px ui-monospace, monospace; }
+    .overlay .btns { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+    /* 批量登录:未登录的会话一次全部铺开(最多 10 格),每格一个独立 BrowserView */
+    #grid-title { display: none; width: 100%; margin-bottom: 6px; align-items: center; justify-content: space-between; gap: 8px; color: #b4b4bb; font-size: 12px; }
+    #grid-title b { color: var(--fg); font-size: 13px; }
+    #grid { display: none; width: 100%; flex: 1 1 auto; min-height: 0; gap: 8px; grid-auto-rows: minmax(0, 1fr); }
+    /* 批量模式 = 整页只有 webview:侧栏整个隐藏,顶部一条细工具栏,其余全是格子 */
+    body.batch { grid-template-columns: 1fr; }
+    body.batch aside { display: none; }
+    main.batch { padding: 8px 10px 10px; }
+    main.batch #preview-title, main.batch #phone { display: none; }
+    main.batch #grid-title { display: flex; }
+    main.batch #grid { display: grid; }
+    .gcell { display: flex; flex-direction: column; min-width: 0; min-height: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--cell); overflow: hidden; }
+    .gcell.done { border-color: rgba(63,185,80,.6); }
+    .gcell.failed { border-color: rgba(255,92,92,.6); }
+    .ghead { flex: none; height: 30px; padding: 0 8px; display: flex; align-items: center; gap: 6px; font-size: 12px; border-bottom: 1px solid var(--line); background: var(--head); min-width: 0; }
+    .ghead .name { font-size: 12px; }
+    .ghead .st { margin-left: auto; }
+    .gcell.done .ghead .st { color: #3fb950; font-weight: 600; }
+    .gbody { flex: 1 1 auto; min-height: 0; background: #fff; }
+    #grid-empty { grid-column: 1 / -1; display: grid; place-items: center; color: var(--muted); }
+    .spinner { width: 28px; height: 28px; border: 3px solid rgba(255,255,255,.12); border-top-color: var(--accent); border-radius: 50%; animation: spin .9s linear infinite; margin: 0 auto 12px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <aside>
+    <header>
+      <h1>Telegram 矩阵 <small id="count"></small></h1>
+      <div class="actions"><button class="ghost" id="batch-login" title="把所有未登录的 Profile 一次全部打开（最多 10 个）">批量登录</button><button id="add-profile" title="新建一个独立会话（persist:sandbox-N）">+ 添加 Profile</button></div>
+    </header>
+    <div class="list">
+      <div id="rows"></div>
+      <div id="empty">还没有 Profile<br>点击右上角「添加 Profile」创建第一个 Telegram 会话</div>
+    </div>
+    <div class="hint">点击行切换预览；点 ⚙ 设置代理 / 测 IP / 删除。已打开过的会话会在后台保持登录。</div>
+  </aside>
+  <main>
+    <div id="grid-title">
+      <div class="left"><b>批量登录</b><span id="grid-count"></span></div>
+      <div class="actions"><button class="ghost" id="grid-reload" title="重新加载所有格子">全部重载</button><button class="ghost" id="grid-exit">退出批量</button></div>
+    </div>
+    <div id="grid"></div>
+    <div id="preview-title">
+      <div class="left"><span class="dot" id="sel-dot"></span><span id="selected-name">未选择 Profile</span><span id="status"></span></div>
+      <div class="actions"><button class="code" id="open-code" title="在该 Profile 的 tab 里打开接码 URL">接码</button><button class="ghost" id="probe-ip" title="经该 Profile 的代理探测出口 IP / 地区">测 IP</button><button class="ghost" id="reload" title="重新加载 Telegram Web">重新加载</button></div>
+    </div>
+    <div id="phone">
+      <div id="phone-preview"></div>
+      <div class="overlay on" id="ov-empty"><div>选择左侧一个 Profile 预览 Telegram Web</div></div>
+      <div class="overlay" id="ov-loading"><div><div class="spinner"></div><div>正在加载 Telegram Web…</div></div></div>
+      <div class="overlay" id="ov-error">
+        <div>
+          <h2>无法连接 Telegram</h2>
+          <p id="err-detail"></p>
+          <div class="btns"><button id="err-retry">重试</button><button class="ghost" id="err-cfg">代理设置</button></div>
+        </div>
+      </div>
+    </div>
+  </main>
+  <div id="cfg-modal" class="modal" hidden>
+    <div class="modal-card">
+      <div class="modal-head"><span id="cfg-title">Profile 设置</span><button class="icon" id="cfg-x" title="关闭">✕</button></div>
+      <label class="modal-label">手机号</label>
+      <div class="modal-row"><input id="cfg-phone" placeholder="+8801700000000" spellcheck="false"></div>
+      <label class="modal-label">接码 URL</label>
+      <div class="modal-row"><input id="cfg-code" placeholder="https://…/getcode?id=…" spellcheck="false"><button class="ghost" id="cfg-code-open" title="在该 Profile 的 tab 里打开">打开</button></div>
+      <label class="modal-label">代理地址</label>
+      <div class="modal-row"><input id="cfg-proxy" placeholder="留空 = 直连，例如 http://127.0.0.1:20001" spellcheck="false"><button id="cfg-save">保存</button></div>
+      <div class="modal-row"><button class="ghost" id="cfg-test">测 IP</button><span class="modal-ip" id="cfg-ip"></span></div>
+      <div class="modal-err" id="cfg-err"></div>
+      <div class="modal-danger"><button class="ghost del" id="cfg-del">删除此 Profile</button></div>
+    </div>
+  </div>
+  <script>
+    const TELEGRAM_URL = 'https://web.telegram.org/k/';
+    const rowsEl = document.getElementById('rows');
+    const empty = document.getElementById('empty');
+    const countEl = document.getElementById('count');
+    const addButton = document.getElementById('add-profile');
+    const preview = document.getElementById('phone-preview');
+    const selectedName = document.getElementById('selected-name');
+    const selDot = document.getElementById('sel-dot');
+    const statusEl = document.getElementById('status');
+    const ov = { empty: document.getElementById('ov-empty'), loading: document.getElementById('ov-loading'), error: document.getElementById('ov-error') };
+    const errDetail = document.getElementById('err-detail');
+    let profiles = [];
+    let selected = null;
+    const openedProfiles = new Set();   // 打开过的会话保留在后台(登录态不丢),只有选中的贴到预览区
+    const cellState = new Map();        // accountIdx -> { loading, failed, error, url, title }
+    const rows = new Map();             // accountIdx -> row element
+    const BATCH_MAX = 10;               // 一次最多铺开多少个登录格
+    const mainEl = document.querySelector('main');
+    const gridEl = document.getElementById('grid');
+    const gridCount = document.getElementById('grid-count');
+    let batchMode = false;
+    const batch = new Set();            // 批量模式下铺开的 accountIdx
+    const gcells = new Map();           // accountIdx -> { el, body }
+
+    const esc = (value) => String(value || '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const cellId = (idx) => `telegram-preview-${idx}`;
+    const stateOf = (idx) => cellState.get(Number(idx)) || {};
+    const dotClass = (st) => st.loading ? 'loading' : st.failed ? 'failed' : (st.url ? 'ok' : '');
+    const stateText = (st, opened) => st.loading ? '加载中…' : st.failed ? '连接失败' : st.url ? '已加载' : (opened ? '' : '未打开');
+    const fmtAgo = (iso) => { const t = Date.parse(iso || ''); if (!t) return ''; const m = Math.round((Date.now() - t) / 60000); return m < 1 ? '刚刚' : m < 60 ? `${m} 分钟前` : m < 1440 ? `${Math.round(m / 60)} 小时前` : `${Math.round(m / 1440)} 天前`; };
+    // 列表只显示一个简短地区(取最具体的一段:优先省/州,否则国家),完整信息在 tooltip。
+    const shortArea = (area) => { const seg = String(area || '').split('·').map((x) => x.trim()).filter(Boolean); return seg[1] || seg[0] || ''; };
+    function renderIp(p) {
+      const row = rows.get(p.accountIdx); if (!row) return;
+      const el = row.querySelector('.ip'); el.className = 'ip';
+      const info = p.ipInfo;
+      if (info && info.ip) {
+        const a = shortArea(info.area);
+        el.textContent = a || info.ip;
+        el.title = `出口 IP ${info.ip}${info.area ? '，' + info.area : ''}，${fmtAgo(info.probedAt) || '未知时间'}探测`;
+      } else { el.classList.add('none'); el.textContent = ''; el.title = ''; }
+    }
+    // 经该 Profile 的代理探测出口 IP;成功后更新它的列表地区。返回 {ok, info|error}。
+    async function probeIp(p) {
+      try {
+        const r = await window.panelAPI.probeIp(p.accountIdx);
+        if (r && r.ipInfo) { p.ipInfo = r.ipInfo; renderIp(p); return { ok: true, info: r.ipInfo }; }
+        return { ok: false, error: (r && r.error) || '探测失败' };
+      } catch (e) { return { ok: false, error: e.message || String(e) }; }
+    }
+    // 身份:优先用本次会话探到的(cellState.identity),否则用 profile 里存的(上次登录)。
+    const identityOf = (p) => stateOf(p.accountIdx).identity || p.telegram || null;
+    const phoneOf = (p) => (p.login && p.login.phone) || '';
+    const codeUrlOf = (p) => (p.login && p.login.codeUrl) || '';
+    function renderPhone(p) {
+      const row = rows.get(p.accountIdx); if (!row) return;
+      const el = row.querySelector('.phone'); const ph = phoneOf(p);
+      el.classList.toggle('none', !ph); el.textContent = ph; el.title = codeUrlOf(p) ? `接码：${codeUrlOf(p)}` : '';
+      const g = gcells.get(p.accountIdx); if (g) { g.el.querySelector('.phone').textContent = ph; g.el.querySelector('.code').disabled = !codeUrlOf(p); }
+    }
+    async function openCode(p) {
+      if (!codeUrlOf(p)) { flash(`#${p.accountIdx} 还没有接码 URL，点 ⚙ 填写`, 4000); return; }
+      try { await window.panelAPI.openCodeUrl(p.accountIdx, codeUrlOf(p)); flash(`#${p.accountIdx} 接码页已在 Profile 窗口打开`); }
+      catch (e) { flash(e.message || String(e), 6000); }
+    }
+    function renderIdentity(p) {
+      renderPhone(p);
+      const row = rows.get(p.accountIdx); if (!row) return;
+      const el = row.querySelector('.tg');
+      const it = identityOf(p);
+      if (it && (it.username || it.displayName || it.phone)) {
+        el.classList.remove('none');
+        el.innerHTML = (it.username ? `<b>@${esc(it.username)}</b>` : '') + (it.displayName ? `${it.username ? ' · ' : ''}${esc(it.displayName)}` : '') + (!it.username && !it.displayName && it.phone ? `+${esc(it.phone)}` : '');
+        el.title = [it.username && `@${it.username}`, it.displayName, it.phone && `+${it.phone}`].filter(Boolean).join('  ');
+      } else {
+        el.classList.add('none');
+        el.textContent = openedProfiles.has(p.accountIdx) && stateOf(p.accountIdx).url ? '未登录' : '—';
+        el.title = '';
+      }
+    }
+
+    function flash(text, ms = 2500) {
+      statusEl.textContent = text; statusEl.dataset.sticky = '1';
+      clearTimeout(flash.t);
+      flash.t = setTimeout(() => { delete statusEl.dataset.sticky; renderPreviewState(); }, ms);
+    }
+
+    function syncPreview() {
+      if (!window.panelAPI) return;
+      const rect = preview.getBoundingClientRect();
+      const box = (r) => ({ x: r.x, y: r.y, w: r.width, h: r.height });
+      const cells = [...openedProfiles].map((profileId) => {
+        let visible = false, r = null;
+        if (batchMode) {
+          const g = gcells.get(profileId);
+          if (g && batch.has(profileId)) { visible = true; r = box(g.body.getBoundingClientRect()); }
+        } else if (selected && profileId === selected.accountIdx) { visible = true; r = box(rect); }
+        return { id: cellId(profileId), url: TELEGRAM_URL, profile: profileId, visible, rect: r };
+      });
+      try { window.panelAPI.sync(cells); } catch (e) {}
+    }
+
+    function describeError(p, st) {
+      const e = st.error || {};
+      const desc = e.description ? `<code>${esc(e.description)}</code>` : '';
+      if (p.proxy) return `代理 <code>${esc(p.proxy)}</code> 不可用或无法访问 Telegram。${desc}<br>点 ⚙ 检查或更换该 Profile 的代理，可用「测 IP」验证。`;
+      return `当前为直连，网络无法访问 Telegram。${desc}<br>点 ⚙ 为该 Profile 设置代理。`;
+    }
+
+    function renderPreviewState() {
+      const st = selected ? stateOf(selected.accountIdx) : {};
+      ov.empty.classList.toggle('on', !selected);
+      ov.loading.classList.toggle('on', !!selected && !!st.loading && !st.url);
+      ov.error.classList.toggle('on', !!selected && !st.loading && !!st.failed);
+      if (selected && st.failed) errDetail.innerHTML = describeError(selected, st);
+      selDot.className = `dot ${selected ? dotClass(st) : ''}`;
+      if (selected && !statusEl.dataset.sticky) statusEl.textContent = stateText(st, true);
+    }
+
+    function renderRowState(idx) {
+      const row = rows.get(idx); if (!row) return;
+      const st = stateOf(idx);
+      row.classList.toggle('failed', !!st.failed && !st.loading);
+      row.querySelector('.dot').className = `dot ${dotClass(st)}`;
+      row.querySelector('.st').textContent = stateText(st, openedProfiles.has(idx));
+      renderGridCell(idx);
+    }
+
+    // ── 批量登录:把未登录的 Profile 一次全部铺开 ──
+    const hasIdentity = (p) => { const it = identityOf(p); return !!(it && (it.username || it.displayName || it.phone)); };
+    const gridCols = (n) => n <= 1 ? 1 : n <= 4 ? 2 : n <= 6 ? 3 : n <= 8 ? 4 : 5;
+    function buildGridCell(p) {
+      const el = document.createElement('div');
+      el.className = 'gcell'; el.dataset.id = String(p.accountIdx);
+      el.innerHTML = `<div class="ghead"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="phone">${esc(phoneOf(p))}</span><span class="st"></span><button class="code" title="在该 Profile 的 tab 里打开接码 URL">接码</button><button class="icon reload" title="重新加载">⟳</button></div><div class="gbody"></div>`;
+      el.querySelector('.reload').onclick = () => reloadProfile(p.accountIdx);
+      el.querySelector('.code').onclick = () => openCode(p);
+      el.querySelector('.code').disabled = !codeUrlOf(p);
+      el.querySelector('.ghead').onclick = (e) => { if (!e.target.closest('button')) { exitBatch(); selectProfile(p.accountIdx); } };
+      return { el, body: el.querySelector('.gbody') };
+    }
+    function renderGridCell(idx) {
+      const g = gcells.get(idx); if (!g) return;
+      const p = profiles.find((x) => x.accountIdx === idx); const st = stateOf(idx);
+      const done = !!p && hasIdentity(p);
+      g.el.classList.toggle('done', done);
+      g.el.classList.toggle('failed', !!st.failed && !st.loading);
+      g.el.querySelector('.dot').className = `dot ${dotClass(st)}`;
+      g.el.querySelector('.st').textContent = done ? '✓ 已登录' : stateText(st, true);
+      if (batchMode) { const n = [...batch].filter((i) => { const q = profiles.find((x) => x.accountIdx === i); return q && hasIdentity(q); }).length; gridCount.textContent = `${batch.size} 个会话 · ${n} 已登录`; }
+    }
+    function enterBatch() {
+      const todo = profiles.filter((p) => !hasIdentity(p)).slice(0, BATCH_MAX);
+      if (!todo.length) { flash('没有未登录的 Profile'); return; }
+      batch.clear(); gridEl.innerHTML = ''; gcells.clear();
+      for (const p of todo) {
+        batch.add(p.accountIdx);
+        const g = buildGridCell(p); gcells.set(p.accountIdx, g); gridEl.appendChild(g.el);
+        if (!openedProfiles.has(p.accountIdx)) { openedProfiles.add(p.accountIdx); cellState.set(p.accountIdx, { loading: true }); }
+        renderRowState(p.accountIdx);
+      }
+      gridEl.style.gridTemplateColumns = `repeat(${gridCols(todo.length)}, minmax(0, 1fr))`;
+      batchMode = true; mainEl.classList.add('batch'); document.body.classList.add('batch'); document.getElementById('batch-login').textContent = '退出批量';
+      render();
+      requestAnimationFrame(syncPreview);
+      setTimeout(pullStates, 300);
+    }
+    function exitBatch() {
+      if (!batchMode) return;
+      batchMode = false; mainEl.classList.remove('batch'); document.body.classList.remove('batch'); document.getElementById('batch-login').textContent = '批量登录';
+      batch.clear(); gcells.clear(); gridEl.innerHTML = '';
+      render(); renderPreviewState(); syncPreview();   // 会话留在后台,登录态不丢
+    }
+    document.getElementById('batch-login').onclick = () => (batchMode ? exitBatch() : enterBatch());
+    document.getElementById('grid-exit').onclick = exitBatch;
+    document.getElementById('grid-reload').onclick = () => { for (const idx of batch) reloadProfile(idx); };
+    new ResizeObserver(() => requestAnimationFrame(syncPreview)).observe(gridEl);
+
+    function buildRow(p) {
+      const row = document.createElement('div');
+      row.className = 'row'; row.dataset.id = String(p.accountIdx); row.title = `persist:sandbox-${p.accountIdx}`;
+      row.innerHTML = `
+        <div class="line1"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="st"></span><button class="icon gear" title="代理设置">⚙</button><button class="icon reload" title="重新加载">⟳</button></div>
+        <div class="line2"><span class="tg none">—</span><span class="phone none"></span><span class="ip none"></span></div>`;
+      // ⚙ 打开设置弹窗(代理 / 测 IP / 删除),不再 inline。
+      row.querySelector('.gear').onclick = (e) => { e.stopPropagation(); openCfgModal(p); };
+      row.onclick = () => { exitBatch(); selectProfile(p.accountIdx); };
+      row.querySelector('.reload').onclick = (e) => { e.stopPropagation(); reloadProfile(p.accountIdx); };
+      return row;
+    }
+
+    function reloadProfile(idx) {
+      const fresh = !openedProfiles.has(idx);
+      openedProfiles.add(idx);
+      cellState.set(idx, { loading: true }); renderRowState(idx);
+      if (selected && selected.accountIdx === idx) renderPreviewState();
+      syncPreview();
+      // 首次打开:上面的 sync() 已经会建视图并加载 URL,再 reload 只是白加载一次。
+      if (!fresh) { try { window.panelAPI.reload(cellId(idx)); } catch (e) {} }
+    }
+
+    function render() {
+      empty.classList.toggle('on', profiles.length === 0);
+      countEl.textContent = profiles.length ? `${profiles.length} 个会话` : '';
+      for (const p of profiles) {
+        if (!rows.has(p.accountIdx)) { const row = buildRow(p); rows.set(p.accountIdx, row); rowsEl.appendChild(row); }
+        rows.get(p.accountIdx).classList.toggle('active', !!selected && selected.accountIdx === p.accountIdx);
+        renderRowState(p.accountIdx);
+        renderIdentity(p);
+        renderIp(p);
+      }
+    }
+
+    function selectProfile(accountIdx) {
+      selected = profiles.find((p) => p.accountIdx === Number(accountIdx)) || null;
+      if (selected) { openedProfiles.add(selected.accountIdx); localStorage.setItem('telegram-matrix-profile', String(selected.accountIdx)); }
+      selectedName.textContent = selected ? `${selected.name} · #${selected.accountIdx}` : '未选择 Profile';
+      selectedName.title = selected ? `persist:sandbox-${selected.accountIdx}` : '';
+      delete statusEl.dataset.sticky;
+      render();
+      renderPreviewState();
+      syncPreview();
+      if (selected && !cellState.has(selected.accountIdx)) setTimeout(pullStates, 300);
+    }
+
+    function applyCellState(state) {
+      const m = /^telegram-preview-(\d+)$/.exec(state.id || '');
+      if (!m) return;
+      const idx = Number(m[1]);
+      const prev = stateOf(idx);
+      const failed = !!state.failed || /^chrome-error:/.test(state.url || '');
+      const next = { ...prev, loading: !!state.loading };
+      if (state.url !== undefined) { next.url = failed ? '' : state.url; next.title = state.title || ''; }
+      if (!state.loading) { next.failed = failed; next.error = state.error || (failed ? prev.error : null); }
+      if (state.identity) next.identity = state.identity;
+      cellState.set(idx, next);
+      renderRowState(idx);
+      { const p = profiles.find((x) => x.accountIdx === idx); if (p) renderIdentity(p); }
+      renderGridCell(idx);
+      if (selected && selected.accountIdx === idx) renderPreviewState();
+    }
+    async function pullStates({ adopt = false } = {}) {
+      let list = [];
+      try { list = await window.panelAPI.states(); } catch (e) { return; }
+      for (const st of list || []) {
+        // 面板页刷新后 openedProfiles 是空的,而主进程里那些会话视图还活着。
+        // 不先认领回来,第一次 syncPreview() 就会把它们当多余格子销毁,后台
+        // 登录着的会话全没(实测:刷新后 #1 的 webContents 被销毁)。
+        if (adopt) {
+          const m = /^telegram-preview-(\d+)$/.exec(st.id || '');
+          if (m) openedProfiles.add(Number(m[1]));
+        }
+        applyCellState(st);
+      }
+    }
+
+    async function loadProfiles(preferredId) {
+      profiles = await window.panelAPI.profiles();
+      profiles.sort((a, b) => a.accountIdx - b.accountIdx);
+      const remembered = Number(localStorage.getItem('telegram-matrix-profile'));
+      const target = preferredId || (profiles.some((p) => p.accountIdx === remembered) ? remembered : 0) || (profiles[0] && profiles[0].accountIdx);
+      selectProfile(target);
+    }
+
+    async function removeProfile(p) {
+      const idx = p.accountIdx;
+      await window.panelAPI.removeProfile(idx);
+      openedProfiles.delete(idx); cellState.delete(idx);
+      const row = rows.get(idx); if (row) row.remove(); rows.delete(idx);
+      profiles = profiles.filter((x) => x.accountIdx !== idx);
+      if (selected && selected.accountIdx === idx) {
+        const next = profiles[0] ? profiles[0].accountIdx : 0;
+        if (next) selectProfile(next); else { selected = null; localStorage.removeItem('telegram-matrix-profile'); selectedName.textContent = '未选择 Profile'; render(); renderPreviewState(); syncPreview(); }
+      } else render();
+      flash(`Profile #${idx} 已删除`);
+    }
+
+    addButton.onclick = async () => {
+      addButton.disabled = true; flash('正在创建…', 60000);
+      try {
+        const profile = await window.panelAPI.addProfile();
+        await loadProfiles(profile.accountIdx);
+        flash(`Profile #${profile.accountIdx} 已创建`);
+        const row = rows.get(profile.accountIdx); if (row) row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      } catch (e) { flash(e.message || String(e), 6000); }
+      finally { addButton.disabled = false; }
+    };
+    document.getElementById('reload').onclick = () => { if (selected) reloadProfile(selected.accountIdx); };
+    document.getElementById('open-code').onclick = () => { if (selected) openCode(selected); };
+    document.getElementById('err-retry').onclick = () => { if (selected) reloadProfile(selected.accountIdx); };
+    document.getElementById('err-cfg').onclick = () => { if (selected) openCfgModal(selected); };
+    document.getElementById('probe-ip').onclick = async () => {
+      if (!selected) { flash('先选择一个 Profile'); return; }
+      const b = document.getElementById('probe-ip'); const o = b.textContent; b.disabled = true; b.textContent = '测 IP…';
+      const r = await probeIp(selected);
+      b.disabled = false; b.textContent = o;
+      flash(r.ok ? `#${selected.accountIdx} 出口：${shortArea(selected.ipInfo.area) || selected.ipInfo.ip}` : `IP 探测失败：${r.error}`, 6000);
+    };
+    // ── 设置弹窗(代理 / 测 IP / 删除) ──
+    const cfgModal = document.getElementById('cfg-modal');
+    const cfgProxy = document.getElementById('cfg-proxy');
+    const cfgErr = document.getElementById('cfg-err');
+    const cfgIp = document.getElementById('cfg-ip');
+    const cfgDel = document.getElementById('cfg-del');
+    let cfgP = null, delArmed = false;
+    const cfgPhone = document.getElementById('cfg-phone');
+    const cfgCode = document.getElementById('cfg-code');
+    document.getElementById('cfg-code-open').onclick = () => { if (cfgP) openCode({ ...cfgP, login: { phone: cfgPhone.value, codeUrl: cfgCode.value.trim() } }); };
+    const cfgIpText = (p) => p && p.ipInfo && p.ipInfo.ip ? (p.ipInfo.area ? `${p.ipInfo.area} · ${p.ipInfo.ip}` : p.ipInfo.ip) : '未探测';
+    function openCfgModal(p) {
+      if (!p) return; cfgP = p; delArmed = false;
+      document.getElementById('cfg-title').textContent = `${p.name} · #${p.accountIdx} 设置`;
+      cfgProxy.value = p.proxy || ''; cfgErr.textContent = ''; cfgIp.textContent = cfgIpText(p);
+      cfgPhone.value = phoneOf(p); cfgCode.value = codeUrlOf(p);
+      cfgDel.textContent = '删除此 Profile'; cfgDel.disabled = false;
+      cfgModal.hidden = false; cfgProxy.focus();
+      // BrowserView 预览永远浮在页面 DOM 之上,会盖住弹窗 —— 打开弹窗时把 cells 脱离(复用拖拽逻辑),关闭时贴回。
+      try { window.panelAPI.dragging(true); } catch (e) {}
+    }
+    function closeCfgModal() {
+      cfgModal.hidden = true; cfgP = null; delArmed = false;
+      try { window.panelAPI.dragging(false); } catch (e) {}
+      syncPreview();
+    }
+    cfgModal.onclick = (e) => { if (e.target === cfgModal) closeCfgModal(); };
+    document.getElementById('cfg-x').onclick = closeCfgModal;
+    document.getElementById('cfg-save').onclick = async () => {
+      if (!cfgP) return; const b = document.getElementById('cfg-save'); b.disabled = true; cfgErr.textContent = '';
+      try {
+        const lg = await window.panelAPI.setProfileLogin(cfgP.accountIdx, cfgPhone.value.trim(), cfgCode.value.trim());
+        cfgP.login = lg.login; renderPhone(cfgP);
+        const u = await window.panelAPI.setProfileProxy(cfgP.accountIdx, cfgProxy.value.trim());
+        cfgP.proxy = u.proxy; cfgP.ipInfo = null; renderIp(cfgP);
+        if (openedProfiles.has(cfgP.accountIdx)) { reloadProfile(cfgP.accountIdx); flash(`#${cfgP.accountIdx} 代理已应用，重新加载中`); }
+        else flash(`#${cfgP.accountIdx} 代理已保存，打开时生效`);
+        closeCfgModal();
+      } catch (e) { cfgErr.textContent = e.message || String(e); } finally { b.disabled = false; }
+    };
+    cfgProxy.onkeydown = (e) => { if (e.key === 'Enter') document.getElementById('cfg-save').onclick(); if (e.key === 'Escape') closeCfgModal(); };
+    document.getElementById('cfg-test').onclick = async () => {
+      if (!cfgP) return; const b = document.getElementById('cfg-test'); const o = b.textContent; b.disabled = true; b.textContent = '测 IP…'; cfgErr.textContent = '';
+      const r = await probeIp(cfgP);
+      b.disabled = false; b.textContent = o;
+      if (r.ok) cfgIp.textContent = cfgIpText(cfgP); else cfgErr.textContent = '探测失败：' + r.error;
+    };
+    cfgDel.onclick = async () => {
+      if (!cfgP) return;
+      if (!delArmed) { delArmed = true; cfgDel.textContent = '确认删除（不可恢复）'; setTimeout(() => { if (delArmed) { delArmed = false; cfgDel.textContent = '删除此 Profile'; } }, 4000); return; }
+      delArmed = false; cfgDel.disabled = true; cfgErr.textContent = '';
+      try { await removeProfile(cfgP); closeCfgModal(); }
+      catch (e) { cfgErr.textContent = e.message || String(e); cfgDel.disabled = false; cfgDel.textContent = '删除此 Profile'; }
+    };
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !cfgModal.hidden) closeCfgModal(); });
+
+    new ResizeObserver(() => requestAnimationFrame(syncPreview)).observe(preview);
+    window.addEventListener('resize', syncPreview);
+    try { window.panelAPI.onCellState(applyCellState); } catch (e) {}
+    pullStates({ adopt: true })
+      .catch(() => {})
+      .then(() => loadProfiles())
+      .catch((e) => { flash(e.message || String(e), 8000); render(); });
+  </script>
+</body>
+</html>

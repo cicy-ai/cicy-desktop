@@ -4675,7 +4675,14 @@ function useHub() {
     setLoading(true);
     try {
       const r = await bridge.instances();
-      if (r?.ok) { setInstances(r.instances || []); setError(""); }
+      if (r?.ok) {
+        // Hide the desktop pseudo-instances (name starts with "desktop-"): they
+        // are the machines enrolled onto the control channel, not openable
+        // cicy-code teams, so a card for one only misleads.
+        const only = (r.instances || []).filter((it) => !/^desktop-/i.test(String((it && (it.name || it.slug)) || "")));
+        setInstances(only);
+        setError("");
+      }
       else {
         setInstances([]);
         setError(r?.error || "");

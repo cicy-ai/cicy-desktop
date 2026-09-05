@@ -1,0 +1,832 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>面板</title>
+<!-- tab favicon: a 2x2 grid mark so the panel tab reads as "面板" at a glance -->
+<link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="2" y="2" width="9" height="9" rx="2" fill="%233b82f6"/><rect x="13" y="2" width="9" height="9" rx="2" fill="%238b5cf6"/><rect x="2" y="13" width="9" height="9" rx="2" fill="%238b5cf6"/><rect x="13" y="13" width="9" height="9" rx="2" fill="%233b82f6"/></svg>'>
+<style>
+  /* Panel page — a split canvas of <webview> cells. Layout is a binary split
+     tree rendered with ABSOLUTE rects (not nested flex): cells are never
+     re-parented on split/close, so their <webview> guests never reload. */
+  :root{
+    --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08);
+    --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;background:var(--bg);color:var(--fg);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;overflow:hidden}
+  svg{display:block}
+
+  #stage{position:absolute;inset:0;padding:8px}
+
+  /* ── cell ── */
+  .cell{position:absolute;display:flex;flex-direction:column;background:var(--cell);border:1px solid var(--line);border-radius:10px;overflow:hidden;transition:top .16s ease,left .16s ease,width .16s ease,height .16s ease;box-shadow:0 2px 10px rgba(0,0,0,.35)}
+  /* native (BrowserView) cells: the content view jumps instantly to its new
+     bounds — animating the frame underneath would visibly desync, so don't. */
+  .native-cells .cell,.native-cells .divider{transition:none}
+  .cell.dragging-layout{transition:none}
+  .cell__head{flex:0 0 34px;display:flex;align-items:center;gap:6px;padding:0 6px 0 10px;background:var(--head);border-bottom:1px solid var(--line);-webkit-user-select:none;user-select:none}
+  /* Reload and loading share one fixed button slot: loading swaps the glyph in
+     place, so no toolbar element moves and no extra padding is needed. */
+  .reload-btn{position:relative}
+  .reload-btn .cell__spin{position:absolute;width:12px;height:12px;border:2px solid rgba(255,255,255,.18);border-top-color:var(--accent);border-radius:50%;animation:sp .7s linear infinite;visibility:hidden}
+  .cell.loading .reload-btn>svg{visibility:hidden}
+  .cell.loading .reload-btn .cell__spin{visibility:visible}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .cell__url{flex:1;min-width:0;height:24px;padding:0 10px;background:#101012;border:1px solid var(--line);border-radius:12px;color:var(--fg);font-size:12px;outline:none;-webkit-user-select:text;user-select:text}
+  .cell__url:focus{border-color:var(--accent);background:#0d0d10}
+  .cell__url::placeholder{color:var(--muted)}
+  .service-trigger{flex:0 0 30px;width:30px;height:28px;border:1px solid var(--line);border-radius:8px;background:#101012;display:flex;align-items:center;justify-content:center;cursor:pointer}
+  .service-trigger:hover,.service-trigger.open{border-color:var(--accent);background:#17171b}
+  .service-trigger.image-logo{background:#fff}
+  .service-trigger.image-logo:hover,.service-trigger.image-logo.open{background:#fff}
+  .service-trigger svg,.service-trigger img{width:21px;height:21px;object-fit:contain}
+  .profile-trigger{flex:0 0 32px;height:28px;padding:0;border:1px solid var(--line);border-radius:8px;background:#101012;color:#aeb4c0;font-size:11px;font-weight:700;cursor:pointer}
+  .profile-trigger:hover,.profile-trigger.open{border-color:var(--accent);color:#fff}
+  .profile-trigger:disabled{opacity:.55;border-color:var(--line);cursor:default}
+  .profile-pop{position:fixed;z-index:1001;min-width:180px;max-height:300px;overflow:auto;padding:6px;background:#1b1b20;border:1px solid rgba(255,255,255,.14);border-radius:10px;box-shadow:0 18px 50px rgba(0,0,0,.65)}
+  .profile-item{width:100%;height:36px;padding:0 10px;border:0;border-radius:7px;background:transparent;color:var(--fg);display:flex;align-items:center;gap:9px;text-align:left;cursor:pointer}
+  .profile-item:hover,.profile-item.active{background:rgba(59,130,246,.15)}
+  .profile-item b{font-size:11px;color:#93b4f8}
+  .profile-item span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+  .service-pop{position:fixed;z-index:1000;width:340px;max-width:calc(100vw - 16px);max-height:430px;padding:8px;background:#1b1b20;border:1px solid rgba(255,255,255,.14);border-radius:12px;box-shadow:0 18px 50px rgba(0,0,0,.65);display:none}
+  .service-pop.open{display:block}
+  .service-search{width:100%;height:34px;padding:0 11px;border:1px solid var(--line);border-radius:8px;background:#101012;color:var(--fg);font-size:13px;outline:none;-webkit-user-select:text;user-select:text}
+  .service-search:focus{border-color:var(--accent)}
+  .service-list{max-height:360px;margin-top:7px;overflow:auto}
+  .service-section{padding:7px 8px 4px;color:#777783;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+  .service-item{width:100%;height:44px;padding:0 9px;border:0;border-radius:8px;background:transparent;color:var(--fg);display:flex;align-items:center;gap:11px;text-align:left;cursor:pointer}
+  .service-item:hover,.service-item.active{background:rgba(59,130,246,.15)}
+  .service-icon{flex:0 0 28px;width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.06)}
+  .service-icon.image-logo{background:#fff}
+  .service-icon svg,.service-icon img{width:24px;height:24px;object-fit:contain}
+  .service-copy{min-width:0;display:flex;flex-direction:column;gap:2px}
+  .service-name{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .service-meta{font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .service-empty{padding:22px;text-align:center;color:var(--muted);font-size:12px}
+  .cbtn{flex:0 0 24px;width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--muted);cursor:default}
+  .cbtn:hover{background:rgba(255,255,255,.10);color:#fff}
+  .cbtn.close:hover{background:rgba(249,112,102,.18);color:#f97066}
+  .cell__body{position:relative;flex:1;min-height:0;background:#fff}
+  .cell__body webview{position:absolute;inset:0;width:100%;height:100%;background:#fff}
+  /* while dragging a divider, a transparent shield stops webviews from
+     swallowing pointermove (webview = separate guest, events die inside it) */
+  .cell__body .shield{position:absolute;inset:0;display:none;z-index:5}
+  body.resizing .cell__body .shield{display:block}
+  /* empty cell (no url yet) */
+  .cell__hint{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:var(--muted);font-size:13px;pointer-events:none}
+  .cell__hint .big{font-size:26px;opacity:.4}
+
+  /* ── divider ── */
+  .divider{position:absolute;z-index:10;display:flex;align-items:center;justify-content:center;transition:top .16s ease,left .16s ease,width .16s ease,height .16s ease}
+  .divider.v{cursor:col-resize}
+  .divider.h{cursor:row-resize}
+  .divider::after{content:"";border-radius:2px;background:transparent;transition:background .12s}
+  .divider.v::after{width:3px;height:34px}
+  .divider.h::after{width:34px;height:3px}
+  .divider:hover::after,.divider.active::after{background:var(--accent)}
+  body.resizing .divider{transition:none}
+
+  /* ── empty panel ── */
+  #empty{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:16px}
+  #empty.on{display:flex}
+  #empty .logo{width:52px;height:52px;border-radius:14px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;opacity:.9}
+  #empty h1{font-size:15px;font-weight:600}
+  #empty p{font-size:12.5px;color:var(--muted)}
+  #addfirst{display:flex;align-items:center;gap:8px;margin-top:6px;padding:9px 22px;border-radius:10px;background:var(--accent);color:#fff;font-size:13px;font-weight:600;cursor:default;-webkit-user-select:none;user-select:none}
+  #addfirst:hover{background:#2f6fe0}
+
+  /* ── floating add (＋ webview) ── */
+  #fab{position:absolute;right:18px;bottom:18px;z-index:20;width:40px;height:40px;border-radius:50%;background:var(--accent);color:#fff;display:none;align-items:center;justify-content:center;box-shadow:0 4px 14px rgba(59,130,246,.45);cursor:default;-webkit-user-select:none;user-select:none;transition:transform .12s}
+  #fab:hover{transform:scale(1.08)}
+  #fab.on{display:flex}
+</style>
+</head>
+<body>
+  <div id="stage"></div>
+
+  <div id="empty" class="on">
+    <div class="logo"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/></svg></div>
+    <h1>空白面板</h1>
+    <p>把多个页面拼在一个视图里,自由分屏</p>
+    <div id="addfirst"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>添加 WebView</div>
+  </div>
+
+  <div id="fab" title="添加 WebView"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></div>
+
+<script>
+  // ── state ──────────────────────────────────────────────────────────────────
+  // tree: null | {type:'leaf', id, url, profile} | {type:'split', dir:'row'|'col', ratio, a, b}
+  // 'row' = a|b side by side (vertical divider), 'col' = a over b.
+  const PANEL_ID = (location.pathname || '/').replace(/[^\w-]/g, '') || 'default';
+  const LS_KEY = 'cicy_panel_' + PANEL_ID;
+  const GUT = 8;        // px gap between cells (the divider lives in it)
+  const MIN_PX = 140;   // a cell never shrinks below this
+  // NATIVE mode: cells are main-process BrowserViews (panel-cells.js) — real
+  // webContents, popups keep window.opener so OAuth login works. This page is
+  // then pure chrome (headers/dividers); it syncs [{id,url,rect}] over panelAPI.
+  // Fallback (no panelAPI, e.g. opened via file:// in dev): inline <webview>s.
+  const NATIVE = !!window.panelAPI;
+  if (NATIVE) document.documentElement.classList.add('native-cells');
+  let root = null;
+  let seq = 1;
+  const cells = new Map(); // leafId -> {el, urlEl, hintEl, body, wv}
+
+  const stage = document.getElementById('stage');
+  const emptyEl = document.getElementById('empty');
+  const fabEl = document.getElementById('fab');
+  let suspendVersion = 0;
+  const nextFrame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+  async function suspendNativeViews() {
+    if (!NATIVE) return;
+    const version = ++suspendVersion;
+    try {
+      const shots = await window.panelAPI.snapshots();
+      if (version !== suspendVersion) return;
+      // Decode every data URL before detaching the BrowserViews. Setting a
+      // background-image and detaching in the same frame exposes the black cell
+      // background while Chromium is still decoding the snapshot.
+      await Promise.all((shots || []).map((shot) => new Promise((resolve) => {
+        if (!shot.dataUrl) return resolve();
+        const image = new Image();
+        image.onload = image.onerror = resolve;
+        image.src = shot.dataUrl;
+        if (image.complete) resolve();
+      })));
+      if (version !== suspendVersion) return;
+      for (const shot of shots || []) {
+        const cell = cells.get(Number(shot.id)) || cells.get(shot.id);
+        if (!cell || !shot.dataUrl) continue;
+        cell.body.style.backgroundImage = `url("${shot.dataUrl}")`;
+        cell.body.style.backgroundSize = 'cover';
+        cell.body.style.backgroundPosition = 'center top';
+      }
+      // Let the decoded backgrounds paint before removing the native views.
+      await nextFrame();
+      await nextFrame();
+      if (version !== suspendVersion) return;
+      window.panelAPI.dragging(true);
+    } catch (e) {
+      if (version === suspendVersion) {
+        try { window.panelAPI.dragging(true); } catch (_) {}
+      }
+    }
+  }
+  function resumeNativeViews() {
+    if (!NATIVE) return;
+    const version = ++suspendVersion;
+    try { window.panelAPI.dragging(false); } catch (e) {}
+    // Keep the snapshot behind the reattached BrowserView for a couple frames;
+    // clearing synchronously can reveal black before its compositor surface is
+    // visible again.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (version !== suspendVersion) return;
+      for (const cell of cells.values()) {
+        cell.body.style.backgroundImage = '';
+        cell.body.style.backgroundSize = '';
+        cell.body.style.backgroundPosition = '';
+      }
+    }));
+  }
+
+  const newLeaf = (url, profile = 1) => ({ type: 'leaf', id: seq++, url: url || '', profile: Number(profile) > 0 ? Number(profile) : 1 });
+
+  // ── tree helpers ───────────────────────────────────────────────────────────
+  function leaves(node, out = []) {
+    if (!node) return out;
+    if (node.type === 'leaf') out.push(node);
+    else { leaves(node.a, out); leaves(node.b, out); }
+    return out;
+  }
+  function findParent(node, leafId, parent = null) {
+    if (!node) return null;
+    if (node.type === 'leaf') return node.id === leafId ? { parent, node } : null;
+    return findParent(node.a, leafId, node) || findParent(node.b, leafId, node);
+  }
+
+  // ── persistence ────────────────────────────────────────────────────────────
+  function serialize(node) {
+    if (!node) return null;
+    if (node.type === 'leaf') return { type: 'leaf', url: node.url || '', profile: Number(node.profile) > 0 ? Number(node.profile) : 1 };
+    return { type: 'split', dir: node.dir, ratio: node.ratio, a: serialize(node.a), b: serialize(node.b) };
+  }
+  function deserialize(node) {
+    if (!node) return null;
+    if (node.type === 'leaf') return newLeaf(node.url, node.profile);
+    return { type: 'split', dir: node.dir === 'col' ? 'col' : 'row', ratio: Math.min(.88, Math.max(.12, +node.ratio || .5)), a: deserialize(node.a), b: deserialize(node.b) };
+  }
+  function save() { try { localStorage.setItem(LS_KEY, JSON.stringify(serialize(root))); } catch (e) {} }
+  function restore() { try { root = deserialize(JSON.parse(localStorage.getItem(LS_KEY) || 'null')); } catch (e) { root = null; } }
+
+  // ── layout (absolute rects; cells are never re-parented) ───────────────────
+  let dividerPool = [];
+  function assign(node, x, y, w, h, out) {
+    node._rect = { x, y, w, h };
+    if (node.type === 'leaf') { out.rects.set(node.id, { x, y, w, h }); return; }
+    if (node.dir === 'row') {
+      const aw = Math.max(0, (w - GUT) * node.ratio);
+      assign(node.a, x, y, aw, h, out);
+      out.divs.push({ node, x: x + aw, y, w: GUT, h, vert: true });
+      assign(node.b, x + aw + GUT, y, w - aw - GUT, h, out);
+    } else {
+      const ah = Math.max(0, (h - GUT) * node.ratio);
+      assign(node.a, x, y, w, ah, out);
+      out.divs.push({ node, x, y: y + ah, w, h: GUT, vert: false });
+      assign(node.b, x, y + ah + GUT, w, h - ah - GUT, out);
+    }
+  }
+  function layout() {
+    const n = leaves(root).length;
+    emptyEl.classList.toggle('on', n === 0);
+    // NATIVE: cell views float above the page and would cover the FAB — hide it;
+    // the per-cell header split buttons are the add affordance instead.
+    fabEl.classList.toggle('on', n > 0 && !NATIVE);
+    document.title = n > 1 ? `面板 (${n})` : '面板';
+    if (!root) { for (const d of dividerPool) d.el.style.display = 'none'; return; }
+    const P = 8;
+    const W = Math.max(0, stage.clientWidth - P * 2);
+    const H = Math.max(0, stage.clientHeight - P * 2);
+    const out = { rects: new Map(), divs: [] };
+    assign(root, P, P, W, H, out);
+    for (const [id, r] of out.rects) {
+      const c = cells.get(id);
+      if (!c) continue;
+      c.el.style.left = r.x + 'px'; c.el.style.top = r.y + 'px';
+      c.el.style.width = Math.max(0, r.w) + 'px'; c.el.style.height = Math.max(0, r.h) + 'px';
+    }
+    // divider elements are pooled + reused so hover state survives re-layout
+    while (dividerPool.length < out.divs.length) {
+      const el = document.createElement('div');
+      attachDividerDrag(el);
+      stage.appendChild(el);
+      dividerPool.push({ el });
+    }
+    dividerPool.forEach((d, i) => {
+      const spec = out.divs[i];
+      if (!spec) { d.el.style.display = 'none'; d.node = null; return; }
+      d.node = spec.node;
+      d.el.className = 'divider ' + (spec.vert ? 'v' : 'h');
+      d.el.style.display = 'flex';
+      d.el.style.left = spec.x + 'px'; d.el.style.top = spec.y + 'px';
+      d.el.style.width = spec.w + 'px'; d.el.style.height = spec.h + 'px';
+      d.el._node = spec.node;
+    });
+    pushCells();
+  }
+
+  // ── native cells sync (BrowserView mode) ───────────────────────────────────
+  // Send the full desired state (id/url/body-rect) to main; it reconciles views.
+  // Cells WITHOUT a url are not synced — they stay pure DOM so the hint shows.
+  let pushQueued = false;
+  function pushCells() {
+    if (!NATIVE || pushQueued) return;
+    pushQueued = true;
+    requestAnimationFrame(() => {
+      pushQueued = false;
+      const arr = [];
+      for (const l of leaves(root)) {
+        if (!l.url) continue;
+        const c = cells.get(l.id);
+        if (!c) continue;
+        const r = c.body.getBoundingClientRect();
+        arr.push({ id: l.id, url: l.url, profile: isLocalCicyCode(l.url) ? 0 : l.profile, rect: { x: r.x, y: r.y, w: r.width, h: r.height } });
+      }
+      try { window.panelAPI.sync(arr); } catch (e) {}
+    });
+  }
+  if (NATIVE) {
+    window.panelAPI.onCellState((s) => {
+      if (!s || s.id == null) return;
+      const hit = findParent(root, s.id);
+      const c = cells.get(s.id);
+      if (!hit || !c) return;
+      if (typeof s.loading === 'boolean') c.el.classList.toggle('loading', s.loading);
+      if (s.url && !s.url.startsWith('about:blank') && s.url !== hit.node.url) {
+        hit.node.url = s.url;
+        if (document.activeElement !== c.urlEl) c.urlEl.value = s.url;
+        save();
+      }
+    });
+  }
+
+  // ── divider drag ───────────────────────────────────────────────────────────
+  function attachDividerDrag(el) {
+    el.addEventListener('pointerdown', (e) => {
+      const node = el._node;
+      if (!node || !node._rect) return;
+      e.preventDefault();
+      el.setPointerCapture(e.pointerId);
+      el.classList.add('active');
+      document.body.classList.add('resizing');
+      if (NATIVE) { try { window.panelAPI.dragging(true); } catch (err) {} }
+      for (const c of cells.values()) c.el.classList.add('dragging-layout');
+      const move = (ev) => {
+        const r = node._rect;
+        let ratio;
+        if (node.dir === 'row') {
+          const usable = r.w - GUT;
+          ratio = (ev.clientX - r.x - GUT / 2) / usable;
+          const min = Math.min(.45, MIN_PX / usable);
+          node.ratio = Math.min(1 - min, Math.max(min, ratio));
+        } else {
+          const usable = r.h - GUT;
+          ratio = (ev.clientY - r.y - GUT / 2) / usable;
+          const min = Math.min(.45, MIN_PX / usable);
+          node.ratio = Math.min(1 - min, Math.max(min, ratio));
+        }
+        layout();
+      };
+      const up = (ev) => {
+        el.releasePointerCapture(ev.pointerId);
+        el.classList.remove('active');
+        document.body.classList.remove('resizing');
+        if (NATIVE) { try { window.panelAPI.dragging(false); } catch (err) {} pushCells(); }
+        for (const c of cells.values()) c.el.classList.remove('dragging-layout');
+        el.removeEventListener('pointermove', move);
+        el.removeEventListener('pointerup', up);
+        save();
+      };
+      el.addEventListener('pointermove', move);
+      el.addEventListener('pointerup', up);
+    });
+  }
+
+  // ── cell DOM ───────────────────────────────────────────────────────────────
+  const I = {
+    reload: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>',
+    splitR: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="12" y1="4" x2="12" y2="20"/></svg>',
+    splitD: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="12" x2="21" y2="12"/></svg>',
+    close: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg>',
+  };
+  const ICONS = {
+    apps: '<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="7" height="7" rx="2" fill="#3b82f6"/><rect x="14" y="3" width="7" height="7" rx="2" fill="#8b5cf6"/><rect x="3" y="14" width="7" height="7" rx="2" fill="#8b5cf6"/><rect x="14" y="14" width="7" height="7" rx="2" fill="#3b82f6"/></svg>',
+    gmail: '<img src="https://www.gstatic.com/images/branding/product/2x/gmail_2020q4_48dp.png" alt="">',
+    gemini: '<img src="http://127.0.0.1:8008/gemini.svg" alt="">',
+    claudeai: '<img src="http://127.0.0.1:8008/claude-symbol.svg" alt="">',
+    aistudio: '<img src="https://www.gstatic.com/images/branding/productlogos/ai_studio/v1/web-64dp/logo_ai_studio_color_1x_web_64dp.png" alt="">',
+    grok: '<img src="https://upload.wikimedia.org/wikipedia/commons/f/f4/Grok_logo_without_text.svg" alt="">',
+    chatgpt: '<img src="http://127.0.0.1:8008/openai.svg" alt="">',
+    myip: '<svg viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.4 2.5 3.6 5.5 3.6 9S14.4 18.5 12 21M12 3C9.6 5.5 8.4 8.5 8.4 12S9.6 18.5 12 21"/></svg>',
+    colab: '<img src="https://ssl.gstatic.com/colaboratory-static/common/52d6fb476890a764bd46064a9a454157/img/favicon.ico" alt="">',
+    drive: '<img src="https://ssl.gstatic.com/images/branding/product/2x/drive_2020q4_48dp.png" alt="">',
+    agent: '<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="16" rx="5" fill="#2563eb"/><path d="M9 2h6M12 2v3M8 12h.01M16 12h.01M8 16c2.5 1.7 5.5 1.7 8 0" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  };
+  const AGENT_LOGOS = {
+    claude: 'http://127.0.0.1:8008/claude-symbol.svg',
+    codex: 'http://127.0.0.1:8008/openai.svg',
+    cicy: 'http://127.0.0.1:8008/assets/logos/cicy-logo.svg?v=2',
+  };
+  function agentIcon(type) {
+    const t = String(type || '').toLowerCase();
+    const key = t === 'codex' ? 'codex' : (t === 'cicy' ? 'cicy' : (t === 'claude' ? 'claude' : ''));
+    return key ? `<img src="${AGENT_LOGOS[key]}" alt="">` : ICONS.agent;
+  }
+  const SERVICES = [
+    { id: 'gmail', name: 'Gmail', meta: 'Google Mail', url: 'https://mail.google.com/' },
+    { id: 'gemini', name: 'Gemini', meta: 'Google AI', url: 'https://gemini.google.com/app' },
+    { id: 'claudeai', name: 'Claude.ai', meta: 'Anthropic', url: 'https://claude.ai/' },
+    { id: 'aistudio', name: 'Google AI Studio', meta: 'Google AI', url: 'https://aistudio.google.com/' },
+    { id: 'grok', name: 'Grok', meta: 'xAI', url: 'https://grok.com/' },
+    { id: 'chatgpt', name: 'ChatGPT', meta: 'OpenAI', url: 'https://chatgpt.com/' },
+    { id: 'myip', name: 'My IP', meta: 'api.myip.com', url: 'https://api.myip.com/' },
+    { id: 'colab', name: 'Google Colab', meta: 'Google Research', url: 'https://colab.research.google.com/' },
+    { id: 'drive', name: 'Google Drive', meta: 'Google Workspace', url: 'https://drive.google.com/' },
+  ];
+  const CUSTOM_SERVICES_KEY = 'cicy_panel_custom_services';
+  function readCustomServices() {
+    try {
+      const rows = JSON.parse(localStorage.getItem(CUSTOM_SERVICES_KEY) || '[]');
+      return Array.isArray(rows) ? rows.filter((x) => x && x.name && x.url).slice(0, 50) : [];
+    } catch (e) { return []; }
+  }
+  let customServices = readCustomServices();
+  function saveCustomService(url) {
+    let name = url;
+    try { name = new URL(url).hostname || url; } catch (e) {}
+    const old = customServices.find((x) => x.url === url);
+    if (!old) customServices.push({ name, url });
+    try { localStorage.setItem(CUSTOM_SERVICES_KEY, JSON.stringify(customServices)); } catch (e) {}
+  }
+  let agentList = [];
+  let agentsPromise = null;
+  function loadAgents() {
+    if (!agentsPromise) agentsPromise = (NATIVE && window.panelAPI.agents
+      ? window.panelAPI.agents().then((r) => {
+          agentList = r?.agents || [];
+          for (const cell of cells.values()) {
+            if (cell.serviceEl) setTriggerIcon(cell.serviceEl, iconForUrl(cell.urlEl.value));
+          }
+          return agentList;
+        }).catch(() => [])
+      : Promise.resolve([]));
+    return agentsPromise;
+  }
+  function agentUrl(id) { return 'http://127.0.0.1:8008/#/agent/' + encodeURIComponent(id); }
+  function selectedServiceValue(url) {
+    try {
+      const u = new URL(url);
+      if ((u.hostname === '127.0.0.1' || u.hostname === 'localhost') && +u.port === 8008) {
+        const m = u.hash.match(/^#\/agent\/([^/]+)/);
+        if (m) return agentUrl(decodeURIComponent(m[1]));
+      }
+      const h = u.hostname.replace(/^www\./, '');
+      const s = SERVICES.find((x) => h === new URL(x.url).hostname.replace(/^www\./, ''));
+      return s ? s.url : '';
+    } catch (e) { return ''; }
+  }
+  function iconForUrl(url) {
+    const selected = selectedServiceValue(url);
+    const service = SERVICES.find((s) => s.url === selected);
+    if (service) return ICONS[service.id];
+    if (selected && selected.startsWith('http://127.0.0.1:8008/')) {
+      const id = decodeURIComponent(selected.split('/').pop() || '');
+      const agent = agentList.find((a) => a.id === id);
+      return agent ? agentIcon(agent.type) : ICONS.agent;
+    }
+    return ICONS.apps;
+  }
+  let picker = null;
+  let pickerState = null;
+  function ensurePicker() {
+    if (picker) return picker;
+    picker = document.createElement('div'); picker.className = 'service-pop';
+    picker.innerHTML = '<input class="service-search" placeholder="搜索应用、Agent ID、名称或类型…"><div class="service-list"></div>';
+    document.body.appendChild(picker);
+    const search = picker.querySelector('.service-search');
+    search.oninput = () => renderPicker(search.value);
+    search.onkeydown = (e) => {
+      if (e.key === 'Escape') closePicker();
+      if (e.key === 'Enter') {
+        const custom = customUrlFromQuery(search.value);
+        if (!custom || !pickerState) return;
+        e.preventDefault();
+        const id = pickerState.leafId;
+        closePicker();
+        setCellUrl(id, custom);
+      }
+    };
+    document.addEventListener('pointerdown', (e) => {
+      if (pickerState && !picker.contains(e.target) && !pickerState.trigger.contains(e.target)) closePicker();
+    });
+    return picker;
+  }
+  function pickerItem(icon, name, meta, url, active) {
+    const b = document.createElement('button'); b.type = 'button';
+    b.className = 'service-item' + (active ? ' active' : '');
+    b.innerHTML = '<span class="service-icon' + (icon.includes('<img') ? ' image-logo' : '') + '">' + icon + '</span><span class="service-copy"><span class="service-name"></span><span class="service-meta"></span></span>';
+    b.querySelector('.service-name').textContent = name;
+    b.querySelector('.service-meta').textContent = meta || '';
+    b.onclick = () => { const id = pickerState && pickerState.leafId; closePicker(); if (id != null) setCellUrl(id, url); };
+    return b;
+  }
+  function renderPicker(query = '') {
+    if (!pickerState) return;
+    const list = ensurePicker().querySelector('.service-list');
+    list.innerHTML = '';
+    const q = String(query || '').trim().toLowerCase();
+    const current = selectedServiceValue(pickerState.url);
+    const custom = customUrlFromQuery(query);
+    const services = SERVICES.filter((s) => !q || `${s.name} ${s.meta}`.toLowerCase().includes(q));
+    const customs = customServices.filter((s) => !q || `${s.name} ${s.url}`.toLowerCase().includes(q));
+    const agents = agentList.filter((a) => !q || `${a.id} ${a.title} ${a.type}`.toLowerCase().includes(q));
+    const addSection = (label) => { const d = document.createElement('div'); d.className = 'service-section'; d.textContent = label; list.appendChild(d); };
+    if (services.length) {
+      addSection('应用');
+      for (const s of services) list.appendChild(pickerItem(ICONS[s.id], s.name, s.meta, s.url, current === s.url));
+    }
+    if (customs.length) {
+      addSection('自定义');
+      for (const s of customs) list.appendChild(pickerItem(ICONS.apps, s.name, s.url, s.url, pickerState.url === s.url));
+    }
+    if (agents.length) {
+      addSection('CiCy Code Agents');
+      for (const a of agents) {
+        const url = agentUrl(a.id);
+        list.appendChild(pickerItem(agentIcon(a.type), a.title || a.id, `${a.id} · ${a.type || 'agent'}`, url, current === url));
+      }
+    }
+    if (custom) {
+      addSection('自定义 URL');
+      list.appendChild(pickerItem(ICONS.apps, query.trim(), custom, custom, pickerState.url === custom));
+      if (!customServices.some((x) => x.url === custom)) {
+        const add = pickerItem(ICONS.apps, '保存为自定义条目', custom, custom, false);
+        add.onclick = () => { saveCustomService(custom); renderPicker(query); };
+        list.appendChild(add);
+      }
+    }
+    if (!services.length && !customs.length && !agents.length && !custom) list.innerHTML = '<div class="service-empty">没有匹配结果</div>';
+  }
+  async function openPicker(leafId, trigger, url) {
+    if (pickerState) closePicker();
+    const pop = ensurePicker();
+    pickerState = { leafId, trigger, url: url || '' };
+    await suspendNativeViews();
+    if (!pickerState || pickerState.leafId !== leafId) return;
+    trigger.classList.add('open');
+    pop.classList.add('open');
+    const r = trigger.getBoundingClientRect();
+    const left = Math.max(8, Math.min(r.left, innerWidth - Math.min(340, innerWidth - 16) - 8));
+    const below = r.bottom + 6;
+    pop.style.left = left + 'px';
+    pop.style.top = Math.min(below, innerHeight - Math.min(430, innerHeight - 16) - 8) + 'px';
+    const search = pop.querySelector('.service-search'); search.value = '';
+    loadAgents().then(() => { if (pickerState && pickerState.leafId === leafId) renderPicker(search.value); });
+    renderPicker('');
+    setTimeout(() => search.focus(), 0);
+  }
+  function closePicker() {
+    if (!pickerState) return;
+    pickerState.trigger.classList.remove('open');
+    pickerState = null;
+    if (picker) picker.classList.remove('open');
+    resumeNativeViews();
+  }
+  function setTriggerIcon(el, icon) {
+    if (!el) return;
+    el.innerHTML = icon;
+    el.classList.toggle('image-logo', icon.includes('<img'));
+  }
+  let profileListPromise = null;
+  let profilePop = null;
+  function loadProfiles() {
+    if (!profileListPromise) profileListPromise = (NATIVE && window.panelAPI.profiles
+      ? window.panelAPI.profiles().catch(() => [])
+      : Promise.resolve([{ accountIdx: 1, name: '' }]));
+    return profileListPromise;
+  }
+  function closeProfilePicker() {
+    if (!profilePop) return;
+    try { profilePop.trigger.classList.remove('open'); profilePop.el.remove(); } catch (e) {}
+    profilePop = null;
+    resumeNativeViews();
+  }
+  async function openProfilePicker(leafId, trigger) {
+    closeProfilePicker();
+    const hit = findParent(root, leafId);
+    if (!hit || isLocalCicyCode(hit.node.url)) return;
+    const profiles = await loadProfiles();
+    if (!findParent(root, leafId)) return;
+    await suspendNativeViews();
+    if (!findParent(root, leafId)) { resumeNativeViews(); return; }
+    const pop = document.createElement('div'); pop.className = 'profile-pop';
+    const rows = profiles.length ? profiles : [{ accountIdx: 1, name: '' }];
+    for (const p of rows) {
+      const b = document.createElement('button'); b.type = 'button';
+      b.className = 'profile-item' + (Number(hit.node.profile) === Number(p.accountIdx) ? ' active' : '');
+      b.innerHTML = '<b></b><span></span>';
+      b.querySelector('b').textContent = 'P' + p.accountIdx;
+      b.querySelector('span').textContent = p.name || `Profile ${p.accountIdx}`;
+      b.onclick = () => {
+        const current = findParent(root, leafId);
+        if (!current) return closeProfilePicker();
+        current.node.profile = Number(p.accountIdx);
+        trigger.textContent = 'P' + p.accountIdx;
+        closeProfilePicker(); save();
+        if (NATIVE) pushCells();
+        else {
+          const cell = cells.get(leafId);
+          if (cell && cell.wv) { try { cell.wv.remove(); } catch (e) {} cell.wv = null; }
+          if (current.node.url) createWebview(leafId, current.node.url);
+        }
+      };
+      pop.appendChild(b);
+    }
+    document.body.appendChild(pop);
+    const r = trigger.getBoundingClientRect();
+    pop.style.left = Math.max(8, Math.min(r.left, innerWidth - 188)) + 'px';
+    pop.style.top = Math.min(r.bottom + 6, innerHeight - Math.min(300, pop.offsetHeight) - 8) + 'px';
+    trigger.classList.add('open');
+    profilePop = { el: pop, trigger };
+  }
+  document.addEventListener('pointerdown', (e) => {
+    if (profilePop && !profilePop.el.contains(e.target) && !profilePop.trigger.contains(e.target)) closeProfilePicker();
+  });
+  function btn(icon, title, cls, onClick) {
+    const b = document.createElement('div');
+    b.className = 'cbtn' + (cls ? ' ' + cls : '');
+    b.title = title; b.innerHTML = icon;
+    b.onclick = onClick;
+    return b;
+  }
+  function normalizeUrl(v) {
+    v = (v || '').trim();
+    if (!v) return '';
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(v) || /^about:/i.test(v)) return v;
+    return (/\.\w/.test(v) && !/\s/.test(v)) ? 'https://' + v : 'https://www.google.com/search?q=' + encodeURIComponent(v);
+  }
+  function customUrlFromQuery(v) {
+    const raw = String(v || '').trim();
+    if (!raw || /\s/.test(raw)) return '';
+    const looksLikeUrl = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw)
+      || /^localhost(?::\d+)?(?:\/|$)/i.test(raw)
+      || /^(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?(?:\/|$)/.test(raw)
+      || /^[\w-]+(?:\.[\w-]+)+(?:\/|$)/.test(raw);
+    return looksLikeUrl ? normalizeUrl(raw) : '';
+  }
+  function mountCell(leaf) {
+    const el = document.createElement('div');
+    el.className = 'cell';
+    const head = document.createElement('div');
+    head.className = 'cell__head';
+    const spin = document.createElement('span'); spin.className = 'cell__spin';
+    const service = document.createElement('button');
+    service.type = 'button'; service.className = 'service-trigger'; service.title = '选择应用或 Agent';
+    setTriggerIcon(service, iconForUrl(leaf.url));
+    service.onclick = () => openPicker(leaf.id, service, leaf.url);
+    const profile = document.createElement('button');
+    profile.type = 'button'; profile.className = 'profile-trigger'; profile.title = '选择 Electron Profile';
+    profile.textContent = isLocalCicyCode(leaf.url) ? 'P0' : 'P' + (leaf.profile || 1);
+    profile.disabled = isLocalCicyCode(leaf.url);
+    profile.onclick = () => openProfilePicker(leaf.id, profile);
+    const url = document.createElement('input');
+    url.className = 'cell__url'; url.placeholder = '输入网址或搜索'; url.spellcheck = false;
+    url.value = leaf.url || '';
+    url.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      // Enter during an IME composition commits the composing text; navigating
+      // and blurring in that same event makes Chromium commit it a second time
+      // (e.g. "chatgpt" → "chatgptchatgpt"). Let the IME finish first; the
+      // following Enter performs navigation, matching a normal browser omnibox.
+      if (e.isComposing || e.keyCode === 229) return;
+      e.preventDefault();
+      const u = normalizeUrl(url.value);
+      if (u) { setCellUrl(leaf.id, u); url.blur(); }
+    });
+    url.addEventListener('focus', () => url.select());
+    head.appendChild(service);
+    head.appendChild(profile);
+    head.appendChild(url);
+    const reload = btn(I.reload, '刷新', 'reload-btn', () => {
+      if (NATIVE) { try { window.panelAPI.reload(leaf.id); } catch (e) {} return; }
+      const c = cells.get(leaf.id); try { c && c.wv && c.wv.reload(); } catch (e) {}
+    });
+    reload.appendChild(spin);
+    head.appendChild(reload);
+    head.appendChild(btn(I.splitR, '右分屏', '', () => splitLeaf(leaf.id, 'row')));
+    head.appendChild(btn(I.splitD, '下分屏', '', () => splitLeaf(leaf.id, 'col')));
+    head.appendChild(btn(I.close, '关闭', 'close', () => closeLeaf(leaf.id)));
+    const body = document.createElement('div');
+    body.className = 'cell__body';
+    const shield = document.createElement('div'); shield.className = 'shield';
+    const hint = document.createElement('div');
+    hint.className = 'cell__hint';
+    hint.innerHTML = '<div class="big">🌐</div><div>在上方输入网址,回车加载</div>';
+    body.appendChild(hint);
+    body.appendChild(shield);
+    el.appendChild(head);
+    el.appendChild(body);
+    stage.appendChild(el);
+    const cell = { el, urlEl: url, serviceEl: service, profileEl: profile, hintEl: hint, body, wv: null };
+    cells.set(leaf.id, cell);
+    if (leaf.url) {
+      if (NATIVE) hint.style.display = 'none'; // the BrowserView covers the body
+      else createWebview(leaf.id, leaf.url);
+    }
+    return cell;
+  }
+  // URL → profile 路由(与 panel-cells.js 一致): localhost → profile 0(直连),
+  // 其余 → profile 1(走代理)。
+  function isLocalCicyCode(u) {
+    try {
+      const x = new URL(u);
+      return (x.hostname === '127.0.0.1' || x.hostname === 'localhost' || x.hostname === '[::1]' || x.hostname === '::1')
+        && (x.port || '80') === '8008';
+    } catch (e) { return false; }
+  }
+  function createWebview(leafId, url) {
+    const c = cells.get(leafId);
+    if (!c || c.wv) return;
+    const wv = document.createElement('webview');
+    const hit = findParent(root, leafId);
+    wv._profile = isLocalCicyCode(url) ? 0 : Number(hit?.node?.profile || 1);
+    wv.setAttribute('partition', 'persist:sandbox-' + wv._profile);
+    // popups must work (OAuth 登录弹窗 = window.open);main 的 guest open-handler
+    // 对 panel 格子放行为应用内子窗口(共享会话 + window.opener)。
+    wv.setAttribute('allowpopups', 'true');
+    // strip Electron/CiCyDesktop tokens — Google OAuth 等站点会拒绝带 Electron 的 UA
+    // ("this browser may not be secure")。
+    wv.setAttribute('useragent', navigator.userAgent.replace(/\s(CiCyDesktop|Electron)\/\S+/g, ''));
+    wv.setAttribute('src', url);
+    // file:// dev fallback uses a real <webview> instead of PanelCells. Match
+    // the native BrowserView behavior for transparent/un-styled pages.
+    wv.addEventListener('dom-ready', () => {
+      wv.executeJavaScript(`(() => {
+        const transparent = (el) => {
+          const c = getComputedStyle(el).backgroundColor;
+          return c === 'transparent' || /rgba\\([^)]*,\\s*0(?:\\.0+)?\\)$/.test(c);
+        };
+        if (transparent(document.documentElement) && transparent(document.body)) {
+          document.documentElement.style.backgroundColor = '#fff';
+        }
+      })()`).catch(() => {});
+    });
+    wv.addEventListener('did-start-loading', () => c.el.classList.add('loading'));
+    wv.addEventListener('did-stop-loading', () => c.el.classList.remove('loading'));
+    wv.addEventListener('did-navigate', (e) => syncUrl(leafId, e.url));
+    wv.addEventListener('did-navigate-in-page', (e) => syncUrl(leafId, e.url));
+    c.hintEl.style.display = 'none';
+    c.body.insertBefore(wv, c.body.firstChild);
+    c.wv = wv;
+  }
+  function syncUrl(leafId, u) {
+    const hit = findParent(root, leafId);
+    if (!hit || !u || u.startsWith('about:blank')) return;
+    hit.node.url = u;
+    const c = cells.get(leafId);
+    if (c && document.activeElement !== c.urlEl) c.urlEl.value = u;
+    if (c && c.serviceEl) setTriggerIcon(c.serviceEl, iconForUrl(u));
+    if (c && c.profileEl) {
+      c.profileEl.disabled = isLocalCicyCode(u);
+      c.profileEl.textContent = isLocalCicyCode(u) ? 'P0' : 'P' + (hit.node.profile || 1);
+    }
+    save();
+  }
+  function setCellUrl(leafId, url) {
+    const hit = findParent(root, leafId);
+    if (!hit) return;
+    hit.node.url = url;
+    const c = cells.get(leafId);
+    // reflect immediately — did-navigate can be seconds away on a slow page and
+    // the input would sit empty-looking until then.
+    if (c && document.activeElement !== c.urlEl) c.urlEl.value = url;
+    if (c && c.serviceEl) setTriggerIcon(c.serviceEl, iconForUrl(url));
+    if (c && c.profileEl) {
+      c.profileEl.disabled = isLocalCicyCode(url);
+      c.profileEl.textContent = isLocalCicyCode(url) ? 'P0' : 'P' + (hit.node.profile || 1);
+    }
+    if (NATIVE) { if (c) c.hintEl.style.display = 'none'; pushCells(); }
+    else if (c.wv && (isLocalCicyCode(url) ? 0 : Number(hit.node.profile || 1)) !== c.wv._profile) {
+      // selected profile changed → partition must change → rebuild the webview
+      try { c.wv.remove(); } catch (e) {}
+      c.wv = null;
+      createWebview(leafId, url);
+    }
+    else if (c.wv) { try { c.wv.src = url; } catch (e) {} }
+    else createWebview(leafId, url);
+    save();
+  }
+  function unmountCell(leafId) {
+    const c = cells.get(leafId);
+    if (!c) return;
+    try { c.el.remove(); } catch (e) {}
+    cells.delete(leafId);
+  }
+
+  // ── structural ops ─────────────────────────────────────────────────────────
+  function splitLeaf(leafId, dir) {
+    const hit = findParent(root, leafId);
+    if (!hit) return;
+    const fresh = newLeaf('');
+    const split = { type: 'split', dir, ratio: .5, a: hit.node, b: fresh };
+    if (!hit.parent) root = split;
+    else if (hit.parent.a === hit.node) hit.parent.a = split;
+    else hit.parent.b = split;
+    mountCell(fresh);
+    layout(); save();
+    const c = cells.get(fresh.id);
+    if (c) setTimeout(() => { try { c.urlEl.focus(); } catch (e) {} }, 180);
+  }
+  function closeLeaf(leafId) {
+    const hit = findParent(root, leafId);
+    if (!hit) return;
+    unmountCell(leafId);
+    if (!hit.parent) { root = null; }
+    else {
+      const sibling = hit.parent.a === hit.node ? hit.parent.b : hit.parent.a;
+      const gp = findSplitParent(root, hit.parent);
+      if (!gp) root = sibling;
+      else if (gp.a === hit.parent) gp.a = sibling;
+      else gp.b = sibling;
+    }
+    layout(); save();
+  }
+  function findSplitParent(node, target, parent = null) {
+    if (!node || node.type === 'leaf') return null;
+    if (node === target) return parent;
+    return findSplitParent(node.a, target, node) || findSplitParent(node.b, target, node);
+  }
+  // ＋: split the LARGEST cell along its longer edge → keeps the grid balanced.
+  function addCell() {
+    const ls = leaves(root);
+    if (!ls.length) { root = newLeaf(''); mountCell(root); layout(); save(); focusLeaf(root.id); return; }
+    let best = ls[0], bestA = -1;
+    for (const l of ls) {
+      const r = l._rect || { w: 0, h: 0 };
+      const a = r.w * r.h;
+      if (a > bestA) { bestA = a; best = l; }
+    }
+    const r = best._rect || { w: 1, h: 0 };
+    splitLeaf(best.id, r.w >= r.h ? 'row' : 'col');
+  }
+  function focusLeaf(id) { const c = cells.get(id); if (c) setTimeout(() => { try { c.urlEl.focus(); } catch (e) {} }, 180); }
+
+  // ── boot ───────────────────────────────────────────────────────────────────
+  document.getElementById('addfirst').onclick = addCell;
+  fabEl.onclick = addCell;
+  window.addEventListener('resize', layout);
+  restore();
+  for (const l of leaves(root)) mountCell(l);
+  layout();
+</script>
+</body>
+</html>
