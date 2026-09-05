@@ -2,10 +2,9 @@
   "name": "cicy-desktop-render",
   "private": true,
   "version": "0.0.1",
-  "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "node stamp-panel-version.mjs && vite build",
     "deploy": "wrangler deploy"
   },
   "dependencies": {

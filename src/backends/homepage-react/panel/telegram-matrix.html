@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="pv" content="ae062db5b34d">
   <title>Telegram 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -45,6 +46,7 @@
     .line2 .phone { flex: none; color: #b4b4bb; font: 11px ui-monospace, monospace; white-space: nowrap; }
     .line2 .phone.none { display: none; }
     button.code { background: #1f6feb; padding: 3px 8px; font-size: 11px; }
+    button.code.on { background: #c0142e; }
     .ghead .phone { color: #b4b4bb; font: 11px ui-monospace, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
     /* 代理设置弹窗 */
     .modal { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.55); }
@@ -84,22 +86,22 @@
     /* 批量登录:未登录的会话一次全部铺开(最多 10 格),每格一个独立 BrowserView */
     #grid-title { display: none; width: 100%; margin-bottom: 6px; align-items: center; justify-content: space-between; gap: 8px; color: #b4b4bb; font-size: 12px; }
     #grid-title b { color: var(--fg); font-size: 13px; }
-    #grid { display: none; width: 100%; flex: 1 1 auto; min-height: 0; gap: 8px; grid-auto-rows: minmax(0, 1fr); }
+    #grid { display: none; width: 100%; flex: 1 1 auto; min-height: 0; gap: 8px; flex-direction: row; flex-wrap: wrap; align-content: flex-start; overflow-x: hidden; overflow-y: auto; }
     /* 批量模式 = 整页只有 webview:侧栏整个隐藏,顶部一条细工具栏,其余全是格子 */
     body.batch { grid-template-columns: 1fr; }
     body.batch aside { display: none; }
     main.batch { padding: 8px 10px 10px; }
     main.batch #preview-title, main.batch #phone { display: none; }
     main.batch #grid-title { display: flex; }
-    main.batch #grid { display: grid; }
-    .gcell { display: flex; flex-direction: column; min-width: 0; min-height: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--cell); overflow: hidden; }
+    main.batch #grid { display: flex; }
+    .gcell { display: flex; flex-direction: column; flex: none; width: 360px; height: 50vh; min-height: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--cell); overflow: hidden; }
     .gcell.done { border-color: rgba(63,185,80,.6); }
     .gcell.failed { border-color: rgba(255,92,92,.6); }
     .ghead { flex: none; height: 30px; padding: 0 8px; display: flex; align-items: center; gap: 6px; font-size: 12px; border-bottom: 1px solid var(--line); background: var(--head); min-width: 0; }
     .ghead .name { font-size: 12px; }
     .ghead .st { margin-left: auto; }
     .gcell.done .ghead .st { color: #3fb950; font-weight: 600; }
-    .gbody { flex: 1 1 auto; min-height: 0; background: #fff; }
+    .gbody { flex: 1 1 auto; min-height: 0; width: 100%; background: #fff; }
     #grid-empty { grid-column: 1 / -1; display: grid; place-items: center; color: var(--muted); }
     .spinner { width: 28px; height: 28px; border: 3px solid rgba(255,255,255,.12); border-top-color: var(--accent); border-radius: 50%; animation: spin .9s linear infinite; margin: 0 auto 12px; }
     @keyframes spin { to { transform: rotate(360deg); } }
@@ -109,7 +111,7 @@
   <aside>
     <header>
       <h1>Telegram 矩阵 <small id="count"></small></h1>
-      <div class="actions"><button class="ghost" id="batch-login" title="把所有未登录的 Profile 一次全部打开（最多 10 个）">批量登录</button><button id="add-profile" title="新建一个独立会话（persist:sandbox-N）">+ 添加 Profile</button></div>
+      <div class="actions"><button class="ghost" id="batch-login" title="平铺所有 Profile 的会话到网格（最多 10 个）">批量网格</button><button id="add-profile" title="新建一个独立会话（persist:sandbox-N）">+ 添加 Profile</button></div>
     </header>
     <div class="list">
       <div id="rows"></div>
@@ -125,7 +127,7 @@
     <div id="grid"></div>
     <div id="preview-title">
       <div class="left"><span class="dot" id="sel-dot"></span><span id="selected-name">未选择 Profile</span><span id="status"></span></div>
-      <div class="actions"><button class="code" id="open-code" title="在该 Profile 的 tab 里打开接码 URL">接码</button><button class="ghost" id="probe-ip" title="经该 Profile 的代理探测出口 IP / 地区">测 IP</button><button class="ghost" id="reload" title="重新加载 Telegram Web">重新加载</button></div>
+      <div class="actions"><button class="code" id="open-code" title="在格子上叠加/关闭接码 webview(同代理出口)">接码</button><button class="ghost" id="probe-ip" title="经该 Profile 的代理探测出口 IP / 地区">测 IP</button><button class="ghost" id="reload" title="重新加载 Telegram Web">重新加载</button></div>
     </div>
     <div id="phone">
       <div id="phone-preview"></div>
@@ -169,6 +171,7 @@
     let profiles = [];
     let selected = null;
     const openedProfiles = new Set();   // 打开过的会话保留在后台(登录态不丢),只有选中的贴到预览区
+    const codeOpen = new Set();          // 已叠开接码 overlay 的 accountIdx(同 partition 的接码 webview 覆盖在格子上)
     const cellState = new Map();        // accountIdx -> { loading, failed, error, url, title }
     const rows = new Map();             // accountIdx -> row element
     const BATCH_MAX = 10;               // 一次最多铺开多少个登录格
@@ -215,10 +218,22 @@
       el.classList.toggle('none', !ph); el.textContent = ph; el.title = codeUrlOf(p) ? `接码：${codeUrlOf(p)}` : '';
       const g = gcells.get(p.accountIdx); if (g) { g.el.querySelector('.phone').textContent = ph; g.el.querySelector('.code').disabled = !codeUrlOf(p); }
     }
-    async function openCode(p) {
-      if (!codeUrlOf(p)) { flash(`#${p.accountIdx} 还没有接码 URL，点 ⚙ 填写`, 4000); return; }
-      try { await window.panelAPI.openCodeUrl(p.accountIdx, codeUrlOf(p)); flash(`#${p.accountIdx} 接码页已在 Profile 窗口打开`); }
-      catch (e) { flash(e.message || String(e), 6000); }
+    // 接码 = 在当前格子的 Telegram webview 上方叠一个同尺寸、同 partition(persist:sandbox-idx,
+    // 走该 profile 的代理出口)、更高 z 层的接码 webview。再点一次关闭。与 tg-autologin 自动化里
+    // 的 overlay 完全一致的呈现,只是重载/关闭放在格子 header(BrowserView 之上无法放页面按钮)。
+    function openCode(p) {
+      if (!codeUrlOf(p)) { flash(`#${p.accountIdx} 还没有接码 URL,点 ⚙ 填写`, 4000); return; }
+      if (!openedProfiles.has(p.accountIdx)) { openedProfiles.add(p.accountIdx); cellState.set(p.accountIdx, { loading: true }); }
+      if (codeOpen.has(p.accountIdx)) { codeOpen.delete(p.accountIdx); flash(`#${p.accountIdx} 已关闭接码`); }
+      else { codeOpen.add(p.accountIdx); flash(`#${p.accountIdx} 接码已叠加在格子上`); }
+      updateCodeButtons(p.accountIdx);
+      syncPreview();
+    }
+    function updateCodeButtons(idx) {
+      const on = codeOpen.has(idx);
+      const g = gcells.get(idx);
+      if (g) { const b = g.el.querySelector('.code'); if (b) { b.classList.toggle('on', on); b.textContent = on ? '关闭接码' : '接码'; } }
+      if (selected && selected.accountIdx === idx) { const b = document.getElementById('open-code'); if (b) { b.classList.toggle('on', on); b.textContent = on ? '关闭接码' : '接码'; } }
     }
     function renderIdentity(p) {
       renderPhone(p);
@@ -246,15 +261,21 @@
       if (!window.panelAPI) return;
       const rect = preview.getBoundingClientRect();
       const box = (r) => ({ x: r.x, y: r.y, w: r.width, h: r.height });
-      const cells = [...openedProfiles].map((profileId) => {
+      const cells = []; const overlays = [];
+      for (const profileId of openedProfiles) {
         let visible = false, r = null;
         if (batchMode) {
           const g = gcells.get(profileId);
           if (g && batch.has(profileId)) { visible = true; r = box(g.body.getBoundingClientRect()); }
         } else if (selected && profileId === selected.accountIdx) { visible = true; r = box(rect); }
-        return { id: cellId(profileId), url: TELEGRAM_URL, profile: profileId, visible, rect: r };
-      });
-      try { window.panelAPI.sync(cells); } catch (e) {}
+        cells.push({ id: cellId(profileId), url: TELEGRAM_URL, profile: profileId, visible, rect: r });
+        // 接码叠加层:同 rect、同 profile(=同 partition/代理),排在 tg 格子之后 → attach 更晚 → 叠最上层
+        if (visible && codeOpen.has(profileId)) {
+          const p = profiles.find((x) => x.accountIdx === profileId); const cu = p && codeUrlOf(p);
+          if (cu) overlays.push({ id: 'code-' + profileId, url: cu, profile: profileId, visible: true, rect: r });
+        }
+      }
+      try { window.panelAPI.sync(cells.concat(overlays)); } catch (e) {}
     }
 
     function describeError(p, st) {
@@ -272,6 +293,7 @@
       if (selected && st.failed) errDetail.innerHTML = describeError(selected, st);
       selDot.className = `dot ${selected ? dotClass(st) : ''}`;
       if (selected && !statusEl.dataset.sticky) statusEl.textContent = stateText(st, true);
+      if (selected) updateCodeButtons(selected.accountIdx);
     }
 
     function renderRowState(idx) {
@@ -289,7 +311,7 @@
     function buildGridCell(p) {
       const el = document.createElement('div');
       el.className = 'gcell'; el.dataset.id = String(p.accountIdx);
-      el.innerHTML = `<div class="ghead"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="phone">${esc(phoneOf(p))}</span><span class="st"></span><button class="code" title="在该 Profile 的 tab 里打开接码 URL">接码</button><button class="icon reload" title="重新加载">⟳</button></div><div class="gbody"></div>`;
+      el.innerHTML = `<div class="ghead"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="phone">${esc(phoneOf(p))}</span><span class="st"></span><button class="code" title="在格子上叠加/关闭接码 webview(同代理出口)">接码</button><button class="icon reload" title="重新加载">⟳</button></div><div class="gbody"></div>`;
       el.querySelector('.reload').onclick = () => reloadProfile(p.accountIdx);
       el.querySelector('.code').onclick = () => openCode(p);
       el.querySelector('.code').disabled = !codeUrlOf(p);
@@ -304,11 +326,13 @@
       g.el.classList.toggle('failed', !!st.failed && !st.loading);
       g.el.querySelector('.dot').className = `dot ${dotClass(st)}`;
       g.el.querySelector('.st').textContent = done ? '✓ 已登录' : stateText(st, true);
+      updateCodeButtons(idx);
       if (batchMode) { const n = [...batch].filter((i) => { const q = profiles.find((x) => x.accountIdx === i); return q && hasIdentity(q); }).length; gridCount.textContent = `${batch.size} 个会话 · ${n} 已登录`; }
     }
     function enterBatch() {
-      const todo = profiles.filter((p) => !hasIdentity(p)).slice(0, BATCH_MAX);
-      if (!todo.length) { flash('没有未登录的 Profile'); return; }
+      // 默认网格 = 平铺全部 profile 的会话(不再只挑未登录的);仍受 BATCH_MAX 上限保护。
+      const todo = profiles.slice(0, BATCH_MAX);
+      if (!todo.length) { flash('没有 Profile'); return; }
       batch.clear(); gridEl.innerHTML = ''; gcells.clear();
       for (const p of todo) {
         batch.add(p.accountIdx);
@@ -324,7 +348,7 @@
     }
     function exitBatch() {
       if (!batchMode) return;
-      batchMode = false; mainEl.classList.remove('batch'); document.body.classList.remove('batch'); document.getElementById('batch-login').textContent = '批量登录';
+      batchMode = false; mainEl.classList.remove('batch'); document.body.classList.remove('batch'); document.getElementById('batch-login').textContent = '批量网格';
       batch.clear(); gcells.clear(); gridEl.innerHTML = '';
       render(); renderPreviewState(); syncPreview();   // 会话留在后台,登录态不丢
     }
@@ -347,6 +371,8 @@
     }
 
     function reloadProfile(idx) {
+      // 接码 overlay 开着时,重载指向接码 webview(用户看到的最上层就是它)
+      if (codeOpen.has(idx)) { try { window.panelAPI.reload('code-' + idx); } catch (e) {} return; }
       const fresh = !openedProfiles.has(idx);
       openedProfiles.add(idx);
       cellState.set(idx, { loading: true }); renderRowState(idx);
@@ -515,7 +541,42 @@
     pullStates({ adopt: true })
       .catch(() => {})
       .then(() => loadProfiles())
+      // 打开面板即默认进批量网格:把所有 profile 的 webview 平铺出来。
+      // 崩溃循环保护:若上次开机自动批量后没在几秒内清除标记(说明渲染进程崩溃重载了),
+      // 这次跳过自动批量、停在列表,避免弱机反复「崩溃→自动批量→再崩」的刷新循环。
+      .then(() => {
+        try {
+          const K = 'tg-matrix-autobatch-pending';
+          let prev = null; try { prev = localStorage.getItem(K); } catch (e) {}
+          if (prev && (Date.now() - Number(prev)) < 20000) {
+            try { localStorage.removeItem(K); } catch (e) {}
+            flash('上次批量疑似导致崩溃,已跳过自动批量。点「批量网格」可手动打开。', 6000);
+            return;
+          }
+          try { localStorage.setItem(K, String(Date.now())); } catch (e) {}
+          enterBatch();
+          setTimeout(() => { try { localStorage.removeItem(K); } catch (e) {} }, 8000);
+        } catch (e) {}
+      })
       .catch((e) => { flash(e.message || String(e), 8000); render(); });
+
+    // 自动更新:构建时给本页打了内容版本号(<meta name="pv">)。每 60s 拉一次自身
+    // (同源 cicyui://panel,无跨域;cicyui handler 每次都从远端取最新),版本变了就 reload。
+    // 这样服务端一部署,所有开着的面板自己就切到新版,不用手动逐台重载。DEV 态不轮询。
+    (function autoUpdate() {
+      const meta = document.querySelector('meta[name="pv"]');
+      const PV = meta ? meta.content : '';
+      if (!PV || PV === 'DEV') return;
+      setInterval(async () => {
+        try {
+          const r = await fetch(location.href, { cache: 'no-store' });
+          if (!r.ok) return;
+          const t = await r.text();
+          const mm = t.match(/<meta name="pv" content="([^"]*)">/);
+          if (mm && mm[1] && mm[1] !== PV) location.reload();
+        } catch (e) {}
+      }, 60000);
+    })();
   </script>
 </body>
 </html>
