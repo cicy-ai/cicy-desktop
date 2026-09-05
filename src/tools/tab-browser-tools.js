@@ -206,13 +206,23 @@ function readLastPanelState() {
 // 沙箱 profile 里开出来的面板格子会渲染不出内容,所以干脆不提供入口。
 // URL 带唯一 id → addTab 的 origin+pathname 复用判断不会把两个面板并成一个,
 // 面板页也按这个 path 分别持久化各自的布局。
+// 本机在车队里的 id(global.json 的 desktopTeam,去掉 desktop- 前缀,如 xs-3007)。
+// 拼进面板 URL 让面板页显示"我是哪台机器"——机器多了一眼分得清。
+function machineTeamId() {
+  try {
+    const { readGlobalConfig } = require("../utils/global-json");
+    const c = readGlobalConfig(path.join(os.homedir(), "cicy-ai", "global.json"));
+    return String((c && c.desktopTeam) || "").replace(/^desktop-/, "");
+  } catch (e) { return ""; }
+}
 function openPanelTab(m, preset) {
   if (!m || m.accountIdx !== 0) return null;
   const resolved = resolvePanelPreset(preset);
   // Network URL: the preset IS the page path (…/panel/telegram-matrix); ?t= keeps
   // each open a distinct tab (and busts any cache). blank → the generic split panel.
   const page = resolved.preset && resolved.preset !== "blank" ? resolved.preset : "split-panel";
-  const url = `${PANEL_URL_BASE}${page}?t=${Date.now().toString(36)}`;
+  const tid = machineTeamId();
+  const url = `${PANEL_URL_BASE}${page}?t=${Date.now().toString(36)}${tid ? "&team=" + encodeURIComponent(tid) : ""}`;
   const name = resolved.title;
   const id = m.addTab(url, { title: name });
   saveLastPanelState(url, name);

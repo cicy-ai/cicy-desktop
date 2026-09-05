@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="ae062db5b34d">
+  <meta name="pv" content="8d8c0bdd0853">
   <title>Telegram 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -105,12 +105,15 @@
     #grid-empty { grid-column: 1 / -1; display: grid; place-items: center; color: var(--muted); }
     .spinner { width: 28px; height: 28px; border: 3px solid rgba(255,255,255,.12); border-top-color: var(--accent); border-radius: 50%; animation: spin .9s linear infinite; margin: 0 auto 12px; }
     @keyframes spin { to { transform: rotate(360deg); } }
+    /* 机器 id 徽章:机器多了一眼认出这是哪台。列表/批量两种模式都显示。 */
+    .mid{display:inline-block;margin-right:8px;padding:2px 9px;border-radius:7px;font:700 13px ui-monospace,monospace;
+         background:#1f6feb;color:#fff;letter-spacing:.5px;vertical-align:middle;box-shadow:0 1px 4px rgba(0,0,0,.4)}
   </style>
 </head>
 <body>
   <aside>
     <header>
-      <h1>Telegram 矩阵 <small id="count"></small></h1>
+      <h1><span id="mid-list" class="mid" hidden></span>Telegram 矩阵 <small id="count"></small></h1>
       <div class="actions"><button class="ghost" id="batch-login" title="平铺所有 Profile 的会话到网格（最多 10 个）">批量网格</button><button id="add-profile" title="新建一个独立会话（persist:sandbox-N）">+ 添加 Profile</button></div>
     </header>
     <div class="list">
@@ -121,7 +124,7 @@
   </aside>
   <main>
     <div id="grid-title">
-      <div class="left"><b>批量登录</b><span id="grid-count"></span></div>
+      <div class="left"><span id="mid-batch" class="mid" hidden></span><b>批量登录</b><span id="grid-count"></span></div>
       <div class="actions"><button class="ghost" id="grid-reload" title="重新加载所有格子">全部重载</button><button class="ghost" id="grid-exit">退出批量</button></div>
     </div>
     <div id="grid"></div>
@@ -183,6 +186,14 @@
     const gcells = new Map();           // accountIdx -> { el, body }
 
     const esc = (value) => String(value || '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    // 机器 id:app 打开面板时把本机 id 拼进 URL(?team=xs-3007)。两处徽章都填上。
+    (function(){ try {
+      const t = new URLSearchParams(location.search).get('team');
+      if (t) for (const id of ['mid-list','mid-batch']) {
+        const el = document.getElementById(id); if (el) { el.textContent = t; el.hidden = false; el.title = '本机: ' + t; }
+      }
+      if (t) document.title = t + ' · Telegram 矩阵';
+    } catch (e) {} })();
     const cellId = (idx) => `telegram-preview-${idx}`;
     const stateOf = (idx) => cellState.get(Number(idx)) || {};
     const dotClass = (st) => st.loading ? 'loading' : st.failed ? 'failed' : (st.url ? 'ok' : '');

@@ -1043,6 +1043,11 @@ function ensureWindowsWatchdog(want) {
       "For Each p In procs",
       "  n = n + 1",
       "Next",
+      // 更新安装期间让位:updating.flag 新鲜(<180s)就不拉起 app,免得和安装器
+      // 抢 exe 文件锁 → 装不上 → 版本停滞 → 反复重启的循环。mtime 过期即自动恢复。
+      'Set fso = CreateObject("Scripting.FileSystemObject")',
+      'flag = sh.ExpandEnvironmentStrings("%LOCALAPPDATA%") & "\\cicy-desktop\\updating.flag"',
+      'If fso.FileExists(flag) Then If DateDiff("s", fso.GetFile(flag).DateLastModified, Now) < 180 Then WScript.Quit',
       `If n = 0 Then sh.Run """${exe}"" --hidden", 0, False`,
       "",
     ];

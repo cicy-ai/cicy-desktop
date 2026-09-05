@@ -404,6 +404,12 @@ function installWindows(installer) {
   const dir = path.join(process.env.LOCALAPPDATA || os.homedir(), "cicy-desktop");
   fs.mkdirSync(dir, { recursive: true });
   const vbs = path.join(dir, "update-install.vbs");
+  // Stand the 1-min watchdog DOWN for the install window: it would otherwise see
+  // the app gone (installer closed it), relaunch it, lock the exe, fail the
+  // replace, and leave the version unchanged — the exact loop that made a node
+  // "总被关". The watchdog skips its relaunch while this flag is < 180s old;
+  // mtime-expiry is the fail-safe so a crashed install can't wedge it forever.
+  try { fs.writeFileSync(path.join(dir, "updating.flag"), String(Date.now())); } catch { /* best effort */ }
   // VBS escapes a double quote by doubling it. cmd waits for the installer (no
   // `start` on that leg), then the pause lets Windows release the replaced
   // files before the new exe runs hidden.
