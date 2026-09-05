@@ -133,5 +133,10 @@ function ensureForPartition(partition) {
   try { handlerFor(session.fromPartition(partition), partition); } catch (e) {}
 }
 
-const PANEL_URL_BASE = "cicyui://panel/";
+// Panel tabs load straight from the network (desktop.cicy-ai.com/panel/<page>)
+// so the address bar shows the real https URL — the page ships by deploying the
+// Worker, same as before. panelAPI still reaches the page: buildTabWebPreferences
+// applies PANEL_PRELOAD (sandbox kept ON) to any tab whose URL starts with this
+// base. The cicyui://panel handler above stays as an offline/legacy fallback.
+const PANEL_URL_BASE = PANEL_REMOTE_BASE.replace(/\/+$/, "") + "/";
 module.exports = { NEWTAB_URL, PANEL_URL_BASE, registerScheme, installHandler, ensureForPartition, startPageHtml };

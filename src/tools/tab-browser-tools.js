@@ -209,7 +209,10 @@ function readLastPanelState() {
 function openPanelTab(m, preset) {
   if (!m || m.accountIdx !== 0) return null;
   const resolved = resolvePanelPreset(preset);
-  const url = PANEL_URL_BASE + Date.now().toString(36) + (resolved.query ? `?${resolved.query}` : "");
+  // Network URL: the preset IS the page path (…/panel/telegram-matrix); ?t= keeps
+  // each open a distinct tab (and busts any cache). blank → the generic split panel.
+  const page = resolved.preset && resolved.preset !== "blank" ? resolved.preset : "split-panel";
+  const url = `${PANEL_URL_BASE}${page}?t=${Date.now().toString(36)}`;
   const name = resolved.title;
   const id = m.addTab(url, { title: name });
   saveLastPanelState(url, name);
@@ -237,7 +240,7 @@ function buildTabWebPreferences(accountIdx, partition, target, opts = {}) {
   // split panel page: its cells are main-managed BrowserViews (panel-cells.js),
   // driven over panelAPI IPC. No webviewTag needed (that path is the file://-dev
   // fallback below). Sandbox stays ON — the preload only uses contextBridge/ipc.
-  else if (typeof target === "string" && target.startsWith("cicyui://panel")) { wp.preload = PANEL_PRELOAD; }
+  else if (typeof target === "string" && (target.startsWith(PANEL_URL_BASE) || target.startsWith("cicyui://panel"))) { wp.preload = PANEL_PRELOAD; }
   // Every other profile-0 tab carries the electronRPC bridge (WEBVIEW_PRELOAD),
   // but the bridge is INERT until the page's origin is authorized: the first
   // rpc:guarded call from a non-allowlisted origin pops a consent modal
