@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="8d8c0bdd0853">
-  <title>Facebook 矩阵</title>
+  <meta name="pv" content="15e64cc77c1d">
+  <title>TikTok 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
     * { box-sizing: border-box; }
@@ -105,7 +105,7 @@
     #grid-empty { grid-column: 1 / -1; display: grid; place-items: center; color: var(--muted); }
     .spinner { width: 28px; height: 28px; border: 3px solid rgba(255,255,255,.12); border-top-color: var(--accent); border-radius: 50%; animation: spin .9s linear infinite; margin: 0 auto 12px; }
     @keyframes spin { to { transform: rotate(360deg); } }
-    /* Facebook 矩阵:接码/手机号是 Telegram 专属,这里隐藏 */
+    /* TikTok 矩阵:接码/手机号是 Telegram 专属,这里隐藏 */
     button.code, .line2 .phone, .ghead .phone, #cfg-login, #open-code { display: none !important; }
     /* 机器 id 徽章:机器多了一眼认出这是哪台。列表/批量两种模式都显示。 */
     .mid{display:inline-block;margin-right:8px;padding:2px 9px;border-radius:7px;font:700 13px ui-monospace,monospace;
@@ -115,12 +115,12 @@
 <body>
   <aside>
     <header>
-      <h1><span id="mid-list" class="mid" hidden></span>Facebook 矩阵 <small id="count"></small></h1>
+      <h1><span id="mid-list" class="mid" hidden></span>TikTok 矩阵 <small id="count"></small></h1>
       <div class="actions"><button class="ghost" id="batch-login" title="平铺所有 Profile 的会话到网格（最多 10 个）">批量网格</button><button id="add-profile" title="新建一个独立会话（persist:sandbox-N）">+ 添加 Profile</button></div>
     </header>
     <div class="list">
       <div id="rows"></div>
-      <div id="empty">还没有 Profile<br>点击右上角「添加 Profile」创建第一个 Facebook 会话</div>
+      <div id="empty">还没有 Profile<br>点击右上角「添加 Profile」创建第一个 TikTok 会话</div>
     </div>
     <div class="hint">点击行切换预览；点 ⚙ 设置代理 / 测 IP / 删除。已打开过的会话会在后台保持登录。</div>
   </aside>
@@ -132,15 +132,15 @@
     <div id="grid"></div>
     <div id="preview-title">
       <div class="left"><span class="dot" id="sel-dot"></span><span id="selected-name">未选择 Profile</span><span id="status"></span></div>
-      <div class="actions"><button class="code" id="open-code" title="在格子上叠加/关闭接码 webview(同代理出口)">接码</button><button class="ghost" id="probe-ip" title="经该 Profile 的代理探测出口 IP / 地区">测 IP</button><button class="ghost" id="reload" title="重新加载 Facebook">重新加载</button></div>
+      <div class="actions"><button class="code" id="open-code" title="在格子上叠加/关闭接码 webview(同代理出口)">接码</button><button class="ghost" id="probe-ip" title="经该 Profile 的代理探测出口 IP / 地区">测 IP</button><button class="ghost" id="reload" title="重新加载 TikTok">重新加载</button></div>
     </div>
     <div id="phone">
       <div id="phone-preview"></div>
-      <div class="overlay on" id="ov-empty"><div>选择左侧一个 Profile 预览 Facebook</div></div>
-      <div class="overlay" id="ov-loading"><div><div class="spinner"></div><div>正在加载 Facebook…</div></div></div>
+      <div class="overlay on" id="ov-empty"><div>选择左侧一个 Profile 预览 TikTok</div></div>
+      <div class="overlay" id="ov-loading"><div><div class="spinner"></div><div>正在加载 TikTok…</div></div></div>
       <div class="overlay" id="ov-error">
         <div>
-          <h2>无法连接 Facebook</h2>
+          <h2>无法连接 TikTok</h2>
           <p id="err-detail"></p>
           <div class="btns"><button id="err-retry">重试</button><button class="ghost" id="err-cfg">代理设置</button></div>
         </div>
@@ -164,7 +164,7 @@
     </div>
   </div>
   <script>
-    const SITE_URL = 'https://www.facebook.com/';
+    const SITE_URL = 'https://www.tiktok.com/';
     const rowsEl = document.getElementById('rows');
     const empty = document.getElementById('empty');
     const countEl = document.getElementById('count');
@@ -196,9 +196,9 @@
       if (t) for (const id of ['mid-list','mid-batch']) {
         const el = document.getElementById(id); if (el) { el.textContent = t; el.hidden = false; el.title = '本机: ' + t; }
       }
-      if (t) document.title = t + ' · Facebook 矩阵';
+      if (t) document.title = t + ' · TikTok 矩阵';
     } catch (e) {} })();
-    const cellId = (idx) => `facebook-preview-${idx}`;
+    const cellId = (idx) => `tiktok-preview-${idx}`;
     const stateOf = (idx) => cellState.get(Number(idx)) || {};
     const dotClass = (st) => st.loading ? 'loading' : st.failed ? 'failed' : (st.url ? 'ok' : '');
     const stateText = (st, opened) => st.loading ? '加载中…' : st.failed ? '连接失败' : st.url ? '已加载' : (opened ? '' : '未打开');
@@ -224,7 +224,7 @@
       } catch (e) { return { ok: false, error: e.message || String(e) }; }
     }
     // 身份:优先用本次会话探到的(cellState.identity),否则用 profile 里存的(上次登录)。
-    const identityOf = (p) => stateOf(p.accountIdx).identity || p.facebook || null;
+    const identityOf = (p) => stateOf(p.accountIdx).identity || p.tiktok || null;
     const phoneOf = (p) => (p.login && p.login.phone) || '';
     const codeUrlOf = (p) => (p.login && p.login.codeUrl) || '';
     function renderPhone(p) {
@@ -296,8 +296,8 @@
     function describeError(p, st) {
       const e = st.error || {};
       const desc = e.description ? `<code>${esc(e.description)}</code>` : '';
-      if (p.proxy) return `代理 <code>${esc(p.proxy)}</code> 不可用或无法访问 Facebook。${desc}<br>点 ⚙ 检查或更换该 Profile 的代理，可用「测 IP」验证。`;
-      return `当前为直连，网络无法访问 Facebook。${desc}<br>点 ⚙ 为该 Profile 设置代理。`;
+      if (p.proxy) return `代理 <code>${esc(p.proxy)}</code> 不可用或无法访问 TikTok。${desc}<br>点 ⚙ 检查或更换该 Profile 的代理，可用「测 IP」验证。`;
+      return `当前为直连，网络无法访问 TikTok。${desc}<br>点 ⚙ 为该 Profile 设置代理。`;
     }
 
     function renderPreviewState() {
@@ -412,7 +412,7 @@
 
     function selectProfile(accountIdx) {
       selected = profiles.find((p) => p.accountIdx === Number(accountIdx)) || null;
-      if (selected) { openedProfiles.add(selected.accountIdx); localStorage.setItem('facebook-matrix-profile', String(selected.accountIdx)); }
+      if (selected) { openedProfiles.add(selected.accountIdx); localStorage.setItem('tiktok-matrix-profile', String(selected.accountIdx)); }
       selectedName.textContent = selected ? `${selected.name} · #${selected.accountIdx}` : '未选择 Profile';
       selectedName.title = selected ? `persist:sandbox-${selected.accountIdx}` : '';
       delete statusEl.dataset.sticky;
@@ -423,7 +423,7 @@
     }
 
     function applyCellState(state) {
-      const m = /^facebook-preview-(\d+)$/.exec(state.id || '');
+      const m = /^tiktok-preview-(\d+)$/.exec(state.id || '');
       if (!m) return;
       const idx = Number(m[1]);
       const prev = stateOf(idx);
@@ -446,7 +446,7 @@
         // 不先认领回来,第一次 syncPreview() 就会把它们当多余格子销毁,后台
         // 登录着的会话全没(实测:刷新后 #1 的 webContents 被销毁)。
         if (adopt) {
-          const m = /^facebook-preview-(\d+)$/.exec(st.id || '');
+          const m = /^tiktok-preview-(\d+)$/.exec(st.id || '');
           if (m) openedProfiles.add(Number(m[1]));
         }
         applyCellState(st);
@@ -456,7 +456,7 @@
     async function loadProfiles(preferredId) {
       profiles = await window.panelAPI.profiles();
       profiles.sort((a, b) => a.accountIdx - b.accountIdx);
-      const remembered = Number(localStorage.getItem('facebook-matrix-profile'));
+      const remembered = Number(localStorage.getItem('tiktok-matrix-profile'));
       const target = preferredId || (profiles.some((p) => p.accountIdx === remembered) ? remembered : 0) || (profiles[0] && profiles[0].accountIdx);
       selectProfile(target);
     }
@@ -469,7 +469,7 @@
       profiles = profiles.filter((x) => x.accountIdx !== idx);
       if (selected && selected.accountIdx === idx) {
         const next = profiles[0] ? profiles[0].accountIdx : 0;
-        if (next) selectProfile(next); else { selected = null; localStorage.removeItem('facebook-matrix-profile'); selectedName.textContent = '未选择 Profile'; render(); renderPreviewState(); syncPreview(); }
+        if (next) selectProfile(next); else { selected = null; localStorage.removeItem('tiktok-matrix-profile'); selectedName.textContent = '未选择 Profile'; render(); renderPreviewState(); syncPreview(); }
       } else render();
       flash(`Profile #${idx} 已删除`);
     }
@@ -563,7 +563,7 @@
       // 这次跳过自动批量、停在列表,避免弱机反复「崩溃→自动批量→再崩」的刷新循环。
       .then(() => {
         try {
-          const K = 'fb-matrix-autobatch-pending';
+          const K = 'tk-matrix-autobatch-pending';
           let prev = null; try { prev = localStorage.getItem(K); } catch (e) {}
           if (prev && (Date.now() - Number(prev)) < 20000) {
             try { localStorage.removeItem(K); } catch (e) {}

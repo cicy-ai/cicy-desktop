@@ -39,6 +39,7 @@ const PANEL_PAGES = [
   "telegram-matrix.html",
   "redroid-matrix.html",
   "facebook-matrix.html",
+  "tiktok-matrix.html",
   "split-panel.html",
 ];
 fs.rmSync(PANEL_OUT, { recursive: true, force: true });

@@ -77,14 +77,50 @@ const HOST_CTRL = Number(process.env.CICY_HOST_MIHOMO_CTRL || 19011);
 
 function binPresent() { return valid(NEW_BIN) || valid(LEGACY_BIN); }
 
-function download(url, dest, redirects = 0) {
+// Node's own TLS stack gets ECONNRESET on the R2 host from some CN networks
+// (TLS-fingerprint reset) while Chromium's stack on the very same machine gets
+// 200 — so prefer Electron `net` (Chromium) and keep Node https as the fallback
+// for non-Electron callers (tests / scripts).
+function downloadViaNet(url, dest) {
+  let net;
+  try { net = require("electron").net; } catch { net = null; }
+  if (!net || typeof net.fetch !== "function") return null;
+  return (async () => {
+    const stg = dest + ".part";
+    try { fs.rmSync(stg, { force: true }); } catch {}
+    const res = await net.fetch(url, { signal: AbortSignal.timeout(10 * 60 * 1000) });
+    if (res.status !== 200) throw new Error(`HTTP ${res.status} for ${url}`);
+    const total = Number(res.headers.get("content-length") || 0);
+    const f = fs.createWriteStream(stg);
+    const reader = res.body.getReader();
+    let got = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const b = Buffer.from(value);
+        got += b.length;
+        await new Promise((ok, no) => f.write(b, (e) => (e ? no(e) : ok())));
+      }
+      await new Promise((ok) => f.end(ok));
+      if (total && got !== total) throw new Error(`short download ${got}/${total}`);
+      fs.renameSync(stg, dest);
+    } catch (e) {
+      try { f.destroy(); } catch {}
+      try { fs.rmSync(stg, { force: true }); } catch {}
+      throw e;
+    }
+  })();
+}
+
+function downloadViaNode(url, dest, redirects = 0) {
   return new Promise((resolve, reject) => {
     if (redirects > 5) return reject(new Error("too many redirects"));
     const f = fs.createWriteStream(dest);
     const req = https.get(url, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         f.close(); try { fs.unlinkSync(dest); } catch {}
-        return download(res.headers.location, dest, redirects + 1).then(resolve, reject);
+        return downloadViaNode(res.headers.location, dest, redirects + 1).then(resolve, reject);
       }
       if (res.statusCode !== 200) { f.close(); try { fs.unlinkSync(dest); } catch {} return reject(new Error(`HTTP ${res.statusCode} for ${url}`)); }
       res.pipe(f);
@@ -93,6 +129,15 @@ function download(url, dest, redirects = 0) {
     });
     req.on("error", (e) => { try { fs.unlinkSync(dest); } catch {} reject(e); });
   });
+}
+
+async function download(url, dest) {
+  const viaNet = downloadViaNet(url, dest);
+  if (viaNet) {
+    try { await viaNet; return; }
+    catch (e) { console.warn(`[host-mihomo] net.fetch download failed (${e.message}), falling back to https`); }
+  }
+  await downloadViaNode(url, dest);
 }
 
 // Ensure the mihomo binary is in ~/.local/bin/mihomo-<ver> (idempotent).

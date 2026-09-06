@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="8d8c0bdd0853">
+  <meta name="pv" content="e3e0f2a4d05d">
   <title>Telegram 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -354,6 +354,7 @@
       gridEl.style.gridTemplateColumns = `repeat(${gridCols(todo.length)}, minmax(0, 1fr))`;
       batchMode = true; mainEl.classList.add('batch'); document.body.classList.add('batch'); document.getElementById('batch-login').textContent = '退出批量';
       render();
+      syncPreview();                       // 后台 tab 里 rAF 不会触发,先直接同步一次把格子建出来
       requestAnimationFrame(syncPreview);
       setTimeout(pullStates, 300);
     }
@@ -548,6 +549,7 @@
 
     new ResizeObserver(() => requestAnimationFrame(syncPreview)).observe(preview);
     window.addEventListener('resize', syncPreview);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) { syncPreview(); setTimeout(syncPreview, 500); setTimeout(pullStates, 800); } });
     try { window.panelAPI.onCellState(applyCellState); } catch (e) {}
     pullStates({ adopt: true })
       .catch(() => {})

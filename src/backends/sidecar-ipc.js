@@ -149,6 +149,16 @@ function register({ sidecarLogPath } = {}) {
   // 退避:子进程被拦(安全软件开机后一段时间会自己放行)2 分钟一试;其余 15 分钟一试。
   const AUTO_RETRY_MS = { spawn_blocked: 2 * 60 * 1000, windows_component_store_broken: 6 * 60 * 60 * 1000, virtualization_disabled: 60 * 60 * 1000, default: 15 * 60 * 1000 };
   const HARD_BOOTSTRAP_REASONS = new Set(["spawn_blocked", "virtualization_disabled", "wsl_enable_failed", "windows_component_store_broken", "wsl_kernel_missing", "wsl_reboot_required"]);
+  // cicy-desktop 本质是 client,cicy-code/WSL「能装就装、不能装也能用」:仍会自动尝试安装,
+  // 但硬失败(这台机根本装不了,如不支持嵌套虚拟化)后不再每 15 分钟强装弹 UAC,也不自动
+  // 重启整机——改为永久挂起,app 照常当 client;用户在 UI 点「安装/重试」可解除挂起。
+  // 要恢复旧的「强制自动重试 + 自动重启」行为:设 env CICY_WSL_AUTOINSTALL=1 或建标记文件
+  // ~/cicy-ai/db/wsl-autoinstall.flag。
+  const WSL_AUTOINSTALL_FLAG = path.join(os.homedir(), "cicy-ai", "db", "wsl-autoinstall.flag");
+  function wslAutoInstallAllowed() {
+    if (process.env.CICY_WSL_AUTOINSTALL === "1") return true;
+    try { return fs.existsSync(WSL_AUTOINSTALL_FLAG); } catch { return false; }
+  }
   function recordBootstrapResult(result, err) {
     if (err) {
       const code = err && err.code;
@@ -160,10 +170,16 @@ function register({ sidecarLogPath } = {}) {
       _lastBootstrapError = { reason: result.reason || result.error || "bootstrap_failed", message: result.message || "", ts: Date.now() };
     } else return;
     _softRetryAt = Date.now() + 2 * 60 * 1000;
-    if (_lastBootstrapError.reason === "wsl_reboot_required") scheduleReboot(90);
+    // 需要重启才能继续装 WSL 时,默认不自动重启整机(这些机器在跑账号矩阵,强制重启代价大),
+    // 只挂起等用户手动重启/重试;CICY_WSL_AUTOINSTALL=1 时才恢复自动重启。
+    if (_lastBootstrapError.reason === "wsl_reboot_required") scheduleReboot(90, "", { auto: true });
     if (HARD_BOOTSTRAP_REASONS.has(_lastBootstrapError.reason)) {
       _autoBootstrapPaused = _lastBootstrapError.reason;
-      _autoBootstrapRetryAt = Date.now() + (AUTO_RETRY_MS[_lastBootstrapError.reason] || AUTO_RETRY_MS.default);
+      // 硬失败(如 vmPlatform=false,这台根本装不了)→ 永久挂起,不再每 15 分钟强装;
+      // app 照常当 client。用户点「安装/重试」(docker:app-bootstrap)会清挂起再试一次。
+      _autoBootstrapRetryAt = wslAutoInstallAllowed()
+        ? Date.now() + (AUTO_RETRY_MS[_lastBootstrapError.reason] || AUTO_RETRY_MS.default)
+        : Number.MAX_SAFE_INTEGER;
     }
     log.error(`[docker] bootstrap failed reason=${_lastBootstrapError.reason}${_lastBootstrapError.message ? ` — ${_lastBootstrapError.message}` : ""}${_autoBootstrapPaused ? " (auto-bootstrap paused until user retries)" : ""}`);
   }
@@ -191,7 +207,10 @@ function register({ sidecarLogPath } = {}) {
     if (delta) { c = Math.max(0, c + delta); try { fs.mkdirSync(path.dirname(REBOOT_COUNT_FILE), { recursive: true }); fs.writeFileSync(REBOOT_COUNT_FILE, JSON.stringify({ count: c, ts: Date.now() })); } catch {} }
     return c;
   }
-  function scheduleReboot(delaySec = 90, why = "") {
+  function scheduleReboot(delaySec = 90, why = "", { auto = false } = {}) {
+    // client 优先:自动触发的整机重启默认抑制(只有用户手动「立即重启」或开启
+    // CICY_WSL_AUTOINSTALL 才真的重启),避免为可选的 cicy-code sidecar 重启正在跑账号的机器。
+    if (auto && !wslAutoInstallAllowed()) { log.info("[docker] auto-reboot 已抑制(client 模式;设 CICY_WSL_AUTOINSTALL=1 或 wsl-autoinstall.flag 可恢复)"); return false; }
     if (_rebootScheduled || process.platform !== "win32") return false;
     if (delaySec > 10 && rebootCount() >= 2) { log.warn("[docker] auto-reboot skipped: already rebooted 2× for WSL without success"); return false; }
     _rebootScheduled = true;
@@ -262,12 +281,12 @@ function register({ sidecarLogPath } = {}) {
                 if (dk.modernWslInstalled()) { try { rebootCount(-99); } catch {} }
               }
               _lastBootstrapError = { reason: "wsl_wedged", message: dk.modernWslInstalled && dk.modernWslInstalled() ? "已安装新版 WSL,将自动重启 Windows 生效" : "WSL 卡死且服务重启无效,将自动重启 Windows 修复", ts: Date.now() };
-              scheduleReboot(90);
+              scheduleReboot(90, "", { auto: true });
             }
           } catch (e) { log.warn(`[docker-daemon] auto repairWsl failed: ${e.message}`); }
           await refreshDockerStatus(); return;
         }
-        if (_unknownStreak >= 6 && !_rebootScheduled) { _lastBootstrapError = { reason: "wsl_wedged", message: "WSL 持续无响应,将自动重启 Windows 修复", ts: Date.now() }; scheduleReboot(90); }
+        if (_unknownStreak >= 6 && !_rebootScheduled) { _lastBootstrapError = { reason: "wsl_wedged", message: "WSL 持续无响应,将自动重启 Windows 修复", ts: Date.now() }; scheduleReboot(90, "", { auto: true }); }
         return;
       } else if (!s.unknown) { _unknownStreak = 0; }
       // 容器在里面健康、Windows 侧却连不通 = WSL localhost 转发坏了(实测 wsl --shutdown 后恢复)。
@@ -310,7 +329,7 @@ function register({ sidecarLogPath } = {}) {
             if (_relayMissesAfterRepair >= 3 && !_rebootScheduled && rebootCount() < 2) {
               _lastBootstrapError = { reason: "relay_unreachable", message: "容器正常但 Windows 连不上 :8008,端口修复无效 → 90 秒后自动重启 Windows 修复", ts: Date.now() };
               log.warn("[docker-daemon] relay still unreachable after tcp repair → auto reboot");
-              scheduleReboot(90, "Windows 无法连接本机 :8008(端口异常),自动重启修复");
+              scheduleReboot(90, "Windows 无法连接本机 :8008(端口异常),自动重启修复", { auto: true });
               await refreshDockerStatus();
               return;
             }

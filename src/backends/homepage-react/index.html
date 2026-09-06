@@ -1,12 +1,43 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-cicy-stamp="20260904010332">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
   <link rel="icon" type="image/png" sizes="256x256" href="./favicon-256.png" />
   <title>CiCy Desktop</title>
-  <script type="module" crossorigin src="./assets/index-CppodgBn.js"></script>
+  <!-- Deployment watchdog. Deliberately INLINE and outside the bundle:
+       the reload used to live in a React hook, so a bundle that failed to
+       render took the watchdog down with it and that machine could never learn
+       a fix had shipped — it stayed on the broken build forever, reachable only
+       by someone pressing reload. Here it runs even if nothing else does.
+       Plain ES5, no imports, everything in try/catch: it must never be the
+       thing that breaks. -->
+  <script>
+  (function () {
+    var STAMP = "20260904010332"; // filled in by the Worker on the way out
+    window.__CICY_BUILD__ = STAMP; // the bundle's socket reuses this, one source of truth
+    // The socket learns the deployed build on every connect, so this is only
+    // the floor for a bundle too broken to hold a socket open. Keep it rare.
+    var EVERY = 600000;
+    function check() {
+      try {
+        fetch("./api/version?t=" + Date.now(), { cache: "no-store" })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (j) {
+            // Numeric compare, and only ever forward: a stale page reloads,
+            // a page newer than the server (mid-deploy race) sits still.
+            var mine = parseInt(STAMP, 10), theirs = parseInt(j && j.build, 10);
+            if (mine && theirs && theirs > mine) { location.reload(true); }
+          })
+          .catch(function () {});
+      } catch (e) {}
+    }
+    setInterval(check, EVERY);
+    setTimeout(check, 5000);
+  })();
+  </script>
+  <script type="module" crossorigin src="./assets/index-BMHPUEiZ.js"></script>
   <link rel="stylesheet" crossorigin href="./assets/index-C6Zrdgc0.css">
 </head>
 <body>

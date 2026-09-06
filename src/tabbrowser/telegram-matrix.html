@@ -354,6 +354,7 @@
       gridEl.style.gridTemplateColumns = `repeat(${gridCols(todo.length)}, minmax(0, 1fr))`;
       batchMode = true; mainEl.classList.add('batch'); document.body.classList.add('batch'); document.getElementById('batch-login').textContent = '退出批量';
       render();
+      syncPreview();                       // 后台 tab 里 rAF 不会触发,先直接同步一次把格子建出来
       requestAnimationFrame(syncPreview);
       setTimeout(pullStates, 300);
     }
@@ -548,6 +549,7 @@
 
     new ResizeObserver(() => requestAnimationFrame(syncPreview)).observe(preview);
     window.addEventListener('resize', syncPreview);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) { syncPreview(); setTimeout(syncPreview, 500); setTimeout(pullStates, 800); } });
     try { window.panelAPI.onCellState(applyCellState); } catch (e) {}
     pullStates({ adopt: true })
       .catch(() => {})

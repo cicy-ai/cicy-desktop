@@ -1,0 +1,114 @@
+#!/usr/bin/env node
+// wsd-ws — drive the desktop fleet over ONE persistent WebSocket to the hub.
+// Drop-in for `wsd`: same subcommands + --json shape {results:[{host,short,ok,out}]}.
+// Every command rides one /ws connection (verified by the owner's hubAuth token),
+// so high-frequency control never hits the Cloudflare edge per-request → no 429.
+// Only `ls` uses a single HTTP /api/fleet call (low-frequency; the registry's
+// version/ip/cid live only there).
+import { readFileSync, statSync } from 'fs';
+import { homedir } from 'os';
+import { join } from 'path';
+import http from 'http';
+import https from 'https';
+
+const HOME = homedir();
+const ctrl = JSON.parse(readFileSync(join(HOME,'cicy-ai','db','desktop-ctrl.json'),'utf8'));
+const dev  = JSON.parse(readFileSync(join(HOME,'cicy-ai','db','cloud-device.json'),'utf8'));
+const BASE = ctrl.base.replace(/\/$/,'');
+const UID = "ctrl-" + process.pid + "-" + Math.random().toString(36).slice(2,8); // 每进程唯一,避免并发互相 evict
+const WSURL = BASE.replace(/^http/,'ws') + '/ws?team=' + encodeURIComponent(UID) + '&mid=' + encodeURIComponent(UID) + '&host=' + encodeURIComponent(UID) + '&short=CTRL';
+const CTRLTOK = ctrl.token;               // x-cicy-ctrl for the HTTP /api/fleet fallback
+const HUBTOK = dev.token;
+
+const a = process.argv.slice(2);
+const JSON_OUT = a.includes('--json');
+const args = a.filter(x => x !== '--json');
+const sub = args[0];
+
+function die(m){ console.error(m); process.exit(2); }
+function usage(){ die('usage: wsd-ws ls | main <t> <file|-|code> | exec <t> <shell...> | rpc <t> <tool> [json] | ipc <t> <ch> [json] | ping <t>   [--json]'); }
+if (!sub) usage();
+
+// wsd body(): "-"=stdin, existing file=read, else inline code
+function body(x){
+  if (x === '-') return readFileSync(0,'utf8');
+  if (x && x[0] === '@') return readFileSync(x.slice(1),'utf8'); // @path = 读文件(手动调用惯用)
+  try { if (statSync(x).isFile()) return readFileSync(x,'utf8'); } catch {}
+  return x;
+}
+// wsd main contract: js runs in the page context; bridge to main process.
+function mainWrap(code){
+  // 用 base64 传递主进程代码,彻底避开多行/引号/换行的转义问题(在页面上下文 atob 解回)
+  const b64 = Buffer.from(code, 'utf8').toString('base64');
+  return "const g = await window.electronRPC('get_windows', {});"
+    + "const gt = ((g&&g.content)||[]).map(c=>c&&c.text).join('');"
+    + "let wid = 1; try { const ws = JSON.parse(gt); if (ws && ws.length) wid = ws[0].id; } catch (e) {}"
+    + "const __b64 = " + JSON.stringify(b64) + ";"
+    + "const __code = decodeURIComponent(Array.prototype.map.call(atob(__b64), function(c){return '%'+('00'+c.charCodeAt(0).toString(16)).slice(-2)}).join(''));"
+    + "const r = await window.electronRPC('control_electron_BrowserWindow', {win_id: wid, code: __code});"
+    + "return ((r&&r.content)||[]).map(c=>c&&c.text).join('');";
+}
+function normTarget(t){
+  if(!t) return t; const low=String(t).toLowerCase();
+  if(low==='all') return 'all';
+  if(/^c\d+-/.test(low)) return t;
+  if(low.startsWith('desktop-')) return t;
+  return 'desktop-'+t;
+}
+
+// ---- ls: single HTTP GET /api/fleet, printed in wsd's text shape ----
+function httpGet(pathname){
+  return new Promise((resolve,reject)=>{
+    const u=new URL(BASE+pathname); const mod=u.protocol==='https:'?https:http;
+    const req=mod.request(u,{method:'GET',headers:{'x-cicy-ctrl':CTRLTOK}},res=>{
+      let d=''; res.on('data',c=>d+=c); res.on('end',()=>resolve({status:res.statusCode,body:d}));
+    });
+    req.on('error',reject); req.setTimeout(30000,()=>{req.destroy(new Error('timeout'))}); req.end();
+  });
+}
+async function doLs(){
+  const r=await httpGet('/api/fleet');
+  let peers=[]; try{ peers=JSON.parse(r.body).peers||JSON.parse(r.body); }catch{}
+  if(JSON_OUT){ process.stdout.write(JSON.stringify({peers})+'\n'); return; }
+  console.log(`peers=${peers.length}`);
+  for(const p of peers){
+    console.log(`  ${(p.team||p.host||'?')}\tv=${p.v||''}\t${p.plat||''}\tip=${p.ip||''} cid=${p.cid||''}`);
+  }
+}
+
+// ---- build command list for WS subcommands ----
+let cmds=[];
+if (sub==='ls'){ doLs().catch(e=>die('wsd-ws ls: '+e.message)); }
+else {
+  if (sub==='main'){ const t=args[1]; if(!t||args[2]===undefined) usage(); cmds=[{target:normTarget(t), js:mainWrap(body(args.slice(2).join(' ')))}]; }
+  else if (sub==='exec'){ const t=args[1]; const c=args.slice(2).join(' '); if(!t||!c) usage(); cmds=[{target:normTarget(t), tool:'exec_shell', args:{command:c}}]; }
+  else if (sub==='rpc'){ const t=args[1], tool=args[2]; if(!t||!tool) usage(); let ja={}; try{ ja=args[3]?JSON.parse(args[3]):{}; }catch{ die('rpc args must be JSON'); } cmds=[{target:normTarget(t), tool, args:ja}]; }
+  else if (sub==='ipc'){ const t=args[1], ch=args[2]; if(!t||!ch) usage(); let ja=[]; try{ ja=args[3]?JSON.parse(args[3]):[]; }catch{ die('ipc args must be JSON'); } cmds=[{target:normTarget(t), ipc:ch, args:ja}]; }
+  else if (sub==='ping'){ const t=args[1]; if(!t) usage(); cmds=[{target:normTarget(t), js:mainWrap('(async()=>JSON.stringify({ok:1,t:Date.now()}))()')}]; }
+  else if (sub==='run'){ const f=args[1]; if(!f) usage(); cmds=JSON.parse(readFileSync(f,'utf8')).map(c=>{ const t=normTarget(c.target); if(c.tool||c.ipc) return {...c,target:t}; if(c.js!==undefined) return {target:t, js:(c.raw?c.js:mainWrap(c.js))}; return {...c,target:t}; }); }
+  else usage();
+  runWs();
+}
+
+function runWs(){
+  const ws = new WebSocket(WSURL);
+  let idx=0, unauth=0, curId=null; const results=[];
+  const mkId=()=>'k'+Math.random().toString(36).slice(2)+Date.now().toString(36);
+  function out(){
+    if (JSON_OUT) process.stdout.write(JSON.stringify({results})+'\n');
+    else for(const r of results){ const o=(r&&typeof r.out==='string')?r.out:JSON.stringify(r&&r.out); console.log(`${r&&r.ok?'ok ':'ERR'} ${(r&&r.host)||'?'}\t${o}`); }
+    try{ws.close()}catch{} process.exit(results.every(r=>r&&r.ok)?0:1);
+  }
+  function sendCur(){ const c=cmds[idx]; curId=mkId(); ws.send(JSON.stringify({type:'cmd', cmdId:curId, target:c.target, js:c.js, tool:c.tool, args:c.args, ipc:c.ipc})); }
+  function next(){ idx++; if(idx>=cmds.length) out(); else sendCur(); }
+  ws.addEventListener('open',()=>ws.send(JSON.stringify({type:'hello', tok:HUBTOK, mid:UID, host:UID, team:UID, v:'ctrl', plat:'linux', auto:false})));
+  ws.addEventListener('message',(e)=>{ let f=null; try{f=JSON.parse(String(e.data))}catch{return;}
+    if(f.type==='welcome'){ setTimeout(sendCur,1500); return; }
+    if(f.type==='cmd_result' && f.cmdId===curId){ const r=f.result||{};
+      if(r.ok===false && /unauthorized/.test(String(r.out||'')) && unauth<8){ unauth++; setTimeout(sendCur,700); return; }
+      results.push(r); setTimeout(next,120); return; }
+  });
+  ws.addEventListener('error',()=>{});
+  ws.addEventListener('close',(e)=>{ if(idx<cmds.length){ console.error(`wsd-ws: closed code=${e.code}${e.reason?' '+e.reason:''}`); process.exit(3); } });
+  setTimeout(()=>{ console.error('wsd-ws: overall timeout'); out(); }, 120000);
+}
