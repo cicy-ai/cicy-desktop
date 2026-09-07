@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="ce8e03f89310">
+  <meta name="pv" content="2ba09c12bbd0">
   <title>Facebook 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -177,7 +177,7 @@
       </div>
     </div>
   </main>
-  <div id="maxview" hidden><div class="maxhead"><span class="name" id="max-name"></span><span class="chip" id="max-chip"></span><span class="sp"></span><button class="icon" id="max-gear" title="Profile 信息 / 设置">⚙</button><button class="icon" id="max-ping" title="ipcheck 出口 IP">🌐</button><button class="icon" id="max-mail" title="打开 Gmail 读验证码">📧</button><button class="icon" id="max-reload" title="重新加载">⟳</button><button class="ghost" id="max-restore">还原</button></div><div id="maxbody"></div></div>
+  <div id="maxview" hidden><div class="maxhead"><span class="name" id="max-name"></span><span class="chip" id="max-chip"></span><span class="sp"></span><button class="icon" id="max-gear" title="Profile 信息 / 设置">⚙</button><button class="icon" id="max-ping" title="ipcheck 出口 IP">🌐</button><button class="icon" id="max-reload" title="重新加载">⟳</button><button class="ghost" id="max-restore">还原</button></div><div id="maxbody"></div></div>
   <div id="cfg-modal" class="modal" hidden>
     <div class="modal-card">
       <div class="modal-head"><span id="cfg-title">Profile 设置</span><button class="icon" id="cfg-x" title="关闭">✕</button></div>
@@ -210,7 +210,7 @@
     let profiles = [];
     let selected = null;
     const openedProfiles = new Set();   // 打开过的会话保留在后台(登录态不丢),只有选中的贴到预览区
-    const codeOpen = new Set(); const pingOpen = new Set(); const pingUrl = new Map(); const mailOpen = new Set();          // 已叠开接码 overlay 的 accountIdx(同 partition 的接码 webview 覆盖在格子上)
+    const codeOpen = new Set(); const pingOpen = new Set(); const pingUrl = new Map();          // 已叠开接码 overlay 的 accountIdx(同 partition 的接码 webview 覆盖在格子上)
     const cellState = new Map();        // accountIdx -> { loading, failed, error, url, title }
     const rows = new Map();             // accountIdx -> row element
     const BATCH_MAX = 10;               // 一次最多铺开多少个登录格
@@ -331,7 +331,6 @@
           if (cu) overlays.push({ id: 'code-' + profileId, url: cu, profile: profileId, visible: true, rect: r });
         }
         if (visible && pingOpen.has(profileId)) overlays.push({ id: 'ping-' + profileId, url: (pingUrl.get(profileId) || 'https://ping0.cc/'), profile: profileId, visible: true, rect: r });
-        if (visible && mailOpen.has(profileId)) overlays.push({ id: 'mail-' + profileId, url: 'https://mail.google.com/', profile: profileId, visible: true, rect: r });
       }
       try { window.panelAPI.sync(cells.concat(overlays)); } catch (e) {}
     }
@@ -369,12 +368,11 @@
     function buildGridCell(p) {
       const el = document.createElement('div');
       el.className = 'gcell'; el.dataset.id = String(p.accountIdx);
-      el.innerHTML = `<div class="ghead"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="phone">${esc(phoneOf(p))}</span><span class="st"></span><button class="code" title="在格子上叠加/关闭接码 webview(同代理出口)">接码</button><button class="icon gear" title="Profile 信息 / 代理设置">⚙</button><button class="icon ping" title="用本 Profile 代理打开 ping0.cc(验 IP/指纹)">🌐</button><button class="icon mail" title="打开 Gmail 读验证码(同代理)">📧</button><button class="icon pingctl reloadping" title="重载 ping0">🔄</button><button class="icon pingctl closeping" title="关闭 ping0">✕</button><button class="icon max" title="最大化 / 还原">⤢</button><button class="icon reload" title="重新加载">⟳</button></div><div class="gbody"></div>`;
+      el.innerHTML = `<div class="ghead"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="phone">${esc(phoneOf(p))}</span><span class="st"></span><button class="code" title="在格子上叠加/关闭接码 webview(同代理出口)">接码</button><button class="icon gear" title="Profile 信息 / 代理设置">⚙</button><button class="icon ping" title="用本 Profile 代理打开 ping0.cc(验 IP/指纹)">🌐</button><button class="icon pingctl reloadping" title="重载 ping0">🔄</button><button class="icon pingctl closeping" title="关闭 ping0">✕</button><button class="icon max" title="最大化 / 还原">⤢</button><button class="icon reload" title="重新加载">⟳</button></div><div class="gbody"></div>`;
       el.querySelector('.gear').onclick = (e) => { e.stopPropagation(); openCfgModal(p); };
       el.querySelector('.reload').onclick = () => reloadProfile(p.accountIdx);
       el.querySelector('.max').onclick = (e) => { e.stopPropagation(); toggleMax(p.accountIdx); };
       el.querySelector('.ping').onclick = (e) => { e.stopPropagation(); togglePing(p.accountIdx); };
-      el.querySelector('.mail').onclick = (e) => { e.stopPropagation(); toggleMail(p.accountIdx); };
       el.querySelector('.reloadping').onclick = (e) => { e.stopPropagation(); reloadPing(p.accountIdx); };
       el.querySelector('.closeping').onclick = (e) => { e.stopPropagation(); closePing(p.accountIdx); };
       el.querySelector('.code').onclick = () => openCode(p);
@@ -427,17 +425,7 @@
     document.getElementById('max-restore').onclick = () => { maxedIdx = null; syncPreview(); };
     document.getElementById('max-gear').onclick = () => { if (maxedIdx != null) { const p = profiles.find((x) => x.accountIdx === maxedIdx); if (p) openCfgModal(p); } };
     document.getElementById('max-ping').onclick = () => { if (maxedIdx != null) togglePing(maxedIdx); };
-    document.getElementById('max-mail').onclick = () => { if (maxedIdx != null) toggleMail(maxedIdx); };
     document.getElementById('max-reload').onclick = () => { if (maxedIdx != null) reloadProfile(maxedIdx); };
-    function toggleMail(idx) {
-      if (mailOpen.has(idx)) { mailOpen.delete(idx); syncPreview(); return; }
-      mailOpen.add(idx);
-      const p = profiles.find((x) => x.accountIdx === idx); const fb = (p && p.facebook) || {};
-      const email = fb.id || fb.username || '';
-      const m = String(fb.displayName || '').match(/邮箱密码[:：]\s*([^·]+)/); const pw = m ? m[1].trim() : '';
-      flash('#' + idx + ' 邮箱 ' + email + (pw ? ('  ·  密码 ' + pw) : '') + '（已在格子打开 Gmail，登录读验证码；再点 📧 关闭）', 10000);
-      syncPreview();
-    }
     async function togglePing(idx) {
       if (pingOpen.has(idx)) { closePing(idx); return; }
       const cp = profiles.find((x) => x.accountIdx === idx);
