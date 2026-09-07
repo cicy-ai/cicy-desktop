@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>IP 核对</title>
+<style>
+  :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --line:rgba(255,255,255,.10); --fg:#e6e6e9; --muted:#8b8b92; --ok:#3fb950; --warn:#f0b429; --bad:#ff5c5c; --accent:#4aa3ff; font-family: Inter,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; width:100%; height:100%; background:var(--bg); color:var(--fg); overflow:auto; }
+  .wrap { padding:10px 12px; display:flex; flex-direction:column; gap:12px; }
+  .card { border:1px solid var(--line); border-radius:10px; background:var(--cell); padding:10px 12px; }
+  .card h3 { margin:0 0 8px; font-size:12px; color:var(--muted); font-weight:600; letter-spacing:.02em; }
+  .r { display:flex; align-items:center; gap:8px; font-size:12.5px; line-height:2; }
+  .r .k { flex:none; width:104px; color:var(--muted); }
+  .r .v { flex:1; min-width:0; font-family:ui-monospace,monospace; word-break:break-all; }
+  .r .v b { color:var(--fg); }
+  .mut { color:var(--muted); }
+  .ok { color:var(--ok); } .warn { color:var(--warn); } .bad { color:var(--bad); }
+  .badge { display:inline-block; padding:1px 8px; border-radius:999px; font-size:11px; font-weight:600; }
+  .badge.dc { background:rgba(255,92,92,.15); color:#ff9e9e; border:1px solid rgba(255,92,92,.4); }
+  .badge.res { background:rgba(63,185,80,.15); color:#7ee787; border:1px solid rgba(63,185,80,.4); }
+  .badge.unk { background:var(--line); color:var(--muted); }
+  a { color:var(--accent); text-decoration:none; } a:hover { text-decoration:underline; }
+  .links { display:flex; flex-wrap:wrap; gap:6px 14px; font-size:12px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h3>出口 IP</h3>
+      <div class="r"><span class="k">代理探测出口</span><span class="v" id="proxyip"><span class="mut">—</span></span></div>
+      <div class="r"><span class="k">浏览器真实出口</span><span class="v" id="realip"><span class="mut">读取中…</span></span></div>
+      <div class="r"><span class="k">一致性</span><span class="v" id="match"><span class="mut">—</span></span></div>
+    </div>
+    <div class="card">
+      <h3>IP 情报</h3>
+      <div class="r"><span class="k">归属地</span><span class="v" id="geo"><span class="mut">—</span></span></div>
+      <div class="r"><span class="k">ASN / 运营商</span><span class="v" id="asn"><span class="mut">—</span></span></div>
+      <div class="r"><span class="k">类型</span><span class="v" id="type"><span class="mut">—</span></span></div>
+      <div class="r"><span class="k">数据源</span><span class="v" id="src"><span class="mut">—</span></span></div>
+    </div>
+    <div class="card">
+      <h3>完整风控 / 详情（新窗口）</h3>
+      <div class="links" id="links"><span class="mut">拿到真实出口 IP 后生成…</span></div>
+    </div>
+  </div>
+<script>
+  const qs = new URLSearchParams(location.search);
+  const proxyip = (qs.get('proxyip') || '').trim();
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  if (proxyip) $('proxyip').innerHTML = '<b>' + esc(proxyip) + '</b>';
+
+  // 数据中心/机房关键词(命中→非住宅)。住宅/ISP 走 else。
+  const DC = /\b(cloud|hosting|host|data\s?center|datacenter|colo|colocation|vps|server|cdn|telecom cloud)\b|amazon|aws|google|microsoft|azure|digitalocean|ovh|hetzner|linode|vultr|choopa|m247|datacamp|leaseweb|g-?core|gcore|tencent|alibaba|aliyun|oracle|contabo|hostwinds|colocrossing|akamai|fastly|cloudflare|scaleway|kamatera|constant company|zenlayer|psychz|nforce|sharktech/i;
+
+  async function realExitIp() {
+    const urls = ['https://ifconfig.me/ip', 'https://api.ipify.org', 'https://icanhazip.com', 'https://ipinfo.io/ip'];
+    for (const u of urls) {
+      try { const r = await fetch(u, { cache: 'no-store' }); if (r.ok) { const t = (await r.text()).trim(); if (/^[0-9a-fA-F:.]{3,45}$/.test(t)) return t; } } catch (e) {}
+    }
+    return null;
+  }
+
+  async function ipIntel(ip) {
+    try {
+      const r = await fetch('https://api.ipapi.is/?q=' + encodeURIComponent(ip), { cache: 'no-store' });
+      if (r.ok) { const d = await r.json(); return { src: 'ipapi.is', country: d.country, region: d.region, city: d.city, asn: d.asn, company: d.company }; }
+    } catch (e) {}
+    try {
+      const r = await fetch('https://ipinfo.io/' + encodeURIComponent(ip) + '/json', { cache: 'no-store' });
+      if (r.ok) { const d = await r.json(); const org = d.org || ''; return { src: 'ipinfo.io', country: d.country, region: d.region, city: d.city, asn: org.split(' ')[0], company: org.split(' ').slice(1).join(' ') || org, hostname: d.hostname }; }
+    } catch (e) {}
+    return null;
+  }
+
+  function renderIntel(ip, d) {
+    if (!d) { $('geo').innerHTML = '<span class="bad">情报获取失败</span>'; return; }
+    const geo = [d.city, d.region, d.country].filter(Boolean).join(' · ');
+    $('geo').innerHTML = geo ? esc(geo) : '<span class="mut">未知</span>';
+    $('asn').innerHTML = esc([d.asn, d.company].filter(Boolean).join('  ·  ')) || '<span class="mut">未知</span>';
+    $('src').innerHTML = esc(d.src) + (d.hostname ? '  ·  ' + esc(d.hostname) : '');
+    const hay = [d.asn, d.company, d.hostname].filter(Boolean).join(' ');
+    if (DC.test(hay)) $('type').innerHTML = '<span class="badge dc">数据中心 / 机房</span> <span class="mut">(非原生住宅,风险较高)</span>';
+    else $('type').innerHTML = '<span class="badge res">疑似住宅 / ISP</span> <span class="mut">(启发式,以完整风控为准)</span>';
+  }
+
+  function renderLinks(ip) {
+    $('links').innerHTML = [
+      ['ping0.cc', 'https://ping0.cc/ip/' + encodeURIComponent(ip)],
+      ['scamalytics', 'https://scamalytics.com/ip/' + encodeURIComponent(ip)],
+      ['ipapi.is', 'https://ipapi.is/?q=' + encodeURIComponent(ip)],
+      ['ipinfo', 'https://ipinfo.io/' + encodeURIComponent(ip)],
+    ].map(([t, u]) => '<a href="' + u + '" target="_blank" rel="noreferrer">' + t + ' ↗</a>').join('');
+  }
+
+  (async () => {
+    const ip = await realExitIp();
+    if (!ip) {
+      $('realip').innerHTML = '<span class="bad">读取失败(代理不通 / CORS 被拦)</span>';
+      if (proxyip) { renderLinks(proxyip); renderIntel(proxyip, await ipIntel(proxyip)); }
+      return;
+    }
+    $('realip').innerHTML = '<b>' + esc(ip) + '</b>';
+    if (proxyip) $('match').innerHTML = (proxyip === ip) ? '<span class="ok">✓ 一致</span>' : '<span class="bad">✗ 不一致 · 浏览器实际走 ' + esc(ip) + '</span>';
+    renderLinks(ip);
+    renderIntel(ip, await ipIntel(ip));
+  })();
+</script>
+</body>
+</html>
