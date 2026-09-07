@@ -2029,6 +2029,19 @@ electronApp.whenReady().then(async () => {
   };
   installApplicationMenu();
 
+  // 实时读:profile 列表(chrome.json / electron account-*.json)变化时重建原生菜单,
+  // 修复"只在启动时读一次"导致外部改动不反映的 bug。
+  try {
+    let menuWatchTimer = null;
+    const rebuildMenu = () => { clearTimeout(menuWatchTimer); menuWatchTimer = setTimeout(() => { try { installApplicationMenu(); } catch (e) {} }, 300); };
+    for (const dir of [path.join(os.homedir(), "cicy-ai", "db"), path.join(os.homedir(), "cicy-ai", "electron")]) {
+      try {
+        fs.mkdirSync(dir, { recursive: true });
+        fs.watch(dir, { persistent: false }, (evt, name) => { if (!name || /^chrome\.json$/.test(name) || /^account-\d+\.json$/.test(name)) rebuildMenu(); });
+      } catch (e) {}
+    }
+  } catch (e) {}
+
   // Always open the homepage unless launched at login with --hidden.
   const hidden = process.argv.includes("--hidden");
   if (!hidden) {

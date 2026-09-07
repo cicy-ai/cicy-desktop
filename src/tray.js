@@ -183,6 +183,27 @@ function installTrayMenu() {
   trayInstance.setContextMenu(Menu.buildFromTemplate(template));
 }
 
+// 实时读:监听 chrome.json 与 electron account-*.json 所在目录,变化即防抖重建托盘菜单。
+// 修复"菜单只在启动时读一次 profile 列表"的 bug。
+let profileWatchers = [];
+let profileWatchTimer = null;
+function watchProfileStores() {
+  for (const w of profileWatchers) { try { w.close(); } catch (e) {} }
+  profileWatchers = [];
+  const home = app.getPath("home");
+  const targets = [path.join(home, "cicy-ai", "db"), path.join(home, "cicy-ai", "electron")];
+  const rebuild = () => { clearTimeout(profileWatchTimer); profileWatchTimer = setTimeout(() => { try { installTrayMenu(); } catch (e) { log.warn(`[Tray] rebuild failed: ${e.message}`); } }, 300); };
+  for (const dir of targets) {
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      const w = fs.watch(dir, { persistent: false }, (evt, name) => {
+        if (!name || /^chrome\.json$/.test(name) || /^account-\d+\.json$/.test(name)) rebuild();
+      });
+      profileWatchers.push(w);
+    } catch (e) { log.warn(`[Tray] watch ${dir} failed: ${e.message}`); }
+  }
+}
+
 function setupTray() {
   try {
     let iconPath;
@@ -209,6 +230,7 @@ function setupTray() {
     trayInstance = new Tray(img);
     trayInstance.setToolTip(i18n.t("tray.tooltip"));
     installTrayMenu();
+    watchProfileStores(); // chrome.json / electron account 变化时实时重建菜单
 
     // Click on tray icon: open homepage on macOS, toggle on others
     trayInstance.on("click", () => openHomepage());
