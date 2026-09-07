@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="f3f7944ecc09">
+  <meta name="pv" content="a7baba9906d9">
   <title>TikTok 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -164,7 +164,7 @@
       </div>
     </div>
   </main>
-  <div id="maxview" hidden><div class="maxhead"><span class="name" id="max-name"></span><span class="chip" id="max-chip"></span><span class="sp"></span><button class="ghost" id="max-restore">还原</button></div><div id="maxbody"></div></div>
+  <div id="maxview" hidden><div class="maxhead"><span class="name" id="max-name"></span><span class="chip" id="max-chip"></span><span class="sp"></span><button class="icon" id="max-ping" title="ipcheck 出口 IP">🌐</button><button class="icon" id="max-reload" title="重新加载">⟳</button><button class="ghost" id="max-restore">还原</button></div><div id="maxbody"></div></div>
   <div id="cfg-modal" class="modal" hidden>
     <div class="modal-card">
       <div class="modal-head"><span id="cfg-title">Profile 设置</span><button class="icon" id="cfg-x" title="关闭">✕</button></div>
@@ -403,6 +403,8 @@
       syncPreview();
     }
     document.getElementById('max-restore').onclick = () => { maxedIdx = null; syncPreview(); };
+    document.getElementById('max-ping').onclick = () => { if (maxedIdx != null) togglePing(maxedIdx); };
+    document.getElementById('max-reload').onclick = () => { if (maxedIdx != null) reloadProfile(maxedIdx); };
     async function togglePing(idx) {
       if (pingOpen.has(idx)) { closePing(idx); return; }
       const cp = profiles.find((x) => x.accountIdx === idx);

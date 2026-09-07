@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="055f13aa2759">
+  <meta name="pv" content="52eca6bc13e7">
   <title>Facebook 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -61,11 +61,19 @@
     .modal-row input:focus { border-color: var(--accent); }
     .modal-ip { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: #b4b4bb; }
     .modal-err { color: #ff8a8a; font-size: 12px; min-height: 16px; margin-bottom: 4px; word-break: break-all; }
-    .cfg-info { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 14px; background: #141416; }
-    .ci-row { display: flex; gap: 10px; font-size: 12px; line-height: 1.8; }
-    .ci-row .ci-k { flex: none; width: 64px; color: var(--muted); }
-    .ci-row .ci-v { flex: 1; min-width: 0; color: var(--fg); word-break: break-all; font-family: ui-monospace, monospace; }
+    .cfg-info { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; background: #0f0f11; display: flex; flex-direction: column; gap: 4px; }
+    .ci-row { display: flex; gap: 12px; font-size: 12px; line-height: 1.65; align-items: baseline; }
+    .ci-row .ci-k { flex: none; width: 76px; color: var(--muted); }
+    .ci-row .ci-v { flex: 1; min-width: 0; color: var(--fg); word-break: break-all; }
+    .ci-row .ci-v .mono { font-family: ui-monospace, monospace; user-select: all; cursor: text; }
     .ci-row .ci-v .muted { color: var(--muted); }
+    .ci-b { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+    .ci-b.ok { background: rgba(63,185,80,.16); color: #7ee787; }
+    .ci-b.warn { background: rgba(240,180,41,.16); color: #f0c150; }
+    .ci-b.mut { background: var(--line); color: var(--muted); }
+    .cfg-info hr { border: 0; border-top: 1px solid var(--line); margin: 6px 0; }
+    .fblogin-btn { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 6px 14px; font-size: 12px; font-weight: 600; cursor: pointer; }
+    .fblogin-btn:hover { filter: brightness(1.08); }
     .modal-danger { margin-top: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
     button.del { background: #b3261e; }
     .row-err { padding: 4px 0 0 16px; color: #ff8a8a; font-size: 11px; display: none; }
@@ -169,7 +177,7 @@
       </div>
     </div>
   </main>
-  <div id="maxview" hidden><div class="maxhead"><span class="name" id="max-name"></span><span class="chip" id="max-chip"></span><span class="sp"></span><button class="ghost" id="max-restore">还原</button></div><div id="maxbody"></div></div>
+  <div id="maxview" hidden><div class="maxhead"><span class="name" id="max-name"></span><span class="chip" id="max-chip"></span><span class="sp"></span><button class="icon" id="max-gear" title="Profile 信息 / 设置">⚙</button><button class="icon" id="max-ping" title="ipcheck 出口 IP">🌐</button><button class="icon" id="max-reload" title="重新加载">⟳</button><button class="ghost" id="max-restore">还原</button></div><div id="maxbody"></div></div>
   <div id="cfg-modal" class="modal" hidden>
     <div class="modal-card">
       <div class="modal-head"><span id="cfg-title">Profile 设置</span><button class="icon" id="cfg-x" title="关闭">✕</button></div>
@@ -410,6 +418,9 @@
       syncPreview();
     }
     document.getElementById('max-restore').onclick = () => { maxedIdx = null; syncPreview(); };
+    document.getElementById('max-gear').onclick = () => { if (maxedIdx != null) { const p = profiles.find((x) => x.accountIdx === maxedIdx); if (p) openCfgModal(p); } };
+    document.getElementById('max-ping').onclick = () => { if (maxedIdx != null) togglePing(maxedIdx); };
+    document.getElementById('max-reload').onclick = () => { if (maxedIdx != null) reloadProfile(maxedIdx); };
     async function togglePing(idx) {
       if (pingOpen.has(idx)) { closePing(idx); return; }
       const cp = profiles.find((x) => x.accountIdx === idx);
@@ -566,24 +577,43 @@
     const cfgIpText = (p) => p && p.ipInfo && p.ipInfo.ip ? (p.ipInfo.area ? `${p.ipInfo.area} · ${p.ipInfo.ip}` : p.ipInfo.ip) : '未探测';
     // 当前 profile / 代理 / FB 账号身份的只读概览,放在设置弹窗顶部。
     const cfgInfoHtml = (p) => {
-      // 面板 profile 直接带 p.facebook = { id:邮箱, displayName:备注(含密码/2FA/邮箱密码/备用) }。
+      // p.facebook = { id:邮箱, displayName:备注(格式: "<号ID> · FB密码:x · 2FA:y · 邮箱密码:z · 备用:w") }。
       // 绑定 = p.facebook 存在;真实登录 = 本次会话实际探到的 identity(stateOf.identity)。
       const fb = p.facebook || {};
       const live = stateOf(p.accountIdx).identity;
       const loggedIn = !!(live && (live.username || live.displayName || live.phone));
       const bound = !!(fb.id || fb.username || fb.displayName);
-      const state = loggedIn ? '<span style="color:#67d181">✓ 已登录</span>'
-        : (bound ? '<span style="color:#f0b429">已绑定 · 未登录</span>' : '<span class="muted">未绑定</span>');
+      // 解析备注(displayName)成键值,首段是号 ID。
+      const meta = {}; let acctId = '';
+      String(fb.displayName || '').split('·').forEach((seg, i) => {
+        seg = seg.trim(); if (!seg) return;
+        const m = seg.match(/^([^:：]+)[:：]([\s\S]*)$/);
+        if (m) meta[m[1].trim()] = m[2].trim(); else if (i === 0) acctId = seg;
+      });
+      const mono = (v) => v ? `<span class="mono">${esc(v)}</span>` : '<span class="muted">—</span>';
+      const badge = loggedIn ? '<span class="ci-b ok">✓ 已登录</span>'
+        : (bound ? '<span class="ci-b warn">已绑定 · 未登录</span>' : '<span class="ci-b mut">未绑定</span>');
       const rows = [
-        ['Profile', `${esc(p.name)} · #${p.accountIdx}`],
-        ['分区', `persist:sandbox-${p.accountIdx}`],
-        ['状态', state],
-        ['FB 账号', esc(fb.id || fb.username || '') || '<span class="muted">—</span>'],
-        ['凭据', esc(fb.displayName || '') || '<span class="muted">—</span>'],
-        ['代理', p.proxy ? `<code>${esc(p.proxy)}</code>` : '<span class="muted">直连</span>'],
+        ['Profile', `${esc(p.name)} · #${p.accountIdx}` + (acctId ? ` <span class="muted">${esc(acctId)}</span>` : '')],
+        ['状态', badge],
+        ['FB 账号', mono(fb.id || fb.username)],
+        ['FB 密码', mono(meta['FB密码'])],
+        ['2FA', mono(meta['2FA'])],
+        ['邮箱密码', mono(meta['邮箱密码'])],
+        ['备用邮箱', mono(meta['备用'] || meta['备用邮箱'])],
+        ['__hr__', ''],
+        ['分区', mono(`persist:sandbox-${p.accountIdx}`)],
+        ['代理', p.proxy ? mono(p.proxy) : '<span class="muted">直连</span>'],
         ['出口 IP', esc(cfgIpText(p))],
       ];
-      return rows.map(([k, v]) => `<div class="ci-row"><span class="ci-k">${k}</span><span class="ci-v">${v}</span></div>`).join('');
+      const html = rows.map(([k, v]) => k === '__hr__' ? '<hr>' : `<div class="ci-row"><span class="ci-k">${k}</span><span class="ci-v">${v}</span></div>`).join('');
+      const btn = (!loggedIn && bound) ? `<div class="ci-row" style="margin-top:10px"><span class="ci-k"></span><span class="ci-v"><button class="fblogin-btn" onclick="__fbLoginClick(${p.accountIdx})">登录（自动填账密 + 提交）</button></span></div>` : '';
+      return html + btn;
+    };
+    // 未登录时点"登录":经 panelAPI.reload 特殊 id 触发主进程 fbLogin(填账密→提交→两步自动 TOTP→reCAPTCHA 停)。
+    window.__fbLoginClick = (idx) => {
+      try { window.panelAPI.reload('fblogin-' + idx); } catch (e) {}
+      flash('#' + idx + ' 已触发登录：填账密 → 提交 → 两步自动 TOTP → 若 reCAPTCHA 需真人点', 7000);
     };
     function openCfgModal(p) {
       if (!p) return; cfgP = p; delArmed = false;
