@@ -177,7 +177,10 @@ function register({ sidecarLogPath } = {}) {
       _autoBootstrapPaused = _lastBootstrapError.reason;
       // 硬失败(如 vmPlatform=false,这台根本装不了)→ 永久挂起,不再每 15 分钟强装;
       // app 照常当 client。用户点「安装/重试」(docker:app-bootstrap)会清挂起再试一次。
-      _autoBootstrapRetryAt = wslAutoInstallAllowed()
+      // 例外:spawn_blocked 是安全软件开机临时拦子进程、会自愈 → 保留短重试(符合「能装就装」),
+      // 不永久挂起。
+      const transient = _lastBootstrapError.reason === "spawn_blocked";
+      _autoBootstrapRetryAt = (wslAutoInstallAllowed() || transient)
         ? Date.now() + (AUTO_RETRY_MS[_lastBootstrapError.reason] || AUTO_RETRY_MS.default)
         : Number.MAX_SAFE_INTEGER;
     }
@@ -253,6 +256,11 @@ function register({ sidecarLogPath } = {}) {
     _dockerDaemonBusy = true;
     try {
       const s = await refreshDockerStatus();
+      // client 优先:host mihomo(Chrome/TG 代理)必须在 docker/WSL 起不来时也能自启。
+      // 它原本只在下方 `else if (s.running)` 分支里被拉起 —— 于是 docker 装不上的机器
+      // 重启后 mihomo 永不启动 → 面板全白板。这里每轮无条件确保一次:standalone 分支
+      // 不依赖 docker;幂等(已在跑则只做配置同步/直接返回)。
+      try { await maybeStartChromeProxy(); } catch (e) { log.warn(`[chrome-proxy] ensure-running failed: ${e.message}`); }
       // 打开 cicy-desktop 就保证 Windows/WSL 的 :8008 可用:
       //   - 已安装但停止 → 启动 WSL、dockerd 和容器;
       //   - 从未安装 → bootstrap 自动启用 WSL2、导入专用 distro、安装 Docker
