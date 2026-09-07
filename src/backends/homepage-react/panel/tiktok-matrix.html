@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="a7baba9906d9">
+  <meta name="pv" content="56f19c57668a">
   <title>TikTok 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -107,6 +107,9 @@
     .maxhead .name { font-weight: 650; font-size: 13px; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .maxhead .chip { flex: none; padding: 1px 6px; border-radius: 999px; background: var(--head); color: #b4b4bb; font: 11px ui-monospace, monospace; }
     .maxhead .sp { flex: 1; }
+    .maxhead .acts { flex: none; display: inline-flex; align-items: center; gap: 6px; padding-left: 12px; border-left: 1px solid var(--line); }
+    .ghead .acts { flex: none; display: inline-flex; align-items: center; gap: 4px; margin-left: auto; padding-left: 8px; }
+    .ghead .st ~ .acts { margin-left: 8px; }
     #maxbody { flex: 1 1 auto; min-height: 0; }
     .gcell .pingctl { display: none; }
     .gcell.pinging .pingctl { display: inline-block; }
@@ -164,7 +167,7 @@
       </div>
     </div>
   </main>
-  <div id="maxview" hidden><div class="maxhead"><span class="name" id="max-name"></span><span class="chip" id="max-chip"></span><span class="sp"></span><button class="icon" id="max-ping" title="ipcheck 出口 IP">🌐</button><button class="icon" id="max-reload" title="重新加载">⟳</button><button class="ghost" id="max-restore">还原</button></div><div id="maxbody"></div></div>
+  <div id="maxview" hidden><div class="maxhead"><span class="dot" id="max-dot"></span><span class="name" id="max-name"></span><span class="chip" id="max-chip"></span><span class="sp"></span><span class="acts"><button class="icon" id="max-gear" title="Profile 信息 / 代理设置">⚙</button><button class="icon" id="max-ping" title="ipcheck 出口 IP">🌐</button><button class="icon" id="max-reload" title="重新加载">⟳</button><button class="ghost" id="max-restore">还原</button></span></div><div id="maxbody"></div></div>
   <div id="cfg-modal" class="modal" hidden>
     <div class="modal-card">
       <div class="modal-head"><span id="cfg-title">Profile 设置</span><button class="icon" id="cfg-x" title="关闭">✕</button></div>
@@ -349,7 +352,7 @@
     function buildGridCell(p) {
       const el = document.createElement('div');
       el.className = 'gcell'; el.dataset.id = String(p.accountIdx);
-      el.innerHTML = `<div class="ghead"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="phone">${esc(phoneOf(p))}</span><span class="st"></span><button class="code" title="在格子上叠加/关闭接码 webview(同代理出口)">接码</button><button class="icon ping" title="用本 Profile 代理打开 ping0.cc(验 IP/指纹)">🌐</button><button class="icon pingctl reloadping" title="重载 ping0">🔄</button><button class="icon pingctl closeping" title="关闭 ping0">✕</button><button class="icon max" title="最大化 / 还原">⤢</button><button class="icon reload" title="重新加载">⟳</button></div><div class="gbody"></div>`;
+      el.innerHTML = `<div class="ghead"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="phone">${esc(phoneOf(p))}</span><span class="st"></span><span class="acts"><button class="code" title="在格子上叠加/关闭接码 webview(同代理出口)">接码</button><button class="icon gear" title="Profile 信息 / 代理设置">⚙</button><button class="icon ping" title="用本 Profile 代理打开 ping0.cc(验 IP/指纹)">🌐</button><button class="icon pingctl reloadping" title="重载 ping0">🔄</button><button class="icon pingctl closeping" title="关闭 ping0">✕</button><button class="icon max" title="最大化 / 还原">⤢</button><button class="icon reload" title="重新加载">⟳</button></span></div><div class="gbody"></div>`;
       el.querySelector('.reload').onclick = () => reloadProfile(p.accountIdx);
       el.querySelector('.max').onclick = (e) => { e.stopPropagation(); toggleMax(p.accountIdx); };
       el.querySelector('.ping').onclick = (e) => { e.stopPropagation(); togglePing(p.accountIdx); };
@@ -357,6 +360,7 @@
       el.querySelector('.closeping').onclick = (e) => { e.stopPropagation(); closePing(p.accountIdx); };
       el.querySelector('.code').onclick = () => openCode(p);
       el.querySelector('.code').disabled = !codeUrlOf(p);
+      el.querySelector('.gear').onclick = (e) => { e.stopPropagation(); openCfgModal(p); };
       el.querySelector('.ghead').onclick = (e) => { if (!e.target.closest('button')) { selectProfile(p.accountIdx); } };
       return { el, body: el.querySelector('.gbody') };
     }
@@ -398,11 +402,19 @@
     document.getElementById('grid-reload').onclick = () => { if (!batch.size) { enterBatch(); return; } for (const idx of batch) reloadProfile(idx); };
     function toggleMax(idx) {
       maxedIdx = (maxedIdx === idx) ? null : idx;
-      const p = profiles.find((x) => x.accountIdx === idx);
-      if (maxedIdx != null && p) { document.getElementById('max-name').textContent = p.name; document.getElementById('max-chip').textContent = '#' + p.accountIdx; }
+      renderMaxHead();
       syncPreview();
     }
+    // 最大化顶栏:恢复完整 action bar(设置 / IP / 重载),保持与格子一致。
+    function renderMaxHead() {
+      if (maxedIdx == null) return;
+      const p = profiles.find((x) => x.accountIdx === maxedIdx); if (!p) return;
+      document.getElementById('max-dot').className = `dot ${dotClass(stateOf(maxedIdx))}`;
+      document.getElementById('max-name').textContent = p.name;
+      document.getElementById('max-chip').textContent = '#' + p.accountIdx;
+    }
     document.getElementById('max-restore').onclick = () => { maxedIdx = null; syncPreview(); };
+    document.getElementById('max-gear').onclick = () => { if (maxedIdx != null) { const p = profiles.find((x) => x.accountIdx === maxedIdx); if (p) openCfgModal(p); } };
     document.getElementById('max-ping').onclick = () => { if (maxedIdx != null) togglePing(maxedIdx); };
     document.getElementById('max-reload').onclick = () => { if (maxedIdx != null) reloadProfile(maxedIdx); };
     async function togglePing(idx) {
@@ -415,8 +427,8 @@
       pingOpen.add(idx);
       const g = gcells.get(idx); if (g) g.el.classList.add('pinging');
       syncPreview();
-      if (ip) return;
-      // 后台补探“代理探测出口 IP”(第一行),拿到后带进 overlay(reload)。
+      // 缓存只作即时占位,随后无论有无缓存都现场重探一次:住宅代理 sticky 出口会轮换,
+      // 缓存过期会与浏览器真实出口不一致(误报“不一致”)。每次开 🌐 都刷新“代理探测出口”。
       try {
         const r = await window.panelAPI.probeIp(idx);
         if (r && r.ipInfo && r.ipInfo.ip && pingOpen.has(idx)) { if (cp) cp.ipInfo = r.ipInfo; pingUrl.set(idx, IPCHECK + '?idx=' + idx + '&proxyip=' + encodeURIComponent(r.ipInfo.ip)); syncPreview(); }

@@ -127,6 +127,10 @@ class PanelCells {
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
+        // ipcheck 覆盖层(ping-N)要在页内用 <webview> 内嵌 ping0 —— <webview> 是顶级
+        // 导航,X-Frame-Options/CSP frame-ancestors 拦不住(<iframe> 会被拦)。只给 ping
+        // 覆盖层开 webviewTag,账号格子(cell-N)保持关闭,不破坏 sandbox 隔离模型。
+        webviewTag: typeof cellId === "string" && cellId.startsWith("ping-"),
       },
     });
     const wc = view.webContents;
@@ -397,7 +401,11 @@ function installIpc(findTab) {
     return hit ? cellsForTab(hit.manager, hit.tab) : null;
   };
   ipcMain.on("panelcells:sync", (e, { cells }) => { const pc = ctx(e); if (pc) pc.sync(cells); });
-  ipcMain.on("panelcells:reload", (e, { id }) => { const pc = ctx(e); if (pc) pc.reload(id); });
+  ipcMain.on("panelcells:reload", (e, { id }) => {
+    // 合成 id `fblogin-<idx>` = Facebook 面板的“登录（自动填账密 + 提交）”,不是重载格子。
+    try { if (require("./fb-login").maybeHandleReload(id)) return; } catch (err) {}
+    const pc = ctx(e); if (pc) pc.reload(id);
+  });
   ipcMain.handle("panelcells:states", (e) => { const pc = ctx(e); return pc ? pc.states() : []; });
   ipcMain.handle("panelcells:profiles", (e) => {
     if (!ctx(e)) return [];
