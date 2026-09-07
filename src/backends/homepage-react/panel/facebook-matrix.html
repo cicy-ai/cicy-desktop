@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="2ba09c12bbd0">
+  <meta name="pv" content="ce8e03f89310">
   <title>Facebook 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -392,9 +392,9 @@
       if (batchMode) { const n = [...batch].filter((i) => { const q = profiles.find((x) => x.accountIdx === i); return q && hasIdentity(q); }).length; gridCount.textContent = `${batch.size} 个会话 · ${n} 已登录`; }
     }
     function enterBatch() {
-      // 默认网格 = 平铺全部 profile 的会话(不再只挑未登录的);仍受 BATCH_MAX 上限保护。
-      const todo = profiles.slice(0, BATCH_MAX);
-      if (!todo.length) { flash('没有 Profile'); return; }
+      // 默认网格 = 只平铺“配置了 FB 账号(有 facebook 绑定)”的 profile,未配置的隐藏。
+      const todo = profiles.filter((p) => p.facebook).slice(0, BATCH_MAX);
+      if (!todo.length) { flash('本机没有配置 FB 账号的 Profile'); return; }
       batch.clear(); gridEl.innerHTML = ''; gcells.clear();
       for (const p of todo) {
         batch.add(p.accountIdx);
