@@ -1569,6 +1569,14 @@ electronApp.whenReady().then(async () => {
         }
       });
       __ipcMainAuth.handle("hub:logout", () => hub.logout());
+      // Drill-down: one node's projects, each with its agents.
+      __ipcMainAuth.handle("hub:projects", async (_e, arg) => {
+        try {
+          return await hub.projects(arg || {});
+        } catch (e) {
+          return { ok: false, error: String((e && e.message) || e), projects: [] };
+        }
+      });
       // "+ 面板" dropdown config, edited from the homepage: which panels show, in
       // what order, under what name. panel-menu-store validates every id against
       // the built-in set, so the homepage can reorder/rename/disable but can never

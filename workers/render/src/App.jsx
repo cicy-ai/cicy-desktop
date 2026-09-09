@@ -1244,7 +1244,7 @@ export default function App() {
             </div>
           )}
           {!firstLoading && showHub && hub.loggedIn && (hub.instances || []).map((it) => (
-            <HubInstanceCard key={"hub:" + it.id} inst={it} onOpen={() => hub.open(it)} />
+            <HubInstanceCard key={"hub:" + it.id} inst={it} onOpen={(next, title) => hub.open(it, next, title)} />
           ))}
           {!firstLoading && showLocal && localList.map((t) => (
             <LocalTeamCard key={"local:" + t.id} team={t} cloudCode={cloudCodeFor(t.cloud_team_id)} onOpen={() => openLocalTeam(t.id)} onRename={renameLocalTeam} onRefresh={fetchLocalTeams} />
@@ -4746,9 +4746,10 @@ function useHub() {
     setInstances([]); setError("");
     refreshStatus();
   };
-  const open = async (inst) => {
+  // `next`: a path inside the node's UI ("/#/project/<slug>", "/#/agent/<wid>").
+  const open = async (inst, next, title) => {
     try {
-      const r = await bridge.open(inst.id, inst.name, 0);
+      const r = await bridge.open(inst.id, title || inst.name, 0, next || "/");
       if (!r?.ok) toast.show({ id: "hub-open", message: hubErrText(r?.error) || tr("cicyHub.loginFailed", "打开失败"), status: "error", ttl: 5000 });
     } catch (e) { toast.show({ id: "hub-open", message: e?.message || String(e), status: "error", ttl: 5000 }); }
   };
@@ -4818,11 +4819,66 @@ function HubLoginModal({ hub }) {
 function hubPct(v) { const n = Number(v); return Number.isFinite(n) ? Math.round(n) + "%" : "–"; }
 function hubGB(bytes) { const n = Number(bytes); return Number.isFinite(n) && n > 0 ? (n / 1073741824).toFixed(n >= 100 * 1073741824 ? 0 : 1) + "G" : ""; }
 
+// Agent liveness colour for the drill-down rows.
+function hubAgentTone(a) {
+  const st = String(a.status || "").toLowerCase();
+  if (a.working || st === "working" || st === "busy" || st === "running") return "#3b82f6";
+  if (st === "error" || st === "failed") return "#f87171";
+  if (st === "active" || st === "idle" || st === "online" || a.online) return "#4ade80";
+  return "#6b7280";
+}
+
+// Projects → agents of one node, loaded lazily from the node itself when the
+// card is expanded. Project → opens the node at #/project/<slug>; agent → at
+// #/agent/<wid> (the node's own chat, voice bar included).
+function HubInstanceTree({ inst, onOpen }) {
+  const [tree, setTree] = useState(null); // null = loading | { error } | { projects }
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const r = await window.cicy?.hub?.projects?.(inst.id);
+        if (!alive) return;
+        setTree(r && r.ok ? { projects: r.projects || [] } : { error: (r && r.error) || "failed" });
+      } catch (e) { if (alive) setTree({ error: e?.message || String(e) }); }
+    })();
+    return () => { alive = false; };
+  }, [inst.id]);
+  if (!tree) return <div data-id="HubInstanceTree" style={{ padding: "6px 0", fontSize: 12, opacity: .6, display: "flex", alignItems: "center", gap: 6 }}><Spinner /> {tr("cicyHub.loadingProjects", "读取项目…")}</div>;
+  if (tree.error) return <div data-id="HubInstanceTree" className="error" style={{ fontSize: 12 }}>{hubErrText(tree.error)}</div>;
+  if (!tree.projects.length) return <div data-id="HubInstanceTree" style={{ padding: "6px 0", fontSize: 12, opacity: .6 }}>{tr("cicyHub.noAgents", "这台机器还没有 Agent")}</div>;
+  const rowStyle = { display: "flex", alignItems: "center", gap: 6, padding: "4px 6px", borderRadius: 6, cursor: "pointer", fontSize: 12, minWidth: 0 };
+  return (
+    <div data-id="HubInstanceTree" style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 6, maxHeight: 260, overflowY: "auto" }}>
+      {tree.projects.map((p) => (
+        <div key={p.id} data-id="HubProject">
+          <div className="bcard__menu-item" style={{ ...rowStyle, fontWeight: 600 }} title={tr("cicyHub.openProject", "打开项目")}
+            onClick={(e) => { e.stopPropagation(); onOpen(p.slug ? `/#/project/${encodeURIComponent(p.slug)}` : "/", p.name || inst.name); }}>
+            <span style={{ opacity: .7 }}>📁</span>
+            <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name || tr("cicyHub.ungrouped", "未分组")}</span>
+            <span style={{ opacity: .5 }}>{tr("cicyHub.agents", "{{n}} 个 Agent", { n: p.agents.length })}</span>
+          </div>
+          {p.agents.map((a) => (
+            <div key={a.wid} data-id="HubAgent" className="bcard__menu-item" style={{ ...rowStyle, paddingLeft: 22 }} title={`${a.wid}${a.workspace ? " · " + a.workspace : ""}`}
+              onClick={(e) => { e.stopPropagation(); onOpen(`/#/agent/${encodeURIComponent(a.wid)}`, `${a.title || a.wid} · ${inst.name}`); }}>
+              <span style={{ width: 7, height: 7, borderRadius: 4, background: hubAgentTone(a), flex: "none" }} />
+              <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.title || a.wid}</span>
+              {a.role === "master" && <span className="bcard__chip" style={{ fontSize: 10 }}>master</span>}
+              {a.agentType && <span style={{ opacity: .5, fontSize: 10 }}>{a.agentType}</span>}
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function HubInstanceCard({ inst, onOpen }) {
   const tone = inst.online ? "ok" : "off";
   const res = inst.resources || null;
   const [busy, setBusy] = useState(false);
-  const handleOpen = async () => { if (busy) return; setBusy(true); try { await onOpen(); } finally { setBusy(false); } };
+  const [expanded, setExpanded] = useState(false);
+  const handleOpen = async (next, title) => { if (busy) return; setBusy(true); try { await onOpen(next, title); } finally { setBusy(false); } };
   const canOpen = inst.reachable || inst.online;
   const hot = (v) => Number(v) >= 90;
   // One muted line for live usage — chips only for identity (version).
@@ -4841,7 +4897,12 @@ function HubInstanceCard({ inst, onOpen }) {
           <LaptopIcon />
         </div>
         {typeof inst.agents === "number" && inst.agents > 0 && (
-          <span data-id="HubInstanceCard-agents" style={{ fontSize: 11, color: "#8b949e" }}>{tr("cicyHub.agents", "{{n}} 个 Agent", { n: inst.agents })}</span>
+          <button type="button" data-id="HubInstanceCard-agents" className="btn-ghost" disabled={!canOpen}
+            style={{ fontSize: 11, color: "#8b949e", padding: "2px 6px", border: "none", background: "transparent", cursor: "pointer" }}
+            title={tr("cicyHub.toggleTree", "展开 / 收起项目与 Agent")}
+            onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }}>
+            {tr("cicyHub.agents", "{{n}} 个 Agent", { n: inst.agents })} {expanded ? "▾" : "▸"}
+          </button>
         )}
       </div>
       <div className="bcard__body">
@@ -4860,8 +4921,9 @@ function HubInstanceCard({ inst, onOpen }) {
             ))}
           </div>
         )}
+        {expanded && canOpen && <HubInstanceTree inst={inst} onOpen={handleOpen} />}
       </div>
-      <button type="button" className="bcard__cta" data-id="HubInstanceCard-open" disabled={busy || !canOpen} onClick={handleOpen}>
+      <button type="button" className="bcard__cta" data-id="HubInstanceCard-open" disabled={busy || !canOpen} onClick={() => handleOpen("/", inst.name)}>
         {busy ? <Spinner /> : <ArrowIcon />}
         <span>{canOpen ? tr("cicyHub.open", "打开") : tr("cicyHub.unreachable", "不可达")}</span>
       </button>

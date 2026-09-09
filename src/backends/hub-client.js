@@ -12,6 +12,10 @@
 //   hub:open         {id}     → one-time grant URL → opened as a team tab; the
 //                               grant sets the domain-wide hub session cookie so
 //                               later opens need no login at all
+//   hub:projects     {id}     → that node's projects, each with its agents —
+//                               read straight off the node's own API through its
+//                               hub hostname (the gateway accepts the owner's hub
+//                               token as bearer and swaps in the node's api token)
 //
 // The desktop registers itself as a hub instance (id `code-desktop-…`) because
 // hub tokens are bound to (owner, instance). It never heartbeats, so it is
@@ -333,7 +337,8 @@ async function instances() {
   const out = list
     // direct: `self` is this desktop's hidden pseudo-instance; via sidecar: `self` is the
     // local node itself, which IS a real instance the user may want to open.
-    .filter((i) => (viaSidecar || !i.self) && !String(i.platform || "").startsWith("desktop"))
+    // Viewer logins (this desktop, other desktops, phones) are not machines.
+    .filter((i) => (viaSidecar || !i.self) && !/^(desktop|mobile)/.test(String(i.platform || "")))
     .map((i) => ({
       id: i.instanceId,
       name: i.name || (i.proxyHost ? String(i.proxyHost).split(".")[0] : i.instanceId),
@@ -350,6 +355,8 @@ async function instances() {
       resources: i.resources || null,
       ports: Array.isArray(i.ports) ? i.ports : [],
       agents: Array.isArray(i.agents) ? i.agents.length : undefined,
+      // The node's last agent snapshot (agentId/title/status/model/working…).
+      agentList: Array.isArray(i.agents) ? i.agents : [],
     }))
     .sort((x, y) => Number(y.online) - Number(x.online) || x.name.localeCompare(y.name));
   // Every host in this list was fetched with the owner's own token, so each one
@@ -358,7 +365,96 @@ async function instances() {
   try {
     hubTrust.recordOwnerHubHosts(out.map((i) => i.host));
   } catch {}
+  _lastInstances = out;
   return { ok: true, owner: res.json.owner || a.owner, viaSidecar, instances: out };
+}
+
+// ── node drill-down: projects → agents ──────────────────────────────────────
+// Every instance host is the node's own cicy-code API; the hub gateway lets the
+// owner's hub token through (swapping in the node's api token), so the desktop
+// can read /api/groups (projects), /api/panes and /api/poll directly — no
+// cookie session, no per-node credential.
+let _lastInstances = [];
+const NODE_TIMEOUT_MS = 15_000;
+
+async function nodeFetch(host, route, token) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), NODE_TIMEOUT_MS);
+  try {
+    const r = await pickFetch()("https://" + host + route, {
+      headers: { accept: "application/json", authorization: "Bearer " + token },
+      signal: ctrl.signal,
+      cache: "no-store",
+    });
+    const text = await r.text();
+    let json = null;
+    try {
+      json = text ? JSON.parse(text) : null;
+    } catch {}
+    if (!r.ok) throw new Error(`${route}: HTTP ${r.status}`);
+    return json;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+const shortWid = (paneId) => String(paneId || "").split(":")[0];
+
+async function projects({ id } = {}) {
+  const a = readAuth();
+  if (!a) return { ok: false, error: "not_logged_in", projects: [] };
+  let inst = _lastInstances.find((i) => i.id === id);
+  if (!inst) {
+    const r = await instances();
+    inst = (r.instances || []).find((i) => i.id === id);
+  }
+  if (!inst || !inst.host) return { ok: false, error: "instance_not_found", projects: [] };
+  const [groupsRes, panesRes, pollRes] = await Promise.all([
+    nodeFetch(inst.host, "/api/groups", a.token).catch(() => null),
+    nodeFetch(inst.host, "/api/panes", a.token),
+    nodeFetch(inst.host, "/api/poll", a.token).catch(() => null),
+  ]);
+  const groups = Array.isArray(groupsRes) ? groupsRes : (groupsRes && groupsRes.groups) || [];
+  const panes = (Array.isArray(panesRes) ? panesRes : (panesRes && panesRes.panes) || []).filter(
+    (p) => p && typeof p.pane_id === "string" && p.pane_id
+  );
+  const statuses = (pollRes && pollRes.statuses) || {};
+  const pollRows = new Map();
+  for (const row of (pollRes && pollRes.agents) || [])
+    if (row && row.name) pollRows.set(String(row.name), row);
+  // Every pane on the node is an agent (masters included).
+  const agents = new Map();
+  for (const p of panes) {
+    const wid = shortWid(p.pane_id);
+    if (!wid || agents.has(wid)) continue;
+    const row = pollRows.get(wid) || {};
+    agents.set(wid, {
+      wid,
+      title: p.title || row.title || wid,
+      agentType: p.agent_type || row.agent_type || "",
+      role: p.role || "",
+      status: String(statuses[p.pane_id] || statuses[wid] || row.status || ""),
+      model: p.default_model || "",
+      workspace: p.workspace || "",
+    });
+  }
+  const placed = new Set();
+  const out = [];
+  for (const g of groups) {
+    const ids = new Set((g.pane_ids || []).map(shortWid));
+    const members = [...agents.values()].filter((x) => ids.has(x.wid) && !placed.has(x.wid));
+    for (const m of members) placed.add(m.wid);
+    if (!members.length && !g.is_default) continue;
+    out.push({
+      id: String(g.id),
+      name: g.name || String(g.project_template || g.id),
+      slug: g.project_template || "",
+      agents: members,
+    });
+  }
+  const rest = [...agents.values()].filter((x) => !placed.has(x.wid));
+  if (rest.length) out.push({ id: "ungrouped", name: "", slug: "", agents: rest });
+  return { ok: true, host: inst.host, projects: out };
 }
 
 // One-time hand-off URL for an instance (optionally one of its local ports).
@@ -410,4 +506,14 @@ async function logout() {
   return { ok: true };
 }
 
-module.exports = { status, loginStart, loginCode, cancel, instances, grantUrl, logout, hubOrigin };
+module.exports = {
+  status,
+  loginStart,
+  loginCode,
+  cancel,
+  instances,
+  projects,
+  grantUrl,
+  logout,
+  hubOrigin,
+};

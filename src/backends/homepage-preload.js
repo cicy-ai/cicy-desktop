@@ -331,7 +331,9 @@ contextBridge.exposeInMainWorld("cicy", {
     loginCode:  (code)  => logInvoke("hub:login-code", code),
     cancel:     ()      => logInvoke("hub:cancel"),
     instances:  ()      => logInvoke("hub:instances"),
-    open:       (id, title, port) => logInvoke("hub:open", { id, title, port }),
+    // `next` = a path (+ hash route) inside the node's UI, e.g. "/#/project/x".
+    open:       (id, title, port, next) => logInvoke("hub:open", { id, title, port, next }),
+    projects:   (id)    => logInvoke("hub:projects", { id }),
     logout:     ()      => logInvoke("hub:logout"),
     onComplete: (cb)    => {
       const handler = (_e, payload) => cb(payload);
