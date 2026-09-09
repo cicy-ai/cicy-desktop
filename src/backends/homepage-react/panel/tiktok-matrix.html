@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="56f19c57668a">
+  <meta name="pv" content="466ac89fb935">
   <title>TikTok 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -171,6 +171,7 @@
   <div id="cfg-modal" class="modal" hidden>
     <div class="modal-card">
       <div class="modal-head"><span id="cfg-title">Profile 设置</span><button class="icon" id="cfg-x" title="关闭">✕</button></div>
+      <div class="modal-row"><span class="modal-ip" id="cfg-fb" title="TikTok 用此 Facebook 账号登录(选 Continue with Facebook)"></span></div>
       <div id="cfg-login">
       <label class="modal-label">手机号</label>
       <div class="modal-row"><input id="cfg-phone" placeholder="+8801700000000" spellcheck="false"></div>
@@ -247,6 +248,7 @@
     }
     // 身份:优先用本次会话探到的(cellState.identity),否则用 profile 里存的(上次登录)。
     const identityOf = (p) => stateOf(p.accountIdx).identity || p.tiktok || null;
+    const fbAcctOf = (p) => (p && p.facebook && (p.facebook.id || p.facebook.username)) || '';
     const phoneOf = (p) => (p.login && p.login.phone) || '';
     const codeUrlOf = (p) => (p.login && p.login.codeUrl) || '';
     function renderPhone(p) {
@@ -352,7 +354,7 @@
     function buildGridCell(p) {
       const el = document.createElement('div');
       el.className = 'gcell'; el.dataset.id = String(p.accountIdx);
-      el.innerHTML = `<div class="ghead"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="phone">${esc(phoneOf(p))}</span><span class="st"></span><span class="acts"><button class="code" title="在格子上叠加/关闭接码 webview(同代理出口)">接码</button><button class="icon gear" title="Profile 信息 / 代理设置">⚙</button><button class="icon ping" title="用本 Profile 代理打开 ping0.cc(验 IP/指纹)">🌐</button><button class="icon pingctl reloadping" title="重载 ping0">🔄</button><button class="icon pingctl closeping" title="关闭 ping0">✕</button><button class="icon max" title="最大化 / 还原">⤢</button><button class="icon reload" title="重新加载">⟳</button></span></div><div class="gbody"></div>`;
+      el.innerHTML = `<div class="ghead"><span class="dot"></span><span class="name" title="${esc(fbAcctOf(p) ? 'FB 登录账号：' + fbAcctOf(p) : '')}">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="phone">${esc(phoneOf(p))}</span><span class="st"></span><span class="acts"><button class="code" title="在格子上叠加/关闭接码 webview(同代理出口)">接码</button><button class="icon gear" title="Profile 信息 / 代理设置">⚙</button><button class="icon ping" title="用本 Profile 代理打开 ping0.cc(验 IP/指纹)">🌐</button><button class="icon pingctl reloadping" title="重载 ping0">🔄</button><button class="icon pingctl closeping" title="关闭 ping0">✕</button><button class="icon max" title="最大化 / 还原">⤢</button><button class="icon reload" title="重新加载">⟳</button></span></div><div class="gbody"></div>`;
       el.querySelector('.reload').onclick = () => reloadProfile(p.accountIdx);
       el.querySelector('.max').onclick = (e) => { e.stopPropagation(); toggleMax(p.accountIdx); };
       el.querySelector('.ping').onclick = (e) => { e.stopPropagation(); togglePing(p.accountIdx); };
@@ -376,9 +378,9 @@
       if (batchMode) { const n = [...batch].filter((i) => { const q = profiles.find((x) => x.accountIdx === i); return q && hasIdentity(q); }).length; gridCount.textContent = `${batch.size} 个会话 · ${n} 已登录`; }
     }
     function enterBatch() {
-      // 默认网格 = 平铺全部 profile 的会话(不再只挑未登录的);仍受 BATCH_MAX 上限保护。
-      const todo = profiles.slice(0, BATCH_MAX);
-      if (!todo.length) { flash('没有 Profile'); return; }
+      // TikTok 用 Facebook 登录 —— 只铺配了 FB 账号(或已有 TK 身份)的 profile:有多少 FB 就有多少 TK 格。
+      const todo = profiles.filter((p) => p.facebook || p.tiktok).slice(0, BATCH_MAX);
+      if (!todo.length) { flash('没有配置 FB 账号的 Profile(TK 用 FB 登录)'); return; }
       batch.clear(); gridEl.innerHTML = ''; gcells.clear();
       for (const p of todo) {
         batch.add(p.accountIdx);
@@ -576,6 +578,7 @@
       document.getElementById('cfg-title').textContent = `${p.name} · #${p.accountIdx} 设置`;
       cfgProxy.value = p.proxy || ''; cfgErr.textContent = ''; cfgIp.textContent = cfgIpText(p);
       cfgPhone.value = phoneOf(p); cfgCode.value = codeUrlOf(p);
+      document.getElementById('cfg-fb').textContent = fbAcctOf(p) ? ('FB 登录账号：' + fbAcctOf(p)) : '未配置 FB 账号（TK 用 FB 登录）';
       cfgDel.textContent = '删除此 Profile'; cfgDel.disabled = false;
       cfgModal.hidden = false; cfgProxy.focus();
       // BrowserView 预览永远浮在页面 DOM 之上,会盖住弹窗 —— 打开弹窗时把 cells 脱离(复用拖拽逻辑),关闭时贴回。
