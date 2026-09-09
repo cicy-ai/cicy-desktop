@@ -23,7 +23,8 @@ test("facebook-matrix page targets facebook and its own cell ids / storage key",
   assert.match(html, /https:\/\/www\.facebook\.com\//);
   assert.match(html, /facebook-preview-\$\{idx\}/);
   assert.match(html, /facebook-matrix-profile/);
-  assert.doesNotMatch(html, /telegram/i);
+  // Must not TARGET Telegram (comments may mention it: the 接码 overlay is Telegram-only and hidden here).
+  assert.doesNotMatch(html, /web\.telegram\.org|telegram-preview-|telegram-matrix-profile/i);
   assert.match(html, /id="rows"/);
   assert.match(html, /panelAPI\.states/);
 });

@@ -151,5 +151,5 @@ test("telegramLogin: phone + 接码 URL are validated and stored per profile", (
   assert.throws(() => normalizeTelegramLogin({ codeUrl: "not a url" }), /URL/);
   const html = require("fs").readFileSync(require("path").join(__dirname, "..", "src", "tabbrowser", "telegram-matrix.html"), "utf8");
   assert.match(html, /id="cfg-phone"/); assert.match(html, /id="cfg-code"/);
-  assert.match(html, /panelAPI\.openCodeUrl\(/);
+  assert.match(html, /function openCode\(p\)/);
 });

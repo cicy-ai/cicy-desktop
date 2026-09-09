@@ -52,7 +52,7 @@ test("WSL setup is a single elevation with component-store repair fallback; rebo
   assert.doesNotMatch(d, /execFile\("wsl", \[/);
   assert.doesNotMatch(read("src/sidecar/wsl-docker.js"), /(execFile|spawn)\("wsl", \[/);
   const ipc = read("src/backends/sidecar-ipc.js");
-  assert.match(ipc, /reason === "wsl_reboot_required"\) scheduleReboot\(90\)/);
+  assert.match(ipc, /reason === "wsl_reboot_required"\) scheduleReboot\(90, "", \{ auto: true \}\)/);
   assert.match(ipc, /"docker:reboot-cancel"/);
   assert.match(read("workers/render/src/App.jsx"), /DockerDrawer-reboot-cancel/);
 });

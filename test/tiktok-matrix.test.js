@@ -20,7 +20,8 @@ test("tiktok-matrix page targets tiktok and its own cell ids / storage key", () 
   assert.match(html, /tiktok-preview-\$\{idx\}/);
   assert.match(html, /tiktok-matrix-profile/);
   assert.doesNotMatch(html, /facebook/i);
-  assert.doesNotMatch(html, /telegram/i);
+  // Must not TARGET Telegram (comments may mention it: the 接码 overlay is Telegram-only and hidden here).
+  assert.doesNotMatch(html, /web\.telegram\.org|telegram-preview-|telegram-matrix-profile/i);
   assert.match(html, /id="rows"/);
   assert.match(html, /panelAPI\.states/);
 });
