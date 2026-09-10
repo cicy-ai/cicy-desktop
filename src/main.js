@@ -2061,6 +2061,16 @@ electronApp.whenReady().then(async () => {
   const hw = require("./backends/homepage-window");
   appUpdater.init(hw.getHomepageWindow && hw.getHomepageWindow());
 
+  // 保险:默认会话(profile 0)可能在 session-created 监听器挂上之前就已创建,
+  // 启动时再显式直连一次。幂等,失败只记日志。
+  try {
+    const { session } = require("electron");
+    session.defaultSession
+      .setProxy({ mode: "direct" })
+      .then(() => log.info("[Proxy] 启动时确认:默认会话(profile 0)直连"))
+      .catch((err) => log.error("[Proxy] 启动时默认会话直连失败:", err));
+  } catch (err) { log.error("[Proxy] 启动时默认会话直连异常:", err); }
+
   // 为 webview partition 设置代理
   if (config.proxy) {
     const { session } = require("electron");
@@ -2240,15 +2250,20 @@ process.on("SIGINT", () => {
 // 注意:Electron 的 Session 读不到 .partition(恒为 undefined,见 window-utils 的说明),
 // 所以只能拿对象和 defaultSession 比,不能靠 partition 字符串判断。
 electronApp.on("session-created", (session) => {
-  if (!config.proxy) return;
   const { session: sessions } = require("electron");
+  // 默认会话**无条件**直连 —— 不只是「不套 --proxy」,还要挡住 Electron 默认的
+  // 「跟随系统代理」。首页窗口根本不走 window-utils 那段 profile 0 直连逻辑
+  // (homepage-window.js 里没有任何 session 处理),所以以前 config.proxy 为空时
+  // 默认会话就静默跟随 Windows 系统代理:系统代理指着挂掉的 mihomo,
+  // 首页/Hub 登录/车队通道/自动更新全断,机器还拉不到修复版本。
   if (session === sessions.defaultSession) {
     session
       .setProxy({ mode: "direct" })
-      .then(() => log.info("[Proxy] 默认会话(profile 0)强制直连,不套 --proxy"))
+      .then(() => log.info("[Proxy] 默认会话(profile 0)强制直连(不跟随系统代理)"))
       .catch((err) => log.error("[Proxy] 默认会话直连设置失败:", err));
     return;
   }
+  if (!config.proxy) return;
   // 其余会话走代理,但 localhost 一律 bypass —— 到本机 cicy-code / gotty 终端的连接
   // 不能被代理拦(以前漏了 bypass,终端白板就是这么来的)。
   session
