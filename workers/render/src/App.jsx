@@ -1571,7 +1571,7 @@ function useFleetSocket() {
         if (f.type === "reload") { try { location.reload(); } catch {} return; }
         // 车队级 dsh 配置(API Key 等启动环境):hub 只发给已验证的机器;DshCard 订阅后落盘并按需重启 dsh
         if (f.type === "dsh_config") {
-          window.__dshFleetCfg = { env: (f.env && typeof f.env === "object") ? f.env : {}, rev: String(f.rev || "") };
+          window.__dshFleetCfg = { env: (f.env && typeof f.env === "object") ? f.env : {}, workspaces: Array.isArray(f.workspaces) ? f.workspaces : [], rev: String(f.rev || "") };
           try { window.dispatchEvent(new CustomEvent("cicy:dsh-config")); } catch {}
           return;
         }
@@ -3307,6 +3307,29 @@ const envFile = path.join(dbDir, "dsh-env.json"), envApplied = path.join(dbDir, 
 function fleetEnv() { try { const j = JSON.parse(fs.readFileSync(envFile, "utf8")); const src = (j && j.env) || {}; const out = {}; for (const [k, v] of Object.entries(src)) { if (/^[A-Z][A-Z0-9_]*$/.test(k) && typeof v === "string" && v) out[k] = v; } return out; } catch { return {}; } }
 function envHash() { const e = fleetEnv(); const ks = Object.keys(e).sort(); return ks.length ? require("crypto").createHash("sha1").update(JSON.stringify(ks.map((k) => [k, e[k]]))).digest("hex").slice(0, 12) : ""; }
 function appliedHash() { try { return fs.readFileSync(envApplied, "utf8").trim(); } catch { return ""; } }
+// 默认工作区:hub 下发 [{path,title}],路径支持 ~ 和 %VAR%。dsh 的 workspace.json 是 single 布局、内存为准,
+// 所以只在 dsh 没跑的时候(start 之前)种记录;status 只报哪些还缺,让 DshCard 决定重启。
+const wsFile = path.join(home, ".dsh", "storages", "workspace.json");
+function expandPath(p) { let s = String(p || "").trim(); if (!s) return ""; if (s === "~" || s.startsWith("~/") || s.startsWith("~\\")) s = home + s.slice(1); s = s.replace(/%([A-Za-z_][A-Za-z0-9_]*)%/g, (m, k) => process.env[k] || m).replace(/\$([A-Z_][A-Z0-9_]*)/g, (m, k) => process.env[k] || m); return path.resolve(s); }
+function fleetWorkspaces() { try { const j = JSON.parse(fs.readFileSync(envFile, "utf8")); return (Array.isArray(j.workspaces) ? j.workspaces : []).map((w) => ({ path: expandPath(typeof w === "string" ? w : w && w.path), title: (w && w.title) || "" })).filter((w) => w.path); } catch { return []; } }
+function canon(p) { try { p = fs.realpathSync.native(p); } catch {} return process.platform === "win32" ? p.toLowerCase() : p; }
+function readWs() { try { return JSON.parse(fs.readFileSync(wsFile, "utf8")); } catch { return null; } }
+function wsMissing() { const cfg = fleetWorkspaces(); if (!cfg.length) return []; const j = readWs(); const have = new Set(Object.values((j && j.tables && j.tables.workspaces) || {}).map((r) => canon(r.path))); return cfg.filter((w) => !have.has(canon(w.path))).map((w) => w.path); }
+function seedWorkspaces() {
+  const cfg = fleetWorkspaces(); if (!cfg.length) return { seeded: [] };
+  let j = readWs(); if (!j || !j.tables || !j.global) j = { unit: { name: "workspace", version: 2 }, global: { initialized: true, workspaceIds: [], archivedSessionIds: [] }, tables: { workspaces: {} } };
+  const have = new Map(Object.values(j.tables.workspaces).map((r) => [canon(r.path), r])); const seeded = [];
+  for (const w of cfg) {
+    try { fs.mkdirSync(w.path, { recursive: true }); } catch {}
+    let real = w.path; try { real = fs.realpathSync.native(w.path); } catch { continue; }
+    if (have.has(canon(real))) continue;
+    const id = require("crypto").randomUUID(), now = new Date().toISOString();
+    j.tables.workspaces[id] = { path: real, title: w.title || path.basename(real) || real, sessionIds: [], createdAt: now, updatedAt: now };
+    j.global.workspaceIds.push(id); j.global.initialized = true; have.set(canon(real), j.tables.workspaces[id]); seeded.push(real);
+  }
+  if (seeded.length) { try { fs.mkdirSync(path.dirname(wsFile), { recursive: true }); const tmp = wsFile + ".tmp-" + process.pid; fs.writeFileSync(tmp, JSON.stringify(j, null, 2)); fs.renameSync(tmp, wsFile); } catch (e) { return { seeded: [], error: String(e.message) }; } }
+  return { seeded };
+}
 // 子进程 PATH:node 所在目录 + System32(矩阵机 Electron 的 PATH 里没有 node)
 process.env.PATH = [path.dirname(process.execPath), process.platform === "win32" ? path.join(process.env.SystemRoot || "C:\\Windows", "System32") : "/usr/local/bin", process.env.PATH || ""].join(path.delimiter);
 const out = (o) => { process.stdout.write(JSON.stringify(o)); };
@@ -3365,8 +3388,8 @@ async function httpUp() { return (await probe()).dsh; }
 function installing() { return pidAlive(readPidFile(lockFile)); }
 async function status() {
   const p = pkgInfo(); const pid = readPidFile(pidFile); const pr = await probe();
-  const eh = envHash(), ea = appliedHash();
-  return { ok: true, installed: !!p && !p.broken, broken: !!(p && p.broken), version: p ? p.version : null, installing: installing(), running: pr.dsh, occupied: pr.up && !pr.dsh, pid, pidAlive: pidAlive(pid), hasToken: !!lastToken(), node: process.version, logFile, envKeys: Object.keys(fleetEnv()), envHash: eh, envStale: pr.dsh && ea !== eh };
+  const eh = envHash(), ea = appliedHash(), wm = wsMissing();
+  return { ok: true, installed: !!p && !p.broken, broken: !!(p && p.broken), version: p ? p.version : null, installing: installing(), running: pr.dsh, occupied: pr.up && !pr.dsh, pid, pidAlive: pidAlive(pid), hasToken: !!lastToken(), node: process.version, logFile, envKeys: Object.keys(fleetEnv()), envHash: eh, envStale: pr.dsh && ea !== eh, wsMissing: wm, wsStale: pr.dsh && wm.length > 0 };
 }
 async function install() {
   // 安装锁:首页刷新/多开会再次触发安装,两个 npm -g 同时写全局目录会把包写坏。有锁就等它完。
@@ -3401,13 +3424,14 @@ async function start() {
   const pr = await probe();
   if (pr.dsh) return { ok: true, already: true, token: lastToken() };
   if (pr.up) return { ok: false, error: "port_in_use", tail: "127.0.0.1:" + PORT + " is used by another program" };
+  const seeded = seedWorkspaces();   // dsh 此刻没在跑,可以安全改 workspace.json
   const fd = fs.openSync(logFile, "w");
   const child = cp.spawn(process.execPath, [p.bin, "web", "--no-open", "--port", String(PORT)], { detached: true, windowsHide: true, stdio: ["ignore", fd, fd], cwd: home, env: Object.assign({}, process.env, { NO_COLOR: "1" }, savedRegistry() ? { npm_config_registry: savedRegistry() } : {}, fleetEnv()) });   // dsh 首次运行会用 pnpm 自举 ~/.dsh/profiles,沿用实测最快的源;fleetEnv = hub 下发的 API Key 等
   try { fs.writeFileSync(envApplied, envHash()); } catch {}
   child.unref(); try { fs.closeSync(fd); } catch {}
   try { fs.writeFileSync(pidFile, String(child.pid)); } catch {}
   // dsh web 冷启动在矩阵机上实测常超过 30s(加载 ~200MB 依赖);只要进程还活着就等到 120s,别误报 start_failed
-  for (let i = 0; i < 240; i++) { await sleep(500); if (await httpUp()) return { ok: true, pid: child.pid, token: lastToken() }; if (!pidAlive(child.pid)) break; }
+  for (let i = 0; i < 240; i++) { await sleep(500); if (await httpUp()) return { ok: true, pid: child.pid, token: lastToken(), seededWorkspaces: seeded.seeded }; if (!pidAlive(child.pid)) break; }
   let tail = ""; try { tail = fs.readFileSync(logFile, "utf8").slice(-1500); } catch {}
   return { ok: false, error: "start_failed", pid: child.pid, tail };
 }
@@ -3539,13 +3563,13 @@ function DshCard() {
       const env = await dshEnv();
       if (!env.home) return;
       const f = dshIsWin() ? `${env.home}\\cicy-ai\\db\\dsh-env.json` : `${env.home}/cicy-ai/db/dsh-env.json`;
-      const w = parseRpcText(await window.electronRPC?.("file_write", { path: f, content: JSON.stringify({ rev: cfg.rev, env: cfg.env }, null, 2) }));
+      const w = parseRpcText(await window.electronRPC?.("file_write", { path: f, content: JSON.stringify({ rev: cfg.rev, env: cfg.env, workspaces: cfg.workspaces || [] }, null, 2) }));
       if (!w.ok) return;
       appliedRev.current = cfg.rev;
       if (!env.node) return;                      // 还没装 Node:runSetup 装完 start 时自然带上
       const s = await dshCtl("status");
       if (s.error) return;
-      if (s.running && s.envStale) { setBusy("start"); try { await dshCtl("stop"); await dshCtl("start"); } finally { setBusy(""); } }
+      if (s.running && (s.envStale || s.wsStale)) { setBusy("start"); try { await dshCtl("stop"); await dshCtl("start"); } finally { setBusy(""); } }   // key 变了 / 默认工作区还没种 → 重启一次(种工作区要在 dsh 停着时改 workspace.json)
       else if (!s.running && s.installed) { setBusy("start"); try { await dshCtl("start"); } finally { setBusy(""); } }
       refresh();
     } catch (e) { console.warn("[DshCard] fleet cfg", e); }

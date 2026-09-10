@@ -14,6 +14,8 @@ dsh 的 key 存在每台机器的 %USERPROFILE%\\.dsh\\.credentials.yaml:
   dsh-key-push --hub --from xs-3002               # 从某台已配好的机器读 key 再写到 hub
   dsh-key-push --hub --status                     # 看 hub 当前配置(掩码)和已推送机器数
   dsh-key-push --hub --unset                      # 清空(机器上 dsh 重启后回到本地 key)
+  dsh-key-push --hub --workspaces "~,~/projects"  # 默认工作区(逗号分隔;~ 和 %VAR% 在机器上展开,目录不存在会建)
+  dsh-key-push --hub --workspaces ""              # 清空默认工作区(已种的记录不删)
 
 逐机直写凭据文件(临时/兜底方式):
   dsh-key-push <target|all> --key sk-xxx          # 直接给 key
@@ -53,7 +55,7 @@ def wsd_main(target, js, timeout=60):
 
 
 def status(target):
-    return wsd_main(target, JS_HEAD + " const t = read(); let env=''; try { env = (fs.readFileSync(envf,'utf8').match(/^DEEPSEEK_API_KEY=(.*)$/m)||[])[1]||''; } catch {} let fleet=null; try { const j = JSON.parse(fs.readFileSync(path.join(home,'cicy-ai','db','dsh-env.json'),'utf8')); fleet = { rev: j.rev, keys: Object.keys(j.env||{}) }; } catch {} let applied=''; try { applied = fs.readFileSync(path.join(home,'cicy-ai','db','dsh-env.applied'),'utf8').trim(); } catch {} return JSON.stringify({ file: !!t, key: mask(keyOf(t)), env: mask(env.trim()), fleet, applied }); })()")
+    return wsd_main(target, JS_HEAD + " const t = read(); let env=''; try { env = (fs.readFileSync(envf,'utf8').match(/^DEEPSEEK_API_KEY=(.*)$/m)||[])[1]||''; } catch {} let fleet=null; try { const j = JSON.parse(fs.readFileSync(path.join(home,'cicy-ai','db','dsh-env.json'),'utf8')); fleet = { rev: j.rev, keys: Object.keys(j.env||{}) }; } catch {} let applied=''; try { applied = fs.readFileSync(path.join(home,'cicy-ai','db','dsh-env.applied'),'utf8').trim(); } catch {} let ws=null; try { const j = JSON.parse(fs.readFileSync(path.join(home,'.dsh','storages','workspace.json'),'utf8')); ws = Object.values((j.tables&&j.tables.workspaces)||{}).map(r=>r.title+'='+r.path); } catch {} return JSON.stringify({ file: !!t, key: mask(keyOf(t)), env: mask(env.trim()), fleet, applied, workspaces: ws }); })()")
 
 
 def read_key(target):
@@ -101,16 +103,22 @@ def hub_token():
     except Exception: return ""
 
 
-def hub_mode(mode, key):
+def hub_mode(mode, key, workspaces=None):
     import urllib.request
     tok = hub_token()
     if mode == "status":
         req = urllib.request.Request(HUB_URL + "/api/dsh-config", headers={"x-cicy-ctrl": tok})
         print(urllib.request.urlopen(req, timeout=10).read().decode()); return
-    env = {} if mode == "unset" else {"DEEPSEEK_API_KEY": key}
-    if mode == "set" and not key:
-        raise SystemExit("need --key / --file")
-    body = json.dumps({"env": env}).encode()
+    body = {}
+    if workspaces is not None:
+        body["workspaces"] = [{"path": w.strip()} for w in workspaces.split(",") if w.strip()]
+    if mode == "unset":
+        body["env"] = {}
+    elif key:
+        body["env"] = {"DEEPSEEK_API_KEY": key}
+    if not body:
+        raise SystemExit("need --key / --file / --unset / --workspaces")
+    body = json.dumps(body).encode()
     req = urllib.request.Request(HUB_URL + "/api/dsh-config", data=body, method="PUT", headers={"x-cicy-ctrl": tok, "content-type": "application/json"})
     print(urllib.request.urlopen(req, timeout=10).read().decode())
 
@@ -125,7 +133,7 @@ def targets_of(t):
 def main(argv):
     if not argv or argv[0] in ("-h", "--help"):
         print(__doc__); return 0
-    target = None; key = None; src = None; also_env = False; mode = "set"; hub = False
+    target = None; key = None; src = None; also_env = False; mode = "set"; hub = False; workspaces = None
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -136,6 +144,7 @@ def main(argv):
             with open(os.path.expanduser(argv[i + 1])) as f: key = json.load(f)["DEEPSEEK_API_KEY"]
             i += 1
         elif a == "--env": also_env = True
+        elif a == "--workspaces": workspaces = argv[i + 1]; i += 1
         elif a == "--unset": mode = "unset"
         elif a == "--status": mode = "status"
         else: target = a
@@ -143,7 +152,7 @@ def main(argv):
     if hub:
         if mode == "set" and src and not key:
             key = read_key(src); print(f"key from {src}: {key[:5]}…{key[-3:]} ({len(key)} chars)")
-        hub_mode(mode, key); return 0
+        hub_mode(mode, key, workspaces); return 0
     if not target:
         raise SystemExit("need <target|all> (see --help)")
     if mode == "set":
