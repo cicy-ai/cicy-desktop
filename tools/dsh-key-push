@@ -8,7 +8,14 @@ dsh 的 key 存在每台机器的 %USERPROFILE%\\.dsh\\.credentials.yaml:
 优先级:启动环境变量 > 这个文件 > <cwd>/.env > ~/.dsh/.env。
 文件里的 records.client-connection/* 是每台机器自己的浏览器会话 grant,本工具不碰。
 
-用法:
+推荐(长远方式):写到 hub 的车队配置,hub 经 fleet ws 下发给每台已验证的机器,DshCard 落盘
+~/cicy-ai/db/dsh-env.json 并把它作为 dsh 的启动环境(优先级最高、界面只读),新机器上线自动带上:
+  dsh-key-push --hub --key sk-xxx                 # 写 ~/cicy-ai/db/dsh-fleet.json,hub 立即推送
+  dsh-key-push --hub --from xs-3002               # 从某台已配好的机器读 key 再写到 hub
+  dsh-key-push --hub --status                     # 看 hub 当前配置(掩码)和已推送机器数
+  dsh-key-push --hub --unset                      # 清空(机器上 dsh 重启后回到本地 key)
+
+逐机直写凭据文件(临时/兜底方式):
   dsh-key-push <target|all> --key sk-xxx          # 直接给 key
   dsh-key-push <target|all> --from xs-3002        # 从某台已配好的机器读出来再分发
   dsh-key-push <target|all> --file ~/cicy-ai/db/dsh.json   # {"DEEPSEEK_API_KEY": "sk-…"}
@@ -46,7 +53,7 @@ def wsd_main(target, js, timeout=60):
 
 
 def status(target):
-    return wsd_main(target, JS_HEAD + " const t = read(); let env=''; try { env = (fs.readFileSync(envf,'utf8').match(/^DEEPSEEK_API_KEY=(.*)$/m)||[])[1]||''; } catch {} return JSON.stringify({ file: !!t, key: mask(keyOf(t)), env: mask(env.trim()) }); })()")
+    return wsd_main(target, JS_HEAD + " const t = read(); let env=''; try { env = (fs.readFileSync(envf,'utf8').match(/^DEEPSEEK_API_KEY=(.*)$/m)||[])[1]||''; } catch {} let fleet=null; try { const j = JSON.parse(fs.readFileSync(path.join(home,'cicy-ai','db','dsh-env.json'),'utf8')); fleet = { rev: j.rev, keys: Object.keys(j.env||{}) }; } catch {} let applied=''; try { applied = fs.readFileSync(path.join(home,'cicy-ai','db','dsh-env.applied'),'utf8').trim(); } catch {} return JSON.stringify({ file: !!t, key: mask(keyOf(t)), env: mask(env.trim()), fleet, applied }); })()")
 
 
 def read_key(target):
@@ -84,6 +91,30 @@ def unset_key(target):
     return wsd_main(target, js)
 
 
+HUB_CFG = os.path.expanduser("~/cicy-ai/db/dsh-fleet.json")
+HUB_URL = os.environ.get("CICY_FLEET_HUB", "http://127.0.0.1:8799")
+
+
+def hub_token():
+    try:
+        with open(os.path.expanduser("~/cicy-ai/db/desktop-ctrl.json")) as f: return json.load(f)["token"]
+    except Exception: return ""
+
+
+def hub_mode(mode, key):
+    import urllib.request
+    tok = hub_token()
+    if mode == "status":
+        req = urllib.request.Request(HUB_URL + "/api/dsh-config", headers={"x-cicy-ctrl": tok})
+        print(urllib.request.urlopen(req, timeout=10).read().decode()); return
+    env = {} if mode == "unset" else {"DEEPSEEK_API_KEY": key}
+    if mode == "set" and not key:
+        raise SystemExit("need --key / --file")
+    body = json.dumps({"env": env}).encode()
+    req = urllib.request.Request(HUB_URL + "/api/dsh-config", data=body, method="PUT", headers={"x-cicy-ctrl": tok, "content-type": "application/json"})
+    print(urllib.request.urlopen(req, timeout=10).read().decode())
+
+
 def targets_of(t):
     if t != "all":
         return [t]
@@ -94,11 +125,12 @@ def targets_of(t):
 def main(argv):
     if not argv or argv[0] in ("-h", "--help"):
         print(__doc__); return 0
-    target = None; key = None; src = None; also_env = False; mode = "set"
+    target = None; key = None; src = None; also_env = False; mode = "set"; hub = False
     i = 0
     while i < len(argv):
         a = argv[i]
-        if a == "--key": key = argv[i + 1]; i += 1
+        if a == "--hub": hub = True
+        elif a == "--key": key = argv[i + 1]; i += 1
         elif a == "--from": src = argv[i + 1]; i += 1
         elif a == "--file":
             with open(os.path.expanduser(argv[i + 1])) as f: key = json.load(f)["DEEPSEEK_API_KEY"]
@@ -108,6 +140,10 @@ def main(argv):
         elif a == "--status": mode = "status"
         else: target = a
         i += 1
+    if hub:
+        if mode == "set" and src and not key:
+            key = read_key(src); print(f"key from {src}: {key[:5]}…{key[-3:]} ({len(key)} chars)")
+        hub_mode(mode, key); return 0
     if not target:
         raise SystemExit("need <target|all> (see --help)")
     if mode == "set":

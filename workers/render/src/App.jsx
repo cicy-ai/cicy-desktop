@@ -400,15 +400,37 @@ async function readTeam() {
   try { return withTeamPrefix((await mainEval(READ_TEAM)).trim()); } catch { return ""; }
 }
 
+// 写机器名。**必须写到 readTeam 真正会读的那个来源**,否则改了名却不生效:
+// readTeam 的优先级是 1) 桌面上的 <数字>.txt  2) ~/cicy-ai/team.txt  3) global.json 的 desktopTeam。
+// 以前这里只写 3),而机器自动起名时写的是 2)(team.txt),2 盖过 3 —— 界面显示改成功了,
+// 上报给 hub 的还是老名字(实测:Mac 改成 mac,车队里仍是 WS5KS)。
+// 所以 2) 和 3) 都写;清空时把 team.txt 一并删掉。
+// 1) 是矩阵机的地面事实(桌面上放个 1005.txt 就叫 xs-1005),不在这里动它 ——
+// 真有这个文件时下面会返回它,调用方据此提示改名没生效。
 async function writeTeam(name) {
   name = withTeamPrefix(String(name || "").trim());
   const code = `(()=>{const r=process.mainModule.require.bind(process.mainModule);
 const os=r("os"),fs=r("fs"),path=r("path");
-const p=path.join(os.homedir(),"cicy-ai","global.json");
+const home=os.homedir();
+const dir=path.join(home,"cicy-ai");
+try{fs.mkdirSync(dir,{recursive:true})}catch(e){}
+const want=${JSON.stringify(name)};
+// 2) team.txt —— 优先级比 global.json 高,不写这个就等于没改
+const tf=path.join(dir,"team.txt");
+try{ if(want){fs.writeFileSync(tf,want)}else{try{fs.unlinkSync(tf)}catch(e){}} }catch(e){}
+// 3) global.json
+const p=path.join(dir,"global.json");
 let c={};try{c=JSON.parse(fs.readFileSync(p,"utf8"))}catch(e){}
-c.desktopTeam=${JSON.stringify(name)};
-fs.writeFileSync(p,JSON.stringify(c,null,2));return String(c.desktopTeam)})()`;
-  return (await mainEval(code)).trim();
+c.desktopTeam=want;
+try{fs.writeFileSync(p,JSON.stringify(c,null,2))}catch(e){}
+// 回读:按 readTeam 的真实优先级算出这台机器现在到底叫什么
+const home2=home.replace(/\\\\/g,"/");
+const deskDirs=["C:/Users/xs/Desktop","C:/Users/Intel/Desktop","C:/Users/Administrator/Desktop",home2+"/Desktop"];
+for(const d of deskDirs){try{for(const f of fs.readdirSync(d)){const m=/^(\\d{3,5})\\.txt$/i.exec(f);if(m)return "xs-"+m[1];}}catch(e){}}
+try{const t=String(fs.readFileSync(tf,"utf8")).trim();if(t)return t}catch(e){}
+try{const c2=JSON.parse(fs.readFileSync(p,"utf8"));return String(c2.desktopTeam||"")}catch(e){return ""}
+})()`;
+  return withTeamPrefix((await mainEval(code)).trim());
 }
 
 export default function App() {
@@ -1547,6 +1569,12 @@ function useFleetSocket() {
           return;
         }
         if (f.type === "reload") { try { location.reload(); } catch {} return; }
+        // 车队级 dsh 配置(API Key 等启动环境):hub 只发给已验证的机器;DshCard 订阅后落盘并按需重启 dsh
+        if (f.type === "dsh_config") {
+          window.__dshFleetCfg = { env: (f.env && typeof f.env === "object") ? f.env : {}, rev: String(f.rev || "") };
+          try { window.dispatchEvent(new CustomEvent("cicy:dsh-config")); } catch {}
+          return;
+        }
         if (f.type === "cmd_result") {
           const w = (window.__cicyCmdWaiters || {})[f.cmdId];
           if (w) w(f.result);
@@ -1580,11 +1608,23 @@ function useFleetSocket() {
     // the identity is carried in the hello frame, so drop the socket and say it
     // again. `ident` is cleared so the new team is actually re-read.
     try {
-      window.__cicyFleetRelabel = () => {
-        ident = null;
+      // 改名后重新上报身份。**不要断线**:hub 收到重复的 hello 就会更新 team
+      // (server.js: `if (typeof f.team === "string") p.team = f.team`),
+      // 原地重发即可。以前是关掉 socket 重连,结果一改名机器就从在线名单里消失一两秒,
+      // 列表上闪成「离线」—— 改个名把机器搞掉线,没道理。
+      // 只有 socket 不可用时才退回重连。
+      window.__cicyFleetRelabel = async () => {
+        ident = null;                       // 丢掉身份缓存,重新读机器名
         retry = FLEET_RETRY_MIN;
-        // Deferred: the caller is still on this socket waiting for its reply,
-        // and closing it here would drop the answer on the floor.
+        try {
+          if (ws && ws.readyState === 1) {
+            const me = await identify();
+            if (ws && ws.readyState === 1) {
+              ws.send(JSON.stringify({ type: "hello", ...me }));
+              return;                        // 原地更新成功,不断线
+            }
+          }
+        } catch {}
         setTimeout(() => { try { ws && ws.close(1000, "relabel"); } catch {} }, 1500);
       };
     } catch {}
@@ -2326,7 +2366,16 @@ function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin, hub }
   // existed never gets asked — and there was nowhere to see or change it
   // afterwards, so it stayed anonymous forever. Surface it in the menu.
   const [myTeam, setMyTeam] = useState(null); // null = still reading
-  useEffect(() => { let on = true; readTeam().then((t) => on && setMyTeam(t || "")); return () => { on = false; }; }, [hubIn]);
+  // 每次**打开这个菜单**都重读一次真实名字,不要只在挂载时读一次。
+  // 名字可能在别处被改(机器管理页远程改名、或人工改了 team.txt),只读一次的话
+  // 这里会一直显示旧名字,看着像「改不了名」(实测:远程改成 limeng-console 后,
+  // 这台机器的菜单仍显示 MHZFU)。
+  useEffect(() => {
+    if (!open) return;
+    let on = true;
+    readTeam().then((t) => on && setMyTeam(t || ""));
+    return () => { on = false; };
+  }, [hubIn, open]);
   // A team belongs to a signed-in machine: it is stated at login and given up
   // with it. Left behind, it makes a signed-out box claim an identity it no
   // longer holds — which is exactly how the wrong machine gets acted on.
@@ -2351,16 +2400,24 @@ function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin, hub }
     if (next && taken.length) {
       const want = withTeamPrefix(next).toLowerCase();
       const mine = withTeamPrefix(cur).toLowerCase();
+      // 只和**机器名**(desktop-* 那些)比。hub 上同时列着 cicy-code 实例和机器,
+      // 而它们本来就该同名(实例 xs-2002 配机器 desktop-xs-2002)—— 拿实例名来判重名,
+      // 等于把唯一正确的命名方式给禁了(实测:改名 xs-2002 一直被拒)。
       const clash = taken.some((n) => {
         const t = String(n || "").trim().toLowerCase();
-        return t && t !== mine && (t === want || t === next.toLowerCase());
+        if (!t.startsWith(TEAM_PREFIX)) return false;
+        return t !== mine && t === want;
       });
       if (clash) { bad(tr("machineName.taken", "「{{n}}」已经被另一台机器用了,换一个", { n: next })); return; }
     }
     setTeamSaving(true);
     try {
-      const saved = await writeTeam(next);
+      const saved = await writeTeam(next);        // 回读到的真实名字(可能被更高优先级的来源盖住)
       setMyTeam(saved || "");
+      if (next && stripTeamPrefix(saved || "") !== next) {
+        bad(tr("machineName.overridden", "改名没生效:这台机器的名字由桌面上的「{{n}}.txt」决定,当前仍是「{{cur}}」",
+          { n: stripTeamPrefix(saved || "").replace(/^xs-/, ""), cur: stripTeamPrefix(saved || "") }));
+      }
       try { window.__cicyFleetRelabel && window.__cicyFleetRelabel(); } catch {}
       try { hub?.refresh && hub.refresh(); } catch {}      // 让占用名单跟上
     } catch {
@@ -3245,6 +3302,11 @@ const dbDir = path.join(home, "cicy-ai", "db"), logDir = path.join(home, "cicy-a
 for (const d of [dbDir, logDir]) { try { fs.mkdirSync(d, { recursive: true }); } catch {} }
 const logFile = path.join(logDir, "dsh.log"), pidFile = path.join(dbDir, "dsh.pid"), rootCache = path.join(dbDir, "dsh-npm-root.txt");
 const lockFile = path.join(dbDir, "dsh-install.lock"), okMarker = path.join(dbDir, "dsh-ok-" + VER + ".txt");
+// 车队级启动环境(hub 下发,DshCard 写的 dsh-env.json):并进 dsh 子进程 env。启动环境在 dsh 里优先级最高且只读。
+const envFile = path.join(dbDir, "dsh-env.json"), envApplied = path.join(dbDir, "dsh-env.applied");
+function fleetEnv() { try { const j = JSON.parse(fs.readFileSync(envFile, "utf8")); const src = (j && j.env) || {}; const out = {}; for (const [k, v] of Object.entries(src)) { if (/^[A-Z][A-Z0-9_]*$/.test(k) && typeof v === "string" && v) out[k] = v; } return out; } catch { return {}; } }
+function envHash() { const e = fleetEnv(); const ks = Object.keys(e).sort(); return ks.length ? require("crypto").createHash("sha1").update(JSON.stringify(ks.map((k) => [k, e[k]]))).digest("hex").slice(0, 12) : ""; }
+function appliedHash() { try { return fs.readFileSync(envApplied, "utf8").trim(); } catch { return ""; } }
 // 子进程 PATH:node 所在目录 + System32(矩阵机 Electron 的 PATH 里没有 node)
 process.env.PATH = [path.dirname(process.execPath), process.platform === "win32" ? path.join(process.env.SystemRoot || "C:\\Windows", "System32") : "/usr/local/bin", process.env.PATH || ""].join(path.delimiter);
 const out = (o) => { process.stdout.write(JSON.stringify(o)); };
@@ -3303,7 +3365,8 @@ async function httpUp() { return (await probe()).dsh; }
 function installing() { return pidAlive(readPidFile(lockFile)); }
 async function status() {
   const p = pkgInfo(); const pid = readPidFile(pidFile); const pr = await probe();
-  return { ok: true, installed: !!p && !p.broken, broken: !!(p && p.broken), version: p ? p.version : null, installing: installing(), running: pr.dsh, occupied: pr.up && !pr.dsh, pid, pidAlive: pidAlive(pid), hasToken: !!lastToken(), node: process.version, logFile };
+  const eh = envHash(), ea = appliedHash();
+  return { ok: true, installed: !!p && !p.broken, broken: !!(p && p.broken), version: p ? p.version : null, installing: installing(), running: pr.dsh, occupied: pr.up && !pr.dsh, pid, pidAlive: pidAlive(pid), hasToken: !!lastToken(), node: process.version, logFile, envKeys: Object.keys(fleetEnv()), envHash: eh, envStale: pr.dsh && ea !== eh };
 }
 async function install() {
   // 安装锁:首页刷新/多开会再次触发安装,两个 npm -g 同时写全局目录会把包写坏。有锁就等它完。
@@ -3339,7 +3402,8 @@ async function start() {
   if (pr.dsh) return { ok: true, already: true, token: lastToken() };
   if (pr.up) return { ok: false, error: "port_in_use", tail: "127.0.0.1:" + PORT + " is used by another program" };
   const fd = fs.openSync(logFile, "w");
-  const child = cp.spawn(process.execPath, [p.bin, "web", "--no-open", "--port", String(PORT)], { detached: true, windowsHide: true, stdio: ["ignore", fd, fd], cwd: home, env: Object.assign({}, process.env, { NO_COLOR: "1" }, savedRegistry() ? { npm_config_registry: savedRegistry() } : {}) });   // dsh 首次运行会用 pnpm 自举 ~/.dsh/profiles,沿用实测最快的源
+  const child = cp.spawn(process.execPath, [p.bin, "web", "--no-open", "--port", String(PORT)], { detached: true, windowsHide: true, stdio: ["ignore", fd, fd], cwd: home, env: Object.assign({}, process.env, { NO_COLOR: "1" }, savedRegistry() ? { npm_config_registry: savedRegistry() } : {}, fleetEnv()) });   // dsh 首次运行会用 pnpm 自举 ~/.dsh/profiles,沿用实测最快的源;fleetEnv = hub 下发的 API Key 等
+  try { fs.writeFileSync(envApplied, envHash()); } catch {}
   child.unref(); try { fs.closeSync(fd); } catch {}
   try { fs.writeFileSync(pidFile, String(child.pid)); } catch {}
   // dsh web 冷启动在矩阵机上实测常超过 30s(加载 ~200MB 依赖);只要进程还活着就等到 120s,别误报 start_failed
@@ -3463,6 +3527,34 @@ function DshCard() {
     const id = setInterval(() => { if (!busyRef.current) refresh(); }, 20000);
     return () => clearInterval(id);
   }, [refresh]);
+
+  // 车队级配置(hub 经 fleet ws 下发的 dsh_config:API Key 等):写到 ~/cicy-ai/db/dsh-env.json,
+  // dsh-ctl start 把它并进启动环境。key 变了且 dsh 在跑 → 静默重启一次;没跑且已装 → 拉起。
+  const appliedRev = useRef("");
+  const applyFleetCfg = useCallback(async () => {
+    const cfg = window.__dshFleetCfg;
+    if (!cfg || busyRef.current) return;
+    if (cfg.rev === appliedRev.current) return;
+    try {
+      const env = await dshEnv();
+      if (!env.home) return;
+      const f = dshIsWin() ? `${env.home}\\cicy-ai\\db\\dsh-env.json` : `${env.home}/cicy-ai/db/dsh-env.json`;
+      const w = parseRpcText(await window.electronRPC?.("file_write", { path: f, content: JSON.stringify({ rev: cfg.rev, env: cfg.env }, null, 2) }));
+      if (!w.ok) return;
+      appliedRev.current = cfg.rev;
+      if (!env.node) return;                      // 还没装 Node:runSetup 装完 start 时自然带上
+      const s = await dshCtl("status");
+      if (s.error) return;
+      if (s.running && s.envStale) { setBusy("start"); try { await dshCtl("stop"); await dshCtl("start"); } finally { setBusy(""); } }
+      else if (!s.running && s.installed) { setBusy("start"); try { await dshCtl("start"); } finally { setBusy(""); } }
+      refresh();
+    } catch (e) { console.warn("[DshCard] fleet cfg", e); }
+  }, [refresh]);
+  useEffect(() => {
+    applyFleetCfg();
+    window.addEventListener("cicy:dsh-config", applyFleetCfg);
+    return () => window.removeEventListener("cicy:dsh-config", applyFleetCfg);
+  }, [applyFleetCfg]);
 
   // 安装(或重装)+ 启动:全程走 Docker 同款抽屉(标题/副标题换成 dsh 的)。
   // 四段:准备环境(找/装 Node)→ 下载运行环境(npm 装 dsh)→ 启动服务(dsh web)→ 完成
@@ -5394,7 +5486,8 @@ function useHub() {
     // 查重:别让两台机器叫同一个名字(登录时也拦一道,不然车队里立刻多一台重名的)
     if (declared) {
       const want = withTeamPrefix(declared).toLowerCase();
-      if ((takenNames || []).some((n) => { const t = String(n || "").trim().toLowerCase(); return t && (t === want || t === declared.toLowerCase()); })) {
+      // 同上:只和机器名(desktop-*)比,别拿 cicy-code 实例名当重名
+      if ((takenNames || []).some((n) => { const t = String(n || "").trim().toLowerCase(); return t.startsWith(TEAM_PREFIX) && t === want; })) {
         setLoginErr(tr("cicyHub.teamTaken", "「" + declared + "」已经被另一台机器用了,换一个")); return;
       }
     }
