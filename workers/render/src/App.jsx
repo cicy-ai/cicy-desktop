@@ -3353,7 +3353,9 @@ function DshCard() {
   // 开机自装/自启:首页每次加载只跑一次(首次 status 回来时决定)。
   useEffect(() => {
     if (autoRan.current || !st) return;
-    if (st.error || st.installing) return;   // 探不到 / 别的页面正在装 → 下轮 status 再决定
+    if (st.installing) return;               // 别的页面/进程正在装 → 下轮 status 再看
+    // no_node 不算失败:开机自装本来就要下载便携版 Node,交给 runSetup。其它 error(ctl 跑不了)才放弃。
+    if (st.error && st.error !== "no_node") return;
     autoRan.current = true;
     if (!auto || st.running) return;
     if (st.installed) { startSilent(); return; }
@@ -3488,7 +3490,6 @@ function DshCard() {
         </div>
         <div className="bcard__meta">
           <span className="bcard__chip">dsh</span>
-          <span className="bcard__chip" style={{ marginLeft: 6 }}>127.0.0.1:{DSH_PORT}</span>
           {st?.version && <span className="bcard__ver" data-id="DshCard-ver" style={{ marginLeft: 8, fontSize: 11, opacity: 0.6 }}>v{st.version}</span>}
         </div>
         {stateText && <div data-id="DshCard-state" title={stateText} style={{ marginTop: 6, fontSize: 12, color: running ? "#8b949e" : "#9aa4b2", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{stateText}</div>}
