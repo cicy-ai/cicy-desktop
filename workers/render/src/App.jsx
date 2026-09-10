@@ -309,6 +309,8 @@ const TEAM_PREFIX = "desktop-";
 // 预填的默认账号:装机时不用手输。
 const DEFAULT_EMAIL = "limeng9088@gmail.com";
 const withTeamPrefix = (t) => (t && !t.startsWith(TEAM_PREFIX) ? TEAM_PREFIX + t : t || "");
+// 显示/编辑时去掉前缀:存的是 desktop-xs-1009,给人看的是 xs-1009。
+const stripTeamPrefix = (t) => String(t || "").replace(new RegExp("^" + TEAM_PREFIX), "");
 
 // global.json is the main process's file; the page cannot touch it directly.
 // The homepage bridge is the unguarded one, so this is a plain call. There is
@@ -2317,6 +2319,23 @@ function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin, hub }
   useEffect(() => {
     if (hub?.available && hub.status && !hubIn && myTeam) { writeTeam("").then(() => setMyTeam("")).catch(() => {}); }
   }, [hub?.available, hub?.status, hubIn, myTeam]);
+  // 改机器名(账号菜单里那一行)。写 global.json 的 desktopTeam,然后 relabel —— 让车队通道
+  // 带着新名字重连一次,hub/机器管理页立刻显示新名字,不用重启 app。
+  const [teamEditing, setTeamEditing] = useState(false);
+  const [teamSaving, setTeamSaving] = useState(false);
+  const commitTeam = useCallback(async (raw) => {
+    setTeamEditing(false);
+    const next = stripTeamPrefix(String(raw || "").trim());
+    if (next === stripTeamPrefix(myTeam || "")) return;   // 没改就别写
+    setTeamSaving(true);
+    try {
+      const saved = await writeTeam(next);
+      setMyTeam(saved || "");
+      try { window.__cicyFleetRelabel && window.__cicyFleetRelabel(); } catch {}
+    } catch {
+      toast.show({ id: "team-rename", status: "error", ttl: 5000, message: tr("machineName.failed", "机器名没保存成功") });
+    } finally { setTeamSaving(false); }
+  }, [myTeam]);
   const [checkingUpd, setCheckingUpd] = useState(false);
   const [appVer, setAppVer] = useState("");
   const wrap = useRef(null);
@@ -2421,14 +2440,46 @@ function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin, hub }
                 {me.email}
               </button>
             )}
-            {hubIn && myTeam && (
-              /* Not a menu item: it is what this machine is called, not
-                 something to pick. Carrying the item class gave it a hover
-                 highlight, so a row that does nothing looked clickable. */
+            {hubIn && myTeam !== null && (
+              /* 这台机器在车队里的名字 —— 现在可以在这里直接改。
+                 以前只读:登录时问一次,登录前装的机器根本没被问过,改都没地方改,
+                 于是永远匿名(车队列表里就只能显示系统机器名或随机短码,认不出是哪台)。
+                 存的是 global.json 的 desktopTeam,存/显示带 desktop- 前缀,输入时不用带。
+                 改完立刻 relabel:重连一次把新名字报给 hub,不用重启。 */
               <div data-id="UserChip-team"
-                style={{ padding: "0 14px 8px", marginTop: -4, fontSize: 12, opacity: .5,
-                         overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {myTeam}
+                title={tr("machineName.hint", "这台机器在车队里的名字,点一下就能改")}
+                style={{ padding: "0 14px 8px", marginTop: -4, fontSize: 12,
+                         display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ opacity: .5, flex: "none" }}>{tr("machineName.label", "机器名")}</span>
+                {teamEditing ? (
+                  <input
+                    data-id="UserChip-team-input"
+                    autoFocus
+                    defaultValue={stripTeamPrefix(myTeam)}
+                    placeholder={tr("machineName.ph", "例如 xs-1009")}
+                    spellCheck={false}
+                    onClick={(e) => e.stopPropagation()}
+                    onBlur={(e) => commitTeam(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+                      if (e.key === "Enter") commitTeam(e.currentTarget.value);
+                      else if (e.key === "Escape") setTeamEditing(false);
+                    }}
+                    style={{ flex: 1, minWidth: 0, font: "inherit", padding: "2px 6px", borderRadius: 6,
+                             border: "1px solid #3b82f6", background: "#0d1117", color: "#e6edf3" }}
+                  />
+                ) : (
+                  <button type="button" data-id="UserChip-team-edit"
+                    onClick={(e) => { e.stopPropagation(); setTeamEditing(true); }}
+                    style={{ flex: 1, minWidth: 0, textAlign: "left", font: "inherit", cursor: "text",
+                             border: "none", background: "transparent", padding: "2px 0",
+                             color: myTeam ? "inherit" : "#58a6ff", opacity: myTeam ? .7 : 1,
+                             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {teamSaving ? tr("machineName.saving", "保存中…")
+                      : myTeam ? stripTeamPrefix(myTeam)
+                      : tr("machineName.unset", "未命名 · 点击设置")}
+                  </button>
+                )}
               </div>
             )}
             {(() => { let sid = ""; try { sid = getShortId(); } catch {} return sid ? (
@@ -2867,7 +2918,7 @@ const dockerDrawer = {
     if (isDl && (hasPct || ev.dest || ev.url)) {
       const prev = dockerDrawerState.bars?.[phase] || {};
       const progress = hasPct ? ev.progress : (ev.status === "skip" || ev.status === "done") ? 100 : prev.progress;
-      next.bars = { ...dockerDrawerState.bars, [phase]: { progress, received: ev.received ?? prev.received, total: ev.total ?? prev.total, url: ev.url || prev.url, dest: ev.dest || prev.dest } };
+      next.bars = { ...dockerDrawerState.bars, [phase]: { progress, received: ev.received ?? prev.received, total: ev.total ?? prev.total, url: ev.url || prev.url, dest: ev.dest || prev.dest, label: ev.label || prev.label } };
     }
     // Log only milestone events — never the per-% running download ticks.
     const isRunningTick = ev.status === "running" && hasPct && isDl;
@@ -2922,7 +2973,7 @@ function DownloadBar({ phaseKey, bar }) {
   return (
     <div className="dlbar" data-id={`DockerDrawer-dlbar-${phaseKey}`}>
       <div className="dlbar__head">
-        <span className="dlbar__name">{DOCKER_DL_LABEL[phaseKey] || phaseKey}</span>
+        <span className="dlbar__name">{bar?.label || DOCKER_DL_LABEL[phaseKey] || phaseKey}</span>
         <span className="dlbar__pct">{pct}%{bar?.total ? ` · ${fmtBytes(bar.received)} / ${fmtBytes(bar.total)}` : ""}</span>
       </div>
       <div className="dlbar__track"><div className={`dlbar__fill${done ? " is-done" : ""}`} style={{ width: `${pct}%` }} /></div>
@@ -3058,7 +3109,8 @@ const DSH_PKG = "@deepseek-ai/dsh";
 const DSH_VERSION = "0.1.2-rc.1";
 const DSH_PORT = 3080;
 const DSH_BLUE = "#4d6bfe";
-const DSH_NODE_VERSION = "v24.19.0";        // Windows 没装 Node 时自动下载的便携版(zip 解压到 %LOCALAPPDATA%\cicy-node,免管理员)
+const DSH_NODE_VERSION = "v24.19.0";
+const DSH_NODE_ZIP_BYTES = 37304352;        // node-v24.19.0-win-x64.zip 大小,只用来算下载进度条        // Windows 没装 Node 时自动下载的便携版(zip 解压到 %LOCALAPPDATA%\cicy-node,免管理员)
 const DSH_AUTO_KEY = "dsh.auto";            // localStorage:"off" = 关闭开机自装/自启
 const DSH_FAIL_BACKOFF_MS = 6 * 60 * 60 * 1000;
 // 自动安装失败的退避标记按首页发布戳分桶:发新版首页后自动再试一次,不用干等 6 小时。
@@ -3067,36 +3119,86 @@ const dshFailKey = () => `dsh.installFailAt.${typeof BUILD_STAMP === "string" ? 
 // ---- 第 0 步:找 Node(exec_shell,不依赖 PATH)。矩阵机的 Electron 进程 PATH 里没有 node,
 // 甚至机器上根本没装 Node,所以一切都用绝对路径,Windows 缺 Node 就下载便携版。
 // PowerShell 用 -EncodedCommand 传脚本,避免 cmd 引号地狱;脚本里不能出现 "${"(JS 模板会吃掉)。
-function dshNodePs1(installNode) {
+// 找 Node:纯 cmd 一行链(不再为了找 node 起 PowerShell,矩阵机 PowerShell 冷启动能到 60s)。
+// 候选按顺序试 --version,第一个能跑的输出 NODE=路径;版本号由 JS 侧校验(>=22)。
+const DSH_FIND_NODE_CMD = [
+  `"%LOCALAPPDATA%\\cicy-node\\node.exe"`,
+  `"%ProgramFiles%\\nodejs\\node.exe"`,
+  `"%LOCALAPPDATA%\\Programs\\nodejs\\node.exe"`,
+  `"%APPDATA%\\nvm\\current\\node.exe"`,
+].map((q) => `(${q} --version 2>nul && echo NODE=${q.slice(1, -1)})`).join(" || ") + " & echo HOME=%USERPROFILE%";
+
+// Windows 缺 Node 时下载便携版(zip 解压到 %LOCALAPPDATA%\cicy-node,免管理员)。
+// 下载/解压临时目录也放 %LOCALAPPDATA%(不用 %TEMP%:用户名带点的机器 %TEMP% 是 8.3 短路径 XS4638~1.COM,PowerShell 的 Move-Item/Remove-Item 会报"对象不存在")。
+// 实测矩阵机:nodejs.org 2.5~6MB/s,npmmirror 只有 100KB~1MB/s,而且哪个快因机器/时段而异,
+// 所以先并行各下 5 秒测速再选源;下载用 curl.exe(带断速放弃:30s 内低于 80KB/s 就换下一个源),
+// 解压用 tar.exe(比 Expand-Archive 快很多)。上次下到一半/解压好没搬完的都复用。
+// 脚本写成 ~/cicy-ai/db/dsh-node.ps1 再 -File 跑(超过 cmd 8K 上限,不能 -EncodedCommand);脚本里不能出现 "${"(JS 模板会吃掉),也不要写非 ASCII 字符(PS 5.1 无 BOM 按 GBK 读会吞行)。
+function dshInstallNodePs1() {
   return `$ErrorActionPreference = 'SilentlyContinue'; $ProgressPreference = 'SilentlyContinue'
-$pf86 = [Environment]::GetEnvironmentVariable('ProgramFiles(x86)')
-$cands = @("$env:LOCALAPPDATA\\cicy-node\\node.exe", "$env:ProgramFiles\\nodejs\\node.exe", "$pf86\\nodejs\\node.exe", "$env:LOCALAPPDATA\\Programs\\nodejs\\node.exe", "$env:APPDATA\\nvm\\current\\node.exe")
-foreach ($c in $cands) { if (Test-Path $c) { $v = & $c --version 2>$null; if ($v -match '^v(\\d+)\\.' -and [int]$matches[1] -ge 22) { Write-Output "NODE=$c"; Write-Output "HOME=$env:USERPROFILE"; exit 0 } } }
-Write-Output "HOME=$env:USERPROFILE"
-if (${installNode ? 1 : 0} -ne 1) { Write-Output 'NODE='; exit 0 }
 $ver = '${DSH_NODE_VERSION}'; $name = "node-$ver-win-x64"
-$dir = "$env:LOCALAPPDATA\\cicy-node"; $tmp = "$env:TEMP\\cicy-node-dl"; $zip = "$tmp\\$name.zip"
+$dir = "$env:LOCALAPPDATA\\cicy-node"; $tmp = "$env:LOCALAPPDATA\\cicy-node-dl"; $zip = "$tmp\\$name.zip"; $ex = "$tmp\\$name"; $lock = "$tmp\\install.lock"
+$curl = "$env:SystemRoot\\System32\\curl.exe"; $tar = "$env:SystemRoot\\System32\\tar.exe"
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$ok = $false
-foreach ($u in @("https://npmmirror.com/mirrors/node/$ver/$name.zip", "https://nodejs.org/dist/$ver/$name.zip")) {
-  try { Remove-Item $zip -Force -ErrorAction SilentlyContinue; Invoke-WebRequest -Uri $u -OutFile $zip -UseBasicParsing -TimeoutSec 900; if ((Get-Item $zip).Length -gt 10000000) { $ok = $true; break } } catch { }
+function Good($p) { if (-not (Test-Path "$p\\node.exe")) { return $false }; $v = & "$p\\node.exe" --version 2>$null; return ($v -match '^v(\\d+)\\.' -and [int]$matches[1] -ge 22) }
+# file ops retry: Defender / 360 scan a fresh 37MB zip and hold it for seconds, so tar/move/delete fail with sharing violations
+function Retry($n, $sb) { for ($k = 0; $k -lt $n; $k++) { $ok = $false; try { $ok = [bool](& $sb) } catch { $ok = $false }; if ($ok) { return $true }; Start-Sleep -Seconds 2 }; return $false }
+function ZipOk($z) { if (-not (Test-Path $z)) { return $false }; if ((Get-Item $z).Length -lt 30000000) { return $false }; if (Test-Path $tar) { return (Retry 6 { & $tar -tf $z 2>$null | Out-Null; $LASTEXITCODE -eq 0 }) }; return $true }
+function LockAlive { if (-not (Test-Path $lock)) { return $false }; $id = 0; try { $id = [int](Get-Content $lock -Raw) } catch { return $false }; if ($id -le 0) { return $false }; return ($null -ne (Get-Process -Id $id -ErrorAction SilentlyContinue)) }
+function Main {
+  $t0 = Get-Date
+  if (Good $dir) { return "NODE=$dir\\node.exe" }
+  if (-not (Good $ex)) {
+    $urls = @("https://nodejs.org/dist/$ver/$name.zip", "https://cdn.npmmirror.com/binaries/node/$ver/$name.zip", "https://npmmirror.com/mirrors/node/$ver/$name.zip")
+    $have = ZipOk $zip
+    if (-not $have) {
+      Remove-Item $zip -Force
+      if (Test-Path $curl) {
+        $procs = @(); $i = 0
+        foreach ($u in $urls[0..1]) { $i++; $f = "$tmp\\spd$i.txt"; Remove-Item $f -Force; $procs += ,@($u, $f, (Start-Process -FilePath $curl -ArgumentList @('-s','-L','-o','NUL','-w','%{size_download}','--max-time','5',$u) -RedirectStandardOutput $f -WindowStyle Hidden -PassThru)) }
+        Start-Sleep -Seconds 6
+        $score = @{}
+        foreach ($p in $procs) { if (-not $p[2].HasExited) { $p[2].Kill() }; $n = 0; try { $n = [int64]((Get-Content $p[1] -Raw) -replace '[^0-9]', '') } catch { }; $score[$p[0]] = $n; Write-Output "SPD=$n $($p[0])" }
+        $urls = @($urls | Sort-Object { $s = 0; if ($score.ContainsKey($_)) { $s = $score[$_] }; -$s })
+        foreach ($u in $urls) {
+          Write-Output "SRC=$u"
+          # resume .part with -C - (same zip on every mirror); give up a source once it drops under 80KB/s for 30s
+          & $curl -L -s -S -o "$zip.part" -C - --speed-limit 80000 --speed-time 30 --max-time 900 $u 2>$null
+          $code = $LASTEXITCODE; $n = 0; if (Test-Path "$zip.part") { $n = (Get-Item "$zip.part").Length }
+          Write-Output "CURL=$code bytes=$n"
+          if ($code -eq 0 -and (ZipOk "$zip.part")) { Retry 8 { Move-Item "$zip.part" $zip -Force; (Test-Path $zip) -and -not (Test-Path "$zip.part") } | Out-Null; if (ZipOk $zip) { $have = $true; break } }
+          if ($code -eq 0 -or $n -gt 40000000) { Remove-Item "$zip.part" -Force }
+        }
+      }
+      if (-not $have) {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        foreach ($u in $urls) { try { Remove-Item $zip -Force; Write-Output "SRC=$u"; Write-Output "IWR=$u"; Invoke-WebRequest -Uri $u -OutFile $zip -UseBasicParsing -TimeoutSec 300; if (ZipOk $zip) { $have = $true; break } } catch { } }
+      }
+      if (-not $have) { return 'ERR=download' }
+    }
+    Retry 5 { Remove-Item $ex -Recurse -Force; -not (Test-Path $ex) } | Out-Null
+    if (Test-Path $tar) { Retry 3 { & $tar -xf $zip -C $tmp 2>$null; Good $ex } | Out-Null }
+    if (-not (Good $ex)) { Remove-Item $ex -Recurse -Force; Expand-Archive -Path $zip -DestinationPath $tmp -Force }
+    if (-not (Good $ex)) { return 'ERR=extract' }
+  }
+  if (Test-Path $dir) { Retry 8 { Remove-Item $dir -Recurse -Force; -not (Test-Path $dir) } | Out-Null }
+  Retry 10 { Move-Item $ex $dir; Good $dir } | Out-Null
+  if (-not (Good $dir)) { Copy-Item $ex $dir -Recurse -Force }
+  Retry 5 { Remove-Item $zip -Force; Remove-Item "$zip.part" -Force; Remove-Item "$tmp\\spd*.txt" -Force; Remove-Item $ex -Recurse -Force; -not (Test-Path $ex) } | Out-Null
+  Write-Output ("SECS=" + [int]((Get-Date) - $t0).TotalSeconds)
+  if (Good $dir) { return "NODE=$dir\\node.exe" } else { return 'ERR=move' }
 }
-if (-not $ok) { Write-Output 'ERR=download'; exit 1 }
-Remove-Item "$tmp\\$name" -Recurse -Force -ErrorAction SilentlyContinue
-Expand-Archive -Path $zip -DestinationPath $tmp -Force
-if (Test-Path $dir) { Remove-Item $dir -Recurse -Force }
-Move-Item "$tmp\\$name" $dir
-Remove-Item $zip -Force -ErrorAction SilentlyContinue
-if (Test-Path "$dir\\node.exe") { Write-Output "NODE=$dir\\node.exe"; exit 0 } else { Write-Output 'ERR=extract'; exit 1 }
+# install lock: a page reload / second window re-triggers setup; two extractors would trample each other, so wait for the live one
+if (LockAlive) { for ($i = 0; $i -lt 450; $i++) { Start-Sleep -Seconds 2; if (Good $dir) { break }; if (-not (LockAlive)) { break } } }
+if (Good $dir) { Write-Output "NODE=$dir\\node.exe"; exit 0 }
+Set-Content -Path $lock -Value $PID
+$r = @(Main)
+Remove-Item $lock -Force
+$r | ForEach-Object { Write-Output $_ }
+if ($r.Count -gt 0 -and "$($r[-1])" -like 'NODE=*') { exit 0 } else { exit 1 }
 `;
 }
 const DSH_NODE_SH = `for p in /usr/local/bin/node /opt/homebrew/bin/node /usr/bin/node "$HOME"/.nvm/versions/node/*/bin/node "$HOME"/.volta/bin/node; do if [ -x "$p" ]; then v=$("$p" --version 2>/dev/null); case "$v" in v2[2-9].*|v[3-9][0-9].*) echo "NODE=$p"; break;; esac; fi; done; echo "HOME=$HOME"`;
-function psEncoded(script) {
-  let bytes = "";
-  for (let i = 0; i < script.length; i++) { const c = script.charCodeAt(i); bytes += String.fromCharCode(c & 0xff, c >> 8); }
-  return btoa(bytes);
-}
 
 // 在本机 node 里跑的控制脚本,写到 ~/cicy-ai/db/dsh-ctl.js,用绝对路径的 node 执行:
 //   node dsh-ctl.js <status|install|start|stop|open> <npm 绝对路径>
@@ -3117,6 +3219,21 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const q = (s) => '"' + s + '"';
 function run(cmd, opts) { return cp.execSync(cmd, Object.assign({ encoding: "utf8", windowsHide: true, timeout: 60000, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 10 * 1024 * 1024 }, opts || {})); }
 function npmRoot() { try { return run(q(NPM) + " root -g").trim().split(/\r?\n/).pop(); } catch { return ""; } }
+// 选 registry:两个源并行各拉 5 秒同一个大 tarball,谁字节多先用谁。矩阵机实测 npmjs 2.5~7MB/s、
+// npmmirror 只有 13~36KB/s(装 200MB 要几十分钟,必超时);但换到国内机器就反过来,所以每次装前实测。
+const REGS = ["https://registry.npmjs.org", "https://registry.npmmirror.com"];
+const regFile = path.join(dbDir, "dsh-registry.txt");
+async function pickRegistry() {
+  const meas = await Promise.all(REGS.map(async (r) => {
+    let n = 0;
+    try { const res = await fetch(r + "/node-pty/-/node-pty-1.1.0.tgz", { signal: AbortSignal.timeout(5000) }); const rd = res.body.getReader(); for (;;) { const { done, value } = await rd.read(); if (done) break; n += value.length; } } catch {}
+    return n;
+  }));
+  const order = REGS.map((r, i) => [r, meas[i]]).sort((a, b) => b[1] - a[1]);
+  try { fs.writeFileSync(regFile, order[0][0]); } catch {}
+  return { order: order.map((x) => x[0]), speed: Object.fromEntries(order.map(([r, n]) => [r, Math.round(n / 5 / 1024) + "KB/s"])) };
+}
+function savedRegistry() { try { return fs.readFileSync(regFile, "utf8").trim(); } catch { return ""; } }
 function pidAlive(n) { if (!n) return false; try { process.kill(n, 0); return true; } catch { return false; } }
 function readPidFile(f) { try { const n = Number(fs.readFileSync(f, "utf8").trim()); return n > 0 ? n : 0; } catch { return 0; } }
 // 已装 = 目录在 + bin 在 + 真能跑(--version 对得上;结果记 marker,以后不再每次 spawn)。
@@ -3169,17 +3286,18 @@ async function install() {
     const scope = path.join(root, "@deepseek-ai");
     // 清掉坏包和 npm 中断留下的 .dsh-xxxx 临时目录,让 npm 干净地重装
     try { for (const e of fs.readdirSync(scope)) { if (e === "dsh" || /^\.dsh-/.test(e)) fs.rmSync(path.join(scope, e), { recursive: true, force: true }); } } catch {}
-    // 先走 npmmirror(矩阵机在国内,registry.npmjs.org 直连基本卡死),不行再走官方源。
-    let outp = "", lastErr = "";
-    for (const reg of ["https://registry.npmmirror.com", "https://registry.npmjs.org"]) {
-      try { outp = run(q(NPM) + " i -g " + PKG + "@" + VER + " --no-audit --no-fund --loglevel=error --fetch-timeout=120000 --fetch-retries=2 --registry=" + reg, { timeout: 12 * 60 * 1000 }); lastErr = ""; break; }
+    // 先实测哪个 registry 快再装(不再固定先走 npmmirror:在这批矩阵机上它只有几十 KB/s,200MB 必超时)。
+    const regs = await pickRegistry();
+    let outp = "", lastErr = "", used = "", t0 = Date.now();
+    for (const reg of regs.order) {
+      try { outp = run(q(NPM) + " i -g " + PKG + "@" + VER + " --no-audit --no-fund --no-progress --loglevel=error --fetch-timeout=90000 --fetch-retries=2 --registry=" + reg, { timeout: 12 * 60 * 1000 }); lastErr = ""; used = reg; break; }
       catch (e) { lastErr = String((e.stderr || "") + (e.stdout || "") + (e.message || "")).trim().slice(-600); }
     }
-    if (lastErr) return { ok: false, error: "npm_install_failed", tail: lastErr };
+    if (lastErr) return { ok: false, error: "npm_install_failed", tail: lastErr, speed: regs.speed };
     try { fs.writeFileSync(rootCache, root); } catch {}
     const p = pkgAt(root);
     if (!p || p.broken) return { ok: false, error: "install_incomplete", tail: (outp || "").slice(-300) };
-    return { ok: true, version: p.version };
+    return { ok: true, version: p.version, registry: used, speed: regs.speed, secs: Math.round((Date.now() - t0) / 1000) };
   } finally { try { fs.unlinkSync(lockFile); } catch {} }
 }
 async function start() {
@@ -3188,7 +3306,7 @@ async function start() {
   if (pr.dsh) return { ok: true, already: true, token: lastToken() };
   if (pr.up) return { ok: false, error: "port_in_use", tail: "127.0.0.1:" + PORT + " is used by another program" };
   const fd = fs.openSync(logFile, "w");
-  const child = cp.spawn(process.execPath, [p.bin, "web", "--no-open", "--port", String(PORT)], { detached: true, windowsHide: true, stdio: ["ignore", fd, fd], cwd: home, env: Object.assign({}, process.env, { NO_COLOR: "1" }) });
+  const child = cp.spawn(process.execPath, [p.bin, "web", "--no-open", "--port", String(PORT)], { detached: true, windowsHide: true, stdio: ["ignore", fd, fd], cwd: home, env: Object.assign({}, process.env, { NO_COLOR: "1" }, savedRegistry() ? { npm_config_registry: savedRegistry() } : {}) });   // dsh 首次运行会用 pnpm 自举 ~/.dsh/profiles,沿用实测最快的源
   child.unref(); try { fs.closeSync(fd); } catch {}
   try { fs.writeFileSync(pidFile, String(child.pid)); } catch {}
   for (let i = 0; i < 60; i++) { await sleep(500); if (await httpUp()) return { ok: true, pid: child.pid, token: lastToken() }; if (!pidAlive(child.pid)) break; }
@@ -3236,19 +3354,34 @@ let _dshEnv = null;
 async function dshEnv({ installNode = false } = {}) {
   if (_dshEnv && _dshEnv.node) return _dshEnv;
   const win = dshIsWin();
-  const cmd = win
-    ? `"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${psEncoded(dshNodePs1(installNode))}`
-    : DSH_NODE_SH;
-  const r = await dshShell(cmd);
-  const text = (r.stdout || "") + "\n" + (r.stderr || "");
-  const node = (text.match(/^NODE=(.+)$/m) || [])[1]?.trim() || "";
-  const home = (text.match(/^HOME=(.+)$/m) || [])[1]?.trim() || "";
-  const err = (text.match(/^ERR=(.+)$/m) || [])[1]?.trim() || "";
-  if (!node) return { node: "", home, error: err || (r.stderr || r.stdout || "").trim().slice(-300) };
+  const pick = (text) => ({
+    node: (text.match(/^NODE=(.+)$/m) || [])[1]?.trim() || "",
+    home: (text.match(/^HOME=(.+)$/m) || [])[1]?.trim() || "",
+    err: (text.match(/^ERR=(.+)$/m) || [])[1]?.trim() || "",
+    major: Number((text.match(/^v(\d+)\./m) || [])[1] || 0),
+    src: [...text.matchAll(/^SRC=(.+)$/mg)].map((m) => m[1].trim()).pop() || "",
+    secs: Number((text.match(/^SECS=(\d+)/m) || [])[1] || 0),
+  });
+  let r = await dshShell(win ? DSH_FIND_NODE_CMD : DSH_NODE_SH);
+  let t = pick((r.stdout || "") + "\n" + (r.stderr || ""));
+  let node = t.node, home = t.home, err = "", src = "", secs = 0;
+  if (win && node && t.major && t.major < 22) node = "";   // 有 node 但太旧:当没有,装便携版(cicy-node 排在候选首位,下次直接命中)
+  if (!node && win && installNode) {
+    // 脚本超过 cmd 8K 命令行上限,不能走 -EncodedCommand;写成文件再 -File 跑
+    const ps1 = `${home}\\cicy-ai\\db\\dsh-node.ps1`;
+    // 带 BOM:无 BOM 的 .ps1 会被 PowerShell 5.1 按 ANSI(GBK)读,脚本里一个非 ASCII 字符就能把下一行吞进注释
+    const w = parseRpcText(await window.electronRPC?.("file_write", { path: ps1, content: "\uFEFF" + dshInstallNodePs1() }));
+    if (!w.ok) return { node: "", home, error: "ps1_write_failed" };
+    r = await dshShell(`"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${ps1}"`);
+    const t2 = pick((r.stdout || "") + "\n" + (r.stderr || ""));
+    node = t2.node; err = t2.err; src = t2.src; secs = t2.secs;
+    if (!node && !err) err = (r.stderr || r.stdout || "").trim().slice(-300);
+  }
+  if (!node) return { node: "", home, error: err };
   const dir = node.replace(/[\\/][^\\/]+$/, "");
   const npm = win ? `${dir}\\npm.cmd` : `${dir}/npm`;
   const ctl = win ? `${home}\\cicy-ai\\db\\dsh-ctl.js` : `${home}/cicy-ai/db/dsh-ctl.js`;
-  _dshEnv = { node, npm, home, ctl, written: false };
+  _dshEnv = { node, npm, home, ctl, written: false, src, secs };
   return _dshEnv;
 }
 async function dshCtl(op, opts = {}) {
@@ -3315,12 +3448,22 @@ function DshCard() {
       if (!env.node) {
         if (!dshIsWin()) { fail(tr("dsh.needNode", "需要 Node.js 22+,请先安装:{{url}}", { url: "https://nodejs.org/en/download" })); return; }
         heartbeat("install-docker", tr("dsh.installingNode", "这台机器没有 Node.js,下载便携版 {{v}}(约 37MB,免管理员)…", { v: DSH_NODE_VERSION }));
-        env = await dshEnv({ installNode: true });
-        stopHb();
+        // 下载是同步的 PowerShell,拿不到进度事件;每 3s 用一条 cmd 读 .part 文件大小驱动进度条(不刷日志)
+        const partCmd = `for %I in ("%LOCALAPPDATA%\\cicy-node-dl\\node-${DSH_NODE_VERSION}-win-x64.zip.part") do @echo %~zI`;
+        const barLabel = tr("dsh.nodeZip", "Node.js 便携版");
+        let polling = false;
+        const prog = setInterval(async () => {
+          if (polling) return; polling = true;
+          try { const r = await dshShell(partCmd); const n = Number(String(r.stdout || "").trim()); if (n > 0) dockerDrawer.push({ phase: "install-docker", status: "running", progress: Math.min(99, Math.round(n * 100 / DSH_NODE_ZIP_BYTES)), received: n, total: DSH_NODE_ZIP_BYTES, label: barLabel }); }
+          catch {} finally { polling = false; }
+        }, 3000);
+        try { env = await dshEnv({ installNode: true }); } finally { clearInterval(prog); stopHb(); }
         if (!env.node) { fail(tr("dsh.nodeFailed", "Node.js 便携版安装失败:{{why}}", { why: env.error || "download" })); return; }
+        if (env.src) dockerDrawer.push({ phase: "install-docker", status: "done", progress: 100, received: DSH_NODE_ZIP_BYTES, total: DSH_NODE_ZIP_BYTES, url: env.src, label: barLabel, message: tr("dsh.nodeDownloaded", "Node.js 便携版下载完成({{s}}s)", { s: env.secs }) });
       }
-      push("install-docker", tr("dsh.nodeReady", "Node.js 就绪:{{p}}", { p: env.node }), "done");
-      let s = await dshCtl("status");
+      const nodeHow = env.src ? ` (${env.src.replace(/^https?:\/\//, "").split("/")[0]}, ${env.secs}s)` : "";
+      push("install-docker", tr("dsh.nodeReady", "Node.js 就绪:{{p}}", { p: env.node }) + nodeHow, "done");
+      let s = await dshCtl("status"), instHow = "";
       if (s.error) { fail(tr("dsh.ctlFailed", "控制脚本无法运行:{{why}}", { why: s.error + (s.detail ? " · " + s.detail : "") })); return; }
       if (!s.installed || opts.reinstall) {
         const label = `${DSH_PKG}@${DSH_VERSION}`;
@@ -3329,10 +3472,11 @@ function DshCard() {
           : tr("dsh.installing", "npm 安装 {{pkg}}…(视网络 1~3 分钟)", { pkg: label }));
         const r = await dshCtl("install");
         stopHb();
+        if (r.ok && r.registry) instHow = ` (${r.registry.replace(/^https?:\/\//, "")}, ${r.secs}s)`;
         if (!r.ok) { fail(tr("dsh.installFailed", "安装失败:{{why}}", { why: [r.error, r.tail, r.detail].filter(Boolean).join(" · ").split(/\r?\n/).filter(Boolean).slice(-3).join(" · ") })); return; }
         s = await dshCtl("status");
       }
-      push("image", tr("dsh.installed", "已安装 v{{v}}", { v: s.version }), "done");
+      push("image", tr("dsh.installed", "已安装 v{{v}}", { v: s.version }) + (instHow || ""), "done");
       push("container", tr("dsh.starting", "启动 dsh web(:{{port}})…", { port: DSH_PORT }));
       const r2 = await dshCtl("start");
       if (!r2.ok) {
