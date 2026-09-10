@@ -2068,6 +2068,8 @@ electronApp.whenReady().then(async () => {
     mainSession
       .setProxy({
         proxyRules: config.proxy,
+        // localhost bypass:到本机 cicy-code / 终端 ws 的连接不能被代理拦
+        proxyBypassRules: "127.0.0.1,localhost,[::1]",
       })
       .then(() => {
         log.info(`[Proxy] persist:main partition 已设置代理: ${config.proxy}`);
@@ -2226,18 +2228,31 @@ process.on("SIGINT", () => {
   electronApp.quit();
 });
 
-// 为所有 session（包括 webview partition）设置代理
+// 给 session 设代理 —— 但**默认会话(profile 0)永远直连**。
+//
+// 以前这里对「所有 session」一视同仁地套 --proxy,默认会话也被代理了。而首页、
+// CiCy Hub 登录、自动更新全都跑在默认会话上,于是代理一挂,整台机器对外彻底断联:
+// 登录报 net::ERR_PROXY_CONNECTION_FAILED、机器掉出车队、连新版本都拉不到 ——
+// 变成「只能有人到机器跟前才能救」(实测 xs-master:mihomo 没起来就这样)。
+// window-utils 里本来就写明 profile 0 强制直连,但那段只在建窗口时对特定会话生效,
+// 盖不住这个全局钩子。
+//
+// 注意:Electron 的 Session 读不到 .partition(恒为 undefined,见 window-utils 的说明),
+// 所以只能拿对象和 defaultSession 比,不能靠 partition 字符串判断。
 electronApp.on("session-created", (session) => {
-  if (config.proxy) {
+  if (!config.proxy) return;
+  const { session: sessions } = require("electron");
+  if (session === sessions.defaultSession) {
     session
-      .setProxy({
-        proxyRules: config.proxy,
-      })
-      .then(() => {
-        log.info(`[Proxy] Session ${session.partition || "default"} 已设置代理: ${config.proxy}`);
-      })
-      .catch((err) => {
-        log.error(`[Proxy] Session ${session.partition || "default"} 设置代理失败:`, err);
-      });
+      .setProxy({ mode: "direct" })
+      .then(() => log.info("[Proxy] 默认会话(profile 0)强制直连,不套 --proxy"))
+      .catch((err) => log.error("[Proxy] 默认会话直连设置失败:", err));
+    return;
   }
+  // 其余会话走代理,但 localhost 一律 bypass —— 到本机 cicy-code / gotty 终端的连接
+  // 不能被代理拦(以前漏了 bypass,终端白板就是这么来的)。
+  session
+    .setProxy({ proxyRules: config.proxy, proxyBypassRules: "127.0.0.1,localhost,[::1]" })
+    .then(() => log.info(`[Proxy] 会话已设置代理: ${config.proxy}(bypass localhost)`))
+    .catch((err) => log.error("[Proxy] 会话设置代理失败:", err));
 });
