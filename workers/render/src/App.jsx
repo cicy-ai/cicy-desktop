@@ -1165,7 +1165,8 @@ export default function App() {
               </button>
             ))}
           </div>
-          <DesktopIdBadge />
+          {/* DesktopIdBadge 已移入用户头像下拉菜单(受信任站点上面)。此处仅留占位撑开右侧布局。 */}
+          <span style={{ marginLeft: "auto" }} aria-hidden />
           {/* 行尾:新加团队 → 直接去云端团队中心添加(私有云)。自定义入口已删。 */}
           <div data-id="AddTeamWrap" style={{ position: "relative" }}>
             <button
@@ -2430,6 +2431,15 @@ function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin, hub }
                 {myTeam}
               </div>
             )}
+            {(() => { let sid = ""; try { sid = getShortId(); } catch {} return sid ? (
+              <div data-id="UserChip-machine-id" title={tr("deviceId.hint", "本机 ID")}
+                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+                         padding: "6px 14px 8px", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
+                <span style={{ opacity: .5, fontSize: 12 }}>ID</span>
+                <span style={{ fontSize: 16, fontWeight: 700, letterSpacing: 1.5 }}>{sid}</span>
+              </div>
+            ) : null; })()}
+            <div className="user-chip__menu-sep" aria-hidden />
             <button type="button" data-id="UserChip-trusted-sites" className="user-chip__menu-item" onClick={() => { setOpen(false); setTrustOpen(true); }}>
               {tr("trustedSites.menu", "受信任站点")}
             </button>
