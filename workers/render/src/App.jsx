@@ -1243,7 +1243,7 @@ export default function App() {
                 : (hub.error ? hubErrText(hub.error) : tr("cicyHub.empty", "这个账号下还没有 cicy-code 实例。在 cicy-code 的「CiCy 账号」里用同一个邮箱登录 Hub 即可出现。"))}
             </div>
           )}
-          {!firstLoading && showHub && hub.loggedIn && (hub.instances || []).map((it) => (
+          {!firstLoading && showHub && hub.loggedIn && (hub.instances || []).filter((it) => it.reachable || it.online).map((it) => (
             <HubInstanceCard key={"hub:" + it.id} inst={it} onOpen={(next, title) => hub.open(it, next, title)} />
           ))}
           {!firstLoading && showLocal && localList.map((t) => (
@@ -1269,6 +1269,8 @@ export default function App() {
               onRefresh={fetchLocalTeams}
             />
           )}
+          {/* 首页第二块:DeepSeek Harness(开源 Agent 框架),homepage 自装自启,和 cicy-code 卡并列 */}
+          {!firstLoading && showLocal && <DshCard />}
           {!firstLoading && showCustom && customList.map((t) => (
             <LocalTeamCard key={"custom:" + t.id} team={t} cloudCode={cloudCodeFor(t.cloud_team_id)} onOpen={() => openLocalTeam(t.id)} onRename={renameLocalTeam} onRefresh={fetchLocalTeams} />
           ))}
@@ -2833,11 +2835,12 @@ let dockerDrawerLogSeq = 0;
 let dockerDrawerState = null; // null = closed
 function emitDockerDrawer() { dockerDrawerListeners.forEach((l) => l(dockerDrawerState)); }
 const dockerDrawer = {
-  open({ onRetry, kind, source } = {}) {
+  open({ onRetry, kind, source, title, sub } = {}) {
     // kind: "install"(默认,安装/升级,带 4 段 stepper)| "open"(打开失败报告,纯日志+hint,无 stepper)
     // source: "op"(默认,某个 run* 函数开的,它自己订阅 push)| "auto"(全局兜底监听开的,
     //   用于程序触发/renderer 重连后还在跑的 bootstrap —— 全局监听负责 push,保证后台不静默)
-    dockerDrawerState = { status: "running", phase: "install-docker", kind: kind || "install", source: source || "op", logs: [], bars: {}, minimized: false, onRetry: onRetry || null, lastAt: Date.now() };
+    // title / sub: 可选,非 Docker 的安装流程(如 DeepSeek Harness 卡)复用同一个抽屉时覆盖标题/副标题。
+    dockerDrawerState = { status: "running", phase: "install-docker", kind: kind || "install", source: source || "op", title: title || "", sub: sub || "", logs: [], bars: {}, minimized: false, onRetry: onRetry || null, lastAt: Date.now() };
     emitDockerDrawer();
   },
   minimize() { if (dockerDrawerState) { dockerDrawerState = { ...dockerDrawerState, minimized: true }; emitDockerDrawer(); } },
@@ -2928,7 +2931,8 @@ function DockerInstallDrawerHost() {
   const isOpen = st.kind === "open"; // 打开失败报告:无安装 stepper、标题/失败标签用「打开」
   const phaseIdx = DOCKER_PHASES.findIndex(([k]) => k === st.phase);
   const dlBars = isOpen ? [] : ["install-docker", "image"].filter((k) => st.bars?.[k]);
-  const drawerTitle = isOpen ? tr("docker.openTitle", "打开 Docker 团队") : tr("docker.setupTitle", "安装 Docker cicy-code");
+  const drawerTitle = st.title || (isOpen ? tr("docker.openTitle", "打开 Docker 团队") : tr("docker.setupTitle", "安装 Docker cicy-code"));
+  const drawerSub = st.sub || "127.0.0.1:8008";
   // Minimized → a floating restore chip (op keeps running in the background).
   if (st.minimized) {
     const pcts = dlBars.map((k) => st.bars[k]?.progress).filter(Number.isFinite);
@@ -2950,7 +2954,7 @@ function DockerInstallDrawerHost() {
             </span>
             <div>
               <div className="drawer__h">{drawerTitle}</div>
-              <div className="drawer__sub">127.0.0.1:8008</div>
+              <div className="drawer__sub">{drawerSub}</div>
             </div>
           </div>
           <div className="drawer__headbtns">
@@ -3028,6 +3032,476 @@ function DockerInstallDrawerHost() {
   );
 }
 
+// ---------------------------------------------------------------------------
+// DeepSeek Harness (dsh) card —— 首页第二块:开源 Agent 框架,模型可换,和 cicy-code 卡并列。
+//
+// 全部只靠 homepage 完成(不改 desktop):走首页 preload 暴露的无门禁 `electronRPC`
+// (exec_shell / exec_node_file),在本机 npm 全局安装锁定版本的 dsh,再以 detached 子进程
+// 拉起 `dsh web --no-open --port 3080`。首页每次打开(= desktop 启动)时:
+//   未装 → 自动安装 + 启动(抽屉里看进度;失败后 6 小时内不再自动重试,可手动点卡片重试)
+//   已装未跑 → 静默启动
+//   在跑 → 「打开」
+// dsh web 是 token 门禁的:进程启动时把 `?token=…` 打到 stdout,我们把 stdout 落到
+// ~/cicy-ai/logs/dsh.log,「打开」时从日志取最新 token 拼 URL(换到 cookie 后 URL 自动变干净)。
+// 版本必须锁死:dsh 还在 developer preview,官方明说会有破坏性变更。
+const DSH_PKG = "@deepseek-ai/dsh";
+const DSH_VERSION = "0.1.2-rc.1";
+const DSH_PORT = 3080;
+const DSH_BLUE = "#4d6bfe";
+const DSH_NODE_VERSION = "v24.19.0";        // Windows 没装 Node 时自动下载的便携版(zip 解压到 %LOCALAPPDATA%\cicy-node,免管理员)
+const DSH_AUTO_KEY = "dsh.auto";            // localStorage:"off" = 关闭开机自装/自启
+const DSH_FAIL_BACKOFF_MS = 6 * 60 * 60 * 1000;
+// 自动安装失败的退避标记按首页发布戳分桶:发新版首页后自动再试一次,不用干等 6 小时。
+const dshFailKey = () => `dsh.installFailAt.${typeof BUILD_STAMP === "string" ? BUILD_STAMP : "dev"}`;
+
+// ---- 第 0 步:找 Node(exec_shell,不依赖 PATH)。矩阵机的 Electron 进程 PATH 里没有 node,
+// 甚至机器上根本没装 Node,所以一切都用绝对路径,Windows 缺 Node 就下载便携版。
+// PowerShell 用 -EncodedCommand 传脚本,避免 cmd 引号地狱;脚本里不能出现 "${"(JS 模板会吃掉)。
+function dshNodePs1(installNode) {
+  return `$ErrorActionPreference = 'SilentlyContinue'; $ProgressPreference = 'SilentlyContinue'
+$pf86 = [Environment]::GetEnvironmentVariable('ProgramFiles(x86)')
+$cands = @("$env:LOCALAPPDATA\\cicy-node\\node.exe", "$env:ProgramFiles\\nodejs\\node.exe", "$pf86\\nodejs\\node.exe", "$env:LOCALAPPDATA\\Programs\\nodejs\\node.exe", "$env:APPDATA\\nvm\\current\\node.exe")
+foreach ($c in $cands) { if (Test-Path $c) { $v = & $c --version 2>$null; if ($v -match '^v(\\d+)\\.' -and [int]$matches[1] -ge 22) { Write-Output "NODE=$c"; Write-Output "HOME=$env:USERPROFILE"; exit 0 } } }
+Write-Output "HOME=$env:USERPROFILE"
+if (${installNode ? 1 : 0} -ne 1) { Write-Output 'NODE='; exit 0 }
+$ver = '${DSH_NODE_VERSION}'; $name = "node-$ver-win-x64"
+$dir = "$env:LOCALAPPDATA\\cicy-node"; $tmp = "$env:TEMP\\cicy-node-dl"; $zip = "$tmp\\$name.zip"
+New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+$ok = $false
+foreach ($u in @("https://npmmirror.com/mirrors/node/$ver/$name.zip", "https://nodejs.org/dist/$ver/$name.zip")) {
+  try { Remove-Item $zip -Force -ErrorAction SilentlyContinue; Invoke-WebRequest -Uri $u -OutFile $zip -UseBasicParsing -TimeoutSec 900; if ((Get-Item $zip).Length -gt 10000000) { $ok = $true; break } } catch { }
+}
+if (-not $ok) { Write-Output 'ERR=download'; exit 1 }
+Remove-Item "$tmp\\$name" -Recurse -Force -ErrorAction SilentlyContinue
+Expand-Archive -Path $zip -DestinationPath $tmp -Force
+if (Test-Path $dir) { Remove-Item $dir -Recurse -Force }
+Move-Item "$tmp\\$name" $dir
+Remove-Item $zip -Force -ErrorAction SilentlyContinue
+if (Test-Path "$dir\\node.exe") { Write-Output "NODE=$dir\\node.exe"; exit 0 } else { Write-Output 'ERR=extract'; exit 1 }
+`;
+}
+const DSH_NODE_SH = `for p in /usr/local/bin/node /opt/homebrew/bin/node /usr/bin/node "$HOME"/.nvm/versions/node/*/bin/node "$HOME"/.volta/bin/node; do if [ -x "$p" ]; then v=$("$p" --version 2>/dev/null); case "$v" in v2[2-9].*|v[3-9][0-9].*) echo "NODE=$p"; break;; esac; fi; done; echo "HOME=$HOME"`;
+function psEncoded(script) {
+  let bytes = "";
+  for (let i = 0; i < script.length; i++) { const c = script.charCodeAt(i); bytes += String.fromCharCode(c & 0xff, c >> 8); }
+  return btoa(bytes);
+}
+
+// 在本机 node 里跑的控制脚本,写到 ~/cicy-ai/db/dsh-ctl.js,用绝对路径的 node 执行:
+//   node dsh-ctl.js <status|install|start|stop|open> <npm 绝对路径>
+// 所有平台同一份,只打一行 JSON 到 stdout。
+const DSH_CTL_SCRIPT = String.raw`
+const fs = require("fs"), path = require("path"), os = require("os"), cp = require("child_process");
+const OP = process.argv[2] || "status", NPM = process.argv[3] || "npm";
+const PORT = ${DSH_PORT}, PKG = "${DSH_PKG}", VER = "${DSH_VERSION}";
+const home = os.homedir();
+const dbDir = path.join(home, "cicy-ai", "db"), logDir = path.join(home, "cicy-ai", "logs");
+for (const d of [dbDir, logDir]) { try { fs.mkdirSync(d, { recursive: true }); } catch {} }
+const logFile = path.join(logDir, "dsh.log"), pidFile = path.join(dbDir, "dsh.pid"), rootCache = path.join(dbDir, "dsh-npm-root.txt");
+const lockFile = path.join(dbDir, "dsh-install.lock"), okMarker = path.join(dbDir, "dsh-ok-" + VER + ".txt");
+// 子进程 PATH:node 所在目录 + System32(矩阵机 Electron 的 PATH 里没有 node)
+process.env.PATH = [path.dirname(process.execPath), process.platform === "win32" ? path.join(process.env.SystemRoot || "C:\\Windows", "System32") : "/usr/local/bin", process.env.PATH || ""].join(path.delimiter);
+const out = (o) => { process.stdout.write(JSON.stringify(o)); };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const q = (s) => '"' + s + '"';
+function run(cmd, opts) { return cp.execSync(cmd, Object.assign({ encoding: "utf8", windowsHide: true, timeout: 60000, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 10 * 1024 * 1024 }, opts || {})); }
+function npmRoot() { try { return run(q(NPM) + " root -g").trim().split(/\r?\n/).pop(); } catch { return ""; } }
+function pidAlive(n) { if (!n) return false; try { process.kill(n, 0); return true; } catch { return false; } }
+function readPidFile(f) { try { const n = Number(fs.readFileSync(f, "utf8").trim()); return n > 0 ? n : 0; } catch { return 0; } }
+// 已装 = 目录在 + bin 在 + 真能跑(--version 对得上;结果记 marker,以后不再每次 spawn)。
+// 并发安装/下到一半会留下缺文件的目录,只看 package.json 会把坏包当好包(Mac 上实测)。
+function pkgAt(root) {
+  if (!root) return null;
+  const dir = path.join(root, "@deepseek-ai", "dsh"), bin = path.join(dir, "lib", "bin.js");
+  let v = ""; try { v = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8")).version; } catch { return null; }
+  if (!fs.existsSync(bin)) return { root, dir, bin, version: v, broken: true };
+  if (v === VER && fs.existsSync(okMarker)) return { root, dir, bin, version: v };
+  try {
+    const got = run(q(process.execPath) + " " + q(bin) + " --version", { timeout: 90000 }).trim();
+    if (got && got.split(/\r?\n/).pop().trim() === v) { if (v === VER) { try { fs.writeFileSync(okMarker, String(Date.now())); } catch {} } return { root, dir, bin, version: v }; }
+  } catch {}
+  return { root, dir, bin, version: v, broken: true };
+}
+function pkgInfo() {
+  let cached = ""; try { cached = fs.readFileSync(rootCache, "utf8").trim(); } catch {}
+  let p = pkgAt(cached);
+  if (!p) { const root = npmRoot(); p = pkgAt(root); if (root) { try { fs.writeFileSync(rootCache, root); } catch {} } }
+  return p;
+}
+function lastToken() { try { const s = fs.readFileSync(logFile, "utf8"); const all = [...s.matchAll(/[?&]token=([A-Za-z0-9_-]+)/g)]; return all.length ? all[all.length - 1][1] : ""; } catch { return ""; } }
+// 端口探测:up = 有东西在听;dsh = 确认是 dsh web(未登录 401 + "dsh web authentication required",登录后 index 带 __DSH_BOOT__)
+async function probe() {
+  try {
+    const r = await fetch("http://127.0.0.1:" + PORT + "/", { signal: AbortSignal.timeout(2500), redirect: "manual" });
+    let body = ""; try { body = (await r.text()).slice(0, 4000); } catch {}
+    const dsh = /dsh web/i.test(body) || /__DSH_BOOT__/.test(body) || /dsh-auth-/.test(r.headers.get("set-cookie") || "");
+    return { up: true, dsh };
+  } catch { return { up: false, dsh: false }; }
+}
+async function httpUp() { return (await probe()).dsh; }
+function installing() { return pidAlive(readPidFile(lockFile)); }
+async function status() {
+  const p = pkgInfo(); const pid = readPidFile(pidFile); const pr = await probe();
+  return { ok: true, installed: !!p && !p.broken, broken: !!(p && p.broken), version: p ? p.version : null, installing: installing(), running: pr.dsh, occupied: pr.up && !pr.dsh, pid, pidAlive: pidAlive(pid), hasToken: !!lastToken(), node: process.version, logFile };
+}
+async function install() {
+  // 安装锁:首页刷新/多开会再次触发安装,两个 npm -g 同时写全局目录会把包写坏。有锁就等它完。
+  if (installing()) {
+    for (let i = 0; i < 600 && installing(); i++) await sleep(2000);
+    const p = pkgInfo(); return p && !p.broken ? { ok: true, version: p.version, waited: true } : { ok: false, error: "install_failed_elsewhere" };
+  }
+  try { fs.writeFileSync(lockFile, String(process.pid)); } catch {}
+  try {
+    try { fs.unlinkSync(okMarker); } catch {}
+    const root = npmRoot();
+    if (!root) return { ok: false, error: "npm_unavailable", tail: NPM };
+    const scope = path.join(root, "@deepseek-ai");
+    // 清掉坏包和 npm 中断留下的 .dsh-xxxx 临时目录,让 npm 干净地重装
+    try { for (const e of fs.readdirSync(scope)) { if (e === "dsh" || /^\.dsh-/.test(e)) fs.rmSync(path.join(scope, e), { recursive: true, force: true }); } } catch {}
+    // 先走 npmmirror(矩阵机在国内,registry.npmjs.org 直连基本卡死),不行再走官方源。
+    let outp = "", lastErr = "";
+    for (const reg of ["https://registry.npmmirror.com", "https://registry.npmjs.org"]) {
+      try { outp = run(q(NPM) + " i -g " + PKG + "@" + VER + " --no-audit --no-fund --loglevel=error --fetch-timeout=120000 --fetch-retries=2 --registry=" + reg, { timeout: 12 * 60 * 1000 }); lastErr = ""; break; }
+      catch (e) { lastErr = String((e.stderr || "") + (e.stdout || "") + (e.message || "")).trim().slice(-600); }
+    }
+    if (lastErr) return { ok: false, error: "npm_install_failed", tail: lastErr };
+    try { fs.writeFileSync(rootCache, root); } catch {}
+    const p = pkgAt(root);
+    if (!p || p.broken) return { ok: false, error: "install_incomplete", tail: (outp || "").slice(-300) };
+    return { ok: true, version: p.version };
+  } finally { try { fs.unlinkSync(lockFile); } catch {} }
+}
+async function start() {
+  const p = pkgInfo(); if (!p || p.broken) return { ok: false, error: "not_installed" };
+  const pr = await probe();
+  if (pr.dsh) return { ok: true, already: true, token: lastToken() };
+  if (pr.up) return { ok: false, error: "port_in_use", tail: "127.0.0.1:" + PORT + " is used by another program" };
+  const fd = fs.openSync(logFile, "w");
+  const child = cp.spawn(process.execPath, [p.bin, "web", "--no-open", "--port", String(PORT)], { detached: true, windowsHide: true, stdio: ["ignore", fd, fd], cwd: home, env: Object.assign({}, process.env, { NO_COLOR: "1" }) });
+  child.unref(); try { fs.closeSync(fd); } catch {}
+  try { fs.writeFileSync(pidFile, String(child.pid)); } catch {}
+  for (let i = 0; i < 60; i++) { await sleep(500); if (await httpUp()) return { ok: true, pid: child.pid, token: lastToken() }; if (!pidAlive(child.pid)) break; }
+  let tail = ""; try { tail = fs.readFileSync(logFile, "utf8").slice(-1500); } catch {}
+  return { ok: false, error: "start_failed", pid: child.pid, tail };
+}
+async function stop() {
+  const pid = readPidFile(pidFile); let killed = false;
+  if (pid && pidAlive(pid)) { try { process.kill(pid); killed = true; } catch {} }
+  if (!killed) {
+    // pid 文件丢了/不是我们拉起的:按端口找(powershell 用绝对路径,别指望 PATH)
+    try {
+      if (process.platform === "win32") run(q(path.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe")) + ' -NoProfile -Command "Get-NetTCPConnection -LocalPort ' + PORT + ' -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }"', { timeout: 20000 });
+      else run("lsof -ti tcp:" + PORT + " | xargs kill 2>/dev/null", { timeout: 20000 });
+      killed = true;
+    } catch {}
+  }
+  for (let i = 0; i < 10; i++) { if (!(await httpUp())) break; await sleep(500); }
+  try { fs.unlinkSync(pidFile); } catch {}
+  return { ok: true, killed, running: await httpUp() };
+}
+async function open() {
+  const up = await httpUp(); const t = lastToken();
+  return { ok: up, url: "http://127.0.0.1:" + PORT + "/" + (t ? "?token=" + t : "") };
+}
+(async () => {
+  try { out(OP === "install" ? await install() : OP === "start" ? await start() : OP === "stop" ? await stop() : OP === "open" ? await open() : await status()); }
+  catch (e) { out({ ok: false, error: String((e && e.message) || e) }); }
+})();
+`;
+
+// 解析工具层标准返回 { content:[{text}], isError }:text 是 JSON {stdout, stderr, exitCode}。
+function parseRpcText(res) {
+  if (!res) return { ok: false, stdout: "", stderr: "no response", code: 1 };
+  const txt = (res.content || []).map((c) => c.text).filter(Boolean).join("\n");
+  let j = null; try { j = JSON.parse(txt); } catch {}
+  if (!j || typeof j !== "object") return { ok: !res.isError, stdout: txt, stderr: "", code: res.isError ? 1 : 0 };
+  const code = Number(j.exitCode ?? (res.isError ? 1 : 0));
+  return { ok: !res.isError && code === 0, stdout: j.stdout || "", stderr: j.stderr || "", code };
+}
+async function dshShell(command) { return parseRpcText(await window.electronRPC?.("exec_shell", { command })); }
+const dshIsWin = () => (window.cicy?.platform || "") === "win32";
+// 找 node/npm/home,结果按页面缓存。installNode=true 时 Windows 缺 Node 会当场下载便携版(慢,只在安装流程里用)。
+let _dshEnv = null;
+async function dshEnv({ installNode = false } = {}) {
+  if (_dshEnv && _dshEnv.node) return _dshEnv;
+  const win = dshIsWin();
+  const cmd = win
+    ? `"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${psEncoded(dshNodePs1(installNode))}`
+    : DSH_NODE_SH;
+  const r = await dshShell(cmd);
+  const text = (r.stdout || "") + "\n" + (r.stderr || "");
+  const node = (text.match(/^NODE=(.+)$/m) || [])[1]?.trim() || "";
+  const home = (text.match(/^HOME=(.+)$/m) || [])[1]?.trim() || "";
+  const err = (text.match(/^ERR=(.+)$/m) || [])[1]?.trim() || "";
+  if (!node) return { node: "", home, error: err || (r.stderr || r.stdout || "").trim().slice(-300) };
+  const dir = node.replace(/[\\/][^\\/]+$/, "");
+  const npm = win ? `${dir}\\npm.cmd` : `${dir}/npm`;
+  const ctl = win ? `${home}\\cicy-ai\\db\\dsh-ctl.js` : `${home}/cicy-ai/db/dsh-ctl.js`;
+  _dshEnv = { node, npm, home, ctl, written: false };
+  return _dshEnv;
+}
+async function dshCtl(op, opts = {}) {
+  const env = await dshEnv(opts);
+  if (!env.node) return { ok: false, error: "no_node", detail: env.error || "" };
+  if (!env.written) {
+    const w = parseRpcText(await window.electronRPC?.("file_write", { path: env.ctl, content: DSH_CTL_SCRIPT }));
+    if (!w.ok) return { ok: false, error: "ctl_write_failed", detail: w.stderr || w.stdout };
+    env.written = true;
+  }
+  const r = await dshShell(`"${env.node}" "${env.ctl}" ${op} "${env.npm}"`);
+  const m = String(r.stdout || "").trim().match(/\{[\s\S]*\}$/);
+  if (m) { try { return JSON.parse(m[0]); } catch {} }
+  return { ok: false, error: "ctl_no_output", detail: (r.stderr || r.stdout || "").trim().slice(-400) };
+}
+function DshIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M4 17c3.5 0 4.5-3 8-3s4.5 3 8 3" />
+      <path d="M4 12c3.5 0 4.5-3 8-3s4.5 3 8 3" />
+      <path d="M4 7c3.5 0 4.5-3 8-3s4.5 3 8 3" />
+    </svg>
+  );
+}
+
+function DshCard() {
+  const [st, setSt] = useState(null);       // dshCtl("status") 结果;null = 还没探过
+  const [busy, setBusy] = useState("");     // "" | install | start | stop | open
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
+  const [auto, setAuto] = useState(() => { try { return localStorage.getItem(DSH_AUTO_KEY) !== "off"; } catch { return true; } });
+  const kebabRef = useRef(null);
+  const menuRef = useRef(null);
+  const autoRan = useRef(false);
+  const busyRef = useRef("");
+  useEffect(() => { busyRef.current = busy; }, [busy]);
+  const MENU_W = 184;
+
+  const refresh = useCallback(async () => {
+    try { const s = await dshCtl("status"); setSt(s); return s; }
+    catch (e) { console.warn("[DshCard] status", e); return null; }
+  }, []);
+  useEffect(() => {
+    refresh();
+    const id = setInterval(() => { if (!busyRef.current) refresh(); }, 20000);
+    return () => clearInterval(id);
+  }, [refresh]);
+
+  // 安装(或重装)+ 启动:全程走 Docker 同款抽屉(标题/副标题换成 dsh 的)。
+  // 四段:准备环境(找/装 Node)→ 下载运行环境(npm 装 dsh)→ 启动服务(dsh web)→ 完成
+  const runSetup = useCallback(async (opts = {}) => {
+    if (busyRef.current) return;
+    setBusy("install");
+    dockerDrawer.open({ kind: "dsh", title: tr("dsh.setupTitle", "安装 DeepSeek Harness"), sub: `127.0.0.1:${DSH_PORT}`, onRetry: () => runSetup(opts) });
+    const push = (phase, message, status) => dockerDrawer.push({ phase, message, status: status || "running" });
+    const fail = (message) => { try { localStorage.setItem(dshFailKey(), String(Date.now())); } catch {} dockerDrawer.finish({ ok: false, message }); };
+    let hb = null;
+    // 长命令期间没有进度事件;定时 push 同一条消息只刷新 lastAt(日志去重不会重复打行)。
+    const heartbeat = (phase, msg) => { push(phase, msg); hb = setInterval(() => push(phase, msg), 10000); };
+    const stopHb = () => { if (hb) { clearInterval(hb); hb = null; } };
+    try {
+      push("install-docker", tr("dsh.checkNode", "检查 Node.js…"));
+      let env = await dshEnv();
+      if (!env.node) {
+        if (!dshIsWin()) { fail(tr("dsh.needNode", "需要 Node.js 22+,请先安装:{{url}}", { url: "https://nodejs.org/en/download" })); return; }
+        heartbeat("install-docker", tr("dsh.installingNode", "这台机器没有 Node.js,下载便携版 {{v}}(约 37MB,免管理员)…", { v: DSH_NODE_VERSION }));
+        env = await dshEnv({ installNode: true });
+        stopHb();
+        if (!env.node) { fail(tr("dsh.nodeFailed", "Node.js 便携版安装失败:{{why}}", { why: env.error || "download" })); return; }
+      }
+      push("install-docker", tr("dsh.nodeReady", "Node.js 就绪:{{p}}", { p: env.node }), "done");
+      let s = await dshCtl("status");
+      if (s.error) { fail(tr("dsh.ctlFailed", "控制脚本无法运行:{{why}}", { why: s.error + (s.detail ? " · " + s.detail : "") })); return; }
+      if (!s.installed || opts.reinstall) {
+        const label = `${DSH_PKG}@${DSH_VERSION}`;
+        heartbeat("image", s.installing
+          ? tr("dsh.installingElsewhere", "另一个安装进程正在进行,等待它完成…")
+          : tr("dsh.installing", "npm 安装 {{pkg}}…(视网络 1~3 分钟)", { pkg: label }));
+        const r = await dshCtl("install");
+        stopHb();
+        if (!r.ok) { fail(tr("dsh.installFailed", "安装失败:{{why}}", { why: [r.error, r.tail, r.detail].filter(Boolean).join(" · ").split(/\r?\n/).filter(Boolean).slice(-3).join(" · ") })); return; }
+        s = await dshCtl("status");
+      }
+      push("image", tr("dsh.installed", "已安装 v{{v}}", { v: s.version }), "done");
+      push("container", tr("dsh.starting", "启动 dsh web(:{{port}})…", { port: DSH_PORT }));
+      const r2 = await dshCtl("start");
+      if (!r2.ok) {
+        const tail = String(r2.tail || "").trim().split(/\r?\n/).filter(Boolean).slice(-2).join(" · ");
+        fail(tr("dsh.startFailed", "启动失败:{{why}}", { why: tail || r2.error || "start_failed" }));
+        return;
+      }
+      try { localStorage.removeItem(dshFailKey()); } catch {}
+      dockerDrawer.finish({ ok: true, message: tr("dsh.ready", "DeepSeek Harness 已就绪") });
+    } catch (e) {
+      dockerDrawer.finish({ ok: false, message: e.message });
+    } finally {
+      stopHb();
+      setBusy(""); refresh();
+    }
+  }, [refresh]);
+
+  const startSilent = useCallback(async () => {
+    if (busyRef.current) return;
+    setBusy("start");
+    try {
+      const r = await dshCtl("start");
+      if (!r.ok) toast.show({ id: "dsh-op", status: "error", ttl: 6000, message: tr("dsh.startFailed", "启动失败:{{why}}", { why: r.error || "start_failed" }) });
+    } catch (e) { toast.show({ id: "dsh-op", status: "error", ttl: 6000, message: e.message }); }
+    finally { setBusy(""); refresh(); }
+  }, [refresh]);
+
+  // 开机自装/自启:首页每次加载只跑一次(首次 status 回来时决定)。
+  useEffect(() => {
+    if (autoRan.current || !st) return;
+    if (st.error || st.installing) return;   // 探不到 / 别的页面正在装 → 下轮 status 再决定
+    autoRan.current = true;
+    if (!auto || st.running) return;
+    if (st.installed) { startSilent(); return; }
+    let failAt = 0; try { failAt = Number(localStorage.getItem(dshFailKey()) || 0); } catch {}
+    if (Date.now() - failAt < DSH_FAIL_BACKOFF_MS) return;   // 这版首页上刚自动装失败过,别每次开机都重来
+    runSetup();
+  }, [st, auto, runSetup, startSilent]);
+
+  const runOp = async (kind, fn, okMsg) => {
+    if (busyRef.current) return;
+    setMenuOpen(false); setBusy(kind);
+    try {
+      const r = await fn();
+      if (r && r.ok === false) toast.show({ id: "dsh-op", status: "error", ttl: 6000, message: r.error || tr("docker.opFailed", "操作失败") });
+      else if (okMsg) toast.show({ id: "dsh-op", status: "ok", ttl: 3000, message: okMsg });
+    } catch (e) { toast.show({ id: "dsh-op", status: "error", ttl: 6000, message: e.message }); }
+    finally { setBusy(""); refresh(); }
+  };
+
+  const openUi = async () => {
+    if (busyRef.current) return;
+    setBusy("open");
+    try {
+      const r = await dshCtl("open");
+      if (!r.ok) { toast.show({ id: "dsh-open", status: "error", ttl: 6000, message: tr("dsh.notRunning", "dsh 还没运行,先点「启动」") }); return; }
+      await window.cicy?.tabs?.open?.(r.url, "DeepSeek Harness", "", true);
+    } catch (e) { toast.show({ id: "dsh-open", status: "error", ttl: 6000, message: e.message }); }
+    finally { setBusy(""); }
+  };
+
+  const toggleAuto = () => {
+    const next = !auto; setAuto(next); setMenuOpen(false);
+    try { if (next) localStorage.removeItem(DSH_AUTO_KEY); else localStorage.setItem(DSH_AUTO_KEY, "off"); } catch {}
+  };
+
+  const toggleMenu = (e) => {
+    e.stopPropagation();
+    if (!menuOpen && kebabRef.current) {
+      const r = kebabRef.current.getBoundingClientRect();
+      const left = Math.max(8, Math.min(r.right - MENU_W, window.innerWidth - MENU_W - 8));
+      setMenuPos({ top: Math.round(r.bottom + 4), left: Math.round(left) });
+    }
+    setMenuOpen((v) => !v);
+  };
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDoc = (e) => {
+      if (kebabRef.current?.contains(e.target) || menuRef.current?.contains(e.target)) return;
+      setMenuOpen(false);
+    };
+    const onKey = (e) => { if (e.key === "Escape") setMenuOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
+  }, [menuOpen]);
+
+  if (typeof window !== "undefined" && !window.electronRPC) return null;   // 非桌面壳里没有本机执行桥,不展示
+
+  const running = !!st?.running;
+  const installed = !!st?.installed;
+  const isBusy = !!busy;
+  const tone = running ? "ok" : installed ? "warn" : "off";
+  const ctaLabel = busy === "open" ? tr("docker.opening", "打开中…")
+    : busy === "install" ? tr("dsh.installingShort", "安装中…")
+    : busy === "start" ? tr("dsh.startingShort", "启动中…")
+    : isBusy ? tr("docker.working", "处理中…")
+    : !st ? tr("docker.probing", "检测中…")
+    : running ? tr("localTeams.open", "打开")
+    : installed ? tr("docker.start", "启动")
+    : tr("dsh.install", "安装");
+  const onCta = () => {
+    if (isBusy || !st) return;
+    if (running) return openUi();
+    if (installed && !st.error) return startSilent();
+    return runSetup();
+  };
+  const stateText = !st ? ""
+    : st.error ? tr("dsh.stateNoNode", "未就绪:{{why}}", { why: st.error === "no_node" ? tr("dsh.noNodeShort", "没有 Node.js(点「安装」自动装便携版)") : st.error })
+    : st.installing ? tr("dsh.stateInstalling", "另一个安装进程进行中…")
+    : running ? tr("dsh.stateRunning", "运行中")
+    : st.broken ? tr("dsh.stateBroken", "安装不完整(点「安装」修复)")
+    : installed ? tr("dsh.stateStopped", "已安装,未运行")
+    : tr("dsh.stateMissing", "未安装");
+
+  return (
+    <div data-id="DshCard" className={`bcard bcard--dsh${running ? " bcard--online" : ""}`}>
+      <div className="bcard__accent" />
+      <div className="bcard__top">
+        <div className="bcard__pill" style={{ color: DSH_BLUE }}>
+          <span className="bcard__dot" data-tone={tone} />
+          <DshIcon />
+        </div>
+        {installed && (
+          <div className="bcard__menuwrap" onClick={(e) => e.stopPropagation()}>
+            <button type="button" ref={kebabRef} data-id="DshCard-menu-btn" className="bcard__kebab" title={tr("dsh.manage", "管理 DeepSeek Harness")} disabled={isBusy} onClick={toggleMenu}>
+              {isBusy ? <Spinner /> : <KebabIcon />}
+            </button>
+            {menuOpen && createPortal(
+              <div className="bcard__menu bcard__menu--portal" data-id="DshCard-menu" role="menu" ref={menuRef}
+                style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: MENU_W }}
+                onClick={(e) => e.stopPropagation()}>
+                <button type="button" data-id="DshCard-restart" className="bcard__menu-item is-accent"
+                  onClick={() => runOp("start", async () => { await dshCtl("stop"); return dshCtl("start"); }, tr("dsh.restarted", "已重启 dsh"))}>
+                  {tr("dsh.restart", "重启 dsh")}
+                </button>
+                <button type="button" data-id="DshCard-stop" className="bcard__menu-item is-danger"
+                  onClick={() => runOp("stop", () => dshCtl("stop"), tr("dsh.stopped", "已停止 dsh"))}>
+                  {tr("dsh.stop", "停止 dsh")}
+                </button>
+                <button type="button" data-id="DshCard-reload" className="bcard__menu-item"
+                  onClick={(e) => { e.stopPropagation(); setMenuOpen(false); window.cicy?.tabs?.reloadIfOpen?.(`http://127.0.0.1:${DSH_PORT}`, "DeepSeek Harness"); }}>
+                  {tr("docker.reloadWindow", "刷新窗口")}
+                </button>
+                <div className="bcard__menu-sep" role="separator" aria-hidden />
+                <button type="button" data-id="DshCard-auto" className="bcard__menu-item" onClick={toggleAuto}>
+                  {auto ? tr("dsh.autoOn", "✓ 开机自动启动") : tr("dsh.autoOff", "开机自动启动:关")}
+                </button>
+                <button type="button" data-id="DshCard-reinstall" className="bcard__menu-item"
+                  title={tr("dsh.reinstallHint", "重新 npm 安装锁定版本 {{v}} 并重启", { v: DSH_VERSION })}
+                  onClick={() => { setMenuOpen(false); runSetup({ reinstall: true }); }}>
+                  {tr("dsh.reinstall", "重新安装")}
+                </button>
+              </div>,
+              document.body
+            )}
+          </div>
+        )}
+      </div>
+      <div className="bcard__body">
+        <div style={{ height: 28, display: "flex", alignItems: "center", gap: 8 }}>
+          <h3 className="bcard__name" title="DeepSeek Harness" style={{ margin: 0, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>DeepSeek Harness</h3>
+        </div>
+        <div className="bcard__meta">
+          <span className="bcard__chip">dsh</span>
+          <span className="bcard__chip" style={{ marginLeft: 6 }}>127.0.0.1:{DSH_PORT}</span>
+          {st?.version && <span className="bcard__ver" data-id="DshCard-ver" style={{ marginLeft: 8, fontSize: 11, opacity: 0.6 }}>v{st.version}</span>}
+        </div>
+        {stateText && <div data-id="DshCard-state" title={stateText} style={{ marginTop: 6, fontSize: 12, color: running ? "#8b949e" : "#9aa4b2", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{stateText}</div>}
+      </div>
+      <button type="button" className="bcard__cta" data-id="DshCard-cta" disabled={isBusy || !st} onClick={onCta}
+        style={!running ? { background: DSH_BLUE, color: "white" } : undefined}>
+        {isBusy ? <Spinner /> : <ArrowIcon />}
+        <span>{ctaLabel}</span>
+      </button>
+    </div>
+  );
+}
+
 // Docker-版 cicy-code card (Windows only): a SECOND cicy-code instance running
 // in Docker on :8008, alongside the native local daemon (:8008). If Docker
 // Desktop is missing, the install flow downloads its installer to the user's
@@ -3075,7 +3549,9 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
       // 一次 checkStatus 就会把还在跑的抽屉提前收成「完成」,用户点完成关掉、命令却还在跑、
       // 卡片卡在「处理中」(实测 bug)。活跃流式的抽屉 lastAt 是新的,不动它。
       const stale = Date.now() - (dockerDrawerState?.lastAt || 0) > 30000;
-      if (s?.running && dockerDrawerState && dockerDrawerState.status === "running" && dockerDrawerState.kind !== "open" && stale) {
+      // kind 只认 install(缺省):"open" 是失败报告,"dsh" 是 DeepSeek Harness 卡借用的抽屉(npm 安装
+      // 可能 1-2 分钟没进度事件,不能被 Docker 的"已就绪"劫持收掉)。
+      if (s?.running && dockerDrawerState && dockerDrawerState.status === "running" && (dockerDrawerState.kind || "install") === "install" && stale) {
         dockerDrawer.finish({ ok: true, message: "Docker cicy-code 已就绪" });
       }
     } catch (e) { console.warn("[DockerCard]", e); }
