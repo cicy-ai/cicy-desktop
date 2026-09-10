@@ -3309,7 +3309,8 @@ async function start() {
   const child = cp.spawn(process.execPath, [p.bin, "web", "--no-open", "--port", String(PORT)], { detached: true, windowsHide: true, stdio: ["ignore", fd, fd], cwd: home, env: Object.assign({}, process.env, { NO_COLOR: "1" }, savedRegistry() ? { npm_config_registry: savedRegistry() } : {}) });   // dsh 首次运行会用 pnpm 自举 ~/.dsh/profiles,沿用实测最快的源
   child.unref(); try { fs.closeSync(fd); } catch {}
   try { fs.writeFileSync(pidFile, String(child.pid)); } catch {}
-  for (let i = 0; i < 60; i++) { await sleep(500); if (await httpUp()) return { ok: true, pid: child.pid, token: lastToken() }; if (!pidAlive(child.pid)) break; }
+  // dsh web 冷启动在矩阵机上实测常超过 30s(加载 ~200MB 依赖);只要进程还活着就等到 120s,别误报 start_failed
+  for (let i = 0; i < 240; i++) { await sleep(500); if (await httpUp()) return { ok: true, pid: child.pid, token: lastToken() }; if (!pidAlive(child.pid)) break; }
   let tail = ""; try { tail = fs.readFileSync(logFile, "utf8").slice(-1500); } catch {}
   return { ok: false, error: "start_failed", pid: child.pid, tail };
 }
