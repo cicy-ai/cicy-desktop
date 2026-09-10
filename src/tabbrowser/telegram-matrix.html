@@ -125,7 +125,7 @@
   <main>
     <div id="grid-title">
       <div class="left"><span id="mid-batch" class="mid" hidden></span><b>批量登录</b><span id="grid-count"></span></div>
-      <div class="actions"><button class="ghost" id="grid-reload" title="重新加载所有格子">全部重载</button><button class="ghost" id="grid-exit">退出批量</button></div>
+      <div class="actions"><button class="ghost" id="grid-reload" title="重新加载所有格子">全部重载</button><button id="grid-add-profile" title="新建一个独立会话（persist:sandbox-N）">+ 添加 Profile</button></div>
     </div>
     <div id="grid"></div>
     <div id="preview-title">
@@ -365,7 +365,7 @@
       render(); renderPreviewState(); syncPreview();   // 会话留在后台,登录态不丢
     }
     document.getElementById('batch-login').onclick = () => (batchMode ? exitBatch() : enterBatch());
-    document.getElementById('grid-exit').onclick = exitBatch;
+    document.getElementById('grid-add-profile').onclick = () => document.getElementById('add-profile').click();
     document.getElementById('grid-reload').onclick = () => { for (const idx of batch) reloadProfile(idx); };
     new ResizeObserver(() => requestAnimationFrame(syncPreview)).observe(gridEl);
 
