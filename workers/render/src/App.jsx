@@ -311,6 +311,14 @@ const DEFAULT_EMAIL = "limeng9088@gmail.com";
 const withTeamPrefix = (t) => (t && !t.startsWith(TEAM_PREFIX) ? TEAM_PREFIX + t : t || "");
 // 显示/编辑时去掉前缀:存的是 desktop-xs-1009,给人看的是 xs-1009。
 const stripTeamPrefix = (t) => String(t || "").replace(new RegExp("^" + TEAM_PREFIX), "");
+// 机器名行内编辑:显示态(button)和编辑态(input)必须**完全同尺寸**,否则一点进编辑
+// 整行会跳 —— 输入框比按钮多了 1px 边框和左右内边距。所以高度写死、box-sizing 用
+// border-box、按钮也带一条透明边框把那 1px 占掉,两个状态逐像素对齐。
+const TEAM_FIELD_STYLE = {
+  flex: "1 1 0%", minWidth: 0, maxWidth: "100%", font: "inherit", boxSizing: "border-box",
+  height: 22, lineHeight: "20px", padding: "0 6px",
+  borderRadius: 6, border: "1px solid transparent",
+};
 
 // global.json is the main process's file; the page cannot touch it directly.
 // The homepage bridge is the unguarded one, so this is a plain call. There is
@@ -879,14 +887,17 @@ export default function App() {
       setError("auth bridge missing");
       return;
     }
-    // Identity first: a machine that signs in without saying what it is
-    // becomes another anonymous box you can only reach by guessing.
+    // team 名不再是登录的前置条件:留空照样能登录,登录后随时在账号菜单的「机器名」
+    // 那行改(以前必须先起名才让登录,装机时很烦)。留空 = 不动机器上已有的名字,
+    // 绝不写空把它清掉。只有真填了才校验格式并保存。
     const declared = String(teamName || "").trim();
-    if (!TEAM_RE.test(declared)) {
-      setError(tr("auth.teamRequired", "请先填写本机 team 名(字母、数字、. _ -)"));
+    if (declared && !TEAM_RE.test(declared)) {
+      setError(tr("auth.teamBadFormat", "team 名只能用字母、数字和 . _ -"));
       return;
     }
-    try { await writeTeam(declared); } catch { setError("无法保存 team 名"); return; }
+    if (declared) {
+      try { await writeTeam(declared); } catch { setError("无法保存 team 名"); return; }
+    }
     setError("");
     setLoginBusy(true); // 按钮 disable + loading
     try {
@@ -915,14 +926,17 @@ export default function App() {
       setError(tr("auth.badEmail", "请输入有效的邮箱地址"));
       return;
     }
-    // Identity first: a machine that signs in without saying what it is
-    // becomes another anonymous box you can only reach by guessing.
+    // team 名不再是登录的前置条件:留空照样能登录,登录后随时在账号菜单的「机器名」
+    // 那行改(以前必须先起名才让登录,装机时很烦)。留空 = 不动机器上已有的名字,
+    // 绝不写空把它清掉。只有真填了才校验格式并保存。
     const declared = String(teamName || "").trim();
-    if (!TEAM_RE.test(declared)) {
-      setError(tr("auth.teamRequired", "请先填写本机 team 名(字母、数字、. _ -)"));
+    if (declared && !TEAM_RE.test(declared)) {
+      setError(tr("auth.teamBadFormat", "team 名只能用字母、数字和 . _ -"));
       return;
     }
-    try { await writeTeam(declared); } catch { setError("无法保存 team 名"); return; }
+    if (declared) {
+      try { await writeTeam(declared); } catch { setError("无法保存 team 名"); return; }
+    }
     setError("");
     setLoginBusy(true); // 按钮 disable + loading
     try {
@@ -998,7 +1012,7 @@ export default function App() {
                   demoted to a secondary option below — its link 302s to 127.0.0.1 and
                   only completes on the SAME machine, so a phone click breaks it. */}
               <label className="login-label" data-id="TeamNameLabel" htmlFor="cicy-team-name">
-                {tr("auth.teamLabel", "本机 team 名(必填,用于识别这台机器)")}
+                {tr("auth.teamLabel", "本机 team 名(可选,登录后可在账号菜单里改)")}
               </label>
               <input
                 id="cicy-team-name"
@@ -2326,16 +2340,33 @@ function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin, hub }
   const commitTeam = useCallback(async (raw) => {
     setTeamEditing(false);
     const next = stripTeamPrefix(String(raw || "").trim());
-    if (next === stripTeamPrefix(myTeam || "")) return;   // 没改就别写
+    const cur = stripTeamPrefix(myTeam || "");
+    if (next === cur) return;                              // 没改就别写
+    const bad = (msg) => toast.show({ id: "team-rename", status: "error", ttl: 6000, message: msg });
+    if (next && !TEAM_RE.test(next)) { bad(tr("machineName.badFormat", "机器名只能用字母、数字和 . _ -")); return; }
+    // 查重:车队里不能有两台同名机器。hub 是按 team 名认机器的,同名的后来者会把前一台
+    // 顶下线(superseded),两台会反复互踢 —— 所以这里必须拦住。
+    // 比的是加前缀后的完整名(desktop-xs-1009),大小写不敏感;自己原来的名字不算冲突。
+    const taken = hub?.takenNames || [];
+    if (next && taken.length) {
+      const want = withTeamPrefix(next).toLowerCase();
+      const mine = withTeamPrefix(cur).toLowerCase();
+      const clash = taken.some((n) => {
+        const t = String(n || "").trim().toLowerCase();
+        return t && t !== mine && (t === want || t === next.toLowerCase());
+      });
+      if (clash) { bad(tr("machineName.taken", "「{{n}}」已经被另一台机器用了,换一个", { n: next })); return; }
+    }
     setTeamSaving(true);
     try {
       const saved = await writeTeam(next);
       setMyTeam(saved || "");
       try { window.__cicyFleetRelabel && window.__cicyFleetRelabel(); } catch {}
+      try { hub?.refresh && hub.refresh(); } catch {}      // 让占用名单跟上
     } catch {
-      toast.show({ id: "team-rename", status: "error", ttl: 5000, message: tr("machineName.failed", "机器名没保存成功") });
+      bad(tr("machineName.failed", "机器名没保存成功"));
     } finally { setTeamSaving(false); }
-  }, [myTeam]);
+  }, [myTeam, hub]);
   const [checkingUpd, setCheckingUpd] = useState(false);
   const [appVer, setAppVer] = useState("");
   const wrap = useRef(null);
@@ -2449,12 +2480,14 @@ function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin, hub }
               <div data-id="UserChip-team"
                 title={tr("machineName.hint", "这台机器在车队里的名字,点一下就能改")}
                 style={{ padding: "0 14px 8px", marginTop: -4, fontSize: 12,
-                         display: "flex", alignItems: "center", gap: 6 }}>
+                         display: "flex", alignItems: "center", gap: 6, minHeight: 30,
+                         maxWidth: "100%", overflow: "hidden" }}>
                 <span style={{ opacity: .5, flex: "none" }}>{tr("machineName.label", "机器名")}</span>
                 {teamEditing ? (
                   <input
                     data-id="UserChip-team-input"
                     autoFocus
+                    size={1}
                     defaultValue={stripTeamPrefix(myTeam)}
                     placeholder={tr("machineName.ph", "例如 xs-1009")}
                     spellCheck={false}
@@ -2465,14 +2498,12 @@ function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin, hub }
                       if (e.key === "Enter") commitTeam(e.currentTarget.value);
                       else if (e.key === "Escape") setTeamEditing(false);
                     }}
-                    style={{ flex: 1, minWidth: 0, font: "inherit", padding: "2px 6px", borderRadius: 6,
-                             border: "1px solid #3b82f6", background: "#0d1117", color: "#e6edf3" }}
+                    style={{ ...TEAM_FIELD_STYLE, borderColor: "#3b82f6", background: "#0d1117", color: "#e6edf3" }}
                   />
                 ) : (
                   <button type="button" data-id="UserChip-team-edit"
                     onClick={(e) => { e.stopPropagation(); setTeamEditing(true); }}
-                    style={{ flex: 1, minWidth: 0, textAlign: "left", font: "inherit", cursor: "text",
-                             border: "none", background: "transparent", padding: "2px 0",
+                    style={{ ...TEAM_FIELD_STYLE, textAlign: "left", cursor: "text", background: "transparent",
                              color: myTeam ? "inherit" : "#58a6ff", opacity: myTeam ? .7 : 1,
                              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {teamSaving ? tr("machineName.saving", "保存中…")
@@ -2481,6 +2512,13 @@ function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin, hub }
                   </button>
                 )}
               </div>
+            )}
+            {/* 没登录时,「登录 CiCy Hub」是这个菜单里最该点的一项 —— 放最上面(ID 之上),
+                不要埋在「检查更新」下面。登录后这一项自动消失。 */}
+            {hub?.available && !hubIn && (
+              <button type="button" data-id="UserChip-hub-login" className="user-chip__menu-item" onClick={() => { setOpen(false); hub.openLogin(); }}>
+                {tr("cicyHub.login", "登录 CiCy Hub")}
+              </button>
             )}
             {(() => { let sid = ""; try { sid = getShortId(); } catch {} return sid ? (
               <div data-id="UserChip-machine-id" title={tr("deviceId.hint", "本机 ID")}
@@ -2506,11 +2544,6 @@ function Header({ me, welcome, onLogout, mitmTeam, guest = false, onLogin, hub }
             <button type="button" data-id="UserChip-check-update" className="user-chip__menu-item" disabled={checkingUpd} onClick={checkUpdate}>
               {checkingUpd ? tr("updateBanner.checkingShort", "检查中…") : tr("updateBanner.checkBtn", "检查更新")}
             </button>
-            {hub?.available && !hubIn && (
-              <button type="button" data-id="UserChip-hub-login" className="user-chip__menu-item" onClick={() => { setOpen(false); hub.openLogin(); }}>
-                {tr("cicyHub.login", "登录 CiCy Hub")}
-              </button>
-            )}
             {/* HTTPS 审计入口暂时隐藏 */}
             {false && mitmTeam && (
               <div className="user-chip__menu-mitm" data-id="UserChip-mitm" onClick={(e) => e.stopPropagation()}>
@@ -5284,6 +5317,7 @@ function useHub() {
   const bridge = typeof window !== "undefined" ? window.cicy?.hub : null;
   const [status, setStatus] = useState(null);       // { loggedIn, owner, pending }
   const [instances, setInstances] = useState(null); // null = not loaded
+  const [takenNames, setTakenNames] = useState([]);  // 全部已占用名字(含 desktop-*),改名查重用
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [loginOpen, setLoginOpen] = useState(false);
@@ -5313,6 +5347,9 @@ function useHub() {
         // cicy-code teams, so a card for one only misleads.
         const only = (r.instances || []).filter((it) => !/^desktop-/i.test(String((it && (it.name || it.slug)) || "")));
         setInstances(only);
+        // 改名查重要用的是**全部**名字(包含上面被过滤掉的 desktop-* 机器),
+        // 否则改成一个已存在的机器名,车队里就会有两台同名机器,分不清也点不准。
+        setTakenNames((r.instances || []).map((it) => String((it && (it.name || it.slug)) || "").trim()).filter(Boolean));
         setError("");
       }
       else {
@@ -5351,10 +5388,20 @@ function useHub() {
   const sendCode = async () => {
     const addr = email.trim();
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr)) { setLoginErr(tr("auth.badEmail", "请输入有效的邮箱地址")); return; }
+    // 同上:team 名可留空,登录后在账号菜单里改。留空不写,避免清掉已有名字。
     const declared = String(team || "").trim();
-    if (!TEAM_RE.test(declared)) { setLoginErr(tr("cicyHub.teamRequired", "请填写本机 team 名(字母、数字、. _ -)")); return; }
+    if (declared && !TEAM_RE.test(declared)) { setLoginErr(tr("cicyHub.teamBadFormat", "team 名只能用字母、数字和 . _ -")); return; }
+    // 查重:别让两台机器叫同一个名字(登录时也拦一道,不然车队里立刻多一台重名的)
+    if (declared) {
+      const want = withTeamPrefix(declared).toLowerCase();
+      if ((takenNames || []).some((n) => { const t = String(n || "").trim().toLowerCase(); return t && (t === want || t === declared.toLowerCase()); })) {
+        setLoginErr(tr("cicyHub.teamTaken", "「" + declared + "」已经被另一台机器用了,换一个")); return;
+      }
+    }
     setBusy(true); setLoginErr("");
-    try { await writeTeam(declared); } catch { setLoginErr(tr("cicyHub.teamSaveFailed", "无法保存 team 名")); setBusy(false); return; }
+    if (declared) {
+      try { await writeTeam(declared); } catch { setLoginErr(tr("cicyHub.teamSaveFailed", "无法保存 team 名")); setBusy(false); return; }
+    }
     try { window.__cicyFleetRelabel && window.__cicyFleetRelabel(); } catch {}
     try {
       const r = await bridge.loginStart(addr);
@@ -5388,7 +5435,7 @@ function useHub() {
 
   return {
     available: !!bridge, status, loggedIn: !!status?.loggedIn, owner: status?.owner || "",
-    instances, loading, error, refresh, logout, open,
+    instances, takenNames, loading, error, refresh, logout, open,
     loginOpen, openLogin, closeLogin, email, setEmail, code, setCode, step, busy, loginErr, sendCode, verify,
     team, setTeam,
   };
@@ -5408,7 +5455,7 @@ function HubLoginModal({ hub }) {
         </div>
         {!codeStep ? (
           <>
-            <label style={{ display: "block", fontSize: 12, opacity: .75, marginBottom: 6 }}>{tr("cicyHub.team", "本机 team 名(必填)")}</label>
+            <label style={{ display: "block", fontSize: 12, opacity: .75, marginBottom: 6 }}>{tr("cicyHub.team", "本机 team 名(可选)")}</label>
             <div style={{ display: "flex", alignItems: "center", marginBottom: 12 }}>
               <span style={{ fontSize: 13, opacity: .55, paddingRight: 6, whiteSpace: "nowrap" }}>{TEAM_PREFIX}</span>
               <input data-id="HubLoginModal-team" className="login-email-input" style={{ flex: 1, marginBottom: 0 }} type="text" autoFocus spellCheck={false}
