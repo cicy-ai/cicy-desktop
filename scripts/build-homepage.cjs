@@ -36,6 +36,9 @@ function run(cmd, cwd) {
 const PANEL_SRC = path.join(ROOT, "src", "tabbrowser");
 const PANEL_OUT = path.join(RENDER, "public", "panel");
 const PANEL_PAGES = [
+  // 合并矩阵:一个页面按 profile 的 type(telegram/facebook/tiktok/tab)决定每格加载什么。
+  // 下面三个单平台页保留为跳转壳,老配置(panel_url 指着它们)会自动汇到这里。
+  "matrix.html",
   "telegram-matrix.html",
   "redroid-matrix.html",
   "facebook-matrix.html",

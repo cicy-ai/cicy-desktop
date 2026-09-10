@@ -753,6 +753,10 @@ body {
 }
 .bcard--cloud .bcard__accent { background: var(--accent-cloud); }
 .bcard--custom .bcard__accent { background: var(--accent-custom); }
+.bcard--dsh .bcard__accent { background: #4d6bfe; }
+.bcard--dsh.bcard--online::before {
+  background: radial-gradient(circle at center, rgba(77,107,254,.22) 0%, transparent 60%);
+}
 
 .bcard--online::before {
   content: "";

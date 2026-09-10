@@ -15,7 +15,9 @@
        thing that breaks. -->
   <script>
   (function () {
-    var STAMP = "20260904010332"; // filled in by the Worker on the way out
+    // 占位符由服务端(cicy-fleet server.js / Worker)在返回 index.html 时替换成它的 BUILD。
+    // 绝不能写死数字:写死后一旦服务端 BUILD 更新,这里 mine < theirs 就每 5 秒 reload 一次(实测 2026-09-09)。
+    var STAMP = "__SERVER_BUILD__";
     window.__CICY_BUILD__ = STAMP; // the bundle's socket reuses this, one source of truth
     // The socket learns the deployed build on every connect, so this is only
     // the floor for a bundle too broken to hold a socket open. Keep it rare.
