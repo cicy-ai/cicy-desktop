@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="b71e4068373d">
+  <meta name="pv" content="bc2f3dd7d80c">
   <title>Telegram 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -51,6 +51,17 @@
     /* 代理设置弹窗 */
     .modal { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.55); }
     .modal[hidden] { display: none; }
+    .cfg-info { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; background: #0f0f11; display: flex; flex-direction: column; gap: 4px; }
+    .ci-row { display: flex; gap: 12px; font-size: 12px; line-height: 1.65; align-items: baseline; }
+    .ci-row .ci-k { flex: none; width: 76px; color: var(--muted); }
+    .ci-row .ci-v { flex: 1; min-width: 0; color: var(--fg); word-break: break-all; }
+    .ci-row .ci-v .mono { font-family: ui-monospace, monospace; user-select: all; cursor: text; }
+    .ci-row .ci-v .muted { color: var(--muted); }
+    .ci-b { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+    .ci-b.ok { background: rgba(63,185,80,.16); color: #7ee787; }
+    .ci-b.warn { background: rgba(240,180,41,.16); color: #f0c150; }
+    .ci-b.mut { background: var(--line); color: var(--muted); }
+    .cfg-info hr { border: 0; border-top: 1px solid var(--line); margin: 6px 0; }
     .modal-card { width: 380px; max-width: 92vw; background: var(--cell); border: 1px solid var(--line); border-radius: 14px; padding: 18px; box-shadow: 0 24px 70px rgba(0,0,0,.5); }
     .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; font-size: 15px; font-weight: 650; }
     .modal-head .icon { background: transparent; color: #b4b4bb; padding: 2px 6px; font-size: 14px; border-radius: 6px; }
@@ -181,6 +192,7 @@
   <div id="cfg-modal" class="modal" hidden>
     <div class="modal-card">
       <div class="modal-head"><span id="cfg-title">Profile 设置</span><button class="icon" id="cfg-x" title="关闭">✕</button></div>
+      <div class="cfg-info" id="cfg-info"></div>
       <label class="modal-label">手机号</label>
       <div class="modal-row"><input id="cfg-phone" placeholder="+8801700000000" spellcheck="false"></div>
       <label class="modal-label">接码 URL</label>
@@ -587,11 +599,37 @@
     const cfgCode = document.getElementById('cfg-code');
     document.getElementById('cfg-code-open').onclick = () => { if (cfgP) openCode({ ...cfgP, login: { phone: cfgPhone.value, codeUrl: cfgCode.value.trim() } }); };
     const cfgIpText = (p) => p && p.ipInfo && p.ipInfo.ip ? (p.ipInfo.area ? `${p.ipInfo.area} · ${p.ipInfo.ip}` : p.ipInfo.ip) : '未探测';
+    // 每个格子自己的信息块,和 Facebook 矩阵那边同一套结构(.cfg-info / .ci-row / .ci-b)。
+    // Telegram 这边要显示的是本 Profile 分配到的 TG 身份和接码配置。
+    const cfgInfoHtml = (p) => {
+      const live = stateOf(p.accountIdx).identity;
+      const tg = p.telegram || {};
+      const it = live || tg;
+      const loggedIn = !!(live && (live.username || live.displayName || live.phone));
+      const bound = !!(phoneOf(p) || tg.username || tg.displayName || tg.phone);
+      const mono = (v) => v ? `<span class="mono">${esc(v)}</span>` : '<span class="muted">—</span>';
+      const badge = loggedIn ? '<span class="ci-b ok">✓ 已登录</span>'
+        : (bound ? '<span class="ci-b warn">已分配 · 未登录</span>' : '<span class="ci-b mut">未分配</span>');
+      const rows = [
+        ['Profile', `${esc(p.name)} · #${p.accountIdx}`],
+        ['状态', badge],
+        ['用户名', it && it.username ? mono('@' + it.username) : mono('')],
+        ['显示名', mono(it && it.displayName)],
+        ['手机号', mono(phoneOf(p) || (it && it.phone ? '+' + it.phone : ''))],
+        ['接码 URL', mono(codeUrlOf(p))],
+        ['__hr__', ''],
+        ['分区', mono(`persist:sandbox-${p.accountIdx}`)],
+        ['代理', p.proxy ? mono(p.proxy) : '<span class="muted">直连</span>'],
+        ['出口 IP', esc(cfgIpText(p))],
+      ];
+      return rows.map(([k, v]) => k === '__hr__' ? '<hr>' : `<div class="ci-row"><span class="ci-k">${k}</span><span class="ci-v">${v}</span></div>`).join('');
+    };
     function openCfgModal(p) {
       if (!p) return; cfgP = p; delArmed = false;
       document.getElementById('cfg-title').textContent = `${p.name} · #${p.accountIdx} 设置`;
       cfgProxy.value = p.proxy || ''; cfgErr.textContent = ''; cfgIp.textContent = cfgIpText(p);
       cfgPhone.value = phoneOf(p); cfgCode.value = codeUrlOf(p);
+      document.getElementById('cfg-info').innerHTML = cfgInfoHtml(p);
       cfgDel.textContent = '删除此 Profile'; cfgDel.disabled = false;
       cfgModal.hidden = false; cfgProxy.focus();
       // BrowserView 预览永远浮在页面 DOM 之上,会盖住弹窗 —— 打开弹窗时把 cells 脱离(复用拖拽逻辑),关闭时贴回。
