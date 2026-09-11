@@ -345,31 +345,6 @@ function setNote(backend, idx, note) {
   throw new Error(`Unknown backend: ${backend}`);
 }
 
-// setType — 这个 profile 属于哪个矩阵平台。合并矩阵后,一个 profile 固定跑一个站点,
-// 总网格按 type 决定这一格加载什么。4 个取值:
-//   telegram / facebook / tiktok  —— 三个社媒站
-//   tab                           —— 通用标签页,配 url 字段,想开什么开什么
-// 未设置时按 telegram 处理(历史数据都是从 Telegram 矩阵来的,不改变现状)。
-const PROFILE_TYPES = ["telegram", "facebook", "tiktok", "tab"];
-const DEFAULT_PROFILE_TYPE = "telegram";
-function normalizeType(t) {
-  const v = String(t || "").trim().toLowerCase();
-  return PROFILE_TYPES.includes(v) ? v : DEFAULT_PROFILE_TYPE;
-}
-function setType(backend, idx, type) {
-  const t = normalizeType(type);
-  if (backend === "chrome") return mutateChrome(idx, (e) => ({ ...e, type: t }));
-  if (backend === "electron") return mutateElectron(idx, (d) => ({ ...d, type: t }));
-  throw new Error(`Unknown backend: ${backend}`);
-}
-// type=tab 时这一格打开的地址(其余 type 用各自站点的固定 URL)
-function setTabUrl(backend, idx, url) {
-  const u = String(url || "").trim().slice(0, 2000);
-  if (backend === "chrome") return mutateChrome(idx, (e) => ({ ...e, tabUrl: u }));
-  if (backend === "electron") return mutateElectron(idx, (d) => ({ ...d, tabUrl: u }));
-  throw new Error(`Unknown backend: ${backend}`);
-}
-
 // setTelegramLogin — the phone number this profile signs in to Telegram with
 // and the SMS-code (接码) URL that returns its verification code. Stored as
 // `telegramLogin: { phone, codeUrl }`; either field may be empty.
@@ -429,11 +404,6 @@ module.exports = {
   getProfile,
   setProxy,
   setNote,
-  setType,
-  setTabUrl,
-  normalizeType,
-  PROFILE_TYPES,
-  DEFAULT_PROFILE_TYPE,
   setTelegramLogin,
   normalizeTelegramLogin,
   removeProfile,

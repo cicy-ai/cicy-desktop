@@ -57,7 +57,7 @@ function registerTools(registerTool) {
             id: z
               .string()
               .describe(
-                "内置面板 id，如 blank / matrix(统一矩阵) / redroid-matrix。telegram-matrix、facebook-matrix、tiktok-matrix 已并入 matrix，仍可用(会自动跳转)"
+                "内置面板 id，如 blank / telegram-matrix / redroid-matrix / facebook-matrix"
               ),
             title: z.string().optional().describe("显示名，留空用内置默认名"),
             enabled: z.boolean().optional().describe("是否在菜单中显示，默认 true"),

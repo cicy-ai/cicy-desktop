@@ -19,16 +19,13 @@ const path = require("path");
 const STORE = path.join(os.homedir(), "cicy-ai", "db", "panel-menu.json");
 
 // id === the preset string createPanelMenuTemplate hands to openPanel().
-// 三个社媒矩阵已合并成一个「矩阵」:一个 profile 带一个 type(telegram/facebook/tiktok/tab),
-// 同一个网格按 type 决定每格加载什么。菜单里就该只有一项 —— 留着三项等于合了个寂寞。
 const BUILTIN = [
   { id: "blank", title: "面板" },
-  { id: "matrix", title: "矩阵" },
+  { id: "telegram-matrix", title: "Telegram 矩阵" },
   { id: "redroid-matrix", title: "Redroid 矩阵" },
+  { id: "facebook-matrix", title: "Facebook 矩阵" },
+  { id: "tiktok-matrix", title: "TikTok 矩阵" },
 ];
-// 老菜单项:用户配置里可能还存着这三个 id(panel-menu.json),读到时映射到合并页,
-// 不让它们在菜单里各占一行。
-const LEGACY_MATRIX_IDS = new Set(["telegram-matrix", "facebook-matrix", "tiktok-matrix"]);
 const BUILTIN_IDS = new Set(BUILTIN.map((b) => b.id));
 
 function readRaw() {

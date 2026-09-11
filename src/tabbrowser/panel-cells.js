@@ -418,9 +418,6 @@ function installIpc(findTab) {
           proxy: p.proxy && p.proxy.enabled ? String(p.proxy.url || "") : "",
           note: String(p.note || ""),
           login: { phone: String((p.telegramLogin || {}).phone || ""), codeUrl: String((p.telegramLogin || {}).codeUrl || "") },
-          // 合并矩阵:一个 profile 固定一个平台,总网格按 type 决定这格加载什么
-          type: require("../profiles/profile-store").normalizeType(p.type),
-          tabUrl: String(p.tabUrl || ""),
           telegram: telegramIdentity.telegramIdentityFromProfile(p),
           facebook: facebookIdentity.facebookIdentityFromProfile(p),
           tiktok: tiktokIdentity.tiktokIdentityFromProfile(p),
@@ -485,23 +482,6 @@ function installIpc(findTab) {
     const text = String(note || "").trim().slice(0, 500);
     const profile = require("../profiles/profile-store").setNote("electron", id, text);
     return { accountIdx: id, note: String(profile.note || "") };
-  });
-  // 这个 profile 属于哪个平台(telegram/facebook/tiktok/tab)。合并矩阵后一格一平台。
-  ipcMain.handle("panelcells:set-profile-type", async (e, { accountIdx, type }) => {
-    if (!ctx(e)) throw new Error("Invalid panel");
-    const id = Number(accountIdx);
-    if (!Number.isInteger(id) || id <= 0) throw new Error("Invalid Electron profile ID");
-    const store = require("../profiles/profile-store");
-    const profile = store.setType("electron", id, type);
-    return { accountIdx: id, type: store.normalizeType(profile.type) };
-  });
-  // type=tab 时这一格打开的地址
-  ipcMain.handle("panelcells:set-profile-tab-url", async (e, { accountIdx, url }) => {
-    if (!ctx(e)) throw new Error("Invalid panel");
-    const id = Number(accountIdx);
-    if (!Number.isInteger(id) || id <= 0) throw new Error("Invalid Electron profile ID");
-    const profile = require("../profiles/profile-store").setTabUrl("electron", id, url);
-    return { accountIdx: id, tabUrl: String(profile.tabUrl || "") };
   });
   // 手机号 + 接码 URL(telegramLogin)。
   ipcMain.handle("panelcells:set-profile-login", async (e, { accountIdx, phone, codeUrl }) => {
