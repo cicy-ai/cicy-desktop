@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="5397a0c33918">
+  <meta name="pv" content="e14cd368be4b">
   <title>Facebook 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -86,6 +86,14 @@
     /* 批量登录:未登录的会话一次全部铺开(最多 10 格),每格一个独立 BrowserView */
     #grid-title { display: none; width: 100%; margin-bottom: 6px; align-items: center; justify-content: space-between; gap: 8px; color: #b4b4bb; font-size: 12px; }
     #grid-title b { color: var(--fg); font-size: 13px; }
+    /* 这条栏原来只有外层 #grid-title 是 flex,里面的 .left 是普通 block,
+       徽章 / 「批量登录」/ 计数三段是 inline 元素,直接贴成一串:
+       「xs-1004批量登录4 个会话 · 4 已登录」。间距只在 #preview-title .left 上定义过,
+       网格这条没有。 */
+    #grid-title { height: 34px; padding: 0 2px; }
+    #grid-title .left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    #grid-title .mid { margin-right: 0; }
+    #grid-count { color: var(--muted); font-size: 12px; white-space: nowrap; }
     #grid { display: none; width: 100%; flex: 1 1 auto; min-height: 0; gap: 8px; flex-direction: row; flex-wrap: wrap; align-content: flex-start; overflow-x: hidden; overflow-y: auto; }
     /* 批量模式 = 整页只有 webview:侧栏整个隐藏,顶部一条细工具栏,其余全是格子 */
     body.batch { grid-template-columns: 1fr; }
