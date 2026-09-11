@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="349f7aa338d3">
+  <meta name="pv" content="f6746e7cab7b">
   <title>Telegram 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -328,6 +328,11 @@
       const cardEl = (cfgModal && !cfgModal.hidden) ? document.querySelector('.modal-card') : null;
       const cardR = cardEl ? cardEl.getBoundingClientRect() : null;
       const hitsCard = (r) => !!(cardR && r && !(r.x + r.w <= cardR.left || r.x >= cardR.right || r.y + r.h <= cardR.top || r.y >= cardR.bottom));
+      // 面板在后台标签里时,一格都不显示。
+      // 同一台机器可能开着多个矩阵面板,各自的格子坐标是一样的,后台那份会原样贴在
+      // 前台那份上面:前台开弹窗只让自己的格子让位,后台的照样盖住弹窗(实测 2026-09-11,
+      // xs-1001 上两组 6 格叠在同一批坐标上)。visible:false 只是不画,会话照常活着,保活不受影响。
+      const __bg = document.hidden;
       const cells = []; const overlays = [];
       for (const profileId of openedProfiles) {
         let visible = false, r = null;
@@ -337,6 +342,7 @@
           const g = gcells.get(profileId);
           if (g && batch.has(profileId)) { visible = true; r = box(g.body.getBoundingClientRect()); }
         } else if (selected && profileId === selected.accountIdx) { visible = true; r = box(rect); }
+        if (__bg) visible = false;                    // 后台标签:不画,但会话留着
         if (visible && hitsCard(r)) visible = false;  // 被弹窗盖住 → 临时 detach
         cells.push({ id: cellId(profileId), url: TELEGRAM_URL, profile: profileId, visible, rect: r });
         // 接码叠加层:同 rect、同 profile(=同 partition/代理),排在 tg 格子之后 → attach 更晚 → 叠最上层
@@ -676,7 +682,7 @@
 
     new ResizeObserver(() => requestAnimationFrame(syncPreview)).observe(preview);
     window.addEventListener('resize', syncPreview);
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) { syncPreview(); setTimeout(syncPreview, 500); setTimeout(pullStates, 800); } });
+    document.addEventListener('visibilitychange', () => { if (document.hidden) { syncPreview(); return; } if (!document.hidden) { syncPreview(); setTimeout(syncPreview, 500); setTimeout(pullStates, 800); } });
     try { window.panelAPI.onCellState(applyCellState); } catch (e) {}
     pullStates({ adopt: true })
       .catch(() => {})
