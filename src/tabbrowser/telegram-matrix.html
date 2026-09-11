@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="8d8c0bdd0853">
+  <meta name="pv" content="6d2b1e4cd8c4">
   <title>Telegram 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -105,6 +105,22 @@
     #grid-empty { grid-column: 1 / -1; display: grid; place-items: center; color: var(--muted); }
     .spinner { width: 28px; height: 28px; border: 3px solid rgba(255,255,255,.12); border-top-color: var(--accent); border-radius: 50%; animation: spin .9s linear infinite; margin: 0 auto 12px; }
     @keyframes spin { to { transform: rotate(360deg); } }
+    /* 格子头:只留编号 + 状态点。名字和「已加载/已登录」隐藏(profile 本身不动,
+       只是不显示)—— 一格 360px 宽,名字和状态文字挤在 30px 高的条里很糙。
+       状态全部交给左边那个点:灰=未打开,黄=加载中,绿=已登录,红=连接失败。
+       完整信息仍在 title 里,鼠标悬停可见。 */
+    .ghead { padding: 0 6px 0 11px; gap: 8px; background: linear-gradient(180deg, #1d1d20, #19191b); border-bottom: 1px solid rgba(255,255,255,.07); }
+    .ghead .dot { width: 7px; height: 7px; box-shadow: 0 0 0 3px rgba(255,255,255,.05); }
+    .gcell.done .ghead .dot { box-shadow: 0 0 0 3px rgba(63,185,80,.18); }
+    .gcell.failed .ghead .dot { box-shadow: 0 0 0 3px rgba(255,92,92,.18); }
+    .ghead .name { display: none; }
+    .ghead .chip { padding: 2px 8px; border-radius: 999px; background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.07); color: #e4e4ea; font: 600 11.5px/16px ui-monospace, monospace; letter-spacing: .4px; }
+    .ghead .phone { font-size: 11px; color: #9a9aa2; }
+    /* 空的 .st 继续当撑杆用,把右边两个按钮顶到头 */
+    .ghead .st { margin-left: auto; font-size: 0; }
+    .ghead button.code { padding: 3px 9px; font-size: 11px; border-radius: 7px; }
+    .ghead .icon { font-size: 12px; border-radius: 7px; opacity: .7; }
+    .ghead .icon:hover { opacity: 1; }
     /* 机器 id 徽章:机器多了一眼认出这是哪台。列表/批量两种模式都显示。 */
     .mid{display:inline-block;margin-right:8px;padding:2px 9px;border-radius:7px;font:700 13px ui-monospace,monospace;
          background:#1f6feb;color:#fff;letter-spacing:.5px;vertical-align:middle;box-shadow:0 1px 4px rgba(0,0,0,.4)}
@@ -336,7 +352,10 @@
       g.el.classList.toggle('done', done);
       g.el.classList.toggle('failed', !!st.failed && !st.loading);
       g.el.querySelector('.dot').className = `dot ${dotClass(st)}`;
-      g.el.querySelector('.st').textContent = done ? '✓ 已登录' : stateText(st, true);
+      // 状态只用左边那个点表示，文字不写在 header 上（太挤），收进 title。
+      const stTxt = done ? '✓ 已登录' : stateText(st, true);
+      g.el.querySelector('.st').textContent = '';
+      g.el.querySelector('.ghead').title = [p && p.name, '#' + idx, stTxt].filter(Boolean).join('  ·  ');
       updateCodeButtons(idx);
       if (batchMode) { const n = [...batch].filter((i) => { const q = profiles.find((x) => x.accountIdx === i); return q && hasIdentity(q); }).length; gridCount.textContent = `${batch.size} 个会话 · ${n} 已登录`; }
     }
