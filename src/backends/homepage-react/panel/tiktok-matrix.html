@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="88d3105121e3">
+  <meta name="pv" content="5067f355769d">
   <title>TikTok 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -602,19 +602,27 @@
     function placeCfgOverCell(p) {
       const card = document.querySelector('.modal-card');
       if (!card) return;
+      // 最大化时宿主是 #maxbody(整块),否则是这一格的 .gbody。
+      const mb = document.getElementById('maxbody');
+      const maxOn = typeof maxedIdx !== 'undefined' && maxedIdx != null && mb && !document.getElementById('maxview').hidden;
       const g = p && gcells.get(p.accountIdx);
-      const host = g && g.body && g.body.isConnected ? g.body : null;
+      const host = maxOn ? mb : (g && g.body && g.body.isConnected ? g.body : null);
       if (!host) {
         card.style.left = ''; card.style.top = ''; card.style.width = ''; card.style.height = '';
-        card.style.margin = 'auto'; card.style.inset = '0';
+        card.style.maxHeight = ''; card.style.margin = 'auto'; card.style.inset = '0';
         return;
       }
+      // 在宿主区域里居中,保持卡片自然尺寸 —— 拉伸撑满会把内容顶出去、上下被切掉。
       const r = host.getBoundingClientRect();
+      const w = Math.min(380, Math.max(240, r.width - 12));
+      const maxH = Math.max(160, r.height - 12);
       card.style.inset = 'auto'; card.style.margin = '0';
-      card.style.left = r.left + 'px';
-      card.style.top = r.top + 'px';
-      card.style.width = r.width + 'px';
-      card.style.height = r.height + 'px';
+      card.style.width = w + 'px';
+      card.style.height = 'auto';
+      card.style.maxHeight = maxH + 'px';
+      card.style.left = Math.round(r.left + (r.width - w) / 2) + 'px';
+      const h = Math.min(card.offsetHeight || maxH, maxH);
+      card.style.top = Math.round(r.top + (r.height - h) / 2) + 'px';
     }
     function openCfgModal(p) {
       if (!p) return; cfgP = p; delArmed = false;
