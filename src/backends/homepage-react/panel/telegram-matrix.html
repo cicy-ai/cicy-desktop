@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="532a86f1b388">
+  <meta name="pv" content="8c739836b14b">
   <title>Telegram 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -320,6 +320,11 @@
 
     function syncPreview() {
       if (!window.panelAPI) return;
+      // 弹窗开着时格子视图是被主进程收起来的(BrowserView 永远盖在 DOM 之上,
+      // 不收起弹窗就看不见)。这时候任何一次同步都会把它们重新贴回来、压在弹窗上 ——
+      // 点「打开」「保存」、窗口缩放、ResizeObserver 都会走到这里。关弹窗时会再同步一次。
+      const __m = document.getElementById('cfg-modal');
+      if (__m && !__m.hidden) return;
       const rect = preview.getBoundingClientRect();
       const mv = document.getElementById('maxview'); if (mv) mv.hidden = (maxedIdx == null);
       const box = (r) => ({ x: r.x, y: r.y, w: r.width, h: r.height });
