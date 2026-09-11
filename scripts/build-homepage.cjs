@@ -47,7 +47,14 @@ fs.mkdirSync(PANEL_OUT, { recursive: true });
 for (const page of PANEL_PAGES) {
   fs.copyFileSync(path.join(PANEL_SRC, page), path.join(PANEL_OUT, page));
 }
-console.log(`[build-homepage] panel pages synced: ${PANEL_PAGES.join(", ")}`);
+// 兼容已发布的 v2.1.355:那一版把三个矩阵 preset 全解析成 preset=matrix,
+// 而面板 tab 的地址就是 `/panel/<preset>`,所以它只会去请求 /panel/matrix。
+// 合并页已被 f5b6e3a 回退删掉,这个地址要是不存在,机器上「矩阵」菜单点开
+// 拿到的是 SPA 首页 —— 全队面板直接点空(实测 2026-09-11)。
+// 在下一个版本铺开之前,这里放一份 Telegram 矩阵页顶上,菜单行为和回退前一致。
+// 等车队都升到含 f5b6e3a 的版本后,这段可以删。
+fs.copyFileSync(path.join(PANEL_SRC, "telegram-matrix.html"), path.join(PANEL_OUT, "matrix.html"));
+console.log(`[build-homepage] panel pages synced: ${PANEL_PAGES.join(", ")} (+ matrix.html 兼容 v2.1.355)`);
 
 // 1) build the SPA from source (install deps on a cold runner)
 if (!fs.existsSync(path.join(RENDER, "node_modules"))) {
