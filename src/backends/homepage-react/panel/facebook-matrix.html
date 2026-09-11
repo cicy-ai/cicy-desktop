@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="9863e30fa515">
+  <meta name="pv" content="c87af243884f">
   <title>Facebook 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -677,21 +677,13 @@
       const mono = (v) => v ? `<span class="mono">${esc(v)}</span>` : '<span class="muted">—</span>';
       const badge = loggedIn ? '<span class="ci-b ok">✓ 已登录</span>'
         : (bound ? '<span class="ci-b warn">已绑定 · 未登录</span>' : '<span class="ci-b mut">未绑定</span>');
+      // 只列卡片里别处没有的。标题写了 Profile 名和编号;FB 密码 / 2FA / 邮箱 /
+      // 邮箱密码 / 备用邮箱下面就是对应的输入框;代理地址有输入框;出口 IP 在
+      // 「测 IP」那一行。这些不在这里重复第二遍。
       const rows = [
-        ['Profile', `${esc(p.name)} · #${p.accountIdx}` + (acctId ? ` <span class="muted">${esc(acctId)}</span>` : '')],
         ['状态', badge],
         ['FB 账号', mono(fb.id || fb.username)],
-        // 优先用 logins[] 里的结构化字段,没有再退回备注串解析出来的键值。
-        // (老桌面端不返回这几个字段,那时就只有备注串这一条路。)
-        ['FB 密码', mono(cr.pwd || meta['FB密码'])],
-        ['2FA', mono(cr.twofa || fb.twofa || meta['2FA'])],
-        ['邮箱', mono(cr.email || fb.email || meta['邮箱'])],
-        ['邮箱密码', mono(cr.mailpwd || meta['邮箱密码'])],
-        ['备用邮箱', mono(cr.second || fb.secondEmail || meta['备用'] || meta['备用邮箱'])],
-        ['__hr__', ''],
         ['分区', mono(`persist:sandbox-${p.accountIdx}`)],
-        ['代理', p.proxy ? mono(p.proxy) : '<span class="muted">直连</span>'],
-        ['出口 IP', esc(cfgIpText(p))],
       ];
       const html = rows.map(([k, v]) => k === '__hr__' ? '<hr>' : `<div class="ci-row"><span class="ci-k">${k}</span><span class="ci-v">${v}</span></div>`).join('');
       const btn = (!loggedIn && bound) ? `<div class="ci-row" style="margin-top:10px"><span class="ci-k"></span><span class="ci-v"><button class="fblogin-btn" onclick="__fbLoginClick(${p.accountIdx})">登录（自动填账密 + 提交）</button></span></div>` : '';
