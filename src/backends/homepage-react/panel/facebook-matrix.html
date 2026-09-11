@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="e957f6927c30">
+  <meta name="pv" content="73ff625cfec9">
   <title>Facebook 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -144,7 +144,10 @@
     .ghead .acts { flex: none; display: inline-flex; align-items: center; gap: 4px; margin-left: auto; padding-left: 8px; }
     .ghead .st ~ .acts { margin-left: 8px; }
     .gcell.done .ghead .st { color: #3fb950; font-weight: 600; }
-    .gbody { flex: 1 1 auto; min-height: 0; width: 100%; background: #fff; }
+    /* 打开弹窗时主进程会把所有格子视图摘下来(BrowserView 永远盖在 DOM 之上,
+       不摘弹窗就看不见),露出来的就是这块占位。底色留白的话整屏变白板,
+       看着像坏了 —— 改成和格子同色。视图贴回来后会盖住它,不影响显示。 */
+    .gbody { flex: 1 1 auto; min-height: 0; width: 100%; background: var(--cell); }
     #grid-empty { grid-column: 1 / -1; display: grid; place-items: center; color: var(--muted); }
     .spinner { width: 28px; height: 28px; border: 3px solid rgba(255,255,255,.12); border-top-color: var(--accent); border-radius: 50%; animation: spin .9s linear infinite; margin: 0 auto 12px; }
     @keyframes spin { to { transform: rotate(360deg); } }
