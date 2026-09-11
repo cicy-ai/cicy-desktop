@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="e94d5e7b5d25">
+  <meta name="pv" content="251195822494">
   <title>Telegram 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -145,6 +145,16 @@
     .ghead .phone { display: none; }
     .ghead .st { margin-left: auto; }
     .ghead .acts { flex: none; display: inline-flex; align-items: center; gap: 4px; margin-left: auto; padding-left: 8px; }
+    /* 格子头 / 最大化头部那一排图标:统一成 24×24 的盒子,里面 14px 的单色线条 SVG。
+       之前 ⚙ ⤢ ⟳ 是文本符号、🌐 🔄 是彩色 emoji,两套字体画出来一大一小、一彩一灰。 */
+    .ghead .icon, .maxhead .icon { width: 24px; height: 24px; padding: 0; display: inline-flex; align-items: center; justify-content: center; color: #b4b4bb; border-radius: 6px; line-height: 1; }
+    .ghead .icon svg, .maxhead .icon svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; display: block; }
+    .ghead .acts { gap: 2px; }
+    .ghead button.code { height: 22px; padding: 0 9px; display: inline-flex; align-items: center; }
+    /* 上面把 .icon 统一成 inline-flex,会盖掉原来 .pingctl{display:none} —— 🔄 ✕ 只在
+       ping 叠加层开着时才出现,这里把优先级补回来。 */
+    .ghead .icon.pingctl { display: none; }
+    .gcell.pinging .ghead .icon.pingctl { display: inline-flex; }
     .ghead .st ~ .acts { margin-left: 8px; }
     .gcell.done .ghead .st { color: #3fb950; font-weight: 600; }
     /* 打开弹窗时主进程会把所有格子视图摘下来(BrowserView 永远盖在 DOM 之上,
@@ -194,7 +204,7 @@
       </div>
     </div>
   </main>
-  <div id="maxview" hidden><div class="maxhead"><span class="dot" id="max-dot"></span><span class="name" id="max-name"></span><span class="chip" id="max-chip"></span><span class="minfo" id="max-phone"></span><span class="minfo" id="max-codeurl"></span><span class="sp"></span><span class="acts"><button class="code" id="max-codebtn" title="在格子上叠加/关闭接码 webview(同代理出口)">接码</button><button class="icon" id="max-gear" title="手机号 / 接码 URL / 代理设置">⚙</button><button class="icon" id="max-ping" title="ipcheck 出口 IP">🌐</button><button class="icon" id="max-reload" title="重新加载">⟳</button><button class="ghost" id="max-restore">还原</button></span></div><div id="maxbody"></div></div>
+  <div id="maxview" hidden><div class="maxhead"><span class="dot" id="max-dot"></span><span class="name" id="max-name"></span><span class="chip" id="max-chip"></span><span class="minfo" id="max-phone"></span><span class="minfo" id="max-codeurl"></span><span class="sp"></span><span class="acts"><button class="code" id="max-codebtn" title="在格子上叠加/关闭接码 webview(同代理出口)">接码</button><button class="icon" id="max-gear" title="手机号 / 接码 URL / 代理设置"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button><button class="icon" id="max-ping" title="ipcheck 出口 IP"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></button><button class="icon" id="max-reload" title="重新加载"><svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button><button class="ghost" id="max-restore">还原</button></span></div><div id="maxbody"></div></div>
   <div id="cfg-modal" class="modal" hidden>
     <div class="modal-card">
       <div class="modal-head"><span id="cfg-title">Profile 设置</span><button class="icon" id="cfg-x" title="关闭">✕</button></div>
@@ -392,7 +402,7 @@
     function buildGridCell(p) {
       const el = document.createElement('div');
       el.className = 'gcell'; el.dataset.id = String(p.accountIdx);
-      el.innerHTML = `<div class="ghead"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="phone">${esc(phoneOf(p))}</span><span class="st"></span><span class="acts"><button class="code" title="在格子上叠加/关闭接码 webview(同代理出口)">接码</button><button class="icon gear" title="手机号 / 接码 URL / 代理设置">⚙</button><button class="icon ping" title="用本 Profile 代理打开 ping0.cc(验 IP/指纹)">🌐</button><button class="icon pingctl reloadping" title="重载 ping0">🔄</button><button class="icon pingctl closeping" title="关闭 ping0">✕</button><button class="icon max" title="最大化 / 还原">⤢</button><button class="icon reload" title="重新加载">⟳</button></span></div><div class="gbody"></div>`;
+      el.innerHTML = `<div class="ghead"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="phone">${esc(phoneOf(p))}</span><span class="st"></span><span class="acts"><button class="code" title="在格子上叠加/关闭接码 webview(同代理出口)">接码</button><button class="icon gear" title="手机号 / 接码 URL / 代理设置"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button><button class="icon ping" title="用本 Profile 代理打开 ping0.cc(验 IP/指纹)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></button><button class="icon pingctl reloadping" title="重载 ping0"><svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button><button class="icon pingctl closeping" title="关闭 ping0"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button><button class="icon max" title="最大化 / 还原"><svg viewBox="0 0 24 24"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></button><button class="icon reload" title="重新加载"><svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button></span></div><div class="gbody"></div>`;
       el.querySelector('.reload').onclick = () => reloadProfile(p.accountIdx);
       el.querySelector('.max').onclick = (e) => { e.stopPropagation(); toggleMax(p.accountIdx); };
       el.querySelector('.ping').onclick = (e) => { e.stopPropagation(); togglePing(p.accountIdx); };
