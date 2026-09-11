@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="8d8c0bdd0853">
+  <meta name="pv" content="dc20c6664c5c">
   <title>Telegram 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -94,12 +94,36 @@
     main.batch #preview-title, main.batch #phone { display: none; }
     main.batch #grid-title { display: flex; }
     main.batch #grid { display: flex; }
+    /* 永久网格:去掉非批量(列表+单预览),默认且唯一 = 平铺全部 webview */
+    aside { display: none !important; }
+    body { grid-template-columns: 1fr !important; }
+    main #preview-title, main #phone { display: none !important; }
+    main #grid-title { display: flex !important; }
+    main #grid { display: flex !important; }
+    /* 单格最大化:全屏叠层显示当前 webview(其它 webview detach 保活,不受影响) */
+    #maxview { position: fixed; inset: 0; z-index: 50; background: var(--bg); display: flex; flex-direction: column; }
+    #maxview[hidden] { display: none; }
+    .maxhead { flex: none; height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--line); }
+    .maxhead .name { font-weight: 650; font-size: 13px; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .maxhead .chip { flex: none; padding: 1px 6px; border-radius: 999px; background: var(--head); color: #b4b4bb; font: 11px ui-monospace, monospace; }
+    .maxhead .minfo { flex: none; display: inline-flex; align-items: center; gap: 5px; max-width: 30vw; padding: 2px 8px; border-radius: 8px; background: var(--head); color: #c9c9d1; font: 11px ui-monospace, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .maxhead .minfo:empty { display: none; }
+    .maxhead .minfo b { color: #8a8a93; font-weight: 500; user-select: none; }
+    .maxhead .minfo span { color: #e9e9ee; user-select: all; overflow: hidden; text-overflow: ellipsis; }
+    .maxhead .sp { flex: 1; }
+    .maxhead .acts { flex: none; display: inline-flex; align-items: center; gap: 6px; padding-left: 12px; border-left: 1px solid var(--line); }
+    #maxbody { flex: 1 1 auto; min-height: 0; }
+    .gcell .pingctl { display: none; }
+    .gcell.pinging .pingctl { display: inline-block; }
+    .gcell.pinging .code, .gcell.pinging .gear, .gcell.pinging .max { display: none; }
     .gcell { display: flex; flex-direction: column; flex: none; width: 360px; height: 50vh; min-height: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--cell); overflow: hidden; }
     .gcell.done { border-color: rgba(63,185,80,.6); }
     .gcell.failed { border-color: rgba(255,92,92,.6); }
     .ghead { flex: none; height: 30px; padding: 0 8px; display: flex; align-items: center; gap: 6px; font-size: 12px; border-bottom: 1px solid var(--line); background: var(--head); min-width: 0; }
     .ghead .name { font-size: 12px; }
     .ghead .st { margin-left: auto; }
+    .ghead .acts { flex: none; display: inline-flex; align-items: center; gap: 4px; margin-left: auto; padding-left: 8px; }
+    .ghead .st ~ .acts { margin-left: 8px; }
     .gcell.done .ghead .st { color: #3fb950; font-weight: 600; }
     .gbody { flex: 1 1 auto; min-height: 0; width: 100%; background: #fff; }
     #grid-empty { grid-column: 1 / -1; display: grid; place-items: center; color: var(--muted); }
@@ -114,7 +138,7 @@
   <aside>
     <header>
       <h1><span id="mid-list" class="mid" hidden></span>Telegram 矩阵 <small id="count"></small></h1>
-      <div class="actions"><button class="ghost" id="batch-login" title="平铺所有 Profile 的会话到网格（最多 10 个）">批量网格</button><button id="add-profile" title="新建一个独立会话（persist:sandbox-N）">+ 添加 Profile</button></div>
+      <div class="actions"><button id="add-profile" title="新建一个独立会话（persist:sandbox-N）">+ 添加 Profile</button></div>
     </header>
     <div class="list">
       <div id="rows"></div>
@@ -125,7 +149,7 @@
   <main>
     <div id="grid-title">
       <div class="left"><span id="mid-batch" class="mid" hidden></span><b>批量登录</b><span id="grid-count"></span></div>
-      <div class="actions"><button class="ghost" id="grid-reload" title="重新加载所有格子">全部重载</button><button id="grid-add-profile" title="新建一个独立会话（persist:sandbox-N）">+ 添加 Profile</button></div>
+      <div class="actions"><button class="ghost" id="grid-reload" title="重新加载所有格子">全部重载</button></div>
     </div>
     <div id="grid"></div>
     <div id="preview-title">
@@ -145,6 +169,7 @@
       </div>
     </div>
   </main>
+  <div id="maxview" hidden><div class="maxhead"><span class="dot" id="max-dot"></span><span class="name" id="max-name"></span><span class="chip" id="max-chip"></span><span class="minfo" id="max-phone"></span><span class="minfo" id="max-codeurl"></span><span class="sp"></span><span class="acts"><button class="code" id="max-codebtn" title="在格子上叠加/关闭接码 webview(同代理出口)">接码</button><button class="icon" id="max-gear" title="手机号 / 接码 URL / 代理设置">⚙</button><button class="icon" id="max-ping" title="ipcheck 出口 IP">🌐</button><button class="icon" id="max-reload" title="重新加载">⟳</button><button class="ghost" id="max-restore">还原</button></span></div><div id="maxbody"></div></div>
   <div id="cfg-modal" class="modal" hidden>
     <div class="modal-card">
       <div class="modal-head"><span id="cfg-title">Profile 设置</span><button class="icon" id="cfg-x" title="关闭">✕</button></div>
@@ -174,7 +199,7 @@
     let profiles = [];
     let selected = null;
     const openedProfiles = new Set();   // 打开过的会话保留在后台(登录态不丢),只有选中的贴到预览区
-    const codeOpen = new Set();          // 已叠开接码 overlay 的 accountIdx(同 partition 的接码 webview 覆盖在格子上)
+    const codeOpen = new Set(); const pingOpen = new Set(); const pingUrl = new Map();          // 已叠开接码 overlay 的 accountIdx(同 partition 的接码 webview 覆盖在格子上)
     const cellState = new Map();        // accountIdx -> { loading, failed, error, url, title }
     const rows = new Map();             // accountIdx -> row element
     const BATCH_MAX = 10;               // 一次最多铺开多少个登录格
@@ -182,6 +207,7 @@
     const gridEl = document.getElementById('grid');
     const gridCount = document.getElementById('grid-count');
     let batchMode = false;
+    let maxedIdx = null;
     const batch = new Set();            // 批量模式下铺开的 accountIdx
     const gcells = new Map();           // accountIdx -> { el, body }
 
@@ -245,6 +271,7 @@
       const g = gcells.get(idx);
       if (g) { const b = g.el.querySelector('.code'); if (b) { b.classList.toggle('on', on); b.textContent = on ? '关闭接码' : '接码'; } }
       if (selected && selected.accountIdx === idx) { const b = document.getElementById('open-code'); if (b) { b.classList.toggle('on', on); b.textContent = on ? '关闭接码' : '接码'; } }
+      if (maxedIdx === idx) renderMaxHead();
     }
     function renderIdentity(p) {
       renderPhone(p);
@@ -271,11 +298,14 @@
     function syncPreview() {
       if (!window.panelAPI) return;
       const rect = preview.getBoundingClientRect();
+      const mv = document.getElementById('maxview'); if (mv) mv.hidden = (maxedIdx == null);
       const box = (r) => ({ x: r.x, y: r.y, w: r.width, h: r.height });
       const cells = []; const overlays = [];
       for (const profileId of openedProfiles) {
         let visible = false, r = null;
-        if (batchMode) {
+        if (maxedIdx != null) {
+          if (profileId === maxedIdx) { visible = true; r = box(document.getElementById('maxbody').getBoundingClientRect()); }
+        } else if (batchMode) {
           const g = gcells.get(profileId);
           if (g && batch.has(profileId)) { visible = true; r = box(g.body.getBoundingClientRect()); }
         } else if (selected && profileId === selected.accountIdx) { visible = true; r = box(rect); }
@@ -285,6 +315,7 @@
           const p = profiles.find((x) => x.accountIdx === profileId); const cu = p && codeUrlOf(p);
           if (cu) overlays.push({ id: 'code-' + profileId, url: cu, profile: profileId, visible: true, rect: r });
         }
+        if (visible && pingOpen.has(profileId)) overlays.push({ id: 'ping-' + profileId, url: (pingUrl.get(profileId) || 'https://ping0.cc/'), profile: profileId, visible: true, rect: r });
       }
       try { window.panelAPI.sync(cells.concat(overlays)); } catch (e) {}
     }
@@ -322,11 +353,16 @@
     function buildGridCell(p) {
       const el = document.createElement('div');
       el.className = 'gcell'; el.dataset.id = String(p.accountIdx);
-      el.innerHTML = `<div class="ghead"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="phone">${esc(phoneOf(p))}</span><span class="st"></span><button class="code" title="在格子上叠加/关闭接码 webview(同代理出口)">接码</button><button class="icon reload" title="重新加载">⟳</button></div><div class="gbody"></div>`;
+      el.innerHTML = `<div class="ghead"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="phone">${esc(phoneOf(p))}</span><span class="st"></span><span class="acts"><button class="code" title="在格子上叠加/关闭接码 webview(同代理出口)">接码</button><button class="icon gear" title="手机号 / 接码 URL / 代理设置">⚙</button><button class="icon ping" title="用本 Profile 代理打开 ping0.cc(验 IP/指纹)">🌐</button><button class="icon pingctl reloadping" title="重载 ping0">🔄</button><button class="icon pingctl closeping" title="关闭 ping0">✕</button><button class="icon max" title="最大化 / 还原">⤢</button><button class="icon reload" title="重新加载">⟳</button></span></div><div class="gbody"></div>`;
       el.querySelector('.reload').onclick = () => reloadProfile(p.accountIdx);
+      el.querySelector('.max').onclick = (e) => { e.stopPropagation(); toggleMax(p.accountIdx); };
+      el.querySelector('.ping').onclick = (e) => { e.stopPropagation(); togglePing(p.accountIdx); };
+      el.querySelector('.reloadping').onclick = (e) => { e.stopPropagation(); reloadPing(p.accountIdx); };
+      el.querySelector('.closeping').onclick = (e) => { e.stopPropagation(); closePing(p.accountIdx); };
       el.querySelector('.code').onclick = () => openCode(p);
       el.querySelector('.code').disabled = !codeUrlOf(p);
-      el.querySelector('.ghead').onclick = (e) => { if (!e.target.closest('button')) { exitBatch(); selectProfile(p.accountIdx); } };
+      el.querySelector('.gear').onclick = (e) => { e.stopPropagation(); openCfgModal(p); };
+      el.querySelector('.ghead').onclick = (e) => { if (!e.target.closest('button')) { selectProfile(p.accountIdx); } };
       return { el, body: el.querySelector('.gbody') };
     }
     function renderGridCell(idx) {
@@ -352,7 +388,7 @@
         renderRowState(p.accountIdx);
       }
       gridEl.style.gridTemplateColumns = `repeat(${gridCols(todo.length)}, minmax(0, 1fr))`;
-      batchMode = true; mainEl.classList.add('batch'); document.body.classList.add('batch'); document.getElementById('batch-login').textContent = '退出批量';
+      batchMode = true; mainEl.classList.add('batch'); document.body.classList.add('batch');
       render();
       syncPreview();                       // 后台 tab 里 rAF 不会触发,先直接同步一次把格子建出来
       requestAnimationFrame(syncPreview);
@@ -360,13 +396,54 @@
     }
     function exitBatch() {
       if (!batchMode) return;
-      batchMode = false; mainEl.classList.remove('batch'); document.body.classList.remove('batch'); document.getElementById('batch-login').textContent = '批量网格';
+      batchMode = false; mainEl.classList.remove('batch'); document.body.classList.remove('batch');
       batch.clear(); gcells.clear(); gridEl.innerHTML = '';
       render(); renderPreviewState(); syncPreview();   // 会话留在后台,登录态不丢
     }
-    document.getElementById('batch-login').onclick = () => (batchMode ? exitBatch() : enterBatch());
-    document.getElementById('grid-add-profile').onclick = () => document.getElementById('add-profile').click();
-    document.getElementById('grid-reload').onclick = () => { for (const idx of batch) reloadProfile(idx); };
+    document.getElementById('grid-reload').onclick = () => { if (!batch.size) { enterBatch(); return; } for (const idx of batch) reloadProfile(idx); };
+    function toggleMax(idx) {
+      maxedIdx = (maxedIdx === idx) ? null : idx;
+      renderMaxHead();
+      syncPreview();
+    }
+    // 最大化顶栏:恢复完整 action bar,并把当前分配的手机号 / 接码网址直接摊在栏上。
+    function renderMaxHead() {
+      if (maxedIdx == null) return;
+      const p = profiles.find((x) => x.accountIdx === maxedIdx); if (!p) return;
+      const st = stateOf(maxedIdx);
+      document.getElementById('max-dot').className = `dot ${dotClass(st)}`;
+      document.getElementById('max-name').textContent = p.name;
+      document.getElementById('max-chip').textContent = '#' + p.accountIdx;
+      const ph = phoneOf(p), cu = codeUrlOf(p);
+      document.getElementById('max-phone').innerHTML = ph ? `<b>📱</b><span>${esc(ph)}</span>` : '';
+      const cel = document.getElementById('max-codeurl'); cel.innerHTML = cu ? `<b>接码</b><span>${esc(cu)}</span>` : ''; cel.title = cu || '';
+      const cb = document.getElementById('max-codebtn'); const on = codeOpen.has(maxedIdx);
+      cb.classList.toggle('on', on); cb.textContent = on ? '关闭接码' : '接码'; cb.disabled = !cu;
+    }
+    document.getElementById('max-restore').onclick = () => { maxedIdx = null; syncPreview(); };
+    document.getElementById('max-codebtn').onclick = () => { if (maxedIdx != null) { const p = profiles.find((x) => x.accountIdx === maxedIdx); if (p) openCode(p); } };
+    document.getElementById('max-gear').onclick = () => { if (maxedIdx != null) { const p = profiles.find((x) => x.accountIdx === maxedIdx); if (p) openCfgModal(p); } };
+    document.getElementById('max-ping').onclick = () => { if (maxedIdx != null) togglePing(maxedIdx); };
+    document.getElementById('max-reload').onclick = () => { if (maxedIdx != null) reloadProfile(maxedIdx); };
+    async function togglePing(idx) {
+      if (pingOpen.has(idx)) { closePing(idx); return; }
+      const cp = profiles.find((x) => x.accountIdx === idx);
+      const IPCHECK = location.href.split('/panel/')[0] + '/panel/ipcheck.html';
+      let ip = cp && cp.ipInfo && cp.ipInfo.ip;
+      // overlay 立刻打开(全程 UI 可见):ipcheck 页自己经本 Profile 代理读浏览器真实出口 IP + 查 ping0。
+      pingUrl.set(idx, IPCHECK + '?idx=' + idx + (ip ? '&proxyip=' + encodeURIComponent(ip) : ''));
+      pingOpen.add(idx);
+      const g = gcells.get(idx); if (g) g.el.classList.add('pinging');
+      syncPreview();
+      // 缓存只作即时占位,随后无论有无缓存都现场重探一次:住宅代理 sticky 出口会轮换,
+      // 缓存过期会与浏览器真实出口不一致(误报“不一致”)。每次开 🌐 都刷新“代理探测出口”。
+      try {
+        const r = await window.panelAPI.probeIp(idx);
+        if (r && r.ipInfo && r.ipInfo.ip && pingOpen.has(idx)) { if (cp) cp.ipInfo = r.ipInfo; pingUrl.set(idx, IPCHECK + '?idx=' + idx + '&proxyip=' + encodeURIComponent(r.ipInfo.ip)); syncPreview(); }
+      } catch (e) {}
+    }
+    function reloadPing(idx) { if (!pingOpen.has(idx)) return; const base = (pingUrl.get(idx) || 'https://ping0.cc/').split('?_r=')[0]; pingUrl.set(idx, base + (base.indexOf('?') >= 0 ? '&' : '?') + '_r=' + Date.now()); syncPreview(); }
+    function closePing(idx) { pingOpen.delete(idx); pingUrl.delete(idx); const g = gcells.get(idx); if (g) g.el.classList.remove('pinging'); syncPreview(); }
     new ResizeObserver(() => requestAnimationFrame(syncPreview)).observe(gridEl);
 
     function buildRow(p) {
@@ -377,7 +454,7 @@
         <div class="line2"><span class="tg none">—</span><span class="phone none"></span><span class="ip none"></span></div>`;
       // ⚙ 打开设置弹窗(代理 / 测 IP / 删除),不再 inline。
       row.querySelector('.gear').onclick = (e) => { e.stopPropagation(); openCfgModal(p); };
-      row.onclick = () => { exitBatch(); selectProfile(p.accountIdx); };
+      row.onclick = () => { selectProfile(p.accountIdx); };
       row.querySelector('.reload').onclick = (e) => { e.stopPropagation(); reloadProfile(p.accountIdx); };
       return row;
     }
@@ -563,7 +640,7 @@
           let prev = null; try { prev = localStorage.getItem(K); } catch (e) {}
           if (prev && (Date.now() - Number(prev)) < 20000) {
             try { localStorage.removeItem(K); } catch (e) {}
-            flash('上次批量疑似导致崩溃,已跳过自动批量。点「批量网格」可手动打开。', 6000);
+            flash('上次疑似导致崩溃,已跳过自动平铺。点「全部重载」可手动平铺。', 6000);
             return;
           }
           try { localStorage.setItem(K, String(Date.now())); } catch (e) {}
