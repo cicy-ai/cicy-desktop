@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="59cf102f2e32">
+  <meta name="pv" content="88d3105121e3">
   <title>TikTok 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -49,7 +49,10 @@
     button.code.on { background: #c0142e; }
     .ghead .phone { color: #b4b4bb; font: 11px ui-monospace, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
     /* 代理设置弹窗 */
-    .modal { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.55); }
+    /* 不再是全屏 modal:设置盖在那一格的 webview 上,位置和尺寸跟格子走,
+       和接码 overlay 看到的效果一样。其余格子完全不受影响。 */
+    .modal { position: fixed; inset: 0; z-index: 60; display: block; background: transparent; pointer-events: none; }
+    .modal-card { position: absolute; overflow: auto; pointer-events: auto; }
     .modal[hidden] { display: none; }
     .modal-card { width: 380px; max-width: 92vw; background: var(--cell); border: 1px solid var(--line); border-radius: 14px; padding: 18px; box-shadow: 0 24px 70px rgba(0,0,0,.5); }
     .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; font-size: 15px; font-weight: 650; }
@@ -319,6 +322,7 @@
       // 前台那份上面:前台开弹窗只让自己的格子让位,后台的照样盖住弹窗(实测 2026-09-11,
       // xs-1001 上两组 6 格叠在同一批坐标上)。visible:false 只是不画,会话照常活着,保活不受影响。
       const __bg = document.hidden;
+      if (cfgModal && !cfgModal.hidden && cfgP) placeCfgOverCell(cfgP);
       const cells = []; const overlays = [];
       for (const profileId of openedProfiles) {
         let visible = false, r = null;
@@ -593,6 +597,25 @@
     const cfgCode = document.getElementById('cfg-code');
     document.getElementById('cfg-code-open').onclick = () => { if (cfgP) openCode({ ...cfgP, login: { phone: cfgPhone.value, codeUrl: cfgCode.value.trim() } }); };
     const cfgIpText = (p) => p && p.ipInfo && p.ipInfo.ip ? (p.ipInfo.area ? `${p.ipInfo.area} · ${p.ipInfo.ip}` : p.ipInfo.ip) : '未探测';
+    // 把设置卡片摆到这一格 webview 的位置上(接码 overlay 也是用 .gbody 的矩形)。
+    // 格子不在网格里就退回屏幕居中。摆好之后 syncPreview 的重叠判定会正好把这一格让出来。
+    function placeCfgOverCell(p) {
+      const card = document.querySelector('.modal-card');
+      if (!card) return;
+      const g = p && gcells.get(p.accountIdx);
+      const host = g && g.body && g.body.isConnected ? g.body : null;
+      if (!host) {
+        card.style.left = ''; card.style.top = ''; card.style.width = ''; card.style.height = '';
+        card.style.margin = 'auto'; card.style.inset = '0';
+        return;
+      }
+      const r = host.getBoundingClientRect();
+      card.style.inset = 'auto'; card.style.margin = '0';
+      card.style.left = r.left + 'px';
+      card.style.top = r.top + 'px';
+      card.style.width = r.width + 'px';
+      card.style.height = r.height + 'px';
+    }
     function openCfgModal(p) {
       if (!p) return; cfgP = p; delArmed = false;
       document.getElementById('cfg-title').textContent = `${p.name} · #${p.accountIdx} 设置`;
@@ -600,7 +623,9 @@
       cfgPhone.value = phoneOf(p); cfgCode.value = codeUrlOf(p);
       document.getElementById('cfg-fb').textContent = fbAcctOf(p) ? ('FB 登录账号：' + fbAcctOf(p)) : '未配置 FB 账号（TK 用 FB 登录）';
       cfgDel.textContent = '删除此 Profile'; cfgDel.disabled = false;
-      cfgModal.hidden = false; cfgProxy.focus();
+      cfgModal.hidden = false;
+      placeCfgOverCell(p);
+      cfgProxy.focus();
       // 只让被弹窗卡片盖住的格子让位(syncPreview 里按重叠判定 detach),其余 webview 保持不动。
       syncPreview();
     }
