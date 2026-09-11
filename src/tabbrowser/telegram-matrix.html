@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="8d8c0bdd0853">
+  <meta name="pv" content="05c0492725c2">
   <title>Telegram 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -101,6 +101,8 @@
     .ghead .name { font-size: 12px; }
     .ghead .st { margin-left: auto; }
     .gcell.done .ghead .st { color: #3fb950; font-weight: 600; }
+    /* 按要求:格子头不显示 profile 名字(只是不显示,profile 本身不动) */
+    .ghead .name { display: none; }
     .gbody { flex: 1 1 auto; min-height: 0; width: 100%; background: #fff; }
     #grid-empty { grid-column: 1 / -1; display: grid; place-items: center; color: var(--muted); }
     .spinner { width: 28px; height: 28px; border: 3px solid rgba(255,255,255,.12); border-top-color: var(--accent); border-radius: 50%; animation: spin .9s linear infinite; margin: 0 auto 12px; }
@@ -336,7 +338,7 @@
       g.el.classList.toggle('done', done);
       g.el.classList.toggle('failed', !!st.failed && !st.loading);
       g.el.querySelector('.dot').className = `dot ${dotClass(st)}`;
-      g.el.querySelector('.st').textContent = done ? '✓ 已登录' : stateText(st, true);
+      g.el.querySelector('.st').textContent = '';   // 按要求:不显示「已加载 / 已登录」
       updateCodeButtons(idx);
       if (batchMode) { const n = [...batch].filter((i) => { const q = profiles.find((x) => x.accountIdx === i); return q && hasIdentity(q); }).length; gridCount.textContent = `${batch.size} 个会话 · ${n} 已登录`; }
     }
