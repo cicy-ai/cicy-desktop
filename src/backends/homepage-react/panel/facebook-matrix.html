@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="c574ef4f13d4">
+  <meta name="pv" content="4489ac07b772">
   <title>Facebook 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -134,6 +134,8 @@
     .gcell.failed { border-color: rgba(255,92,92,.6); }
     .ghead { flex: none; height: 30px; padding: 0 8px; display: flex; align-items: center; gap: 6px; font-size: 12px; border-bottom: 1px solid var(--line); background: var(--head); min-width: 0; }
     .ghead .name { font-size: 12px; }
+    /* 格子头不显示 profile 名字(只是不显示,profile 本身不动) */
+    .ghead .name { display: none; }
     .ghead .st { margin-left: auto; }
     .ghead .acts { flex: none; display: inline-flex; align-items: center; gap: 4px; margin-left: auto; padding-left: 8px; }
     .ghead .st ~ .acts { margin-left: 8px; }
