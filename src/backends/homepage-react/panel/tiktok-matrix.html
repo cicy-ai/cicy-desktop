@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="600ac2f7022c">
+  <meta name="pv" content="85fd0f7087e1">
   <title>TikTok 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -306,14 +306,14 @@
 
     function syncPreview() {
       if (!window.panelAPI) return;
-      // 弹窗开着时格子视图是被主进程收起来的(BrowserView 永远盖在 DOM 之上,
-      // 不收起弹窗就看不见)。这时候任何一次同步都会把它们重新贴回来、压在弹窗上 ——
-      // 点「打开」「保存」、窗口缩放、ResizeObserver 都会走到这里。关弹窗时会再同步一次。
-      const __m = document.getElementById('cfg-modal');
-      if (__m && !__m.hidden) return;
       const rect = preview.getBoundingClientRect();
       const mv = document.getElementById('maxview'); if (mv) mv.hidden = (maxedIdx == null);
       const box = (r) => ({ x: r.x, y: r.y, w: r.width, h: r.height });
+      // 设置弹窗打开时:只让被「弹窗卡片」盖住的格子让位(detach),其余 webview 保持显示 —— 方便对照。
+      // 和 facebook-matrix.html 同一套做法,不再一次性把整组收起来。
+      const cardEl = (cfgModal && !cfgModal.hidden) ? document.querySelector('.modal-card') : null;
+      const cardR = cardEl ? cardEl.getBoundingClientRect() : null;
+      const hitsCard = (r) => !!(cardR && r && !(r.x + r.w <= cardR.left || r.x >= cardR.right || r.y + r.h <= cardR.top || r.y >= cardR.bottom));
       const cells = []; const overlays = [];
       for (const profileId of openedProfiles) {
         let visible = false, r = null;
@@ -323,6 +323,7 @@
           const g = gcells.get(profileId);
           if (g && batch.has(profileId)) { visible = true; r = box(g.body.getBoundingClientRect()); }
         } else if (selected && profileId === selected.accountIdx) { visible = true; r = box(rect); }
+        if (visible && hitsCard(r)) visible = false;  // 被弹窗盖住 → 临时 detach
         cells.push({ id: cellId(profileId), url: SITE_URL, profile: profileId, visible, rect: r });
         // 接码叠加层:同 rect、同 profile(=同 partition/代理),排在 tg 格子之后 → attach 更晚 → 叠最上层
         if (visible && codeOpen.has(profileId)) {
@@ -594,12 +595,11 @@
       document.getElementById('cfg-fb').textContent = fbAcctOf(p) ? ('FB 登录账号：' + fbAcctOf(p)) : '未配置 FB 账号（TK 用 FB 登录）';
       cfgDel.textContent = '删除此 Profile'; cfgDel.disabled = false;
       cfgModal.hidden = false; cfgProxy.focus();
-      // BrowserView 预览永远浮在页面 DOM 之上,会盖住弹窗 —— 打开弹窗时把 cells 脱离(复用拖拽逻辑),关闭时贴回。
-      try { window.panelAPI.dragging(true); } catch (e) {}
+      // 只让被弹窗卡片盖住的格子让位(syncPreview 里按重叠判定 detach),其余 webview 保持不动。
+      syncPreview();
     }
     function closeCfgModal() {
       cfgModal.hidden = true; cfgP = null; delArmed = false;
-      try { window.panelAPI.dragging(false); } catch (e) {}
       syncPreview();
     }
     cfgModal.onclick = (e) => { if (e.target === cfgModal) closeCfgModal(); };
