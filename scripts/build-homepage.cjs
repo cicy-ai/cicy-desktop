@@ -54,6 +54,13 @@ for (const page of PANEL_PAGES) {
 // 在下一个版本铺开之前,这里放一份 Telegram 矩阵页顶上,菜单行为和回退前一致。
 // 等车队都升到含 f5b6e3a 的版本后,这段可以删。
 fs.copyFileSync(path.join(PANEL_SRC, "telegram-matrix.html"), path.join(PANEL_OUT, "matrix.html"));
+// ipcheck.html 只在 homepage-react/panel 下手工维护(src/tabbrowser 里没有),
+// 但上面 rmSync 会把整个 PANEL_OUT 清空 —— 不显式保住它,每次构建都会被删,
+// 格子头那个 🌐 按钮点开就是 SPA 首页(实测 2026-09-11)。
+{
+  const extra = path.join(__dirname, "..", "src", "backends", "homepage-react", "panel", "ipcheck.html");
+  if (fs.existsSync(extra)) fs.copyFileSync(extra, path.join(PANEL_OUT, "ipcheck.html"));
+}
 console.log(`[build-homepage] panel pages synced: ${PANEL_PAGES.join(", ")} (+ matrix.html 兼容 v2.1.355)`);
 
 // 1) build the SPA from source (install deps on a cold runner)
