@@ -49,7 +49,18 @@ function facebookIdentityFromProfile(profile) {
   const logins = profile && Array.isArray(profile.logins) ? profile.logins : [];
   const l = logins.find((x) => String((x && x.name) || "").toLowerCase() === "facebook");
   if (!l) return null;
-  return { id: String(l.username || ""), username: "", displayName: String(l.note || ""), phone: "" };
+  // email / twofa / secondEmail 原来在这里被丢掉了,面板的 ⚙ 里那几行只能显示「—」。
+  // 它们在 logins[] 里一直存着(实测 2026-09-11,xs-1001 #1 三项都有值)。
+  // password 这个字段 logins[] 里没有,FB 密码仍只能从备注串 `FB密码:xxx` 解析。
+  return {
+    id: String(l.username || ""),
+    username: "",
+    displayName: String(l.note || ""),
+    phone: "",
+    email: String(l.email || ""),
+    twofa: String(l.twofa || ""),
+    secondEmail: String(l.secondEmail || ""),
+  };
 }
 
 module.exports = { isFacebookUrl, FACEBOOK_IDENTITY_SCRIPT, normalizeFacebookIdentity, facebookLoginRecord, facebookIdentityFromProfile };

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="0342f63f8c64">
+  <meta name="pv" content="ec79e7294f64">
   <title>Facebook 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -637,10 +637,13 @@
         ['Profile', `${esc(p.name)} · #${p.accountIdx}` + (acctId ? ` <span class="muted">${esc(acctId)}</span>` : '')],
         ['状态', badge],
         ['FB 账号', mono(fb.id || fb.username)],
+        // 优先用 logins[] 里的结构化字段,没有再退回备注串解析出来的键值。
+        // (老桌面端不返回这几个字段,那时就只有备注串这一条路。)
         ['FB 密码', mono(meta['FB密码'])],
-        ['2FA', mono(meta['2FA'])],
+        ['2FA', mono(fb.twofa || meta['2FA'])],
+        ['邮箱', mono(fb.email || meta['邮箱'])],
         ['邮箱密码', mono(meta['邮箱密码'])],
-        ['备用邮箱', mono(meta['备用'] || meta['备用邮箱'])],
+        ['备用邮箱', mono(fb.secondEmail || meta['备用'] || meta['备用邮箱'])],
         ['__hr__', ''],
         ['分区', mono(`persist:sandbox-${p.accountIdx}`)],
         ['代理', p.proxy ? mono(p.proxy) : '<span class="muted">直连</span>'],
