@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="ec79e7294f64">
+  <meta name="pv" content="718a4126ab87">
   <title>Facebook 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -207,6 +207,12 @@
       <label class="modal-label">接码 URL</label>
       <div class="modal-row"><input id="cfg-code" placeholder="https://…/getcode?id=…" spellcheck="false"><button class="ghost" id="cfg-code-open" title="在该 Profile 的 tab 里打开">打开</button></div>
       </div>
+      <label class="modal-label">账号资料（存在本机浏览器，不写文件）</label>
+      <div class="modal-row"><input id="cred-pwd" placeholder="FB 密码" spellcheck="false"></div>
+      <div class="modal-row"><input id="cred-twofa" placeholder="2FA 密钥" spellcheck="false"></div>
+      <div class="modal-row"><input id="cred-email" placeholder="邮箱" spellcheck="false"></div>
+      <div class="modal-row"><input id="cred-mailpwd" placeholder="邮箱密码" spellcheck="false"></div>
+      <div class="modal-row"><input id="cred-second" placeholder="备用邮箱" spellcheck="false"></div>
       <label class="modal-label">代理地址</label>
       <div class="modal-row"><input id="cfg-proxy" placeholder="留空 = 直连，例如 http://127.0.0.1:20001" spellcheck="false"><button id="cfg-save">保存</button></div>
       <div class="modal-row"><button class="ghost" id="cfg-test">测 IP</button><span class="modal-ip" id="cfg-ip"></span></div>
@@ -614,6 +620,23 @@
     const cfgPhone = document.getElementById('cfg-phone');
     const cfgCode = document.getElementById('cfg-code');
     document.getElementById('cfg-code-open').onclick = () => { if (cfgP) openCode({ ...cfgP, login: { phone: cfgPhone.value, codeUrl: cfgCode.value.trim() } }); };
+    // 账号资料(密码 / 2FA / 邮箱 / 邮箱密码 / 备用邮箱)存在浏览器本地,不写文件。
+    // 原来这些只能从 logins[].note 那个备注串里解析,而身份识别每次加载都会把 note
+    // 覆盖成抓到的真实昵称,于是一台台丢光(实测:全队 19 个 FB profile 只剩 2 个还留着)。
+    // localStorage 按「机器 + profile 编号」存,身份识别碰不到它。
+    const CRED_KEYS = ['pwd', 'twofa', 'email', 'mailpwd', 'second'];
+    const credKey = (idx) => 'fbcred:' + (new URLSearchParams(location.search).get('team') || 'local') + ':' + idx;
+    function readCred(idx) {
+      try { return JSON.parse(localStorage.getItem(credKey(idx)) || '{}') || {}; } catch (e) { return {}; }
+    }
+    function writeCred(idx, obj) {
+      try {
+        const cur = readCred(idx);
+        for (const k of CRED_KEYS) if (obj[k] !== undefined) cur[k] = String(obj[k] || '');
+        localStorage.setItem(credKey(idx), JSON.stringify(cur));
+        return true;
+      } catch (e) { return false; }
+    }
     const cfgIpText = (p) => p && p.ipInfo && p.ipInfo.ip ? (p.ipInfo.area ? `${p.ipInfo.area} · ${p.ipInfo.ip}` : p.ipInfo.ip) : '未探测';
     // 当前 profile / 代理 / FB 账号身份的只读概览,放在设置弹窗顶部。
     const cfgInfoHtml = (p) => {
@@ -630,6 +653,7 @@
         const m = seg.match(/^([^:：]+)[:：]([\s\S]*)$/);
         if (m) meta[m[1].trim()] = m[2].trim(); else if (i === 0) acctId = seg;
       });
+      const cr = readCred(p.accountIdx);
       const mono = (v) => v ? `<span class="mono">${esc(v)}</span>` : '<span class="muted">—</span>';
       const badge = loggedIn ? '<span class="ci-b ok">✓ 已登录</span>'
         : (bound ? '<span class="ci-b warn">已绑定 · 未登录</span>' : '<span class="ci-b mut">未绑定</span>');
@@ -639,11 +663,11 @@
         ['FB 账号', mono(fb.id || fb.username)],
         // 优先用 logins[] 里的结构化字段,没有再退回备注串解析出来的键值。
         // (老桌面端不返回这几个字段,那时就只有备注串这一条路。)
-        ['FB 密码', mono(meta['FB密码'])],
-        ['2FA', mono(fb.twofa || meta['2FA'])],
-        ['邮箱', mono(fb.email || meta['邮箱'])],
-        ['邮箱密码', mono(meta['邮箱密码'])],
-        ['备用邮箱', mono(fb.secondEmail || meta['备用'] || meta['备用邮箱'])],
+        ['FB 密码', mono(cr.pwd || meta['FB密码'])],
+        ['2FA', mono(cr.twofa || fb.twofa || meta['2FA'])],
+        ['邮箱', mono(cr.email || fb.email || meta['邮箱'])],
+        ['邮箱密码', mono(cr.mailpwd || meta['邮箱密码'])],
+        ['备用邮箱', mono(cr.second || fb.secondEmail || meta['备用'] || meta['备用邮箱'])],
         ['__hr__', ''],
         ['分区', mono(`persist:sandbox-${p.accountIdx}`)],
         ['代理', p.proxy ? mono(p.proxy) : '<span class="muted">直连</span>'],
@@ -681,6 +705,12 @@
       if (!p) return; cfgP = p; delArmed = false;
       document.getElementById('cfg-title').textContent = `${p.name} · #${p.accountIdx} 设置`;
       document.getElementById('cfg-info').innerHTML = cfgInfoHtml(p);
+      { const c = readCred(p.accountIdx);
+        document.getElementById('cred-pwd').value = c.pwd || '';
+        document.getElementById('cred-twofa').value = c.twofa || (p.facebook && p.facebook.twofa) || '';
+        document.getElementById('cred-email').value = c.email || (p.facebook && p.facebook.email) || '';
+        document.getElementById('cred-mailpwd').value = c.mailpwd || '';
+        document.getElementById('cred-second').value = c.second || (p.facebook && p.facebook.secondEmail) || ''; }
       cfgProxy.value = p.proxy || ''; cfgErr.textContent = ''; cfgIp.textContent = cfgIpText(p);
       cfgPhone.value = phoneOf(p); cfgCode.value = codeUrlOf(p);
       cfgDel.textContent = '删除此 Profile'; cfgDel.disabled = false;
@@ -699,6 +729,14 @@
     document.getElementById('cfg-save').onclick = async () => {
       if (!cfgP) return; const b = document.getElementById('cfg-save'); b.disabled = true; cfgErr.textContent = '';
       try {
+        writeCred(cfgP.accountIdx, {
+          pwd: document.getElementById('cred-pwd').value.trim(),
+          twofa: document.getElementById('cred-twofa').value.trim(),
+          email: document.getElementById('cred-email').value.trim(),
+          mailpwd: document.getElementById('cred-mailpwd').value.trim(),
+          second: document.getElementById('cred-second').value.trim(),
+        });
+        document.getElementById('cfg-info').innerHTML = cfgInfoHtml(cfgP);
         const lg = await window.panelAPI.setProfileLogin(cfgP.accountIdx, cfgPhone.value.trim(), cfgCode.value.trim());
         cfgP.login = lg.login; renderPhone(cfgP);
         const u = await window.panelAPI.setProfileProxy(cfgP.accountIdx, cfgProxy.value.trim());
