@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="bc2f3dd7d80c">
+  <meta name="pv" content="70ba20b42c16">
   <title>Telegram 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -610,17 +610,13 @@
       const mono = (v) => v ? `<span class="mono">${esc(v)}</span>` : '<span class="muted">—</span>';
       const badge = loggedIn ? '<span class="ci-b ok">✓ 已登录</span>'
         : (bound ? '<span class="ci-b warn">已分配 · 未登录</span>' : '<span class="ci-b mut">未分配</span>');
+      // 只列弹窗里别处没有的。标题已经写了 Profile 名和编号,手机号 / 接码 URL /
+      // 代理地址下面都有输入框,出口 IP 在「测 IP」那一行 —— 这些不在这里重复一遍。
       const rows = [
-        ['Profile', `${esc(p.name)} · #${p.accountIdx}`],
         ['状态', badge],
         ['用户名', it && it.username ? mono('@' + it.username) : mono('')],
         ['显示名', mono(it && it.displayName)],
-        ['手机号', mono(phoneOf(p) || (it && it.phone ? '+' + it.phone : ''))],
-        ['接码 URL', mono(codeUrlOf(p))],
-        ['__hr__', ''],
         ['分区', mono(`persist:sandbox-${p.accountIdx}`)],
-        ['代理', p.proxy ? mono(p.proxy) : '<span class="muted">直连</span>'],
-        ['出口 IP', esc(cfgIpText(p))],
       ];
       return rows.map(([k, v]) => k === '__hr__' ? '<hr>' : `<div class="ci-row"><span class="ci-k">${k}</span><span class="ci-v">${v}</span></div>`).join('');
     };
