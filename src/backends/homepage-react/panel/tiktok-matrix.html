@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="f674cb160aff">
+  <meta name="pv" content="d484f0b7559c">
   <title>TikTok 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -107,6 +107,9 @@
     .maxhead .name { font-weight: 650; font-size: 13px; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .maxhead .chip { flex: none; padding: 1px 6px; border-radius: 999px; background: var(--head); color: #b4b4bb; font: 11px ui-monospace, monospace; }
     .maxhead .sp { flex: 1; }
+    /* 最大化后的 header 与未最大化的格子头保持一致:不显示名字。
+       TikTok 页没有 .minfo 那两块,所以只有这一条。 */
+    .maxhead .name { display: none; }
     .maxhead .acts { flex: none; display: inline-flex; align-items: center; gap: 6px; padding-left: 12px; border-left: 1px solid var(--line); }
     .ghead .acts { flex: none; display: inline-flex; align-items: center; gap: 4px; margin-left: auto; padding-left: 8px; }
     .ghead .st ~ .acts { margin-left: 8px; }

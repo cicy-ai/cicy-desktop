@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="a3f8b3b25658">
+  <meta name="pv" content="b71e4068373d">
   <title>Telegram 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -108,6 +108,10 @@
     .maxhead .chip { flex: none; padding: 1px 6px; border-radius: 999px; background: var(--head); color: #b4b4bb; font: 11px ui-monospace, monospace; }
     .maxhead .minfo { flex: none; display: inline-flex; align-items: center; gap: 5px; max-width: 30vw; padding: 2px 8px; border-radius: 8px; background: var(--head); color: #c9c9d1; font: 11px ui-monospace, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .maxhead .minfo:empty { display: none; }
+    /* 最大化后的 header 与未最大化的格子头保持一致:不显示名字,
+       也不显示手机号 / 接码 URL 那两块信息。这些在 ⚙ 里都能看。 */
+    .maxhead .name { display: none; }
+    .maxhead .minfo { display: none; }
     .maxhead .minfo b { color: #8a8a93; font-weight: 500; user-select: none; }
     .maxhead .minfo span { color: #e9e9ee; user-select: all; overflow: hidden; text-overflow: ellipsis; }
     .maxhead .sp { flex: 1; }
