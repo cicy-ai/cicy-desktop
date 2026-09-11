@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="312bf0de8452">
+  <meta name="pv" content="9863e30fa515">
   <title>Facebook 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -629,6 +629,26 @@
     function readCred(idx) {
       try { return JSON.parse(localStorage.getItem(credKey(idx)) || '{}') || {}; } catch (e) { return {}; }
     }
+    // 台账才是源头:social-hub 的 fb_accounts 按 home_host + home_idx 下发到每一格,
+    // 密码 / 邮箱密码 / 2FA / 辅助邮箱都在那里。服务端按机器真实 IP 校验,只给它自己那份。
+    // 拉到就缓存进 localStorage,离线或接口不通时仍然看得到。
+    async function pullCred(idx) {
+      const team = new URLSearchParams(location.search).get('team') || '';
+      if (!team) return null;
+      try {
+        const r = await fetch(`/api/fbcred?team=${encodeURIComponent(team)}&idx=${idx}`, { cache: 'no-store' });
+        if (!r.ok) return null;
+        const a = await r.json();
+        if (!a || a.error || !Object.keys(a).length) return null;
+        const c = {
+          pwd: String(a.fb_password || ''), twofa: String(a.twofa || ''),
+          email: String(a.email || ''), mailpwd: String(a.email_password || ''),
+          second: String(a.recovery || ''),
+        };
+        writeCred(idx, c);
+        return c;
+      } catch (e) { return null; }
+    }
     function writeCred(idx, obj) {
       try {
         const cur = readCred(idx);
@@ -713,6 +733,13 @@
       if (!p) return; cfgP = p; delArmed = false;
       document.getElementById('cfg-title').textContent = `${p.name} · #${p.accountIdx} 设置`;
       document.getElementById('cfg-info').innerHTML = cfgInfoHtml(p);
+      pullCred(p.accountIdx).then((c) => {
+        if (!c || !cfgP || cfgP.accountIdx !== p.accountIdx) return;
+        document.getElementById('cfg-info').innerHTML = cfgInfoHtml(p);
+        const set = (id, v) => { const e = document.getElementById(id); if (e && !e.value) e.value = v || ''; };
+        set('cred-pwd', c.pwd); set('cred-twofa', c.twofa); set('cred-email', c.email);
+        set('cred-mailpwd', c.mailpwd); set('cred-second', c.second);
+      });
       { const c = readCred(p.accountIdx);
         document.getElementById('cred-pwd').value = c.pwd || '';
         document.getElementById('cred-twofa').value = c.twofa || (p.facebook && p.facebook.twofa) || '';
