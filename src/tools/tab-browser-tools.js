@@ -32,7 +32,6 @@ const { createPanelMenuTemplate } = require("../tabbrowser/panel-menu");
 const { resolvePanelPreset } = require("../tabbrowser/panel-presets");
 const { normalizeCicyTheme, resolveTabChromeTheme } = require("../tabbrowser/tab-theme");
 const { applyTeamIdentityToTab } = require("../tabbrowser/team-tab-identity");
-const { restoredCicyCodeUrl } = require("../tabbrowser/cicy-code-tab-restore");
 const HOMEPAGE_PRELOAD = path.join(__dirname, "..", "backends", "homepage-preload.js");
 const WEBVIEW_PRELOAD = path.join(__dirname, "..", "backends", "webview-preload.js");
 const CHROME_H = 80;  // tab strip (40) + toolbar (40) — must match tab-shell.html
@@ -94,94 +93,8 @@ const openedWc = sharedState.openedWc; // stripVol(url) -> webContentsId
 
 const { NEWTAB_URL, PANEL_URL_BASE, ensureForPartition } = require("../tabbrowser/newtab-protocol");
 const PANEL_STATE_PATH = path.join(os.homedir(), "cicy-ai", "db", "last-panel.json");
-const CICY_CODE_TAB_STATE_PATH = path.join(os.homedir(), "cicy-ai", "db", "cicy-code-tab.json");
 let lastPanelRestored = false;
-let cicyCodeTabRestored = false;
 
-function isLocalCicyCodeUrl(url) {
-  try {
-    const u = new URL(String(url || ""));
-    return (u.hostname === "127.0.0.1" || u.hostname === "localhost" || u.hostname === "::1")
-      && (u.port || (u.protocol === "https:" ? "443" : "80")) === "8008";
-  } catch (e) { return false; }
-}
-
-function rememberCicyCodeTab(url) {
-  if (!isLocalCicyCodeUrl(url)) return;
-  try {
-    fs.mkdirSync(path.dirname(CICY_CODE_TAB_STATE_PATH), { recursive: true });
-    const tmp = CICY_CODE_TAB_STATE_PATH + ".tmp";
-    fs.writeFileSync(tmp, JSON.stringify({ opened: true, savedAt: new Date().toISOString() }, null, 2));
-    fs.renameSync(tmp, CICY_CODE_TAB_STATE_PATH);
-  } catch (e) {}
-}
-
-function shouldRestoreCicyCodeTab() {
-  try {
-    if (JSON.parse(fs.readFileSync(CICY_CODE_TAB_STATE_PATH, "utf8")).opened === true) return true;
-  } catch (e) {}
-  // One-time compatibility with installs that opened :8008 before this
-  // dedicated tab-state file existed. windows.json is the old window session
-  // store; recognize any historical local CiCy Code URL and migrate it.
-  try {
-    const legacy = JSON.parse(fs.readFileSync(
-      path.join(os.homedir(), "cicy-ai", "db", "windows.json"), "utf8"));
-    const rows = Array.isArray(legacy)
-      ? legacy
-      : (Array.isArray(legacy.windows)
-          ? legacy.windows
-          : (legacy.windows && typeof legacy.windows === "object" ? Object.values(legacy.windows) : []));
-    if (rows.some((row) => isLocalCicyCodeUrl(row && row.url))) {
-      rememberCicyCodeTab("http://127.0.0.1:8008/");
-      return true;
-    }
-  } catch (e) {}
-  return false;
-}
-
-function localCicyCodeHomeUrl() {
-  let token = "";
-  try {
-    const cfg = JSON.parse(fs.readFileSync(path.join(os.homedir(), "cicy-ai", "global.json"), "utf8"));
-    token = String(cfg.api_token || "");
-  } catch (e) {}
-  return `http://127.0.0.1:8008/${token ? `?token=${encodeURIComponent(token)}` : ""}`;
-}
-
-function addRestoredCicyCodeTab(m, restoredUrl) {
-  if (!restoredUrl || !m || m.win.isDestroyed()) return;
-  let team = null;
-  try { team = require("../backends/local-teams").teamIdentityForUrl(restoredUrl); } catch (e) {}
-  m.addTab(restoredUrl, {
-    trusted: true,
-    title: team ? team.title : "CiCy Code",
-    team: true,
-    avatar: team ? team.avatar : "",
-    colorKey: team ? team.id : "local-cicy-code-8008",
-  });
-}
-
-function restoreCicyCodeTab(m) {
-  // Windows :8008 is the Docker sidecar and has its own volume-persisted token.
-  // Never restore it with the desktop host's global.json token: the container
-  // rejects that credential and leaves the restored tab on the login screen.
-  if (process.platform === "win32") {
-    restoredCicyCodeUrl(() => require("../sidecar/wsl-docker").readContainerToken(8008))
-      .then((url) => {
-        if (!url) {
-          console.warn("[tab-browser] skipped Docker :8008 restore: container token unavailable");
-          return;
-        }
-        addRestoredCicyCodeTab(m, url);
-      })
-      .catch((error) => {
-        console.warn(`[tab-browser] skipped Docker :8008 restore: ${error.message}`);
-      });
-    return;
-  }
-
-  addRestoredCicyCodeTab(m, localCicyCodeHomeUrl());
-}
 
 function saveLastPanelState(url, name = "面板") {
   try {
@@ -682,7 +595,6 @@ function profileIdOfWebContents(wc) {
 // button / electron_tab_open / the panel can add tabs to profile 0 too.
 async function openTab(accountIdx, url, opts = {}) {
   const m = ensureManager(accountIdx);
-  if (accountIdx === 0) rememberCicyCodeTab(url);
   if (accountIdx === 0 && url) {
     try {
       const team = require("../backends/local-teams").teamIdentityForUrl(url);
@@ -737,17 +649,13 @@ function openHomeWindow(accountIdx, homeUrl, opts = {}) {
   if (accountIdx === 0 && !lastPanelRestored) {
     lastPanelRestored = true;
     const panel = readLastPanelState();
-    if (panel) m.addTab(panel.url, { title: panel.name });
+    // activate:false —— 启动恢复只把面板放回标签栏,绝不切走当前 tab(用户规矩:tab 在哪就在哪)。
+    if (panel) m.addTab(panel.url, { title: panel.name, activate: false });
   }
-  // CiCy Code is a resident local workspace. Once the user has opened :8008,
-  // restore it on the next desktop launch. Always enter at the root with the
-  // current token instead of reviving a stale #/agent/... route.
-  if (accountIdx === 0 && !cicyCodeTabRestored) {
-    cicyCodeTabRestored = true;
-    if (shouldRestoreCicyCodeTab()) {
-      restoreCicyCodeTab(m);
-    }
-  }
+  // The local CiCy Code / Docker 团队 tab (:8008) is NOT auto-restored on launch any
+  // more: the sidecar keeps running in the background, and the user opens the tab
+  // from the homepage card when they want it. Startup must never add tabs the user
+  // didn't ask for (每次启动自动冒出 Docker 团队 tab 被用户明确要求去掉).
   // 只有明确要求(tray「打开首页」/ 启动,activate!==false)才把窗口抢到前台;deeplink /
   // second-instance 顺带触发(activate:false)只静默显示,绝不从用户当前 app 抢焦点。
   if (opts.activate !== false) { try { m.win.show(); m.win.focus(); } catch (e) {} } else m.surfaceQuiet();
