@@ -174,6 +174,7 @@
   ::-webkit-scrollbar-thumb { background: #33363f; border-radius: 8px; border: 2px solid var(--bg); background-clip: padding-box; }
   ::-webkit-scrollbar-thumb:hover { background: #454a57; }
   ::-webkit-scrollbar-corner { background: transparent; }
+    .maxhead .icon.on, .ghead .icon.on { background: var(--accent); color: #fff; }
   </style>
 </head>
 <body>
@@ -476,9 +477,9 @@
     }
     document.getElementById('max-restore').onclick = () => { maxedIdx = null; syncPreview(); };
     document.getElementById('max-codebtn').onclick = () => { if (maxedIdx != null) { const p = profiles.find((x) => x.accountIdx === maxedIdx); if (p) openCode(p); } };
-    document.getElementById('max-gear').onclick = () => { if (maxedIdx != null) { const p = profiles.find((x) => x.accountIdx === maxedIdx); if (p) openCfgModal(p); } };
-    document.getElementById('max-ping').onclick = () => { if (maxedIdx != null) togglePing(maxedIdx); };
-    document.getElementById('max-reload').onclick = () => { if (maxedIdx != null) reloadProfile(maxedIdx); };
+    document.getElementById('max-gear').onclick = function () { if (maxedIdx == null) return; var p = profiles.find(function(x){ return x.accountIdx === maxedIdx; }); if (!p) return; if (cfgP && cfgP.accountIdx === p.accountIdx && !cfgModal.hidden) closeCfgModal(); else openCfgModal(p); this.classList.toggle('on', !cfgModal.hidden); };
+    document.getElementById('max-ping').onclick = function () { if (maxedIdx == null) return; togglePing(maxedIdx); this.classList.toggle('on', pingOpen.has(maxedIdx)); };
+    document.getElementById('max-reload').onclick = function () { if (maxedIdx == null) return; if (pingOpen.has(maxedIdx)) reloadPing(maxedIdx); else reloadProfile(maxedIdx); };
     async function togglePing(idx) {
       if (pingOpen.has(idx)) { closePing(idx); return; }
       const cp = profiles.find((x) => x.accountIdx === idx);
@@ -697,7 +698,7 @@
       syncPreview();
     }
     function closeCfgModal() {
-      cfgModal.hidden = true; cfgP = null;
+      cfgModal.hidden = true; cfgP = null; { var _mg = document.getElementById('max-gear'); if (_mg) _mg.classList.remove('on'); }
       document.querySelectorAll('.gcell.cfging').forEach(function(el){ el.classList.remove('cfging'); }); delArmed = false;
       syncPreview();
     }
