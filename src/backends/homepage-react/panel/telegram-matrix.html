@@ -138,24 +138,22 @@
     .maxhead .acts { flex: none; display: inline-flex; align-items: center; gap: 6px; padding-left: 12px; border-left: 1px solid var(--line); }
     #maxbody { flex: 1 1 auto; min-height: 0; }
     .gcell .pingctl { display: none; }
-    .gcell.pinging .pingctl { display: inline-block; }
-    .gcell.pinging .code, .gcell.pinging .gear, .gcell.pinging .max { display: none; }
+    .gcell.pinging .code, .gcell.pinging .gear, .gcell.pinging .max { opacity: .3; pointer-events: none; }
     .gcell { display: flex; flex-direction: column; flex: none; width: 360px; height: 50vh; min-height: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--cell); overflow: hidden; }
     .gcell.done { border-color: rgba(63,185,80,.6); }
     .gcell.failed { border-color: rgba(255,92,92,.6); }
-    .ghead { flex: none; height: 30px; padding: 0 8px; display: flex; align-items: center; gap: 6px; font-size: 12px; border-bottom: 1px solid var(--line); background: var(--head); min-width: 0; }
+    .ghead { flex: none; height: 32px; padding: 0 8px; display: flex; align-items: center; gap: 6px; font-size: 12px; border-bottom: 1px solid var(--line); background: var(--head); min-width: 0; }
     .ghead .name { font-size: 12px; }
     /* 格子头不显示 profile 名字(只是不显示,profile 本身不动) */
     .ghead .name { display: none; }
     /* 格子头不显示手机号 */
     .ghead .phone { display: none; }
     .ghead .st { margin-left: auto; }
-    .ghead .acts { flex: none; display: inline-flex; align-items: center; gap: 4px; margin-left: auto; padding-left: 8px; }
+    .ghead .acts { flex: none; display: inline-flex; align-items: center; gap: 6px; margin-left: auto; padding-left: 8px; }
     /* 格子头 / 最大化头部那一排图标:统一成 24×24 的盒子,里面 14px 的单色线条 SVG。
        之前 ⚙ ⤢ ⟳ 是文本符号、🌐 🔄 是彩色 emoji,两套字体画出来一大一小、一彩一灰。 */
-    .ghead .icon, .maxhead .icon { width: 24px; height: 24px; padding: 0; display: inline-flex; align-items: center; justify-content: center; color: #b4b4bb; border-radius: 6px; line-height: 1; }
+    .ghead .icon, .maxhead .icon { width: 28px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; color: #b4b4bb; border-radius: 6px; line-height: 1; }
     .ghead .icon svg, .maxhead .icon svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; display: block; }
-    .ghead .acts { gap: 2px; }
     .ghead button.code { height: 22px; padding: 0 9px; display: inline-flex; align-items: center; }
     /* 上面把 .icon 统一成 inline-flex,会盖掉原来 .pingctl{display:none} —— 🔄 ✕ 只在
        ping 叠加层开着时才出现,这里把优先级补回来。 */
