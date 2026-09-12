@@ -168,6 +168,12 @@
     .mid{display:inline-block;margin-right:8px;padding:2px 9px;border-radius:7px;font:700 13px ui-monospace,monospace;
          background:#1f6feb;color:#fff;letter-spacing:.5px;vertical-align:middle;box-shadow:0 1px 4px rgba(0,0,0,.4)}
     .gcell.pinging .ghead .icon.ping, .gcell.cfging .ghead .icon.gear { background: var(--accent); color: #fff; }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-button { display: none; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #33363f; border-radius: 8px; border: 2px solid var(--bg); background-clip: padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background: #454a57; }
+  ::-webkit-scrollbar-corner { background: transparent; }
   </style>
 </head>
 <body>
@@ -208,7 +214,7 @@
   <div id="maxview" hidden><div class="maxhead"><span class="dot" id="max-dot"></span><span class="name" id="max-name"></span><span class="chip" id="max-chip"></span><span class="minfo" id="max-phone"></span><span class="minfo" id="max-codeurl"></span><span class="sp"></span><span class="acts"><button class="code" id="max-codebtn" title="在格子上叠加/关闭接码 webview(同代理出口)">接码</button><button class="icon" id="max-gear" title="手机号 / 接码 URL / 代理设置"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button><button class="icon" id="max-ping" title="ipcheck 出口 IP"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></button><button class="icon" id="max-reload" title="重新加载"><svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button><button class="ghost" id="max-restore">还原</button></span></div><div id="maxbody"></div></div>
   <div id="cfg-modal" class="modal" hidden>
     <div class="modal-card">
-      <div class="modal-head"><span id="cfg-title">Profile 设置</span><button class="icon" id="cfg-x" title="关闭">✕</button></div>
+      <div class="modal-head"><span id="cfg-title">Profile 设置</span></div>
       <div class="cfg-info" id="cfg-info"></div>
       <label class="modal-label">手机号</label>
       <div class="modal-row"><input id="cfg-phone" placeholder="+8801700000000" spellcheck="false"></div>
@@ -696,7 +702,6 @@
       syncPreview();
     }
     cfgModal.onclick = (e) => { if (e.target === cfgModal) closeCfgModal(); };
-    document.getElementById('cfg-x').onclick = closeCfgModal;
     document.getElementById('cfg-save').onclick = async () => {
       if (!cfgP) return; const b = document.getElementById('cfg-save'); b.disabled = true; cfgErr.textContent = '';
       try {
