@@ -120,7 +120,7 @@ test("Telegram preview defaults to light before navigation without changing othe
     "attach",
     ["Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "light" }] }],
     ["load", "https://web.telegram.org/k/"],
-    ["css", "html, body { width: 100% !important; height: 100% !important; overflow: hidden !important; } body { clip-path: inset(0 round 19px); contain: paint; }"],
+    ["css", "html, body { width: 100% !important; height: 100% !important; overflow: hidden !important; }"],
   ]);
 
   events.length = 0;
