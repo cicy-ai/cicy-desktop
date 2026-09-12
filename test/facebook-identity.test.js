@@ -15,7 +15,9 @@ test("facebook identity normalizes and round-trips through the login record", ()
   assert.equal(rec.name, "facebook");
   assert.equal(rec.username, "100012345");
   assert.equal(rec.note, "Zhang San");
-  assert.deepEqual(fb.facebookIdentityFromProfile({ logins: [rec] }), { id: "100012345", username: "", displayName: "Zhang San", phone: "" });
+  // 从 profile 读回时多带 email / twofa / secondEmail 三项(面板 ⚙ 要显示),记录里没有就是空串。
+  assert.deepEqual(fb.facebookIdentityFromProfile({ logins: [rec] }), { id: "100012345", username: "", displayName: "Zhang San", phone: "", email: "", twofa: "", secondEmail: "" });
+  assert.deepEqual(fb.facebookIdentityFromProfile({ logins: [{ ...rec, email: "a@b.c", twofa: "abc", secondEmail: "x@y.z" }] }).twofa, "abc");
   assert.equal(fb.normalizeFacebookIdentity({ id: "0" }), null);
   assert.equal(fb.facebookIdentityFromProfile({ logins: [] }), null);
 });
