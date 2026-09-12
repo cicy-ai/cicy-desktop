@@ -141,8 +141,6 @@
     .maxhead .sp { flex: 1; }
     .maxhead .acts { flex: none; display: inline-flex; align-items: center; gap: 6px; padding-left: 12px; border-left: 1px solid var(--line); }
     #maxbody { flex: 1 1 auto; min-height: 0; }
-    .gcell .pingctl { display: none; }
-    .gcell.pinging .code, .gcell.pinging .gear, .gcell.pinging .max { opacity: .3; pointer-events: none; }
     .gcell { display: flex; flex-direction: column; flex: none; width: 360px; height: 50vh; min-height: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--cell); overflow: hidden; }
     .gcell.done { border-color: rgba(63,185,80,.6); }
     .gcell.failed { border-color: rgba(255,92,92,.6); }
@@ -159,8 +157,6 @@
     .ghead button.code { height: 22px; padding: 0 9px; display: inline-flex; align-items: center; }
     /* 上面把 .icon 统一成 inline-flex,会盖掉原来 .pingctl{display:none} —— 🔄 ✕ 只在
        ping 叠加层开着时才出现,这里把优先级补回来。 */
-    .ghead .icon.pingctl { display: none; }
-    .gcell.pinging .ghead .icon.pingctl { display: inline-flex; }
     .ghead .st ~ .acts { margin-left: 8px; }
     .gcell.done .ghead .st { color: #3fb950; font-weight: 600; }
     /* 打开弹窗时主进程会把所有格子视图摘下来(BrowserView 永远盖在 DOM 之上,
@@ -175,6 +171,7 @@
     /* 机器 id 徽章:机器多了一眼认出这是哪台。列表/批量两种模式都显示。 */
     .mid{display:inline-block;margin-right:8px;padding:2px 9px;border-radius:7px;font:700 13px ui-monospace,monospace;
          background:#1f6feb;color:#fff;letter-spacing:.5px;vertical-align:middle;box-shadow:0 1px 4px rgba(0,0,0,.4)}
+    .gcell.pinging .ghead .icon.ping, .gcell.cfging .ghead .icon.gear { background: var(--accent); color: #fff; }
   </style>
 </head>
 <body>
@@ -416,13 +413,11 @@
     function buildGridCell(p) {
       const el = document.createElement('div');
       el.className = 'gcell'; el.dataset.id = String(p.accountIdx);
-      el.innerHTML = `<div class="ghead"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="phone">${esc(phoneOf(p))}</span><span class="st"></span><span class="acts"><button class="code" title="在格子上叠加/关闭接码 webview(同代理出口)">接码</button><button class="icon gear" title="Profile 信息 / 代理设置"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button><button class="icon ping" title="用本 Profile 代理打开 ping0.cc(验 IP/指纹)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></button><button class="icon pingctl reloadping" title="重载 ping0"><svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button><button class="icon pingctl closeping" title="关闭 ping0"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button><button class="icon max" title="最大化 / 还原"><svg viewBox="0 0 24 24"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></button><button class="icon reload" title="重新加载"><svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button></span></div><div class="gbody"></div>`;
-      el.querySelector('.gear').onclick = (e) => { e.stopPropagation(); openCfgModal(p); };
-      el.querySelector('.reload').onclick = () => reloadProfile(p.accountIdx);
+      el.innerHTML = `<div class="ghead"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="phone">${esc(phoneOf(p))}</span><span class="st"></span><span class="acts"><button class="code" title="在格子上叠加/关闭接码 webview(同代理出口)">接码</button><button class="icon gear" title="Profile 信息 / 代理设置"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button><button class="icon ping" title="用本 Profile 代理打开 ping0.cc(验 IP/指纹)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></button><button class="icon max" title="最大化 / 还原"><svg viewBox="0 0 24 24"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></button><button class="icon reload" title="重新加载"><svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button></span></div><div class="gbody"></div>`;
+      el.querySelector('.gear').onclick = (e) => { e.stopPropagation(); if (cfgP && cfgP.accountIdx === p.accountIdx && !cfgModal.hidden) closeCfgModal(); else openCfgModal(p); };
+      el.querySelector('.reload').onclick = () => (pingOpen.has(p.accountIdx) ? reloadPing(p.accountIdx) : reloadProfile(p.accountIdx));
       el.querySelector('.max').onclick = (e) => { e.stopPropagation(); toggleMax(p.accountIdx); };
       el.querySelector('.ping').onclick = (e) => { e.stopPropagation(); togglePing(p.accountIdx); };
-      el.querySelector('.reloadping').onclick = (e) => { e.stopPropagation(); reloadPing(p.accountIdx); };
-      el.querySelector('.closeping').onclick = (e) => { e.stopPropagation(); closePing(p.accountIdx); };
       el.querySelector('.code').onclick = () => openCode(p);
       el.querySelector('.code').disabled = !codeUrlOf(p);
       el.querySelector('.ghead').onclick = (e) => { if (!e.target.closest('button')) { selectProfile(p.accountIdx); } };
@@ -758,13 +753,16 @@
       cfgPhone.value = phoneOf(p); cfgCode.value = codeUrlOf(p);
       cfgDel.textContent = '删除此 Profile'; cfgDel.disabled = false;
       cfgModal.hidden = false;
+      document.querySelectorAll('.gcell.cfging').forEach(function(el){ el.classList.remove('cfging'); });
+      { var _g = gcells.get(p.accountIdx); if (_g) _g.el.classList.add('cfging'); }
       placeCfgOverCell(p);
       cfgProxy.focus();
       // 只让被弹窗卡片盖住的格子让位(syncPreview 里按重叠判定 detach),其余 webview 保持不动。
       syncPreview();
     }
     function closeCfgModal() {
-      cfgModal.hidden = true; cfgP = null; delArmed = false;
+      cfgModal.hidden = true; cfgP = null;
+      document.querySelectorAll('.gcell.cfging').forEach(function(el){ el.classList.remove('cfging'); }); delArmed = false;
       syncPreview();
     }
     cfgModal.onclick = (e) => { if (e.target === cfgModal) closeCfgModal(); };
