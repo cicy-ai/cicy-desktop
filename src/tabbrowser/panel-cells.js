@@ -134,6 +134,11 @@ class PanelCells {
       },
     });
     const wc = view.webContents;
+    // 格子不在当前 tab / 被弹窗盖住时是 visible:false(不贴到窗口上),Electron 对隐藏
+    // 视图默认开后台节流,定时器被拖到 1Hz,Telegram Web 的心跳超时后就一直
+    // 「Reconnecting...」(实测 2026-09-12,xs-3004 面板切到后台后三格全部掉线)。
+    // 保活的前提就是隐藏着也得活着,所以关掉节流。
+    try { view.webContents.setBackgroundThrottling(false); } catch (e) {}
     const rec = { view, url: "", profile: profileIdx, visible: true, identity: null };
     try { view.setBackgroundColor("#ffffff"); } catch (e) {}
     // Chromium uses a dark canvas for transparent/un-styled documents when the
