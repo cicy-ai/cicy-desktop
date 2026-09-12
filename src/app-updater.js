@@ -291,6 +291,26 @@ function broadcast(patch) {
 }
 function getState() { return _state; }
 
+function cmpVer(a, b) {
+  const x = String(a).split(".").map(Number), y = String(b).split(".").map(Number);
+  for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); }
+  return 0;
+}
+// 只认更新器自己命名的 cicy-desktop-<x.y.z>.exe / .dmg / .AppImage,别的文件一律不碰;
+// 版本 >= 当前的保留(可能正在下载或刚装完还没重启)。
+function cleanupOldInstallers() {
+  const cur = app.getVersion();
+  let dir = ""; try { dir = app.getPath("downloads"); } catch { return; }
+  let names = []; try { names = fs.readdirSync(dir); } catch { return; }
+  let n = 0;
+  for (const f of names) {
+    const m = f.match(/^cicy-desktop-(\d+\.\d+\.\d+)\.(exe|dmg|AppImage)$/i);
+    if (!m || cmpVer(m[1], cur) >= 0) continue;
+    try { fs.unlinkSync(path.join(dir, f)); n++; } catch {}
+  }
+  if (n) log.info(`[app-updater] removed ${n} old installer(s) from ${dir}`);
+}
+
 function init(mainWin) {
   _win = mainWin;
   _state.current = app.getVersion();
@@ -298,6 +318,10 @@ function init(mainWin) {
   // Running the version we last tried to install = that attempt worked; forget
   // it so a future update to the same number is never wrongly blocked.
   try { if (readAutoTry().version === _state.current) clearAutoTry(); } catch {}
+  // 清掉 Downloads 里旧版本的安装包。每次自动更新都往 Downloads 下一个 125MB 的
+  // cicy-desktop-<ver>.exe,装完从不删:实测 2026-09-12 全队 18 台堆了 56.8GB,
+  // xs-3008 的 C 盘直接写满,新版下到 92% 报 ENOSPC 装不上。只删比当前运行版本低的。
+  setTimeout(() => { try { cleanupOldInstallers(); } catch {} }, 5_000);
   setTimeout(() => check().catch(() => {}), 15_000);      // 启动后探一次
   setInterval(() => check().catch(() => {}), 30 * 60 * 1000); // 每 30 分钟
 }
