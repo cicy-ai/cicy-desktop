@@ -290,12 +290,47 @@ function start({ force = false } = {}) {
 // without WSL at all. Only "no container config AND no host config" leaves us
 // nothing to start. Standalone has no authoritative selection source, so the
 // selection sync is skipped rather than overriding whatever the host holds.
-async function enable({ containerYaml, selections = {}, emit } = {}) {
+// 没有任何配置可用时的兜底:按机器上实际存在的 profile 生成 listener
+// (约定 端口 = 20000 + accountIdx,免鉴权、只绑 127.0.0.1),规则 MATCH,DIRECT。
+//
+// 为什么要有它:没有 WSL / 没有 cicy-code 容器的机器(xs-master 就是)拿不到云端
+// 下发的 mihomo.yaml,原来这里直接抛 noContainerConfig —— 于是 mihomo 连装都不装,
+// 那些 profile 的会话指向 127.0.0.1:2000N 却无人监听,webview 全部
+// ERR_PROXY_CONNECTION_FAILED 白板(2026-09-13 在 xs-master 实测)。
+// 先 DIRECT 让它通,之后容器/云端真配置一到,reconcile 循环会覆盖掉这份兜底。
+function defaultHostConfig(idxs) {
+  const list = (Array.isArray(idxs) && idxs.length ? idxs : [1])
+    .map((n) => Number(n)).filter((n) => Number.isInteger(n) && n >= 1 && n <= 999);
+  const host = {
+    "mixed-port": HOST_MIXED,
+    "allow-lan": false,
+    "log-level": "warning",
+    "external-controller": `127.0.0.1:${HOST_CTRL}`,
+    secret: "",
+    dns: { enable: false },
+    listeners: [...new Set(list)].sort((a, b) => a - b).map((n) => ({
+      name: `chrome-profile-${n}`, type: "mixed", port: 20000 + n, listen: "127.0.0.1",
+    })),
+    proxies: [],
+    "proxy-groups": [],
+    rules: ["MATCH,DIRECT"],
+  };
+  return yaml.dump(host, { lineWidth: -1 });
+}
+
+function writeDefaultConfig(idxs) {
+  const next = defaultHostConfig(idxs);
+  fs.mkdirSync(path.dirname(HOST_CONFIG), { recursive: true });
+  fs.writeFileSync(HOST_CONFIG, next);
+  return true;
+}
+
+async function enable({ containerYaml, selections = {}, emit, profileIdxs } = {}) {
   await ensureBinary({ emit });
   let changed = false, standalone = false;
   if (containerYaml) changed = writeConfig(containerYaml);
   else if (fs.existsSync(HOST_CONFIG)) standalone = true;
-  else throw new Error(tt("noContainerConfig"));
+  else { changed = writeDefaultConfig(profileIdxs); standalone = true; }   // 完全独立:自己造一份能跑的
   const res = start({ force: changed });
   const synced = standalone ? { updated: [] } : await syncSelections(selections);
   emit && emit({ phase: "chrome-proxy", status: "running", message: tt("ready") });
@@ -303,6 +338,8 @@ async function enable({ containerYaml, selections = {}, emit } = {}) {
 }
 
 module.exports = {
+  defaultHostConfig,
+  writeDefaultConfig,
   VER, assetUrl, binPath, binPresent, ensureBinary,
   buildHostConfig, writeConfig, planSelectionUpdates, syncSelections,
   start, stop, running, enable, standalonePinned,

@@ -392,29 +392,53 @@ function register({ sidecarLogPath } = {}) {
     setInterval(() => { reconcileDocker().catch(() => {}); }, 60000);   // keep fresh + self-heal
   }
 
-  // 宿主 Chrome 代理(始终开启):从容器 cp 出 mihomo 配置 → host-mihomo 在宿主起/续。
-  // 已在跑也同步一次配置(容器侧节点可能被云端更新),变了才重启。幂等。二进制不在会自动下。
+  // 宿主 Chrome / Electron profile 代理(始终开启,且**不依赖 WSL 或容器**)。
+  //
+  // 每个 profile 的会话被指向 127.0.0.1:(20000+idx),所以这个 mihomo 必须存在,
+  // 否则那些 webview 一律 ERR_PROXY_CONNECTION_FAILED 白板。以前这里要先从
+  // cicy-code 容器里 cp 出 mihomo.yaml,没有容器(没装 WSL / WSL 坏了)就什么都不做 ——
+  // xs-master 就是这样:没有 WSL、没有容器,mihomo 从来没被装过,profile 1 的
+  // Telegram webview 一直白板(2026-09-13 实测)。
+  //
+  // 现在的语义:**默认装、默认起**。容器配置能读到就用它(云端下发的真实节点),
+  // 读不到就用宿主已有的 mihomo-host.yaml;都没有就按本机实际 profile 生成一份
+  // DIRECT 兜底配置先跑起来。等容器/云端配置到位,下一轮 reconcile 会覆盖它。
+  function hostProfileIdxs() {
+    try {
+      const store = require("../profiles/profile-store");
+      const ids = [];
+      for (const b of ["chrome", "electron"]) {
+        for (const p of store.listProfiles(b) || []) {
+          const n = Number(p && (p.accountIdx ?? p.idx));
+          if (Number.isInteger(n) && n >= 1) ids.push(n);
+        }
+      }
+      return [...new Set(ids)];
+    } catch (e) { return []; }
+  }
+
   async function maybeStartChromeProxy() {
     if (!APP_DOCKER_SUPPORTED) return;
     // 「独立管理」开关:标记文件在 → 不从容器同步覆盖宿主配置,host mihomo
     // 用宿主自己的 mihomo-host.yaml 独立跑(没跑就用现有宿主配置起来)。幂等。
     if (hostMihomo.standalonePinned()) {
-      if (!hostMihomo.running() && hostMihomo.binPresent()) {
-        try { await hostMihomo.enable({ containerYaml: null }); }
+      if (!hostMihomo.running()) {
+        try { await hostMihomo.enable({ containerYaml: null, profileIdxs: hostProfileIdxs() }); }
         catch (e) { log.warn(`[chrome-proxy] standalone start failed: ${e.message}`); }
       }
       return;
     }
+    // 容器读不到不再是致命的 —— catch 成 null,继续往独立模式走。
     const [yaml, selections] = await Promise.all([
-      appDocker.readMihomoConfig(APP_CONTAINER),
-      appDocker.readMihomoSelections(APP_CONTAINER),
+      appDocker.readMihomoConfig(APP_CONTAINER).catch(() => null),
+      appDocker.readMihomoSelections(APP_CONTAINER).catch(() => ({})),
     ]);
     if (hostMihomo.binPresent() && hostMihomo.running()) {
-      if (hostMihomo.writeConfig(yaml)) hostMihomo.start({ force: true });
-      await hostMihomo.syncSelections(selections);
+      if (yaml) { if (hostMihomo.writeConfig(yaml)) hostMihomo.start({ force: true }); await hostMihomo.syncSelections(selections); }
       return;
     }
-    await hostMihomo.enable({ containerYaml: yaml, selections });
+    try { await hostMihomo.enable({ containerYaml: yaml, selections, profileIdxs: hostProfileIdxs() }); }
+    catch (e) { log.warn(`[chrome-proxy] enable failed: ${e.message}`); }
   }
 
   ipcMain.handle("sidecar:status", async () => {
