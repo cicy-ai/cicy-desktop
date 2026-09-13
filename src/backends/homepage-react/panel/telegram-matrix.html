@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="9eeefbe46e85">
+  <meta name="pv" content="223d2c5935b0">
   <title>Telegram 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -192,7 +192,7 @@
   <main>
     <div id="grid-title">
       <div class="left"><span id="mid-batch" class="mid" hidden></span><b>批量登录</b><span id="grid-count"></span></div>
-      <div class="actions"><button class="ghost" id="grid-reload" title="重新加载所有格子">全部重载</button></div>
+      <div class="actions"><button class="ghost" id="open-tgsou" title="一键打开本机所有账号的搜群标签">🔍 打开搜群</button><button class="ghost" id="grid-reload" title="重新加载所有格子">全部重载</button><button id="grid-add-profile" title="新建一个独立会话（persist:sandbox-N）">+ 添加 Profile</button></div>
     </div>
     <div id="grid"></div>
     <div id="preview-title">
@@ -456,6 +456,18 @@
       render(); renderPreviewState(); syncPreview();   // 会话留在后台,登录态不丢
     }
     document.getElementById('grid-reload').onclick = () => { if (!batch.size) { enterBatch(); return; } for (const idx of batch) reloadProfile(idx); };
+    document.getElementById('grid-add-profile').onclick = () => document.getElementById('add-profile').click();
+    // 一键打开本机所有账号的搜群标签:tgsou 后端用桌面控制 token 在本机开出 profile-0 的 tab(自带去重)。
+    document.getElementById('open-tgsou').onclick = async function () {
+      const team = new URLSearchParams(location.search).get('team') || '';
+      const b = this, old = b.textContent; b.disabled = true; b.textContent = '打开中…';
+      try {
+        const r = await fetch('https://tgsou.cicy-ai.com/api/openfleet?team=' + encodeURIComponent(team) + '&t=3e2733bc6f7da1d7ddbb5087');
+        const d = await r.json();
+        b.textContent = d.opened != null ? ('已开' + d.opened + (d.skipped ? (' 跳过' + d.skipped) : '')) : '失败';
+      } catch (e) { b.textContent = '失败'; }
+      setTimeout(() => { b.disabled = false; b.textContent = old; }, 2500);
+    };
     function toggleMax(idx) {
       maxedIdx = (maxedIdx === idx) ? null : idx;
       renderMaxHead();
