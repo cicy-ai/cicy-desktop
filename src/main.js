@@ -46,6 +46,13 @@ electronApp.on("web-contents-created", (_e, wc) => {
   // copy handler still fire; wc.copy() is a no-op when there's no selection.
   try {
     if (wc.getType && wc.getType() === "webview") {
+      // 所有 <webview> guest 都走 domain-inject：inject 文件读取逻辑原本只挂在
+      // BrowserWindow 的主 webContents 上（window-utils.js），tab 里嵌套的 webview 拿不到。
+      // 这里在 app 级 web-contents-created 上统一给每个 webview 挂 dom-ready 注入。
+      try {
+        const { applyDomainInject } = require("./utils/domain-inject");
+        wc.on("dom-ready", () => applyDomainInject(wc));
+      } catch (_) {}
       wc.on("before-input-event", (_ev, input) => {
         if (
           input.type === "keyDown" &&

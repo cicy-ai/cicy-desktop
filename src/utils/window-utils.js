@@ -146,63 +146,13 @@ function setupWindowHandlers(win) {
     });
   }
 
-  win.webContents.on("dom-ready", async () => {
-    // (Removed: the 产物/artifact bridge injection. electronRPC for trusted pages
-    // is provided by webview-preload.js via contextBridge; the artifact webview
-    // remote-control feature was deleted — superseded by the electron tab + chrome
-    // profile browsers.)
+  win.webContents.on("dom-ready", () => {
+    // 域名注入统一走 utils/domain-inject —— 窗口、tab、<webview> 用同一套读取/执行逻辑。
+    // （原先这段逻辑内联在此、只作用于 BrowserWindow 主 webContents；已抽出复用。）
     try {
-      // 1. 获取当前页面的根域名
-      const currentURL = win.webContents.getURL();
-      const url = new URL(currentURL);
-      const hostname = url.hostname;
-      const port = url.port;
-
-      // 2. 确定域名标识
-      let domain;
-      if (hostname === "localhost" || /^\d+\.\d+\.\d+\.\d+$/.test(hostname)) {
-        // localhost 或 IP 地址，使用 hostname:port 作为标识
-        domain = port ? `${hostname}_${port}` : hostname;
-      } else {
-        // 提取根域名 (例如: web.telegram.org -> telegram.org)
-        const parts = hostname.split(".");
-        domain = parts.length > 2 ? parts.slice(-2).join(".") : hostname;
-      }
-
-      // 3. 检查域名注入脚本
-      const injectDir = path.join(os.homedir(), "cicy-ai", "electron", "extension", "inject");
-      const injectFile = path.join(injectDir, `${domain}.js`);
-
-      // 4. 确保目录存在
-      if (!fs.existsSync(injectDir)) {
-        fs.mkdirSync(injectDir, { recursive: true });
-      }
-
-      let domainCode = "";
-
-      // 5. 如果文件不存在，使用默认脚本并创建文件
-      if (!fs.existsSync(injectFile)) {
-        const defaultInjectPath = path.join(__dirname, "..", "extension", "inject.js");
-        domainCode = fs.readFileSync(defaultInjectPath, "utf-8");
-        fs.writeFileSync(injectFile, domainCode, "utf-8");
-        log.info(`[DomReady] Created inject script for ${domain}`);
-      } else {
-        domainCode = fs.readFileSync(injectFile, "utf-8");
-      }
-
-      // 6. 注入脚本
-      await win.webContents.executeJavaScript(`
-        (async () => {
-          try {
-            ${domainCode}
-          } catch(e) {
-            log.error('Domain inject error:', e);
-          }
-        })()
-      `);
-      log.info(`[DomReady] Injected script for ${domain}`);
-    } catch (error) {
-      log.error("[DomReady] Error:", error);
+      require("./domain-inject").applyDomainInject(win.webContents);
+    } catch (e) {
+      log.error("[DomReady] domain inject error:", e);
     }
   });
 }
