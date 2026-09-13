@@ -551,7 +551,7 @@ export default function App() {
   // early return(termsOk / !token 等),把 hook 放到它们后面会让登录前后 hook 数量不一致,
   // React 直接抛 #310 "Rendered more hooks than during the previous render",整页白屏。
   // 2026-09-13 我就是这么把全车队首页打崩的。
-  const dshFleet = useDshFleet(tab === "dsh");
+  const dshFleet = useDshFleet();
   // CiCy Hub: email sign-in → every cicy-code instance of that account (no local
   // cicy-code needed). State + cards live in useHub / HubInstanceCard below.
   const hub = useHub();
@@ -1176,6 +1176,9 @@ export default function App() {
   const showCloud = false; // 首页只用 CiCy Hub 账号,云端团队不再展示
   const showHub = tab === "all" || tab === "hub";
   const hubCount = hub.instances ? hub.instances.length : 0;
+  // 「全部」只放真能打开的 dsh;DSH tab 里才把未就绪的一并列出来看状态。
+  const dshReady = (dshFleet.list || []).filter((m) => m.ready);
+  const showDshAll = tab === "all" || tab === "dsh";
   // 首次打开:本地或云端团队任一还没拉到(为 null)→ grid 显示 skeleton 占位卡,直到两边都
   // resolve(出错也 resolve 成 []),再显示真实内容 —— 避免一个先回来另一个还空的露馅。
   const firstLoading = localTeams === null || teams === null;
@@ -1193,11 +1196,11 @@ export default function App() {
         <div className="app__tabsrow">
           <div className="app__tabs">
             {[
-              { k: "all",    label: tr("teamFilter.all", "全部"),   n: localCount + customCount + hubCount },
+              { k: "all",    label: tr("teamFilter.all", "全部"),   n: localCount + customCount + hubCount + dshReady.length },
               { k: "local",  label: tr("teamFilter.local", "本地"),   n: localCount },
               { k: "hub",    label: tr("teamFilter.hub", "CiCy Hub"), n: hubCount },
               { k: "custom", label: tr("teamFilter.custom", "自定义"), n: customCount },
-              { k: "dsh",    label: tr("teamFilter.dsh", "DSH"), n: dshFleet.list ? dshFleet.list.length : 0 },
+              { k: "dsh",    label: tr("teamFilter.dsh", "DSH"), n: dshReady.length },
             ].map(({ k, label, n }) => (
               <button
                 key={k}
@@ -1301,13 +1304,12 @@ export default function App() {
           {!firstLoading && showHub && hub.loggedIn && (hub.instances || []).filter((it) => it.reachable || it.online).map((it) => (
             <HubInstanceCard key={"hub:" + it.id} inst={it} onOpen={(next, title) => hub.open(it, next, title)} />
           ))}
-          {tab === "dsh" && (dshFleet.list || []).map((m) => <DshFleetCard key={"dsh:" + m.name} m={m} />)}
+          {showDshAll && (tab === "dsh" ? (dshFleet.list || []) : dshReady).map((m) => <DshFleetCard key={"dsh:" + m.name} m={m} />)}
           {tab === "dsh" && dshFleet.list !== null && dshFleet.list.length === 0 && !dshFleet.busy && (
             <div className="empty" data-id="DshFleetEmpty" style={{ gridColumn: "1 / -1" }}>
               {tr("dshFleet.empty", "还没有机器的 dsh 中继连上来。")}
             </div>
           )}
-          {tab === "dsh" && dshFleet.busy && [0, 1, 2].map((i) => <SkeletonCard key={"dshsk" + i} />)}
           {!firstLoading && showLocal && localList.map((t) => (
             <LocalTeamCard key={"local:" + t.id} team={t} cloudCode={cloudCodeFor(t.cloud_team_id)} onOpen={() => openLocalTeam(t.id)} onRename={renameLocalTeam} onRefresh={fetchLocalTeams} />
           ))}
@@ -3239,7 +3241,7 @@ function DockerInstallDrawerHost() {
 // 所以 token 不会出现在首页里。
 const DSH_FLEET_API = "./api/dsh-list";
 
-function useDshFleet(enabled) {
+function useDshFleet() {
   const [list, setList] = useState(null);
   const [busy, setBusy] = useState(false);
   const refresh = useCallback(async () => {
@@ -3251,7 +3253,12 @@ function useDshFleet(enabled) {
     } catch { setList([]); }
     finally { setBusy(false); }
   }, []);
-  useEffect(() => { if (enabled && list === null && !busy) refresh(); }, [enabled, list, busy, refresh]);
+  // 一个 hub 上的接口(带 20s 缓存),不是对 19 台机器扇出,所以开机就拉、慢速轮询即可。
+  useEffect(() => {
+    refresh();
+    const t = setInterval(refresh, 30000);
+    return () => clearInterval(t);
+  }, [refresh]);
   return { list, busy, refresh };
 }
 
@@ -3259,7 +3266,7 @@ function DshFleetCard({ m }) {
   const [busy, setBusy] = useState(false);
   const url = `https://${m.host}/_cicy/enter`;
   const open = async () => {
-    if (busy || !m.up) return;
+    if (busy || !m.ready) return;
     setBusy(true);
     try {
       if (window.cicy?.tabs?.openIn) await window.cicy.tabs.openIn(0, url, m.name + " · dsh");
@@ -3268,11 +3275,11 @@ function DshFleetCard({ m }) {
     finally { setBusy(false); }
   };
   return (
-    <div data-id="DshFleetCard" className={`bcard bcard--custom${m.up ? " bcard--online" : ""}`} title={m.host}>
+    <div data-id="DshFleetCard" className={`bcard bcard--custom${m.ready ? " bcard--online" : ""}`} title={m.host}>
       <div className="bcard__accent" />
       <div className="bcard__top">
         <div className="bcard__pill">
-          <span className="bcard__dot" data-tone={m.up ? "ok" : "off"} />
+          <span className="bcard__dot" data-tone={m.ready ? "ok" : "off"} />
           <LaptopIcon />
         </div>
       </div>
@@ -3286,12 +3293,12 @@ function DshFleetCard({ m }) {
         </div>
         <div data-id="DshFleetCard-host" title={m.host}
           style={{ marginTop: 6, fontSize: 11, color: "#8b949e", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-          {m.up ? m.host : tr("dshFleet.noRelay", "中继未连接")}
+          {m.ready ? m.host : (m.up ? tr("dshFleet.noToken", "dsh 未就绪") : tr("dshFleet.noRelay", "中继未连接"))}
         </div>
       </div>
-      <button type="button" className="bcard__cta" data-id="DshFleetCard-open" disabled={busy || !m.up} onClick={open}>
+      <button type="button" className="bcard__cta" data-id="DshFleetCard-open" disabled={busy || !m.ready} onClick={open}>
         {busy ? <Spinner /> : <ArrowIcon />}
-        <span>{m.up ? tr("cicyHub.open", "打开") : tr("dshFleet.unready", "未就绪")}</span>
+        <span>{m.ready ? tr("cicyHub.open", "打开") : tr("dshFleet.unready", "未就绪")}</span>
       </button>
     </div>
   );
