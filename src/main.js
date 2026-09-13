@@ -44,15 +44,23 @@ electronApp.on("web-contents-created", (_e, wc) => {
   // attachContextMenu). Wire copy directly on the guest. COPY-ONLY and WITHOUT
   // preventDefault, so the gotty terminal's Ctrl+C=SIGINT and any web app's own
   // copy handler still fire; wc.copy() is a no-op when there's no selection.
+  // 域名注入的**唯一统一入口**:凡是承载站点页面的 webContents 都走 domain-inject。
+  //   · webview     —— <webview> guest(如搜群后台里内嵌的 Telegram)
+  //   · browserView —— 浏览器标签页 和 矩阵面板的格子(panel-cells.js 建的)
+  // BrowserWindow 自己的主 webContents 由 window-utils.js 挂,这里不重复。
+  //
+  // 以前这里只判 webview,于是 **标签页和面板格子一个都没注入**(都是 BrowserView):
+  // 实测 xs-master 的 desktop.cicy-ai.com / hub / 矩阵面板格子,__cicyInjected 全是 false,
+  // electronRPC 未定义 —— 放进 inject 目录的脚本在这些页面里从来不生效(2026-09-13)。
+  try {
+    const _t = wc.getType && wc.getType();
+    if (_t === "webview" || _t === "browserView") {
+      const { applyDomainInject } = require("./utils/domain-inject");
+      wc.on("dom-ready", () => applyDomainInject(wc));
+    }
+  } catch (_) {}
   try {
     if (wc.getType && wc.getType() === "webview") {
-      // 所有 <webview> guest 都走 domain-inject：inject 文件读取逻辑原本只挂在
-      // BrowserWindow 的主 webContents 上（window-utils.js），tab 里嵌套的 webview 拿不到。
-      // 这里在 app 级 web-contents-created 上统一给每个 webview 挂 dom-ready 注入。
-      try {
-        const { applyDomainInject } = require("./utils/domain-inject");
-        wc.on("dom-ready", () => applyDomainInject(wc));
-      } catch (_) {}
       wc.on("before-input-event", (_ev, input) => {
         if (
           input.type === "keyDown" &&
