@@ -1592,6 +1592,17 @@ function useFleetSocket() {
             catch (e) { resolve({ error: String(e && e.message) }); return; }
             setTimeout(() => { delete window.__cicyCmdWaiters[cmdId]; resolve(out); }, ms || 8000);
           });
+          // 要一张进入某台机器 dsh 的一次性票。hub 只给已鉴权的连接签,所以
+          // 这等价于"本租户里一台已登录的 desktop 在要" —— 比原来的 IP 白名单
+          // (机房 NAT 后面任何设备都算自己人)严得多。票 60 秒、用一次即废。
+          window.__cicyDshWaiters = window.__cicyDshWaiters || {};
+          window.__cicyDshTicket = (machine) => new Promise((resolve) => {
+            const rid = "d" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+            window.__cicyDshWaiters[rid] = resolve;
+            try { sock.send(JSON.stringify({ type: "dsh_ticket", rid, machine })); }
+            catch (e) { delete window.__cicyDshWaiters[rid]; resolve(""); return; }
+            setTimeout(() => { if (window.__cicyDshWaiters[rid]) { delete window.__cicyDshWaiters[rid]; resolve(""); } }, 8000);
+          });
         } catch {}
         pinger = setInterval(() => {
           claimLease(); // holding the socket means holding the lease
@@ -1618,6 +1629,11 @@ function useFleetSocket() {
         if (f.type === "dsh_config") {
           window.__dshFleetCfg = { env: (f.env && typeof f.env === "object") ? f.env : {}, workspaces: Array.isArray(f.workspaces) ? f.workspaces : [], rev: String(f.rev || "") };
           try { window.dispatchEvent(new CustomEvent("cicy:dsh-config")); } catch {}
+          return;
+        }
+        if (f.type === "dsh_ticket") {
+          const w = (window.__cicyDshWaiters || {})[f.rid];
+          if (w) { delete window.__cicyDshWaiters[f.rid]; w(f.ticket || ""); }
           return;
         }
         if (f.type === "cmd_result") {
@@ -3264,14 +3280,21 @@ function useDshFleet() {
 
 function DshFleetCard({ m }) {
   const [busy, setBusy] = useState(false);
-  const url = `https://${m.host}/_cicy/enter`;
   const open = async () => {
     if (busy || !m.ready) return;
     setBusy(true);
     try {
+      // 先要票再开。没票不要直接打 /_cicy/enter —— 那条路正在下线。
+      const ticket = typeof window.__cicyDshTicket === "function" ? await window.__cicyDshTicket(m.name) : "";
+      if (!ticket) {
+        toast.show({ id: "dsh-ticket", status: "error", ttl: 6000,
+          message: tr("dshFleet.noTicket", "拿不到进入凭据 —— 这台 Desktop 还没连上车队或未登录,稍等几秒再试。") });
+        return;
+      }
+      const url = `https://${m.host}/_cicy/enter?t=${encodeURIComponent(ticket)}`;
       if (window.cicy?.tabs?.openIn) await window.cicy.tabs.openIn(0, url, m.name + " · dsh");
       else window.cicy?.shell?.openExternal?.(url);
-    } catch { try { window.cicy?.shell?.openExternal?.(url); } catch {} }
+    } catch { /* 票据失败不再退回无凭据打开 */ }
     finally { setBusy(false); }
   };
   return (
