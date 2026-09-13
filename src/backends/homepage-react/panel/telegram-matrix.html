@@ -175,6 +175,26 @@
   ::-webkit-scrollbar-thumb:hover { background: #454a57; }
   ::-webkit-scrollbar-corner { background: transparent; }
     .maxhead .icon.on, .ghead .icon.on { background: var(--accent); color: #fff; }
+  /* 某个叠加层打开时,header 收起其余按钮,只留「当前这个」和一个关闭 ——
+     一排图标全亮着看不出现在处于什么状态,也容易误点。 */
+  .gcell.modeon .ghead .acts > button { display: none; }
+  .gcell.modeon .ghead .acts > button.on,
+  .gcell.modeon .ghead .acts > button.xclose { display: inline-flex; }
+  .ghead .acts > button.xclose { display: none; margin-left: auto; }
+  .gcell.modeon .ghead .acts { width: 100%; }
+
+  /* 格子上半的信息浮层。格子是盖在页面之上的 BrowserView,页面里的元素挡不住它 ——
+     所以打开浮层时把格子矩形缩到下半(syncPreview 里做),上半空出来给这个 div。 */
+  .gstat { padding: 8px 10px; background: var(--head); border-bottom: 1px solid var(--line); font-size: 12px; overflow: auto; }
+  .gstat .l { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+  .gstat .l:last-child { margin-bottom: 0; }
+  .gstat b { color: var(--fg); }
+  .gstat .muted { color: var(--muted); }
+  .gstat .ok { color: #5fd39b; }
+  .gstat .warn { color: #e8a33d; }
+  .gstat .sec { width: 52px; padding: 2px 4px; border-radius: 5px; background: var(--panel2, #1a1a20); color: var(--fg); border: 1px solid var(--line); font-size: 11px; }
+  .gstat .go { padding: 3px 9px; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: var(--fg); cursor: pointer; font-size: 11px; }
+  .gstat .go.on { background: #2f6f4f; border-color: #2f6f4f; color: #fff; }
   </style>
 </head>
 <body>
@@ -253,7 +273,14 @@
     let batchMode = false;
     let maxedIdx = null;
     const batch = new Set();            // 批量模式下铺开的 accountIdx
-    const gcells = new Map();           // accountIdx -> { el, body }
+    const gcells = new Map();
+    // 打开了加群浮层的格子;以及每格当前要显示的 URL(随机开群时改它,syncPreview 会带下去)
+    const statOpen = new Set();
+    const cellUrl = new Map();
+    const autoOn = new Set();          // 正在自动随机开群的格子
+    const autoLast = new Map();        // idx -> 上次开群时间
+    const autoStats = new Map();       // idx -> {assigned,joined,remaining}
+    const TGSOU_SEC_KEY = 'tgmatrix.autosec';           // accountIdx -> { el, body }
 
     const esc = (value) => String(value || '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     // 机器 id:app 打开面板时把本机 id 拼进 URL(?team=xs-3007)。两处徽章都填上。
@@ -366,7 +393,9 @@
         } else if (selected && profileId === selected.accountIdx) { visible = true; r = box(rect); }
         if (__bg) visible = false;                    // 后台标签:不画,但会话留着
         if (visible && hitsCard(r)) visible = false;  // 被弹窗盖住 → 临时 detach
-        cells.push({ id: cellId(profileId), url: TELEGRAM_URL, profile: profileId, visible, rect: r });
+        // 浮层不用手动缩矩形:.gcell 是 flex 列、.gbody 是 flex:1,插入 .gstat 后
+        // .gbody 的 boundingRect 已经自动让出了那块高度。再减一次 = 黑色空隙(踩过)。
+        cells.push({ id: cellId(profileId), url: (cellUrl.get(profileId) || TELEGRAM_URL), profile: profileId, visible, rect: r });
         // 接码叠加层:同 rect、同 profile(=同 partition/代理),排在 tg 格子之后 → attach 更晚 → 叠最上层
         if (visible && codeOpen.has(profileId)) {
           const p = profiles.find((x) => x.accountIdx === profileId); const cu = p && codeUrlOf(p);
@@ -410,12 +439,21 @@
     function buildGridCell(p) {
       const el = document.createElement('div');
       el.className = 'gcell'; el.dataset.id = String(p.accountIdx);
-      el.innerHTML = `<div class="ghead"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="phone">${esc(phoneOf(p))}</span><span class="st"></span><span class="acts"><button class="code" title="在格子上叠加/关闭接码 webview(同代理出口)">接码</button><button class="icon tgsou" title="单独打开这个账号的搜群"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button><button class="icon gear" title="手机号 / 接码 URL / 代理设置"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button><button class="icon ping" title="用本 Profile 代理打开 ping0.cc(验 IP/指纹)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></button><button class="icon max" title="最大化 / 还原"><svg viewBox="0 0 24 24"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></button><button class="icon reload" title="重新加载"><svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button></span></div><div class="gbody"></div>`;
+      el.innerHTML = `<div class="ghead"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="phone">${esc(phoneOf(p))}</span><span class="st"></span><span class="acts"><button class="code" title="在格子上叠加/关闭接码 webview(同代理出口)">接码</button><button class="icon stat" title="加群面板:分配/已加入、脚本版本、限流,自动随机开群"><svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></button><button class="icon tgsou" title="单独打开这个账号的搜群"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button><button class="icon gear" title="手机号 / 接码 URL / 代理设置"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button><button class="icon ping" title="用本 Profile 代理打开 ping0.cc(验 IP/指纹)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></button><button class="icon max" title="最大化 / 还原"><svg viewBox="0 0 24 24"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></button><button class="icon reload" title="重新加载"><svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button><button class="icon xclose" title="关闭当前叠加层"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></span></div><div class="gstat" hidden></div><div class="gbody"></div>`;
       el.querySelector('.reload').onclick = () => (pingOpen.has(p.accountIdx) ? reloadPing(p.accountIdx) : reloadProfile(p.accountIdx));
       el.querySelector('.max').onclick = (e) => { e.stopPropagation(); toggleMax(p.accountIdx); };
-      el.querySelector('.ping').onclick = (e) => { e.stopPropagation(); togglePing(p.accountIdx); };
-      el.querySelector('.code').onclick = () => openCode(p);
+      // ping / 接码 也走互斥:先关掉别的叠加层,再用它们原本的开关(各自管自己的集合)
+      el.querySelector('.ping').onclick = (e) => { e.stopPropagation(); closeOthers(p.accountIdx, 'ping'); togglePing(p.accountIdx); setTimeout(() => syncMode(p.accountIdx), 0); };
+      el.querySelector('.code').onclick = (e) => { e.stopPropagation(); closeOthers(p.accountIdx, 'code'); openCode(p); setTimeout(() => syncMode(p.accountIdx), 0); };
       el.querySelector('.code').disabled = !codeUrlOf(p);
+      // 加群面板:分配/已加入、注入脚本版本、限流剩余、随机开群开关。
+      // 版本和限流不另外取 —— 注入脚本把它们写进了 document.title,主进程通过
+      // state.title 推给面板,这是面板唯一能看到格子内部状态的通道。
+      el.querySelector('.stat').onclick = (e) => {
+        e.stopPropagation();
+        if (openMode(p.accountIdx, 'stat')) refreshStat(p.accountIdx);
+      };
+      el.querySelector('.xclose').onclick = (e) => { e.stopPropagation(); closeMode(p.accountIdx); };
       // 单独打开这个账号的搜群:tgsou 后端用桌面控制 token 在本机开 tab(已开着就切前台)。
       // 和顶部「打开搜群」的区别是它只管这一格,不会把全部账号都开出来。
       el.querySelector('.tgsou').onclick = async (e) => {
@@ -432,8 +470,167 @@
       };
       el.querySelector('.gear').onclick = (e) => { e.stopPropagation(); if (cfgP && cfgP.accountIdx === p.accountIdx && !cfgModal.hidden) closeCfgModal(); else openCfgModal(p); };
       el.querySelector('.ghead').onclick = (e) => { if (!e.target.closest('button')) { selectProfile(p.accountIdx); } };
-      return { el, body: el.querySelector('.gbody') };
+      return { el, body: el.querySelector('.gbody'), stat: el.querySelector('.gstat') };
     }
+    // 同一格同一时刻只开一个叠加层(接码 / ping / 加群面板)。
+    // 打开后 header 只留当前按钮和关闭键 —— 一排图标全亮着看不出状态,也容易误点。
+    function syncMode(idx) {
+      const g = gcells.get(idx); if (!g) return;
+      const mode = codeOpen.has(idx) ? 'code' : pingOpen.has(idx) ? 'ping' : statOpen.has(idx) ? 'stat' : '';
+      g.el.classList.toggle('modeon', !!mode);
+      const q = (sel) => g.el.querySelector('.ghead .acts ' + sel);
+      const map = { code: '.code', ping: '.ping', stat: '.stat' };
+      for (const k of Object.keys(map)) { const b = q(map[k]); if (b) b.classList.toggle('on', k === mode); }
+    }
+    function closeMode(idx) { closeOthers(idx, null); }
+    // 只关掉"除了 keep 之外"的叠加层。ping / 接码 有自己的开关函数(closePing / openCode),
+    // 这里不碰它们的内部状态,只负责让同一格里同时最多开一个。
+    function closeOthers(idx, keep) {
+      if (keep !== 'code' && codeOpen.has(idx)) { codeOpen.delete(idx); updateCodeButtons(idx); }
+      if (keep !== 'ping' && pingOpen.has(idx)) { try { closePing(idx); } catch (e) { pingOpen.delete(idx); } }
+      if (keep !== 'stat' && statOpen.has(idx)) { statOpen.delete(idx); renderStat(idx); }
+      syncMode(idx); syncPreview();
+    }
+    // 加群面板的开关(它没有独立的 open/close 函数,状态就是 statOpen)
+    function openMode(idx, mode) {
+      const already = statOpen.has(idx);
+      closeOthers(idx, null);
+      if (already) return false;              // 再点一次 = 关掉
+      statOpen.add(idx);
+      renderStat(idx); syncMode(idx); syncPreview();
+      return true;
+    }
+
+    // ── 加群浮层 ────────────────────────────────────────────────
+    const TGSOU_API = 'https://tgsou.cicy-ai.com';
+    function autoSec() { const v = Number(localStorage.getItem(TGSOU_SEC_KEY)) || 20; return Math.max(5, Math.min(600, v)); }
+
+    // 注入脚本(v1.9.0+)把这些写进了页面标题,这是面板唯一能看到格子内部的通道:
+    //   "⏳ 4分47秒 · v1.9.0 · 已加 12/465 · 在群 138 · +573108335085"
+    // 「已加 j/n」是脚本**实时**从会话列表读出真群、POST 给 tgsou 对账后的回值 ——
+    // 比面板自己问 tgsou 更新,也是 tgsou 那边计数会动的原因(joins 只有这一个写入口)。
+    function titleInfo(idx) {
+      const t = String(stateOf(idx).title || '').trim();
+      const mj = /已加 (\d+)\/(\d+)/.exec(t);
+      return {
+        t,
+        ver: (/v[0-9][0-9.]*/.exec(t) || [''])[0],
+        flooding: t.indexOf('⏳') === 0,
+        joined: mj ? Number(mj[1]) : null,
+        assigned: mj ? Number(mj[2]) : null,
+        live: (/在群 (\d+)/.exec(t) || [])[1],
+        mobile: (/\+\d{6,}/.exec(t) || [''])[0],
+      };
+    }
+    // 手机号:fleet.json / profile 里那份常年过期,页面里脚本从 Telegram 自己读出来的才是真的。
+    function mobileOf(p) { return phoneOf(p) || titleInfo(p.accountIdx).mobile || ''; }
+
+    function renderStat(idx) {
+      const g = gcells.get(idx); if (!g || !g.stat) return;
+      const open = statOpen.has(idx);
+      g.stat.hidden = !open;
+      if (!open) return;
+      const p = profiles.find((x) => x.accountIdx === idx);
+      const st = stateOf(idx);
+      const s = autoStats.get(idx);
+      const ti = titleInfo(idx);
+      const t = ti.t, flooding = ti.flooding, ver = ti.ver;
+      // 数字优先用脚本实时对账的;tgsou 那份(s)用来补「剩余」。
+      const assigned = ti.assigned != null ? ti.assigned : (s ? s.assigned : null);
+      const joined = ti.joined != null ? ti.joined : (s ? s.joined : null);
+      const remaining = s ? s.remaining : (assigned != null && joined != null ? assigned - joined : null);
+      const on = autoOn.has(idx);
+      g.stat.innerHTML =
+        '<div class="l">' +
+          (assigned != null
+             ? ('<span class="muted">分配</span><b>' + assigned + '</b>' +
+                '<span class="muted">已加入</span><b class="ok" title="脚本实时从该账号的会话列表读出的真实已加入数">' + (joined == null ? '—' : joined) + '</b>' +
+                '<span class="muted">/ ' + assigned + '</span>' +
+                '<span class="muted">剩余</span><b>' + (remaining == null ? '—' : remaining) + '</b>' +
+                (ti.live ? ('<span class="muted" title="会话列表里有用户名的群/频道总数(含未分配的)">在群 ' + ti.live + '</span>') : ''))
+             : (mobileOf(p) ? '<span class="muted">读取中…</span>'
+                            : '<span class="muted warn" title="profile 没配手机号,脚本也还没报上来(页面没登录或刚打开)">没有手机号</span>')) +
+        '</div>' +
+        '<div class="l">' +
+          '<span class="muted">脚本</span>' +
+          // 读不到 ≠ 没注入:面板够不到格子的 window,只能从 document.title 认版本。
+          // 脚本若不写 title(1.7.0 就是这样),这里就是读不到,别再误报成"未注入"。
+          (ver ? ('<b>' + ver + '</b>')
+               : '<b class="warn" title="面板只能从页面标题读版本;脚本没写标题时就读不到,不代表没注入">读不到版本</b>') +
+          (flooding ? ('<span class="warn">' + esc(t.replace(/ · v.*$/, '')) + '</span>')
+                    : '<span class="muted">未限流</span>') +
+        '</div>' +
+        '<div class="l">' +
+          '<button class="go' + (on ? ' on' : '') + '" data-act="auto">' + (on ? '停止随机开群' : '随机开群') + '</button>' +
+          '<input class="sec" type="number" min="5" max="600" value="' + autoSec() + '" data-act="sec" title="每隔多少秒换一个群">' +
+          '<span class="muted">秒</span>' +
+          '<button class="go" data-act="one">开一个</button>' +
+        '</div>';
+      g.stat.querySelectorAll('[data-act]').forEach((elx) => {
+        const act = elx.dataset.act;
+        elx.onclick = (ev) => {
+          ev.stopPropagation();
+          if (act === 'one') { pickOne(idx); return; }
+          if (act === 'auto') {
+            if (autoOn.has(idx)) { autoOn.delete(idx); flash('#' + idx + ' 已停止随机开群'); }
+            else { autoOn.add(idx); autoLast.set(idx, 0); flash('#' + idx + ' 开始随机开群'); }
+            renderStat(idx);
+          }
+        };
+        if (act === 'sec') elx.onchange = (ev) => {
+          const v = Math.max(5, Math.min(600, Number(ev.target.value) || 20));
+          ev.target.value = String(v);
+          try { localStorage.setItem(TGSOU_SEC_KEY, String(v)); } catch (e) {}
+        };
+      });
+    }
+
+    async function refreshStat(idx) {
+      const p = profiles.find((x) => x.accountIdx === idx); if (!p) return;
+      const mob = mobileOf(p); if (!mob) { autoStats.set(idx, null); renderStat(idx); return; }
+      try {
+        const r = await fetch(TGSOU_API + '/api/random-unjoined?n=0&t=' + TGSOU_TOKEN + '&mobile=' + encodeURIComponent(mob));
+        const j = await r.json();
+        if (j && j.ok) autoStats.set(idx, { assigned: j.assigned, joined: j.joined, remaining: j.remaining });
+      } catch (e) {}
+      renderStat(idx);
+    }
+
+    // 取一个未加入的群,直接把这一格导航过去。cellUrl 改了之后 syncPreview 会带给主进程,
+    // 主进程按 url 变化重新加载这一格(和点搜群列表里的群是同一个效果)。
+    async function pickOne(idx) {
+      const p = profiles.find((x) => x.accountIdx === idx); if (!p) return;
+      const mob = mobileOf(p); if (!mob) { flash('#' + idx + ' 没有手机号(profile 里没配,脚本也还没报上来),无法取群'); return; }
+      try {
+        const r = await fetch(TGSOU_API + '/api/random-unjoined?n=1&t=' + TGSOU_TOKEN + '&mobile=' + encodeURIComponent(mob));
+        const j = await r.json();
+        if (!j || !j.ok) { flash('取群失败:' + ((j && j.error) || '未知')); autoOn.delete(idx); renderStat(idx); return; }
+        autoStats.set(idx, { assigned: j.assigned, joined: j.joined, remaining: j.remaining });
+        if (!j.picked || !j.picked.length) { flash('#' + idx + ' 分配的群已全部加入'); autoOn.delete(idx); renderStat(idx); return; }
+        const gp = j.picked[0];
+        if (!gp.openUrl) { flash('#' + idx + ' 这个群没有可打开的链接'); return; }
+        cellUrl.set(idx, gp.openUrl);
+        autoLast.set(idx, Date.now());
+        renderStat(idx); syncPreview();
+        flash('#' + idx + ' → ' + gp.title);
+      } catch (e) { flash('取群失败:' + e.message); }
+    }
+
+    // 自动循环:限流中就等(读页面标题里的 ⏳),否则到间隔就换下一个。
+    let statTick = 0;
+    setInterval(() => {
+      for (const idx of autoOn) {
+        if (titleInfo(idx).flooding) continue;                     // 限流中,不换群
+        if (Date.now() - (autoLast.get(idx) || 0) < autoSec() * 1000) continue;
+        autoLast.set(idx, Date.now());
+        pickOne(idx);
+      }
+      for (const idx of statOpen) renderStat(idx);                 // 浮层里的倒计时每秒刷新
+      // 「剩余」只有 tgsou 知道(要拿分配表和 joins 做差),每 15s 问一次。
+      // 脚本那边每 30s 上报一次真实已加入,所以这个数会跟着往下走。
+      if (++statTick % 15 === 0) for (const idx of statOpen) refreshStat(idx);
+    }, 1000);
+
     function renderGridCell(idx) {
       const g = gcells.get(idx); if (!g) return;
       const p = profiles.find((x) => x.accountIdx === idx); const st = stateOf(idx);
@@ -442,6 +639,7 @@
       g.el.classList.toggle('failed', !!st.failed && !st.loading);
       g.el.querySelector('.dot').className = `dot ${dotClass(st)}`;
       g.el.querySelector('.st').textContent = '';   // 格子头不显示状态文字
+      renderStat(idx);                              // 浮层里的版本/限流跟着 state.title 走
       updateCodeButtons(idx);
       if (batchMode) { const n = [...batch].filter((i) => { const q = profiles.find((x) => x.accountIdx === i); return q && hasIdentity(q); }).length; gridCount.textContent = `${batch.size} 个会话 · ${n} 已登录`; }
     }
