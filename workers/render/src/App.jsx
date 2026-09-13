@@ -3444,7 +3444,7 @@ const PORT = ${DSH_PORT}, PKG = "${DSH_PKG}", VER = "${DSH_VERSION}";
 const home = os.homedir();
 const dbDir = path.join(home, "cicy-ai", "db"), logDir = path.join(home, "cicy-ai", "logs");
 for (const d of [dbDir, logDir]) { try { fs.mkdirSync(d, { recursive: true }); } catch {} }
-const logFile = path.join(logDir, "dsh.log"), pidFile = path.join(dbDir, "dsh.pid"), rootCache = path.join(dbDir, "dsh-npm-root.txt");
+const logFile = path.join(logDir, "dsh.log"), errFile = path.join(logDir, "dsh.err.log"), pidFile = path.join(dbDir, "dsh.pid"), rootCache = path.join(dbDir, "dsh-npm-root.txt");
 const lockFile = path.join(dbDir, "dsh-install.lock"), okMarker = path.join(dbDir, "dsh-ok-" + VER + ".txt");
 // 车队级启动环境(hub 下发,DshCard 写的 dsh-env.json):并进 dsh 子进程 env。启动环境在 dsh 里优先级最高且只读。
 const envFile = path.join(dbDir, "dsh-env.json"), envApplied = path.join(dbDir, "dsh-env.applied");
@@ -3572,15 +3572,36 @@ async function start() {
   if (pr.dsh) return { ok: true, already: true, token: lastToken() };
   if (pr.up) return { ok: false, error: "port_in_use", tail: "127.0.0.1:" + PORT + " is used by another program" };
   const seeded = seedWorkspaces();   // dsh 此刻没在跑,可以安全改 workspace.json
-  const fd = fs.openSync(logFile, "w");
-  const child = cp.spawn(process.execPath, [p.bin, "web", "--no-open", "--port", String(PORT)], { detached: true, windowsHide: true, stdio: ["ignore", fd, fd], cwd: home, env: Object.assign({}, process.env, { NO_COLOR: "1" }, savedRegistry() ? { npm_config_registry: savedRegistry() } : {}, fleetEnv()) });   // dsh 首次运行会用 pnpm 自举 ~/.dsh/profiles,沿用实测最快的源;fleetEnv = hub 下发的 API Key 等
+  const env = Object.assign({}, process.env, { NO_COLOR: "1" }, savedRegistry() ? { npm_config_registry: savedRegistry() } : {}, fleetEnv());   // dsh 首次运行会用 pnpm 自举 ~/.dsh/profiles,沿用实测最快的源;fleetEnv = hub 下发的 API Key 等
+  let pid = 0;
+  if (process.platform === "win32") {
+    // ⚠️ 别用 spawn(detached:true):Windows 上 detached = DETACHED_PROCESS,dsh 会**一个控制台都没有**。
+    // 之后 dsh 的 pwsh 工具每执行一条命令,系统就得给那条命令新建一个控制台 —— 那就是屏幕上
+    // 不停闪的黑窗口(实测一个会话 76 次 pwsh 调用 = 闪 76 次)。
+    // 正解:用 Start-Process -WindowStyle Hidden 起 node,让 dsh 自己拥有一个**被隐藏的**控制台;
+    // 它的子进程会继承这个控制台,不再各自新建,于是一个窗口都不会弹。
+    // (~/.agents/bin/_cicy-run.ps1 用的是同一招,但它只能藏住自己那层,管不到 dsh 起的父层。)
+    const q = (x) => "'" + String(x).replace(/'/g, "''") + "'";
+    const cmd = "$p = Start-Process -FilePath " + q(process.execPath)
+      + " -ArgumentList @(" + [p.bin, "web", "--no-open", "--port", String(PORT)].map(q).join(",") + ")"
+      + " -WindowStyle Hidden -RedirectStandardOutput " + q(logFile) + " -RedirectStandardError " + q(errFile)
+      + " -WorkingDirectory " + q(home) + " -PassThru; $p.Id";
+    try { fs.writeFileSync(logFile, ""); fs.writeFileSync(errFile, ""); } catch {}
+    const r = cp.spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", cmd], { encoding: "utf8", timeout: 60000, windowsHide: true, env });
+    pid = Number(String((r && r.stdout) || "").match(/\d+/) || 0);
+    if (!pid) return { ok: false, error: "start_failed", tail: String((r && r.stderr) || "").slice(-800) };
+  } else {
+    const fd = fs.openSync(logFile, "w");
+    const child = cp.spawn(process.execPath, [p.bin, "web", "--no-open", "--port", String(PORT)], { detached: true, windowsHide: true, stdio: ["ignore", fd, fd], cwd: home, env });
+    child.unref(); try { fs.closeSync(fd); } catch {}
+    pid = child.pid;
+  }
   try { fs.writeFileSync(envApplied, envHash()); } catch {}
-  child.unref(); try { fs.closeSync(fd); } catch {}
-  try { fs.writeFileSync(pidFile, String(child.pid)); } catch {}
+  try { fs.writeFileSync(pidFile, String(pid)); } catch {}
   // dsh web 冷启动在矩阵机上实测常超过 30s(加载 ~200MB 依赖);只要进程还活着就等到 120s,别误报 start_failed
-  for (let i = 0; i < 240; i++) { await sleep(500); if (await httpUp()) return { ok: true, pid: child.pid, token: lastToken(), seededWorkspaces: seeded.seeded }; if (!pidAlive(child.pid)) break; }
-  let tail = ""; try { tail = tailOf(logFile, 4096).slice(-1500); } catch {}
-  return { ok: false, error: "start_failed", pid: child.pid, tail };
+  for (let i = 0; i < 240; i++) { await sleep(500); if (await httpUp()) return { ok: true, pid, token: lastToken(), seededWorkspaces: seeded.seeded }; if (!pidAlive(pid)) break; }
+  let tail = ""; try { tail = tailOf(logFile, 4096).slice(-1200) + "\n--- stderr ---\n" + tailOf(errFile, 2048).slice(-600); } catch {}
+  return { ok: false, error: "start_failed", pid, tail };
 }
 async function stop() {
   const pid = readPidFile(pidFile); let killed = false;
