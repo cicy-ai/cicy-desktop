@@ -546,6 +546,12 @@ export default function App() {
   const [customErr, setCustomErr] = useState("");
   // Tab state for the team grid: "all" | "local" | "cloud" | "custom" | "hub".
   const [tab, setTab] = useState("all");
+  // 车队 dsh 卡片(懒加载:进 dsh tab 才去拉 /api/dsh-list)。
+  // 必须和其它 hook 一起放在**所有提前 return 之前** —— App 在条款/登录/恢复态有 4 个
+  // early return(termsOk / !token 等),把 hook 放到它们后面会让登录前后 hook 数量不一致,
+  // React 直接抛 #310 "Rendered more hooks than during the previous render",整页白屏。
+  // 2026-09-13 我就是这么把全车队首页打崩的。
+  const dshFleet = useDshFleet(tab === "dsh");
   // CiCy Hub: email sign-in → every cicy-code instance of that account (no local
   // cicy-code needed). State + cards live in useHub / HubInstanceCard below.
   const hub = useHub();
@@ -1191,6 +1197,7 @@ export default function App() {
               { k: "local",  label: tr("teamFilter.local", "本地"),   n: localCount },
               { k: "hub",    label: tr("teamFilter.hub", "CiCy Hub"), n: hubCount },
               { k: "custom", label: tr("teamFilter.custom", "自定义"), n: customCount },
+              { k: "dsh",    label: tr("teamFilter.dsh", "DSH"), n: dshFleet.list ? dshFleet.list.length : 0 },
             ].map(({ k, label, n }) => (
               <button
                 key={k}
@@ -1203,6 +1210,15 @@ export default function App() {
               </button>
             ))}
           </div>
+          {/* DSH tab 的手动刷新:token 会随 dsh 重启而变,但不值得轮询 —— 要新的自己点。 */}
+          {tab === "dsh" && (
+            <button type="button" className="btn-ghost" data-id="DshFleetRefresh" disabled={dshFleet.busy}
+              title={tr("dshFleet.refresh", "刷新 dsh 中继状态")}
+              style={{ marginLeft: 8, width: 28, height: 28, padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+              onClick={() => dshFleet.refresh()}>
+              {dshFleet.busy ? <Spinner /> : <RefreshIcon />}
+            </button>
+          )}
           {/* DesktopIdBadge 已移入用户头像下拉菜单(受信任站点上面)。此处仅留占位撑开右侧布局。 */}
           <span style={{ marginLeft: "auto" }} aria-hidden />
           {/* 行尾:新加团队 → 直接去云端团队中心添加(私有云)。自定义入口已删。 */}
@@ -1285,6 +1301,13 @@ export default function App() {
           {!firstLoading && showHub && hub.loggedIn && (hub.instances || []).filter((it) => it.reachable || it.online).map((it) => (
             <HubInstanceCard key={"hub:" + it.id} inst={it} onOpen={(next, title) => hub.open(it, next, title)} />
           ))}
+          {tab === "dsh" && (dshFleet.list || []).map((m) => <DshFleetCard key={"dsh:" + m.name} m={m} />)}
+          {tab === "dsh" && dshFleet.list !== null && dshFleet.list.length === 0 && !dshFleet.busy && (
+            <div className="empty" data-id="DshFleetEmpty" style={{ gridColumn: "1 / -1" }}>
+              {tr("dshFleet.empty", "还没有机器的 dsh 中继连上来。")}
+            </div>
+          )}
+          {tab === "dsh" && dshFleet.busy && [0, 1, 2].map((i) => <SkeletonCard key={"dshsk" + i} />)}
           {!firstLoading && showLocal && localList.map((t) => (
             <LocalTeamCard key={"local:" + t.id} team={t} cloudCode={cloudCodeFor(t.cloud_team_id)} onOpen={() => openLocalTeam(t.id)} onRename={renameLocalTeam} onRefresh={fetchLocalTeams} />
           ))}
@@ -3199,6 +3222,77 @@ function DockerInstallDrawerHost() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 车队 dsh —— 每台矩阵机一张卡,点开直接进那台机器的 DeepSeek Harness。
+//
+// dsh 只监听那台机 Windows 侧的 127.0.0.1:3080,外面进不去。反代不走 cloudflared、
+// 不走 frp、也不碰机器上的 WSL:cicy-fleet hub 上有一条专用中继(见
+// ~/cicy-fleet/dsh-proxy.js + px-agent.js),机器的 Electron 主进程连上来,
+// <机器>-dsh.cicy-ai.com 的请求就经这条中继打到它本机的 3080(HTTP 流式 + WS 都转)。
+//
+// 这里只做两件事:拉一份机器清单(/api/dsh-list,不含任何 token),和把「打开」指到
+// /_cicy/enter —— hub 收到后现场向那台机器要 dsh 的 token 再 302 过去,
+// 所以 token 不会出现在首页里。
+const DSH_FLEET_API = "./api/dsh-list";
+
+function useDshFleet(enabled) {
+  const [list, setList] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const refresh = useCallback(async () => {
+    setBusy(true);
+    try {
+      const r = await fetch(DSH_FLEET_API, { cache: "no-store" });
+      const j = await r.json();
+      setList(Array.isArray(j && j.machines) ? j.machines : []);
+    } catch { setList([]); }
+    finally { setBusy(false); }
+  }, []);
+  useEffect(() => { if (enabled && list === null && !busy) refresh(); }, [enabled, list, busy, refresh]);
+  return { list, busy, refresh };
+}
+
+function DshFleetCard({ m }) {
+  const [busy, setBusy] = useState(false);
+  const url = `https://${m.host}/_cicy/enter`;
+  const open = async () => {
+    if (busy || !m.up) return;
+    setBusy(true);
+    try {
+      if (window.cicy?.tabs?.openIn) await window.cicy.tabs.openIn(0, url, m.name + " · dsh");
+      else window.cicy?.shell?.openExternal?.(url);
+    } catch { try { window.cicy?.shell?.openExternal?.(url); } catch {} }
+    finally { setBusy(false); }
+  };
+  return (
+    <div data-id="DshFleetCard" className={`bcard bcard--custom${m.up ? " bcard--online" : ""}`} title={m.host}>
+      <div className="bcard__accent" />
+      <div className="bcard__top">
+        <div className="bcard__pill">
+          <span className="bcard__dot" data-tone={m.up ? "ok" : "off"} />
+          <LaptopIcon />
+        </div>
+      </div>
+      <div className="bcard__body">
+        <div style={{ height: 28, display: "flex", alignItems: "center", gap: 8 }}>
+          <TeamAvatar size={24} name={m.name} teamId={"desktop-" + m.name} />
+          <h3 className="bcard__name" style={{ flex: 1, minWidth: 0, margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</h3>
+        </div>
+        <div className="bcard__meta">
+          <span className="bcard__chip" data-id="DshFleetCard-kind">dsh</span>
+        </div>
+        <div data-id="DshFleetCard-host" title={m.host}
+          style={{ marginTop: 6, fontSize: 11, color: "#8b949e", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {m.up ? m.host : tr("dshFleet.noRelay", "中继未连接")}
+        </div>
+      </div>
+      <button type="button" className="bcard__cta" data-id="DshFleetCard-open" disabled={busy || !m.up} onClick={open}>
+        {busy ? <Spinner /> : <ArrowIcon />}
+        <span>{m.up ? tr("cicyHub.open", "打开") : tr("dshFleet.unready", "未就绪")}</span>
+      </button>
     </div>
   );
 }
@@ -5395,6 +5489,14 @@ function LaptopIcon() {
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <rect x="3" y="4" width="18" height="12" rx="2" />
       <line x1="2" y1="20" x2="22" y2="20" />
+    </svg>
+  );
+}
+function RefreshIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+      <polyline points="21 3 21 9 15 9" />
     </svg>
   );
 }
