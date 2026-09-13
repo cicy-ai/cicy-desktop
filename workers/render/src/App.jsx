@@ -1453,29 +1453,40 @@ function useFleetSocket() {
 
     const mark = (k, v) => { try { (window.__cicyFleet = window.__cicyFleet || {})[k] = v; } catch {} };
 
+    // A main-process round-trip that never settles (main busy / blocked by a
+    // heavy eval) must not hang identify(): cap each one. On timeout the field
+    // is left blank and the hello still goes out — a connected socket with a
+    // partial identity beats a machine that silently never reconnects.
+    const IDENT_STEP_MS = 12 * 1000;
+    const capped = (p, fallback) => Promise.race([
+      Promise.resolve(p),
+      new Promise((res) => setTimeout(() => res(fallback), IDENT_STEP_MS)),
+    ]);
     const identify = async () => {
       if (ident) return ident;
       const out = { host: "", v: "", plat: "", auto: null, team: "", mid: "" };
       // Declared identity — the only thing a command should ever be addressed
       // by. Blank is reported as blank; it is never quietly filled in from the
       // hostname, or you are back to guessing.
-      try { out.team = await readTeam(); } catch {}
+      try { out.team = await capped(readTeam(), ""); } catch {}
       out.mid = getDesktopId();
       out.short = getShortId();
-      try { out.tok = (await mainEval(READ_TOKEN)).trim(); } catch {}
+      try { out.tok = String(await capped(mainEval(READ_TOKEN), "")).trim(); } catch {}
       try {
-        const r = await window.electronRPC?.("get_system_info", {});
+        const r = await capped(window.electronRPC?.("get_system_info", {}), null);
         const t = ((r && r.content) || []).map((c) => c && c.text).join("");
         const j = JSON.parse(t) || {};
         out.host = j.hostname || "";
         out.plat = j.platform || "";
       } catch {}
       try {
-        const raw = await window.cicy?.app?.getVersion?.();
+        const raw = await capped(window.cicy?.app?.getVersion?.(), "");
         out.v = typeof raw === "string" ? raw : (raw && raw.desktop) || "";
       } catch {}
-      try { out.auto = await window.cicy?.app?.getAutoUpdate?.(); } catch {}
-      ident = out;
+      try { out.auto = await capped(window.cicy?.app?.getAutoUpdate?.(), null); } catch {}
+      // Only cache a complete identity; a partial one (some step timed out) is
+      // re-read on the next connect so the hello self-corrects once main is idle.
+      if (out.host && out.v) ident = out;
       return out;
     };
 
@@ -1499,10 +1510,19 @@ function useFleetSocket() {
       retry = Math.min(retry * 2, FLEET_RETRY_MAX);
     };
 
+    let inflightSince = 0;
+    const INFLIGHT_STUCK_MS = 90 * 1000; // > all identify() steps + ws handshake
     const connect = async () => {
-      if (!alive || inflight) return;
+      if (!alive) return;
+      if (inflight) {
+        if (Date.now() - inflightSince < INFLIGHT_STUCK_MS) return;
+        // The previous attempt never came back (main wedged mid-identify).
+        // Invalidate it and start over rather than staying silent for good.
+        mark("step", "stuck-attempt-abandoned");
+        gen++; inflight = false;
+      }
       if (ws && ws.readyState <= 1) return; // already connecting/open
-      inflight = true;
+      inflight = true; inflightSince = Date.now();
       try { await connectOnce(); } finally { inflight = false; }
     };
     const connectOnce = async () => {
@@ -3374,7 +3394,10 @@ function pkgInfo() {
   if (!p) { const root = npmRoot(); p = pkgAt(root); if (root) { try { fs.writeFileSync(rootCache, root); } catch {} } }
   return p;
 }
-function lastToken() { try { const s = fs.readFileSync(logFile, "utf8"); const all = [...s.matchAll(/[?&]token=([A-Za-z0-9_-]+)/g)]; return all.length ? all[all.length - 1][1] : ""; } catch { return ""; } }
+// 只读日志尾部(64KB):status() 每 20s 跑一次,dsh web 每个请求都写日志,文件只增不减,
+// 全量 readFileSync 会把主进程卡住(2026-09-13 全队失联的一个来源)。token 只在最近的启动行里。
+function tailOf(file, max) { try { const st = fs.statSync(file); const len = Math.min(st.size, max); if (!len) return ""; const fd = fs.openSync(file, "r"); try { const b = Buffer.alloc(len); fs.readSync(fd, b, 0, len, st.size - len); return b.toString("utf8"); } finally { fs.closeSync(fd); } } catch { return ""; } }
+function lastToken() { try { const s = tailOf(logFile, 64 * 1024); const all = [...s.matchAll(/[?&]token=([A-Za-z0-9_-]+)/g)]; return all.length ? all[all.length - 1][1] : ""; } catch { return ""; } }
 // 端口探测:up = 有东西在听;dsh = 确认是 dsh web(未登录 401 + "dsh web authentication required",登录后 index 带 __DSH_BOOT__)
 async function probe() {
   try {
@@ -3432,7 +3455,7 @@ async function start() {
   try { fs.writeFileSync(pidFile, String(child.pid)); } catch {}
   // dsh web 冷启动在矩阵机上实测常超过 30s(加载 ~200MB 依赖);只要进程还活着就等到 120s,别误报 start_failed
   for (let i = 0; i < 240; i++) { await sleep(500); if (await httpUp()) return { ok: true, pid: child.pid, token: lastToken(), seededWorkspaces: seeded.seeded }; if (!pidAlive(child.pid)) break; }
-  let tail = ""; try { tail = fs.readFileSync(logFile, "utf8").slice(-1500); } catch {}
+  let tail = ""; try { tail = tailOf(logFile, 4096).slice(-1500); } catch {}
   return { ok: false, error: "start_failed", pid: child.pid, tail };
 }
 async function stop() {
