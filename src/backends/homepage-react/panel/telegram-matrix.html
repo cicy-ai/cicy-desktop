@@ -279,6 +279,7 @@
     const cellUrl = new Map();
     const autoOn = new Set();          // 正在自动随机开群的格子
     const autoStats = new Map();       // idx -> {assigned,joined,remaining}
+    const onceAt = new Map();          // idx -> 上次点「开一个」的时间(只为按钮反馈)
     const TGSOU_SEC_KEY = 'tgmatrix.autosec';           // accountIdx -> { el, body }
 
     const esc = (value) => String(value || '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -534,13 +535,59 @@
     // 手机号:fleet.json / profile 里那份常年过期,页面里脚本从 Telegram 自己读出来的才是真的。
     function mobileOf(p) { return phoneOf(p) || titleInfo(p.accountIdx).mobile || ''; }
 
+    // 浮层每秒都要刷新(倒计时/计数),但**不能每秒重建 DOM**:按钮被换掉时
+    // mousedown 和 mouseup 会落在不同的节点上,click 根本不触发 —— 表现就是
+    // 「开一个点了没反应」。所以骨架只建一次、事件只绑一次,每秒只改文字。
+    function buildStat(g, idx) {
+      g.stat.innerHTML =
+        '<div class="l r1"></div>' +
+        '<div class="l"><span class="muted">脚本</span><b class="ver"></b><span class="flood"></span></div>' +
+        '<div class="l">' +
+          '<button class="go auto" data-act="auto"></button>' +
+          '<input class="sec" type="number" min="5" max="600" data-act="sec" title="每隔多少秒换一个群">' +
+          '<span class="muted">秒</span>' +
+          '<button class="go one" data-act="one">开一个</button>' +
+        '</div>';
+      g.statEls = {
+        r1: g.stat.querySelector('.r1'),
+        ver: g.stat.querySelector('.ver'),
+        flood: g.stat.querySelector('.flood'),
+        auto: g.stat.querySelector('.auto'),
+        one: g.stat.querySelector('.one'),
+        sec: g.stat.querySelector('.sec'),
+      };
+      g.statEls.sec.value = String(autoSec());
+      g.statEls.one.onclick = (ev) => {
+        ev.stopPropagation();
+        onceAt.set(idx, Date.now());
+        setAuto(idx, { once: true });
+        renderStat(idx);
+      };
+      g.statEls.auto.onclick = (ev) => {
+        ev.stopPropagation();
+        const next = !autoOn.has(idx);
+        if (next) autoOn.add(idx); else autoOn.delete(idx);
+        setAuto(idx, { on: next, sec: autoSec() });
+        renderStat(idx);
+        flash('#' + idx + (next ? ' 开始随机开群' : ' 已停止随机开群'));
+      };
+      g.statEls.sec.onclick = (ev) => ev.stopPropagation();
+      g.statEls.sec.onchange = (ev) => {
+        const v = Math.max(5, Math.min(600, Number(ev.target.value) || 20));
+        ev.target.value = String(v);
+        try { localStorage.setItem(TGSOU_SEC_KEY, String(v)); } catch (e) {}
+        if (autoOn.has(idx)) setAuto(idx, { sec: v });
+      };
+    }
+
     function renderStat(idx) {
       const g = gcells.get(idx); if (!g || !g.stat) return;
       const open = statOpen.has(idx);
       g.stat.hidden = !open;
       if (!open) return;
+      if (!g.statEls) buildStat(g, idx);
+      const e = g.statEls;
       const p = profiles.find((x) => x.accountIdx === idx);
-      const st = stateOf(idx);
       const s = autoStats.get(idx);
       const ti = titleInfo(idx);
       const t = ti.t, flooding = ti.flooding, ver = ti.ver;
@@ -550,53 +597,36 @@
       const assigned = s ? s.assigned : (ti.assigned != null ? ti.assigned : null);
       const joined = ti.joined != null ? ti.joined : (s ? s.joined : null);
       const remaining = s ? s.remaining : (ti.assigned != null && ti.joined != null ? ti.assigned - ti.joined : null);
+
+      // 第一行没有可点的东西,整块换掉没关系。
+      e.r1.innerHTML = assigned != null
+        ? ('<span class="muted">分配</span><b>' + assigned + '</b>' +
+           '<span class="muted">已加入</span><b class="ok" title="脚本实时从该账号的会话列表读出的真实已加入数">' + (joined == null ? '—' : joined) + '</b>' +
+           '<span class="muted">/ ' + assigned + '</span>' +
+           '<span class="muted">剩余</span><b>' + (remaining == null ? '—' : remaining) + '</b>' +
+           (ti.live ? ('<span class="muted" title="会话列表里有用户名的群/频道总数(含未分配的)">在群 ' + ti.live + '</span>') : ''))
+        : (mobileOf(p) ? '<span class="muted">读取中…</span>'
+                       : '<span class="muted warn" title="profile 没配手机号,脚本也还没报上来(页面没登录或刚打开)">没有手机号</span>');
+
+      // 读不到 ≠ 没注入:面板够不到格子的 window,只能从 document.title 认版本。
+      e.ver.textContent = ver || '读不到版本';
+      e.ver.className = ver ? (ti.stale ? 'ver muted' : 'ver') : 'ver warn';
+      e.ver.title = ver
+        ? (ti.stale ? '标题这一刻是空的(格子正在导航),显示的是上次读到的值' : '')
+        : '面板只能从页面标题读版本;脚本没写标题时就读不到(1.7.0 就不写),不代表没注入';
+      e.flood.textContent = flooding ? t.replace(/ · v.*$/, '') : '未限流';
+      e.flood.className = flooding ? 'flood warn' : 'flood muted';
+
       const on = autoOn.has(idx);
-      g.stat.innerHTML =
-        '<div class="l">' +
-          (assigned != null
-             ? ('<span class="muted">分配</span><b>' + assigned + '</b>' +
-                '<span class="muted">已加入</span><b class="ok" title="脚本实时从该账号的会话列表读出的真实已加入数">' + (joined == null ? '—' : joined) + '</b>' +
-                '<span class="muted">/ ' + assigned + '</span>' +
-                '<span class="muted">剩余</span><b>' + (remaining == null ? '—' : remaining) + '</b>' +
-                (ti.live ? ('<span class="muted" title="会话列表里有用户名的群/频道总数(含未分配的)">在群 ' + ti.live + '</span>') : ''))
-             : (mobileOf(p) ? '<span class="muted">读取中…</span>'
-                            : '<span class="muted warn" title="profile 没配手机号,脚本也还没报上来(页面没登录或刚打开)">没有手机号</span>')) +
-        '</div>' +
-        '<div class="l">' +
-          '<span class="muted">脚本</span>' +
-          // 读不到 ≠ 没注入:面板够不到格子的 window,只能从 document.title 认版本。
-          // 脚本若不写 title(1.7.0 就是这样),这里就是读不到,别再误报成"未注入"。
-          (ver ? ('<b' + (ti.stale ? ' class="muted" title="标题这一刻是空的(格子正在导航),显示的是上次读到的值"' : '') + '>' + ver + '</b>')
-               : '<b class="warn" title="面板只能从页面标题读版本;脚本没写标题时就读不到(1.7.0 就不写),不代表没注入">读不到版本</b>') +
-          (flooding ? ('<span class="warn">' + esc(t.replace(/ · v.*$/, '')) + '</span>')
-                    : '<span class="muted">未限流</span>') +
-        '</div>' +
-        '<div class="l">' +
-          '<button class="go' + (on ? ' on' : '') + '" data-act="auto">' + (on ? '停止随机开群' : '随机开群') + '</button>' +
-          '<input class="sec" type="number" min="5" max="600" value="' + autoSec() + '" data-act="sec" title="每隔多少秒换一个群">' +
-          '<span class="muted">秒</span>' +
-          '<button class="go" data-act="one">开一个</button>' +
-        '</div>';
-      g.stat.querySelectorAll('[data-act]').forEach((elx) => {
-        const act = elx.dataset.act;
-        elx.onclick = (ev) => {
-          ev.stopPropagation();
-          if (act === 'one') { setAuto(idx, { once: true }); flash('#' + idx + ' 开一个'); return; }
-          if (act === 'auto') {
-            const next = !autoOn.has(idx);
-            if (next) autoOn.add(idx); else autoOn.delete(idx);
-            renderStat(idx);
-            setAuto(idx, { on: next, sec: autoSec() });
-            flash('#' + idx + (next ? ' 开始随机开群' : ' 已停止随机开群'));
-          }
-        };
-        if (act === 'sec') elx.onchange = (ev) => {
-          const v = Math.max(5, Math.min(600, Number(ev.target.value) || 20));
-          ev.target.value = String(v);
-          try { localStorage.setItem(TGSOU_SEC_KEY, String(v)); } catch (e) {}
-          if (autoOn.has(idx)) setAuto(idx, { sec: v });
-        };
-      });
+      e.auto.textContent = on ? '停止随机开群' : '随机开群';
+      e.auto.className = 'go auto' + (on ? ' on' : '');
+      // 「开一个」是写到 tgsou 的一次性标记,格子里的脚本下次轮询(≤5 秒)才会去开。
+      // 不给反馈的话点完看着像没反应,所以这几秒里把按钮改成「已下发…」。
+      const sent = Date.now() - (onceAt.get(idx) || 0) < 8000;
+      e.one.textContent = sent ? '已下发…' : '开一个';
+      e.one.disabled = sent;
+      e.one.title = sent ? '已写到 tgsou,格子里的脚本最多 5 秒后开群' : '立刻开一个还没加入的群';
+      if (document.activeElement !== e.sec) e.sec.value = String(autoSec());
     }
 
     async function refreshStat(idx) {
