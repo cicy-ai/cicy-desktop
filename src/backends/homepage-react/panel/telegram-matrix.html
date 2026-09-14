@@ -509,10 +509,15 @@
     //   "⏳ 4分47秒 · v1.9.0 · 已加 12/465 · 在群 138 · +573108335085"
     // 「已加 j/n」是脚本**实时**从会话列表读出真群、POST 给 tgsou 对账后的回值 ——
     // 比面板自己问 tgsou 更新,也是 tgsou 那边计数会动的原因(joins 只有这一个写入口)。
+    // 标题会**周期性地读不到**:格子每次导航,主进程都会推一条 state,而 applyCellState 里
+    // `next.title = state.title || ''` —— 导航途中 getTitle() 是空的,于是版本/已加/手机号
+    // 全被抹掉,浮层闪「读不到版本」。这些值是脚本的属性、不是这一瞬间的属性,所以记住最后
+    // 一次读到的,标题空了就沿用(限流 ⏳ 例外:那个必须是当下的实时值)。
+    const titleCache = new Map();   // idx -> {ver, joined, assigned, live, mobile}
     function titleInfo(idx) {
       const t = String(stateOf(idx).title || '').trim();
       const mj = /已加 (\d+)\/(\d+)/.exec(t);
-      return {
+      const info = {
         t,
         ver: (/v[0-9][0-9.]*/.exec(t) || [''])[0],
         flooding: t.indexOf('⏳') === 0,
@@ -520,7 +525,12 @@
         assigned: mj ? Number(mj[2]) : null,
         live: (/在群 (\d+)/.exec(t) || [])[1],
         mobile: (/\+\d{6,}/.exec(t) || [''])[0],
+        stale: false,
       };
+      if (info.ver) { titleCache.set(idx, { ver: info.ver, joined: info.joined, assigned: info.assigned, live: info.live, mobile: info.mobile }); return info; }
+      const c = titleCache.get(idx);
+      if (c) { info.ver = c.ver; info.joined = c.joined; info.assigned = c.assigned; info.live = c.live; info.mobile = c.mobile; info.stale = true; }
+      return info;
     }
     // 手机号:fleet.json / profile 里那份常年过期,页面里脚本从 Telegram 自己读出来的才是真的。
     function mobileOf(p) { return phoneOf(p) || titleInfo(p.accountIdx).mobile || ''; }
@@ -557,8 +567,8 @@
           '<span class="muted">脚本</span>' +
           // 读不到 ≠ 没注入:面板够不到格子的 window,只能从 document.title 认版本。
           // 脚本若不写 title(1.7.0 就是这样),这里就是读不到,别再误报成"未注入"。
-          (ver ? ('<b>' + ver + '</b>')
-               : '<b class="warn" title="面板只能从页面标题读版本;脚本没写标题时就读不到,不代表没注入">读不到版本</b>') +
+          (ver ? ('<b' + (ti.stale ? ' class="muted" title="标题这一刻是空的(格子正在导航),显示的是上次读到的值"' : '') + '>' + ver + '</b>')
+               : '<b class="warn" title="面板只能从页面标题读版本;脚本没写标题时就读不到(1.7.0 就不写),不代表没注入">读不到版本</b>') +
           (flooding ? ('<span class="warn">' + esc(t.replace(/ · v.*$/, '')) + '</span>')
                     : '<span class="muted">未限流</span>') +
         '</div>' +
@@ -631,6 +641,8 @@
       // 「剩余」只有 tgsou 知道(要拿分配表和 joins 做差),每 15s 问一次。
       // 脚本那边每 30s 上报一次真实已加入,所以这个数会跟着往下走。
       if (++statTick % 15 === 0) for (const idx of statOpen) refreshStat(idx);
+      // 主进程只在有事件时推 state;标题在两次事件之间可能一直是空的,每 10s 主动兜一次底。
+      if (statTick % 10 === 0) pullStates();
     }, 1000);
 
     function renderGridCell(idx) {
