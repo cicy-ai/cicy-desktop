@@ -278,7 +278,6 @@
     const statOpen = new Set();
     const cellUrl = new Map();
     const autoOn = new Set();          // 正在自动随机开群的格子
-    const autoLast = new Map();        // idx -> 上次开群时间
     const autoStats = new Map();       // idx -> {assigned,joined,remaining}
     const TGSOU_SEC_KEY = 'tgmatrix.autosec';           // accountIdx -> { el, body }
 
@@ -582,17 +581,20 @@
         const act = elx.dataset.act;
         elx.onclick = (ev) => {
           ev.stopPropagation();
-          if (act === 'one') { pickOne(idx); return; }
+          if (act === 'one') { setAuto(idx, { once: true }); flash('#' + idx + ' 开一个'); return; }
           if (act === 'auto') {
-            if (autoOn.has(idx)) { autoOn.delete(idx); flash('#' + idx + ' 已停止随机开群'); }
-            else { autoOn.add(idx); autoLast.set(idx, 0); flash('#' + idx + ' 开始随机开群'); }
+            const next = !autoOn.has(idx);
+            if (next) autoOn.add(idx); else autoOn.delete(idx);
             renderStat(idx);
+            setAuto(idx, { on: next, sec: autoSec() });
+            flash('#' + idx + (next ? ' 开始随机开群' : ' 已停止随机开群'));
           }
         };
         if (act === 'sec') elx.onchange = (ev) => {
           const v = Math.max(5, Math.min(600, Number(ev.target.value) || 20));
           ev.target.value = String(v);
           try { localStorage.setItem(TGSOU_SEC_KEY, String(v)); } catch (e) {}
+          if (autoOn.has(idx)) setAuto(idx, { sec: v });
         };
       });
     }
@@ -605,38 +607,34 @@
         const j = await r.json();
         if (j && j.ok) autoStats.set(idx, { assigned: j.assigned, joined: j.joined, remaining: j.remaining });
       } catch (e) {}
+      // 开关在服务端,不在这个页面 —— 刷新页面、换台机器看,状态都一致。
+      // peek=1:只看不取,别把「开一个」那个一次性标记吃掉。
+      try {
+        const a = await (await fetch(TGSOU_API + '/api/autojoin?peek=1&t=' + TGSOU_TOKEN + '&mobile=' + encodeURIComponent(mob))).json();
+        if (a && a.ok) { if (a.on) autoOn.add(idx); else autoOn.delete(idx); }
+      } catch (e) {}
       renderStat(idx);
     }
 
-    // 取一个未加入的群,直接把这一格导航过去。cellUrl 改了之后 syncPreview 会带给主进程,
-    // 主进程按 url 变化重新加载这一格(和点搜群列表里的群是同一个效果)。
-    async function pickOne(idx) {
+    // 开关写到 tgsou(按手机号存),格子里的注入脚本每 10s 来取。
+    // **面板不再自己导航格子** —— 面板只能把 URL 交给主进程 loadURL,那是整页重载
+    // (先 about:blank 再加载),每 20 秒一次 Telegram 根本初始化不完,格子就是一片白。
+    // 换群交给脚本用 Web K 的内部路由(resolveUsername → setInnerPeer)做,零重载。
+    async function setAuto(idx, patch) {
       const p = profiles.find((x) => x.accountIdx === idx); if (!p) return;
-      const mob = mobileOf(p); if (!mob) { flash('#' + idx + ' 没有手机号(profile 里没配,脚本也还没报上来),无法取群'); return; }
+      const mob = mobileOf(p);
+      if (!mob) { flash('#' + idx + ' 没有手机号(profile 里没配,脚本也还没报上来)'); autoOn.delete(idx); renderStat(idx); return; }
       try {
-        const r = await fetch(TGSOU_API + '/api/random-unjoined?n=1&t=' + TGSOU_TOKEN + '&mobile=' + encodeURIComponent(mob));
-        const j = await r.json();
-        if (!j || !j.ok) { flash('取群失败:' + ((j && j.error) || '未知')); autoOn.delete(idx); renderStat(idx); return; }
-        autoStats.set(idx, { assigned: j.assigned, joined: j.joined, remaining: j.remaining });
-        if (!j.picked || !j.picked.length) { flash('#' + idx + ' 分配的群已全部加入'); autoOn.delete(idx); renderStat(idx); return; }
-        const gp = j.picked[0];
-        if (!gp.openUrl) { flash('#' + idx + ' 这个群没有可打开的链接'); return; }
-        cellUrl.set(idx, gp.openUrl);
-        autoLast.set(idx, Date.now());
-        renderStat(idx); syncPreview();
-        flash('#' + idx + ' → ' + gp.title);
-      } catch (e) { flash('取群失败:' + e.message); }
+        await fetch(TGSOU_API + '/api/autojoin?t=' + TGSOU_TOKEN, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mobile: mob, ...patch }),
+        });
+      } catch (e) { flash('#' + idx + ' 写开关失败:' + e.message); }
     }
 
-    // 自动循环:限流中就等(读页面标题里的 ⏳),否则到间隔就换下一个。
+    // 面板这里只负责显示:换群的节奏(限流等待、间隔)全在格子里的脚本手里。
     let statTick = 0;
     setInterval(() => {
-      for (const idx of autoOn) {
-        if (titleInfo(idx).flooding) continue;                     // 限流中,不换群
-        if (Date.now() - (autoLast.get(idx) || 0) < autoSec() * 1000) continue;
-        autoLast.set(idx, Date.now());
-        pickOne(idx);
-      }
       for (const idx of statOpen) renderStat(idx);                 // 浮层里的倒计时每秒刷新
       // 「剩余」只有 tgsou 知道(要拿分配表和 joins 做差),每 15s 问一次。
       // 脚本那边每 30s 上报一次真实已加入,所以这个数会跟着往下走。
