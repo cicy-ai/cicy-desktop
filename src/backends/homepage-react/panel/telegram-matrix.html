@@ -535,10 +535,12 @@
       const s = autoStats.get(idx);
       const ti = titleInfo(idx);
       const t = ti.t, flooding = ti.flooding, ver = ti.ver;
-      // 数字优先用脚本实时对账的;tgsou 那份(s)用来补「剩余」。
-      const assigned = ti.assigned != null ? ti.assigned : (s ? s.assigned : null);
+      // 已加入用脚本实时对账的;分配/剩余以 tgsou 为准 —— 标题里那个分母只是「分配给该号且有
+      // 用户名的群」,和 tgsou 按 status=active 算的分配数能差不少(实测 381 vs 465),
+      // 混着显示会出现「剩余 440 / 分配 381」这种自相矛盾的数。tgsou 还没回来时才用标题那对。
+      const assigned = s ? s.assigned : (ti.assigned != null ? ti.assigned : null);
       const joined = ti.joined != null ? ti.joined : (s ? s.joined : null);
-      const remaining = s ? s.remaining : (assigned != null && joined != null ? assigned - joined : null);
+      const remaining = s ? s.remaining : (ti.assigned != null && ti.joined != null ? ti.assigned - ti.joined : null);
       const on = autoOn.has(idx);
       g.stat.innerHTML =
         '<div class="l">' +
