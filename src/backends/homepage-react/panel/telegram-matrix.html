@@ -1314,6 +1314,15 @@
             if (cool('toPhone', 4000)) { say('切手机号登录…');
               await evalT(wv, "(function(){var b=[].slice.call(document.querySelectorAll('button')).filter(function(e){return e.offsetParent&&/log in by phone/i.test(e.textContent||'')})[0];if(b){b.click();return 1}return 0})()"); }
           } else if (st.s === 'phone') {
+            // 基线:记住提交前接码页上那个旧码,之后只认比它新的,否则会把上一次的残码填进去。
+            // 必须在提交之前读 —— 提交后再读,新码可能已经到了,会被当成"旧码"从而永远等下一个。
+            // 放在填号之前:填号 → 提交 是连着的两步,中间不会插进来一个接码页。
+            if (!baseRead) { baseRead = true; say('读接码基线…');
+              const base = await readCodePage(idx);
+              if (base && base.dead) { say('接码卡已失效'); return; }
+              if (base && base.rate) { nextCodeAt = Date.now() + 40000; }
+              baseCode = (base && base.code) || ''; baseTime = (base && base.time) || '';
+              continue; }
             const cur = String(st.val || '').replace(/\D/g, '');
             if (cur !== wantD) {
               if (cool('typePhone', 6000)) { say('填手机号…');
@@ -1325,16 +1334,7 @@
                 const after = String(await evalT(wv, phoneFieldJs("return (e.textContent||'')")) || '').replace(/\D/g, '');
                 if (after !== wantD) { say('号码填歪了(' + after + '),重填…'); continue; }
               }
-            } else if (cool('submitPhone', 8000)) {
-              // 基线:记住提交前页面上那个旧码,之后只认比它新的,否则会把上次的残码填进去。
-              // 放在这里而不是一进来就读 —— 一进来就读会先弹出接码 webview,看着像点错了按钮。
-              if (!baseRead) { say('读接码基线…');
-                const base = await readCodePage(idx);
-                if (base && base.dead) { say('接码卡已失效'); return; }
-                if (base && base.rate) { nextCodeAt = Date.now() + 40000; }
-                baseCode = (base && base.code) || ''; baseTime = (base && base.time) || '';
-                baseRead = true; }
-              say('提交手机号…');
+            } else if (cool('submitPhone', 8000)) { say('提交手机号…');
               await evalT(wv, "(function(){var r=document.getElementById('auth-flow-root');var b=[].slice.call(r.querySelectorAll('button')).filter(function(e){return e.offsetParent&&/^next$/i.test((e.textContent||'').trim())})[0];if(b){b.click();return 1}return 0})()"); }
           } else if (st.s === 'code') {
             // 验证码屏会把刚才提交的号码显示出来 —— 对不上说明提交的是别人的号,
