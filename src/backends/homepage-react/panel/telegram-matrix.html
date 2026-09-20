@@ -109,6 +109,19 @@
     #grid-title .left { display: flex; align-items: center; gap: 10px; min-width: 0; }
     #grid-title .mid { margin-right: 0; }
     #grid-count { color: var(--muted); font-size: 12px; white-space: nowrap; }
+    /* 分页控件做成一个整体的胶囊,和 .chip / .icon 同一套语汇 —— 之前是三个
+       各自带边框的原生控件散在工具栏里,和面板其它地方完全不是一个风格。 */
+    .tabs { display: inline-flex; gap: 2px; padding: 1px; border-radius: 999px; background: var(--head); border: 1px solid var(--line); }
+    .tabs button { padding: 2px 10px; border: none; border-radius: 999px; background: transparent; color: #b4b4bb; font-size: 11.5px; cursor: pointer; }
+    .tabs button.on { background: var(--line); color: var(--fg); }
+    .pager { display: inline-flex; align-items: center; gap: 2px; padding: 1px 3px; border-radius: 999px;
+             background: var(--head); border: 1px solid var(--line); }
+    .pager .icon { padding: 1px 5px; font-size: 14px; line-height: 18px; border-radius: 999px; }
+    .pager #page-label { min-width: 96px; text-align: center; color: #b4b4bb; font: 11px ui-monospace, monospace; }
+    .pager i { width: 1px; height: 14px; background: var(--line); margin: 0 3px; }
+    .pager input { width: 34px; padding: 1px 2px; text-align: center; border: none; background: transparent;
+                   color: var(--fg); font: 11px ui-monospace, monospace; }
+    .pager input::-webkit-outer-spin-button, .pager input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
     #grid { display: none; width: 100%; flex: 1 1 auto; min-height: 0; gap: 8px; flex-direction: row; flex-wrap: wrap; align-content: flex-start; overflow-x: hidden; overflow-y: auto; }
     /* 批量模式 = 整页只有 webview:侧栏整个隐藏,顶部一条细工具栏,其余全是格子 */
     body.batch { grid-template-columns: 1fr; }
@@ -141,6 +154,10 @@
     .maxhead .acts { flex: none; display: inline-flex; align-items: center; gap: 6px; padding-left: 12px; border-left: 1px solid var(--line); }
     #maxbody { flex: 1 1 auto; min-height: 0; }
     .gcell { display: flex; flex-direction: column; flex: none; width: 360px; height: 50vh; min-height: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--cell); overflow: hidden; }
+    .gbody .ph { display: flex; align-items: center; justify-content: center; height: 100%;
+      color: var(--muted); font-size: 12px; background: var(--head); }
+    .ghead .pin { color: #6b6b76; }
+    .ghead .pin.on { color: #f0a45a; }
     .gcell.done { border-color: rgba(63,185,80,.6); }
     .gcell.failed { border-color: rgba(255,92,92,.6); }
     .ghead { flex: none; height: 32px; padding: 0 8px; display: flex; align-items: center; gap: 6px; font-size: 12px; border-bottom: 1px solid var(--line); background: var(--head); min-width: 0; }
@@ -215,7 +232,7 @@
   <main>
     <div id="grid-title">
       <div class="left"><span id="mid-batch" class="mid" hidden></span><b>批量登录</b><span id="grid-count"></span></div>
-      <div class="actions"><button class="ghost" id="all-on" title="把本机所有账号的随机开群开关一次全开(写到 tgsou,按手机号存)">全部开</button><button class="ghost" id="all-off" title="把本机所有账号的随机开群开关一次全关">全部关</button><button class="ghost" id="open-tgsou" title="一键打开本机所有账号的搜群标签">🔍 打开搜群</button><button class="ghost" id="grid-reload" title="重新加载所有格子">全部重载</button></div>
+      <div class="actions"><span class="tabs"><button id="tab-cs">客服 0</button><button id="tab-other">非客服 0</button></span><span class="pager" id="pager" title="一次只打开这么多个会话,翻页时其余的会被卸载释放内存"><button class="icon" id="page-prev" title="上一页">‹</button><span id="page-label"></span><button class="icon" id="page-next" title="下一页">›</button><i></i><input id="page-size" type="number" min="1" max="24" title="每页同时打开几个。一个 Telegram 会话能吃到 2.5GB,别开太多"></span><button class="ghost" id="all-on" title="把本机所有账号的随机开群开关一次全开(写到 tgsou,按手机号存)">全部开</button><button class="ghost" id="all-off" title="把本机所有账号的随机开群开关一次全关">全部关</button><button class="ghost" id="open-tgsou" title="一键打开本机所有账号的搜群标签">🔍 打开搜群</button><button class="ghost" id="grid-reload" title="重新加载所有格子">全部重载</button></div>
     </div>
     <div id="grid"></div>
     <div id="preview-title">
@@ -407,11 +424,13 @@
         // .gbody 的 boundingRect 已经自动让出了那块高度。再减一次 = 黑色空隙(踩过)。
         cells.push({ id: cellId(profileId), url: (cellUrl.get(profileId) || TELEGRAM_URL), profile: profileId, visible, rect: r });
         // 接码叠加层:同 rect、同 profile(=同 partition/代理),排在 tg 格子之后 → attach 更晚 → 叠最上层
-        if ((visible || ovVisible) && codeOpen.has(profileId)) {
+        // 叠加层照常创建,只用 visible 控制画不画 —— 之前写成「格子完整露出来才建」,
+        // 结果滚动区外的格子点了接码,主进程压根没收到这条,浮层永远不出现(白板)。
+        if (r && codeOpen.has(profileId)) {
           const p = profiles.find((x) => x.accountIdx === profileId); const cu = p && codeUrlOf(p);
-          if (cu) overlays.push({ id: 'code-' + profileId, url: cu, profile: profileId, visible: true, rect: r });
+          if (cu) overlays.push({ id: 'code-' + profileId, url: cu, profile: profileId, visible: ovVisible, rect: r });
         }
-        if ((visible || ovVisible) && pingOpen.has(profileId)) overlays.push({ id: 'ping-' + profileId, url: (pingUrl.get(profileId) || 'https://ping0.cc/'), profile: profileId, visible: true, rect: r });
+        if (r && pingOpen.has(profileId)) overlays.push({ id: 'ping-' + profileId, url: (pingUrl.get(profileId) || 'https://ping0.cc/'), profile: profileId, visible: ovVisible, rect: r });
       }
       try { window.panelAPI.sync(cells.concat(overlays)); } catch (e) {}
     }
@@ -449,7 +468,7 @@
     function buildGridCell(p) {
       const el = document.createElement('div');
       el.className = 'gcell'; el.dataset.id = String(p.accountIdx);
-      el.innerHTML = `<div class="ghead"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="phone">${esc(phoneOf(p))}</span><span class="st"></span><span class="acts"><button class="code" title="在格子上叠加/关闭接码 webview(同代理出口)">接码</button><button class="icon stat" title="加群面板:分配/已加入、脚本版本、限流,自动随机开群"><svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></button><button class="icon tgsou" title="单独打开这个账号的搜群"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button><button class="icon gear" title="手机号 / 接码 URL / 代理设置"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button><button class="icon ping" title="用本 Profile 代理打开 ping0.cc(验 IP/指纹)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></button><button class="icon max" title="最大化 / 还原"><svg viewBox="0 0 24 24"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></button><button class="icon reload" title="重新加载"><svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button><button class="icon xclose" title="关闭当前叠加层"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></span></div><div class="gstat" hidden></div><div class="gbody"></div>`;
+      el.innerHTML = `<div class="ghead"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="phone">${esc(phoneOf(p))}</span><span class="st"></span><span class="acts"><button class="icon pin" title="标记为客服:常驻不卸载,归到「客服」tab">🎧</button><button class="code" title="在格子上叠加/关闭接码 webview(同代理出口)">接码</button><button class="icon stat" title="加群面板:分配/已加入、脚本版本、限流,自动随机开群"><svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></button><button class="icon tgsou" title="单独打开这个账号的搜群"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button><button class="icon gear" title="手机号 / 接码 URL / 代理设置"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button><button class="icon ping" title="用本 Profile 代理打开 ping0.cc(验 IP/指纹)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></button><button class="icon max" title="最大化 / 还原"><svg viewBox="0 0 24 24"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></button><button class="icon reload" title="重新加载"><svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button><button class="icon xclose" title="关闭当前叠加层"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></span></div><div class="gstat" hidden></div><div class="gbody"></div>`;
       el.querySelector('.reload').onclick = () => (pingOpen.has(p.accountIdx) ? reloadPing(p.accountIdx) : reloadProfile(p.accountIdx));
       el.querySelector('.max').onclick = (e) => { e.stopPropagation(); toggleMax(p.accountIdx); };
       // ping / 接码 也走互斥:先关掉别的叠加层,再用它们原本的开关(各自管自己的集合)
@@ -478,30 +497,102 @@
         } catch (err) { flash('搜群打开失败:' + err.message); }
         finally { b.disabled = false; }
       };
+      el.querySelector('.pin').onclick = (e) => {
+        e.stopPropagation();
+        const i = p.accountIdx;
+        if (csSet.has(i)) csSet.delete(i); else csSet.add(i);
+        saveCs(); applyPage();
+        flash('#' + i + (csSet.has(i) ? ' 标记为客服(常驻,不参与分页)' : ' 取消客服标记'));
+      };
       el.querySelector('.gear').onclick = (e) => { e.stopPropagation(); if (cfgP && cfgP.accountIdx === p.accountIdx && !cfgModal.hidden) closeCfgModal(); else openCfgModal(p); };
       el.querySelector('.ghead').onclick = (e) => { if (!e.target.closest('button')) { selectProfile(p.accountIdx); } };
       const body = el.querySelector('.gbody');
-      // 格子本体改成 <webview>:它在 DOM 里,跟着网格一起滚、被 overflow 裁剪。
-      // 原来是主进程按视口坐标贴的 BrowserView —— 页面一滚就错位,还会糊到网格外面。
-      // partition 和以前完全一样(persist:sandbox-N),所以登录态、代理都不受影响。
+      // 本体是 <webview>,但**不在这里建** —— 一个 Telegram 会话实测能吃到 2.5GB,
+      // 22 个全开在 32GB 的机器上也撑不住。只有当前这一页的格子才真正挂载,
+      // 翻页时把离开的卸掉(内存立刻还回去)。登录态在 partition 里,卸了不丢。
+      body.innerHTML = '<div class="ph">未加载 · 翻到这一页自动打开</div>';
+      return { el, body, stat: el.querySelector('.gstat'), wv: null };
+    }
+    // ── 按需挂载 + 分页 ─────────────────────────────────────
+    // 客服的 TG 在 social-hub 那边常开,矩阵这些非客服账号按需开:一次只让
+    // PAGE_SIZE 个格子有活的 webview,其余是占位。翻页 = 卸旧挂新。
+    // 钉住(📌)的格子不受翻页影响,一直活着。
+    const PAGE_KEY = 'tgmx.pageSize', CS_KEY = 'tgmx.cs', TAB_KEY = 'tgmx.tab';
+    let pageNo = 0;
+    // 客服号:常驻,不参与分页。切 tab 只是把另一组藏起来(hidden),**webview 不卸载** ——
+    // 客服要随时能收消息,卸了就掉线;非客服才按需开。
+    const csSet = new Set((() => { try { return JSON.parse(localStorage.getItem(CS_KEY) || '[]'); } catch (e) { return []; } })());
+    const saveCs = () => { try { localStorage.setItem(CS_KEY, JSON.stringify([...csSet])); } catch (e) {} };
+    let curTab = (() => { try { return localStorage.getItem(TAB_KEY) || 'other'; } catch (e) { return 'other'; } })();
+    const setTab = (t) => { curTab = t; try { localStorage.setItem(TAB_KEY, t); } catch (e) {} applyPage(); };
+    function pageSize() { const v = Number(localStorage.getItem(PAGE_KEY)) || 4; return Math.max(1, Math.min(24, v)); }
+
+    function mountCell(idx) {
+      const g = gcells.get(idx); if (!g || g.wv) return;
       const wv = document.createElement('webview');
-      wv.setAttribute('partition', 'persist:sandbox-' + p.accountIdx);
-      wv.setAttribute('src', cellUrl.get(p.accountIdx) || TELEGRAM_URL);
+      wv.setAttribute('partition', 'persist:sandbox-' + idx);
+      wv.setAttribute('src', cellUrl.get(idx) || TELEGRAM_URL);
       wv.setAttribute('allowpopups', '');
       wv.style.cssText = 'width:100%;height:100%;display:flex;background:#fff';
-      body.appendChild(wv);
-      // 状态一律转成主进程那套 state 形状,交给原来的 applyCellState —— 下游
-      // (标题解析、版本、限流、浮层计数)一行都不用改。
-      const push = (patch) => applyCellState(Object.assign({ id: cellId(p.accountIdx) }, patch));
+      // 状态转成主进程那套 state 形状,交给原有的 applyCellState,下游一行不用改
+      const push = (patch) => applyCellState(Object.assign({ id: cellId(idx) }, patch));
       wv.addEventListener('did-start-loading', () => push({ loading: true }));
       wv.addEventListener('did-stop-loading', () => { let u = ''; try { u = wv.getURL(); } catch (e) {} push({ loading: false, url: u, title: wv.getTitle ? wv.getTitle() : '' }); });
       wv.addEventListener('page-title-updated', (e) => { let u = ''; try { u = wv.getURL(); } catch (er) {} push({ loading: false, url: u, title: e.title || '' }); });
       wv.addEventListener('did-navigate', (e) => push({ loading: false, url: e.url || '' }));
       wv.addEventListener('did-navigate-in-page', (e) => push({ loading: false, url: e.url || '' }));
-      // -3 = ERR_ABORTED,换会话时必然出现,不是错误
       wv.addEventListener('did-fail-load', (e) => { if (e.errorCode !== -3) push({ loading: false, failed: true, error: { code: e.errorCode, desc: e.errorDescription } }); });
-      return { el, body, stat: el.querySelector('.gstat'), wv };
+      g.body.innerHTML = '';
+      g.body.appendChild(wv);
+      g.wv = wv;
+      openedProfiles.add(idx);
     }
+    function unmountCell(idx) {
+      const g = gcells.get(idx); if (!g || !g.wv) return;
+      // 记住当前停在哪个群,下次挂回来接着看
+      try { const u = g.wv.getURL(); if (u && /web\.telegram\.org/.test(u)) cellUrl.set(idx, u); } catch (e) {}
+      try { g.wv.remove(); } catch (e) {}
+      g.wv = null;
+      g.body.innerHTML = '<div class="ph">未加载 · 翻到这一页自动打开</div>';
+      cellState.set(idx, {});
+      renderGridCell(idx);
+    }
+    function pageIdxList() {
+      const all = [...gcells.keys()].filter((i) => !csSet.has(i));
+      const n = pageSize(), maxPage = Math.max(0, Math.ceil(all.length / n) - 1);
+      if (pageNo > maxPage) pageNo = maxPage;
+      return { list: all.slice(pageNo * n, pageNo * n + n), total: all.length, maxPage };
+    }
+    function applyPage() {
+      const { list, total, maxPage } = pageIdxList();
+      const onPage = new Set(list);
+      for (const idx of gcells.keys()) {
+        const g = gcells.get(idx);
+        const isCs = csSet.has(idx);
+        // 挂载规则:客服一直挂着;非客服只有翻到它那一页才挂。
+        // 显示规则:只显示当前 tab 的那一组 —— 两组的 webview 都还在,只是藏起来。
+        const mounted = isCs || onPage.has(idx);
+        const visible = mounted && (curTab === 'cs' ? isCs : !isCs);
+        if (mounted) mountCell(idx); else unmountCell(idx);
+        g.el.hidden = !visible;
+        const b = g.el.querySelector('.pin');
+        if (b) b.classList.toggle('on', isCs);
+      }
+      const csN = csSet.size, otherN = total;
+      const tc = document.getElementById('tab-cs'), to = document.getElementById('tab-other');
+      if (tc) { tc.classList.toggle('on', curTab === 'cs'); tc.textContent = '客服 ' + csN; }
+      if (to) { to.classList.toggle('on', curTab !== 'cs'); to.textContent = '非客服 ' + otherN; }
+      const pager = document.getElementById('pager');
+      if (pager) pager.hidden = (curTab === 'cs');   // 客服常驻,没有分页可言
+      const lab = document.getElementById('page-label');
+      if (lab) {
+        lab.textContent = (total ? (pageNo + 1) : 0) + '/' + (maxPage + 1) + ' · ' + list.length + ' 开';
+        lab.title = '第 ' + (pageNo + 1) + ' 页,共 ' + (maxPage + 1) + ' 页 · 本页 ' + list.length + ' 个';
+      }
+      requestAnimationFrame(syncPreview);
+    }
+    function gotoPage(n) { const { maxPage } = pageIdxList(); pageNo = Math.max(0, Math.min(maxPage, n)); applyPage(); }
+
     // 同一格同一时刻只开一个叠加层(接码 / ping / 加群面板)。
     // 打开后 header 只留当前按钮和关闭键 —— 一排图标全亮着看不出状态,也容易误点。
     function syncMode(idx) {
@@ -723,11 +814,11 @@
       for (const p of todo) {
         batch.add(p.accountIdx);
         const g = buildGridCell(p); gcells.set(p.accountIdx, g); gridEl.appendChild(g.el);
-        if (!openedProfiles.has(p.accountIdx)) { openedProfiles.add(p.accountIdx); cellState.set(p.accountIdx, { loading: true }); }
         renderRowState(p.accountIdx);
       }
       gridEl.style.gridTemplateColumns = `repeat(${gridCols(todo.length)}, minmax(0, 1fr))`;
       batchMode = true; mainEl.classList.add('batch'); document.body.classList.add('batch');
+      applyPage();          // 只挂当前页,不要一次把 20 多个会话全开起来
       render();
       syncPreview();                       // 后台 tab 里 rAF 不会触发,先直接同步一次把格子建出来
       requestAnimationFrame(syncPreview);
@@ -758,6 +849,18 @@
       flash((on ? '已全部开启随机开群 ' : '已全部停止 ') + ok + '/' + list.length
             + (skipped ? ('(跳过 ' + skipped + ' 个没手机号的)') : ''));
     }
+    document.getElementById('tab-cs').onclick = () => setTab('cs');
+    document.getElementById('tab-other').onclick = () => setTab('other');
+    document.getElementById('page-prev').onclick = () => gotoPage(pageNo - 1);
+    document.getElementById('page-next').onclick = () => gotoPage(pageNo + 1);
+    const psEl = document.getElementById('page-size');
+    psEl.value = String(pageSize());
+    psEl.onchange = () => {
+      const v = Math.max(1, Math.min(24, Number(psEl.value) || 4));
+      psEl.value = String(v);
+      try { localStorage.setItem(PAGE_KEY, String(v)); } catch (e) {}
+      pageNo = 0; applyPage();
+    };
     document.getElementById('all-on').onclick = () => setAllAuto(true);
     document.getElementById('all-off').onclick = () => setAllAuto(false);
     document.getElementById('grid-reload').onclick = () => { if (!batch.size) { enterBatch(); return; } for (const idx of batch) reloadProfile(idx); };
