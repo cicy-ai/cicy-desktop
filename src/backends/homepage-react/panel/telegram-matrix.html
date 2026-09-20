@@ -1228,6 +1228,8 @@
       const phone = p && phoneOf(p);
       if (!phone) { flash('#' + idx + ' 没有手机号'); return; }
       loginBusy.add(idx);
+      // 兜底:不管从哪个入口进来,都先把叠加层清掉 —— 整个流程假定格子上是 Telegram 本体
+      try { closeMode(idx); } catch (e) {}
       // 每一步都写到格子头部的状态位,界面上能直接看到走到哪了(不用开设置弹窗)
       // 进度只写格子头部的状态位 —— 写进弹窗按钮会把「提交手机号…」这种长文字塞进小按钮,
       // 把整个弹窗撑歪;而且弹窗点完就关了,写了也看不见。
@@ -1301,7 +1303,7 @@
         }
         say('超时(停在 ' + screen + ')');
       } catch (e) { say('出错[' + screen + ']:' + String(e.message).slice(0, 40)); }
-      finally { loginBusy.delete(idx); }
+      finally { loginBusy.delete(idx); try { closeMode(idx); } catch (e2) {} }
     }
 
     document.addEventListener('click', (e) => {
@@ -1311,6 +1313,10 @@
       const idx = Number(b.dataset.idx);
       // 弹窗盖着格子,登录过程就看不见了 —— 点完立刻收起,进度看格子头部
       try { closeCfgModal(); } catch (err) { try { cfgModal.hidden = true; } catch (e2) {} }
+      // 这一格可能正叠着接码 / ping / 加群面板。不关掉就是在半开状态上起跑:
+      // readCodePage 会因为「接码已经开着」而跳过打开、读完却把它关掉,开关状态直接错位。
+      // 一律先清干净,从第一步(Telegram 格子本体)开始。
+      try { closeMode(idx); } catch (err) {}
       flash('#' + idx + ' 开始自动登录,进度看格子标题');
       autoLogin(idx);
     });
