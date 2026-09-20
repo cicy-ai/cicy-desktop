@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="223d2c5935b0">
+  <meta name="pv" content="147917135b6c">
   <title>Telegram 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -1628,7 +1628,10 @@
                 if (after !== wantD) { say('号码填歪了(' + after + '),重填…'); continue; }
               }
             } else if (cool('submitPhone', 8000)) { say('提交手机号…');
-              await evalT(wv, "(function(){var r=document.getElementById('auth-flow-root');var b=[].slice.call(r.querySelectorAll('button')).filter(function(e){return e.offsetParent&&/^next$/i.test((e.textContent||'').trim())})[0];if(b){b.click();return 1}return 0})()");
+              // 这一句返回 1 = 真的找到 Next 并点下去了,返回 0 = 根本没找到按钮。
+              // 必须看这个返回值:点不到 Next 就绝不往下走,更不许开接码。
+              const clicked = await evalT(wv, "(function(){var r=document.getElementById('auth-flow-root');var b=[].slice.call(r.querySelectorAll('button')).filter(function(e){return e.offsetParent&&/^next$/i.test((e.textContent||'').trim())})[0];if(b){b.click();return 1}return 0})()");
+              if (Number(clicked) !== 1) { say('没找到「下一步」按钮,重试…'); await sleep(2000); continue; }
               // 点完「下一步」等 5 秒,再开接码读基线。这几行必须在**这个分支里面** ——
               // 上面那条 evalT 原本自带收尾的 "}",写在它后面就落到了「手机号屏」这一支上,
               // 变成填完号当场执行,下一步反而是下一轮才点,看着就是"号填完就弹接码"。
