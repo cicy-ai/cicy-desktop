@@ -1293,17 +1293,11 @@
       say('准备中…');
       for (let i = 0; i < 40 && !tgView(idx); i++) await sleep(500);
       if (!tgView(idx)) { say('格子打不开'); loginBusy.delete(idx); return; }
-      let baseCode = '', baseTime = '', code = '', twofa = '';
+      let baseCode = '', baseTime = '', code = '', twofa = '', baseRead = false;
       let lastAct = {}, screen = '', nextCodeAt = 0;
       // 同一个动作 N 秒内不重复做(点了按钮要给页面反应时间),但绝不无限等
       const cool = (k, ms) => { const now = Date.now(); if (now - (lastAct[k] || 0) < ms) return false; lastAct[k] = now; return true; };
       try {
-        // 基线:只接受比它更新的码
-        const base = await readCodePage(idx);
-        if (base && base.dead) { say('接码卡已失效'); return; }
-        if (base && base.rate) { nextCodeAt = Date.now() + 40000; }
-        baseCode = (base && base.code) || ''; baseTime = (base && base.time) || '';
-
         while (Date.now() - t0 < LOGIN_DEADLINE) {
           const wv = tgView(idx);
           if (!wv) { say('格子没打开'); return; }
@@ -1331,7 +1325,16 @@
                 const after = String(await evalT(wv, phoneFieldJs("return (e.textContent||'')")) || '').replace(/\D/g, '');
                 if (after !== wantD) { say('号码填歪了(' + after + '),重填…'); continue; }
               }
-            } else if (cool('submitPhone', 8000)) { say('提交手机号…');
+            } else if (cool('submitPhone', 8000)) {
+              // 基线:记住提交前页面上那个旧码,之后只认比它新的,否则会把上次的残码填进去。
+              // 放在这里而不是一进来就读 —— 一进来就读会先弹出接码 webview,看着像点错了按钮。
+              if (!baseRead) { say('读接码基线…');
+                const base = await readCodePage(idx);
+                if (base && base.dead) { say('接码卡已失效'); return; }
+                if (base && base.rate) { nextCodeAt = Date.now() + 40000; }
+                baseCode = (base && base.code) || ''; baseTime = (base && base.time) || '';
+                baseRead = true; }
+              say('提交手机号…');
               await evalT(wv, "(function(){var r=document.getElementById('auth-flow-root');var b=[].slice.call(r.querySelectorAll('button')).filter(function(e){return e.offsetParent&&/^next$/i.test((e.textContent||'').trim())})[0];if(b){b.click();return 1}return 0})()"); }
           } else if (st.s === 'code') {
             // 验证码屏会把刚才提交的号码显示出来 —— 对不上说明提交的是别人的号,
@@ -1348,6 +1351,8 @@
               // 表现就是永远停在"等验证码"。撞到限流就退避,别把配额全浪费在重试上。
               if (Date.now() >= nextCodeAt && cool('readCode', 12000)) { say('等验证码…');
                 const c = await readCodePage(idx);
+                if (!baseRead) { baseRead = true;   // 没走过手机号屏:这一次读到的就当基线
+                  baseCode = (c && c.code) || ''; baseTime = (c && c.time) || ''; }
                 if (c && c.rate) { nextCodeAt = Date.now() + 40000; say('接码限流,40 秒后再读…'); }
                 else if (c && c.dead) { say('接码卡已失效'); return; }
                 else if (c && c.code && c.code !== baseCode && (!baseTime || c.time > baseTime)) { code = c.code; twofa = c.twofa || twofa; }
