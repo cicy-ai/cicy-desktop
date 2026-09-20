@@ -156,8 +156,6 @@
     .gcell { display: flex; flex-direction: column; flex: none; width: 360px; height: 50vh; min-height: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--cell); overflow: hidden; }
     .gbody .ph { display: flex; align-items: center; justify-content: center; height: 100%;
       color: var(--muted); font-size: 12px; background: var(--head); }
-    .ghead .pin { color: #6b6b76; }
-    .ghead .pin.on { color: #f0a45a; }
     /* .gcell 是 display:flex,会盖过 [hidden] 的 UA 默认 display:none ——
        不加这条,藏起来的格子照样占位(实测:每页 4 个,却铺了 10 格占位)。 */
     .gcell[hidden] { display: none !important; }
@@ -170,6 +168,11 @@
     /* 格子头不显示手机号 */
     .ghead .phone { display: none; }
     .ghead .st { margin-left: auto; }
+    /* 客服是**状态**不是开关。原来做成 .icon 按钮,一拿到 .on 就变成和「当前激活模式」
+       一样的蓝色实心方块 —— 头部并排两个蓝块,分不清谁能点。改成紧挨编号的小标签。 */
+    .ghead .cstag { flex: none; padding: 1px 6px; border-radius: 999px; font-size: 10.5px; line-height: 15px;
+      background: rgba(240,164,90,.14); color: #f0a45a; border: 1px solid rgba(240,164,90,.3); white-space: nowrap; }
+    .ghead .cstag[hidden] { display: none; }
     .ghead .acts { flex: none; display: inline-flex; align-items: center; gap: 6px; margin-left: auto; padding-left: 8px; }
     /* 格子头 / 最大化头部那一排图标:统一成 24×24 的盒子,里面 14px 的单色线条 SVG。
        之前 ⚙ ⤢ ⟳ 是文本符号、🌐 🔄 是彩色 emoji,两套字体画出来一大一小、一彩一灰。 */
@@ -430,13 +433,7 @@
         // .gbody 的 boundingRect 已经自动让出了那块高度。再减一次 = 黑色空隙(踩过)。
         cells.push({ id: cellId(profileId), url: (cellUrl.get(profileId) || TELEGRAM_URL), profile: profileId, visible, rect: r });
         // 接码叠加层:同 rect、同 profile(=同 partition/代理),排在 tg 格子之后 → attach 更晚 → 叠最上层
-        // 叠加层照常创建,只用 visible 控制画不画 —— 之前写成「格子完整露出来才建」,
-        // 结果滚动区外的格子点了接码,主进程压根没收到这条,浮层永远不出现(白板)。
-        if (r && codeOpen.has(profileId)) {
-          const p = profiles.find((x) => x.accountIdx === profileId); const cu = p && codeUrlOf(p);
-          if (cu) overlays.push({ id: 'code-' + profileId, url: cu, profile: profileId, visible: ovVisible, rect: r });
-        }
-        if (r && pingOpen.has(profileId)) overlays.push({ id: 'ping-' + profileId, url: (pingUrl.get(profileId) || 'https://ping0.cc/'), profile: profileId, visible: ovVisible, rect: r });
+        // 叠加层已经改成格子内的 webview(见 syncOverlay),不再交给主进程贴 BrowserView。
       }
       try { window.panelAPI.sync(cells.concat(overlays)); } catch (e) {}
     }
@@ -474,7 +471,7 @@
     function buildGridCell(p) {
       const el = document.createElement('div');
       el.className = 'gcell'; el.dataset.id = String(p.accountIdx);
-      el.innerHTML = `<div class="ghead"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="phone">${esc(phoneOf(p))}</span><span class="st"></span><span class="acts"><button class="icon pin" title="客服号:常驻不卸载,归到「客服」tab。归属在 agg 台账里改">🎧</button><button class="code" title="在格子上叠加/关闭接码 webview(同代理出口)">接码</button><button class="icon stat" title="加群面板:分配/已加入、脚本版本、限流,自动随机开群"><svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></button><button class="icon tgsou" title="单独打开这个账号的搜群"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button><button class="icon gear" title="手机号 / 接码 URL / 代理设置"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button><button class="icon ping" title="用本 Profile 代理打开 ping0.cc(验 IP/指纹)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></button><button class="icon max" title="最大化 / 还原"><svg viewBox="0 0 24 24"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></button><button class="icon xclose" title="关闭当前叠加层"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></span></div><div class="gstat" hidden></div><div class="gbody"></div>`;
+      el.innerHTML = `<div class="ghead"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="cstag" hidden title="客服号:常驻不卸载,归到「客服」tab。归属在 agg 台账(agg.fm558.com/#/tg)里改">客服</span><span class="phone">${esc(phoneOf(p))}</span><span class="st"></span><span class="acts"><button class="code" title="在格子上叠加/关闭接码 webview(同代理出口)">接码</button><button class="icon stat" title="加群面板:分配/已加入、脚本版本、限流,自动随机开群"><svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></button><button class="icon tgsou" title="单独打开这个账号的搜群"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button><button class="icon gear" title="手机号 / 接码 URL / 代理设置"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button><button class="icon ping" title="用本 Profile 代理打开 ping0.cc(验 IP/指纹)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></button><button class="icon max" title="最大化 / 还原"><svg viewBox="0 0 24 24"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></button><button class="icon xclose" title="关闭当前叠加层"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></span></div><div class="gstat" hidden></div><div class="gbody"></div>`;
       el.querySelector('.max').onclick = (e) => { e.stopPropagation(); toggleMax(p.accountIdx); };
       // ping / 接码 也走互斥:先关掉别的叠加层,再用它们原本的开关(各自管自己的集合)
       el.querySelector('.ping').onclick = (e) => { e.stopPropagation(); closeOthers(p.accountIdx, 'ping'); togglePing(p.accountIdx); setTimeout(() => syncMode(p.accountIdx), 0); };
@@ -501,10 +498,6 @@
           flash(j.error ? ('搜群打开失败:' + j.error) : (j.activated ? '已切到已开的搜群' : '已打开 #' + p.accountIdx + ' 的搜群'));
         } catch (err) { flash('搜群打开失败:' + err.message); }
         finally { b.disabled = false; }
-      };
-      el.querySelector('.pin').onclick = (e) => {
-        e.stopPropagation();
-        flash('客服归属在 agg 台账里改(agg.fm558.com/#/tg 的「客服」列),面板只读');
       };
       el.querySelector('.gear').onclick = (e) => { e.stopPropagation(); if (cfgP && cfgP.accountIdx === p.accountIdx && !cfgModal.hidden) closeCfgModal(); else openCfgModal(p); };
       el.querySelector('.ghead').onclick = (e) => { if (!e.target.closest('button')) { selectProfile(p.accountIdx); } };
@@ -562,6 +555,7 @@
       try { const u = g.wv.getURL(); if (u && /web\.telegram\.org/.test(u)) cellUrl.set(idx, u); } catch (e) {}
       try { g.wv.remove(); } catch (e) {}
       g.wv = null;
+      if (g.ov) { try { g.ov.remove(); } catch (e) {} g.ov = null; g.ovKind = ''; }
       g.body.innerHTML = '<div class="ph">未加载 · 翻到这一页自动打开</div>';
       cellState.set(idx, {});
       renderGridCell(idx);
@@ -584,8 +578,8 @@
         const visible = mounted && (curTab === 'cs' ? isCs : !isCs);
         if (mounted) mountCell(idx); else unmountCell(idx);
         g.el.hidden = !visible;
-        const b = g.el.querySelector('.pin');
-        if (b) b.classList.toggle('on', isCs);
+        const tag = g.el.querySelector('.cstag');
+        if (tag) tag.hidden = !isCs;
       }
       const csN = csSet.size, otherN = total;
       const tc = document.getElementById('tab-cs'), to = document.getElementById('tab-other');
@@ -604,7 +598,32 @@
 
     // 同一格同一时刻只开一个叠加层(接码 / ping / 加群面板)。
     // 打开后 header 只留当前按钮和关闭键 —— 一排图标全亮着看不出状态,也容易误点。
+    // 叠加层(接码 / ping)也用格子内的 webview,不再走主进程的 BrowserView。
+    // BrowserView 由主进程按视口坐标贴:面板在后台标签时 syncPreview 一律 visible=false,
+    // 浮层就整个不画,而格子(已经是页面内 webview)照样在 —— 表现就是「按钮亮着、浮层不见」。
+    function syncOverlay(idx) {
+      const g = gcells.get(idx); if (!g) return;
+      const want = codeOpen.has(idx) ? 'code' : pingOpen.has(idx) ? 'ping' : '';
+      const cur = g.ovKind || '';
+      if (want === cur) return;
+      if (g.ov) { try { g.ov.remove(); } catch (e) {} g.ov = null; g.ovKind = ''; }
+      if (!want) return;
+      const p = profiles.find((x) => x.accountIdx === idx);
+      const url = want === 'code' ? codeUrlOf(p) : (pingUrl.get(idx) || 'https://ping0.cc/');
+      if (!url) { flash('#' + idx + ' 没有接码 URL'); codeOpen.delete(idx); updateCodeButtons(idx); return; }
+      const wv = document.createElement('webview');
+      // 同 partition = 同代理出口,接码页看到的 IP 和这个号一致
+      wv.setAttribute('partition', 'persist:sandbox-' + idx);
+      wv.setAttribute('src', url);
+      wv.setAttribute('allowpopups', '');
+      wv.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;display:flex;background:#fff;z-index:3';
+      g.body.style.position = 'relative';
+      g.body.appendChild(wv);
+      g.ov = wv; g.ovKind = want;
+    }
+
     function syncMode(idx) {
+      syncOverlay(idx);
       const g = gcells.get(idx); if (!g) return;
       const mode = codeOpen.has(idx) ? 'code' : pingOpen.has(idx) ? 'ping' : statOpen.has(idx) ? 'stat' : '';
       g.el.classList.toggle('modeon', !!mode);
