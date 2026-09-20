@@ -194,7 +194,12 @@
     #tglist .empty { padding: 20px; text-align: center; color: var(--muted); }
     /* 视图切换放在内容区上方、和表格卡片左右对齐 —— 它只管下面这块内容,
        挤在顶栏那一排全局按钮里会被当成又一个全局动作。客服 tab 没有列表模式,整条不显示。 */
-    #viewbar { display: flex; justify-content: flex-end; width: 100%; margin: 0 0 8px; flex: 0 0 auto; }
+    #viewbar { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+               width: 100%; margin: 0 0 8px; flex: 0 0 auto; }
+    #viewbar .vleft { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+    /* 左半边(自动开群)在列表模式整个藏起来,视图切换仍然贴右,不要塌到左边去 */
+    #viewbar #views { margin-left: auto; }
+    #viewbar .ghost.on { background: var(--accent); border-color: transparent; color: #fff; }
     main.listmode #viewbar { max-width: 1000px; margin: 0 auto 8px; }
     /* 「自动开群」是个选择模式:点亮之后每个格子头上冒出一个勾选框,勾哪个开哪个。
        原来的「全部开/全部关」退化成这个模式里的全选/全不选。 */
@@ -207,9 +212,8 @@
     body.autopick .gcell.autosel { outline: 2px solid rgba(240, 164, 90, .7); }
     #autobar #auto-count { min-width: 56px; text-align: center; color: #b4b4bb; font: 11px ui-monospace, monospace; }
     #autobar .ghost { padding: 2px 8px; font-size: 11px; }
+    #autobar .ghost.on { background: var(--line); color: var(--fg); }
     /* 顶栏的开关型按钮:亮起来 = 这台机器的随机开群是开着的 */
-    #grid-title .ghost.on { background: var(--accent); border-color: transparent; color: #fff; }
-    #grid-title .ghost.on::before { content: '● '; font-size: 9px; vertical-align: 1px; }
     /* [hidden] 对 .pager / .tabs 不起作用(它们自己写了 display:inline-flex),要显式关掉 */
     .is-off { display: none !important; }
 
@@ -319,9 +323,9 @@
   <main>
     <div id="grid-title">
       <div class="left"><span id="mid-batch" class="mid" hidden></span><b>批量登录</b><span id="grid-count"></span></div>
-      <div class="actions"><span class="tabs"><button id="tab-other">非客服 0</button><button id="tab-cs">客服 0</button></span><span class="pager" id="pager" title="一次只打开这么多个会话,翻页时其余的会被卸载释放内存"><button class="icon" id="page-prev" title="上一页">‹</button><span id="page-label"></span><button class="icon" id="page-next" title="下一页">›</button><i></i><input id="page-size" type="number" min="1" max="24" title="每页同时打开几个。一个 Telegram 会话能吃到 2.5GB,别开太多"></span><button class="ghost" id="all-auto">自动开群</button><span class="pager is-off" id="autobar"><button class="ghost" id="auto-sel-all" title="选中本页所有格子">全选</button><button class="ghost" id="auto-sel-none" title="取消选择">清空</button><i></i><span id="auto-count">已选 0</span><i></i><button class="ghost" id="auto-do-on" title="给选中的账号打开随机开群">开群</button><button class="ghost" id="auto-do-off" title="给选中的账号关掉随机开群">关闭</button></span><button class="ghost" id="open-tgsou" title="一键打开本机所有账号的搜群标签">🔍 打开搜群</button><button class="ghost" id="grid-reload" title="重新加载所有格子">全部重载</button></div>
+      <div class="actions"><span class="tabs"><button id="tab-other">非客服 0</button><button id="tab-cs">客服 0</button></span><span class="pager" id="pager" title="一次只打开这么多个会话,翻页时其余的会被卸载释放内存"><button class="icon" id="page-prev" title="上一页">‹</button><span id="page-label"></span><button class="icon" id="page-next" title="下一页">›</button><i></i><input id="page-size" type="number" min="1" max="24" title="每页同时打开几个。一个 Telegram 会话能吃到 2.5GB,别开太多"></span><button class="ghost" id="open-tgsou" title="一键打开本机所有账号的搜群标签">🔍 打开搜群</button><button class="ghost" id="grid-reload" title="重新加载所有格子">全部重载</button></div>
     </div>
-    <div id="viewbar"><span class="tabs" id="views"><button id="view-grid" title="网格:本页的会话平铺成格子">网格</button><button id="view-list" title="列表:一张表,点一行从右侧抽屉里打开那个会话">列表</button></span></div>
+    <div id="viewbar"><span class="vleft"><button class="ghost" id="all-auto">自动开群</button><span class="pager is-off" id="autobar"><button class="ghost" id="auto-sel-all" title="选中/取消本页所有格子">全选</button><i></i><span id="auto-count">已选 0</span><i></i><button class="ghost" id="auto-do-on" title="给选中的账号打开随机开群">开群</button><button class="ghost" id="auto-do-off" title="给选中的账号关掉随机开群">关闭</button></span></span><span class="tabs" id="views"><button id="view-grid" title="网格:本页的会话平铺成格子">网格</button><button id="view-list" title="列表:一张表,点一行从右侧抽屉里打开那个会话">列表</button></span></div>
     <div id="drawer">
       <button class="icon" id="drawer-close" title="收起(Esc)"><svg viewBox="0 0 24 24"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg></button>
       <div id="grid"></div>
@@ -724,8 +728,8 @@
       const vbar = document.getElementById('viewbar');
       if (vbar) vbar.classList.toggle('is-off', curTab === 'cs');
       // 「自动开群」是对着一屏格子做的全局动作,列表模式下一个格子都没开,放着只会误导
-      const aa = document.getElementById('all-auto');
-      if (aa) aa.classList.toggle('is-off', lm);
+      const vleft = document.querySelector('#viewbar .vleft');
+      if (vleft) vleft.classList.toggle('is-off', lm);
       if (lm && autoPick) { autoPick = false; autoSel.clear(); syncAutoBtn(); }
       const vg = document.getElementById('view-grid'), vl = document.getElementById('view-list');
       if (vg) vg.classList.toggle('on', curView !== 'list');
@@ -1103,13 +1107,18 @@
     const autoSel = new Set();
     function syncAutoBtn() {
       const b = document.getElementById('all-auto'); if (!b) return;
+      // 按钮亮着 + 还叫「自动开群」,读起来像「已经开了」,可旁边又有个「开群」——
+      // 同一个词两个意思。进了选择模式就直接叫「完成」,状态自己说清楚。
       b.classList.toggle('on', autoPick);
-      b.title = autoPick ? '退出选择' : '选择要开/关随机开群的账号';
+      b.textContent = autoPick ? '完成' : '自动开群';
+      b.title = autoPick ? '退出选择模式' : '选择要开启/关闭随机开群的账号';
       const bar = document.getElementById('autobar');
       if (bar) bar.classList.toggle('is-off', !autoPick);
       document.body.classList.toggle('autopick', autoPick);
       const n = autoSel.size;
       const c = document.getElementById('auto-count'); if (c) c.textContent = '已选 ' + n;
+      const all = pickable(), sa = document.getElementById('auto-sel-all');
+      if (sa) sa.classList.toggle('on', all.length > 0 && all.every((i) => autoSel.has(i)));
       for (const id of ['auto-do-on', 'auto-do-off']) {
         const e = document.getElementById(id); if (e) e.disabled = !n;
       }
@@ -1183,8 +1192,12 @@
       pageNo = 0; applyPage();
     };
     document.getElementById('all-auto').onclick = () => toggleAutoPick();
-    document.getElementById('auto-sel-all').onclick = () => { for (const i of pickable()) autoSel.add(i); syncAutoBtn(); };
-    document.getElementById('auto-sel-none').onclick = () => { autoSel.clear(); syncAutoBtn(); };
+    document.getElementById('auto-sel-all').onclick = () => {
+      const all = pickable();
+      if (all.length && all.every((i) => autoSel.has(i))) autoSel.clear();
+      else for (const i of all) autoSel.add(i);
+      syncAutoBtn();
+    };
     document.getElementById('auto-do-on').onclick = () => applyAuto(true);
     document.getElementById('auto-do-off').onclick = () => applyAuto(false);
     gridEl.addEventListener('change', (e) => {
@@ -1615,8 +1628,10 @@
                 if (after !== wantD) { say('号码填歪了(' + after + '),重填…'); continue; }
               }
             } else if (cool('submitPhone', 8000)) { say('提交手机号…');
-              await evalT(wv, "(function(){var r=document.getElementById('auth-flow-root');var b=[].slice.call(r.querySelectorAll('button')).filter(function(e){return e.offsetParent&&/^next$/i.test((e.textContent||'').trim())})[0];if(b){b.click();return 1}return 0})()"); }
-              // 点完「下一步」等 5 秒,然后开接码读基线。接码 webview 只在这里出现。
+              await evalT(wv, "(function(){var r=document.getElementById('auth-flow-root');var b=[].slice.call(r.querySelectorAll('button')).filter(function(e){return e.offsetParent&&/^next$/i.test((e.textContent||'').trim())})[0];if(b){b.click();return 1}return 0})()");
+              // 点完「下一步」等 5 秒,再开接码读基线。这几行必须在**这个分支里面** ——
+              // 上面那条 evalT 原本自带收尾的 "}",写在它后面就落到了「手机号屏」这一支上,
+              // 变成填完号当场执行,下一步反而是下一轮才点,看着就是"号填完就弹接码"。
               await sleep(5000);
               submitAt = Date.now();
               if (!baseRead) { baseRead = true; say('读接码基线…');
@@ -1624,7 +1639,7 @@
                 if (base && base.dead) { say('接码卡已失效'); return; }
                 if (base && base.rate) { nextCodeAt = Date.now() + 40000; }
                 baseCode = (base && base.code) || ''; baseTime = (base && base.time) || ''; }
-              continue;
+              continue; }
           } else if (st.s === 'code') {
             // 验证码屏会把刚才提交的号码显示出来 —— 对不上说明提交的是别人的号,
             // 再等下去也等不到码,必须退回去重填,而不是一直"等验证码…"。
