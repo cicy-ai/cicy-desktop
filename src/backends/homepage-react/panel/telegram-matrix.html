@@ -167,7 +167,7 @@
     .ghead .name { display: none; }
     /* 格子头不显示手机号 */
     .ghead .phone { display: none; }
-    .ghead .st { margin-left: auto; }
+    .ghead .st { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
     /* 客服是**状态**不是开关。原来做成 .icon 按钮,一拿到 .on 就变成和「当前激活模式」
        一样的蓝色实心方块 —— 头部并排两个蓝块,分不清谁能点。改成紧挨编号的小标签。 */
     .ghead .cstag { flex: none; padding: 1px 6px; border-radius: 999px; font-size: 10.5px; line-height: 15px;
@@ -207,7 +207,11 @@
   .gcell.modeon .ghead .acts > button.on,
   .gcell.modeon .ghead .acts > button.xclose { display: inline-flex; }
   .ghead .acts > button.xclose { display: none; margin-left: auto; }
-  .gcell.modeon .ghead .acts { width: 100%; }
+  /* 进入模式后按钮要靠右。不能用 width:100% —— .acts 还带着 margin-left:auto,
+     两者叠加会让容器比剩余空间还宽,右对齐的内容被推出可视区(实测:图标整个不见)。
+     改成吃掉剩余空间 + 右对齐。 */
+  .gcell.modeon .ghead .acts { flex: 1 1 auto; min-width: 0; justify-content: flex-end; }
+  .gcell.modeon .ghead .acts > button.xclose { margin-left: 6px; }
 
   /* 格子上半的信息浮层。格子是盖在页面之上的 BrowserView,页面里的元素挡不住它 ——
      所以打开浮层时把格子矩形缩到下半(syncPreview 里做),上半空出来给这个 div。 */
@@ -1102,7 +1106,9 @@
       const bound = !!(phoneOf(p) || tg.username || tg.displayName || tg.phone);
       const mono = (v) => v ? `<span class="mono">${esc(v)}</span>` : '<span class="muted">—</span>';
       const badge = loggedIn ? '<span class="ci-b ok">✓ 已登录</span>'
-        : (bound ? '<span class="ci-b warn">已分配 · 未登录</span>' : '<span class="ci-b mut">未分配</span>');
+        : (bound ? ('<span class="ci-b warn">已分配 · 未登录</span>'
+                    + '<button class="ghost sm cfg-login" data-idx="' + p.accountIdx + '" style="margin-left:8px">自动登录</button>')
+                 : '<span class="ci-b mut">未分配</span>');
       // 只列弹窗里别处没有的。标题已经写了 Profile 名和编号,手机号 / 接码 URL /
       // 代理地址下面都有输入框,出口 IP 在「测 IP」那一行 —— 这些不在这里重复一遍。
       const rows = [
@@ -1140,6 +1146,175 @@
       const h = Math.min(card.offsetHeight || maxH, maxH);
       card.style.top = Math.round(r.top + (r.height - h) / 2) + 'px';
     }
+    // ── 自动登录 ─────────────────────────────────────────
+    // 手机号 → 短信码 → 2FA,全在面板里驱动格子的 webview。
+    // 验证码和 2FA 密码都从接码页读:那页就是格子里的叠加 webview,直接读它的 DOM ——
+    // 比走接码的 HTTP 接口稳,那边有 1 次/分钟限流,还会回缓存的空值。
+    const loginBusy = new Set();
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    function tgView(idx) {
+      const g = gcells.get(idx); if (!g) return null;
+      for (const w of g.el.querySelectorAll('webview')) {
+        if (/web\.telegram\.org/.test(w.getAttribute('src') || '')) return w;
+      }
+      return null;
+    }
+    function codeView(idx) {
+      const g = gcells.get(idx); if (!g) return null;
+      for (const w of g.el.querySelectorAll('webview')) {
+        if (/jiema|getcode/.test(w.getAttribute('src') || '')) return w;
+      }
+      return null;
+    }
+    async function typeInto(wv, text, gap) {
+      for (const ch of String(text)) {
+        wv.sendInputEvent({ type: 'char', keyCode: ch });
+        await sleep(gap || 45);
+      }
+    }
+    // 打开接码浮层读一次三个字段,再关掉(叠着会盖住 Telegram)
+    async function readCodePage(idx) {
+      const g = gcells.get(idx); if (!g) return null;
+      const btn = g.el.querySelector('.code');
+      if (!codeOpen.has(idx)) { btn.click(); await sleep(5000); }
+      const cv = codeView(idx);
+      let out = null;
+      if (cv) {
+        try {
+          // 每次强制刷新再读:分区会缓存接码页,缓存里可能是旧的「设备已掉线」,会被误判成死卡
+          try { await cv.executeJavaScript("(function(){var u=location.href.replace(/([?&])_ts=\\d+/,'$1_ts='+Date.now());if(u===location.href)u+=(u.indexOf('?')<0?'?':'&')+'_ts='+Date.now();location.replace(u);return 1})()"); } catch (e) {}
+          await sleep(2600);
+          // 限流页也是「错误」页,不能当成死卡直接放弃
+          const s = await cv.executeJavaScript("(function(){var v=[].slice.call(document.querySelectorAll('input,textarea')).map(function(e){return e.value||''});var t=document.body.innerText||'';var rate=/请求过于频繁|等待\\s*\\d+\\s*秒/.test(t);return JSON.stringify({code:v[0]||'',time:v[1]||'',twofa:v[2]||'',rate:rate,dead:!rate&&/接码设备已掉线|已冻结|已封禁|自助补号/.test(t)})})()");
+          out = JSON.parse(s);
+        } catch (e) {}
+      }
+      if (codeOpen.has(idx)) { btn.click(); await sleep(1000); }
+      return out;
+    }
+    // 登录做成状态机:每 2 秒看一眼页面在哪一屏,就只做那一屏该做的一件事。
+    // 不用线性脚本 —— 那种写法里任何一步的固定等待落空,后面全部错位,就"卡住"了。
+    // 这里每一轮都重新判断,某个动作没生效下一轮自己重做;单次调用全部带超时;
+    // 整体有总时限。结构上不存在卡死:要么成功,要么超时并说清停在哪一屏。
+    const LOGIN_DEADLINE = 6 * 60 * 1000;
+
+    // 一次 executeJavaScript 也可能悬着不返回(页面卡住时),统一加超时兜底
+    function evalT(wv, expr, ms) {
+      return Promise.race([
+        wv.executeJavaScript(expr).catch(() => null),
+        new Promise((r) => setTimeout(() => r(null), ms || 6000)),
+      ]);
+    }
+    async function screenOf(wv) {
+      const s = await evalT(wv, "(function(){" +
+        "var id='';try{id=String(JSON.parse(localStorage.getItem('user_auth')||'{}').id||'')}catch(e){}" +
+        "if(id)return JSON.stringify({s:'done',id:id});" +
+        "var r=document.getElementById('auth-flow-root');" +
+        "if(!r)return JSON.stringify({s:'loading'});" +
+        "var t=r.innerText||'';" +
+        "if(/Incorrect password/i.test(t))return JSON.stringify({s:'2fa',err:'pw'});" +
+        "if(/Enter Your Password|additional password/i.test(t))return JSON.stringify({s:'2fa'});" +
+        "if(/Invalid code|INVALID/i.test(t))return JSON.stringify({s:'code',err:'code'});" +
+        "if(/sent you a (message|code)|We have sent/i.test(t))return JSON.stringify({s:'code'});" +
+        "var ce=r.querySelectorAll('[contenteditable]');" +
+        "if(ce.length>1)return JSON.stringify({s:'phone',val:(ce[1].textContent||'').replace(/\\s+/g,'')});" +
+        "if(/Log in by QR|Scan with Telegram/i.test(t))return JSON.stringify({s:'qr'});" +
+        "return JSON.stringify({s:'unknown',t:t.slice(0,40)});})()", 6000);
+      try { return JSON.parse(s); } catch (e) { return { s: 'unreadable' }; }
+    }
+    async function autoLogin(idx) {
+      if (loginBusy.has(idx)) { flash('#' + idx + ' 正在登录中'); return; }
+      const p = profiles.find((x) => x.accountIdx === idx);
+      const phone = p && phoneOf(p);
+      if (!phone) { flash('#' + idx + ' 没有手机号'); return; }
+      loginBusy.add(idx);
+      // 每一步都写到格子头部的状态位,界面上能直接看到走到哪了(不用开设置弹窗)
+      // 进度只写格子头部的状态位 —— 写进弹窗按钮会把「提交手机号…」这种长文字塞进小按钮,
+      // 把整个弹窗撑歪;而且弹窗点完就关了,写了也看不见。
+      const say = (t) => {
+        const g = gcells.get(idx);
+        if (g) { const st = g.el.querySelector('.ghead .st'); if (st) { st.textContent = t; st.style.color = '#f0a45a'; } }
+      };
+      const want = phone.replace(/\s+/g, '');
+      const t0 = Date.now();
+      let baseCode = '', baseTime = '', code = '', twofa = '';
+      let lastAct = {}, screen = '';
+      // 同一个动作 N 秒内不重复做(点了按钮要给页面反应时间),但绝不无限等
+      const cool = (k, ms) => { const now = Date.now(); if (now - (lastAct[k] || 0) < ms) return false; lastAct[k] = now; return true; };
+      try {
+        // 基线:只接受比它更新的码
+        const base = await readCodePage(idx);
+        if (base && base.dead) { say('接码卡已失效'); return; }
+        baseCode = (base && base.code) || ''; baseTime = (base && base.time) || '';
+
+        while (Date.now() - t0 < LOGIN_DEADLINE) {
+          const wv = tgView(idx);
+          if (!wv) { say('格子没打开'); return; }
+          const st = await screenOf(wv);
+          screen = st.s;
+
+          if (st.s === 'done') { say('登录成功 id=' + st.id);
+            setTimeout(() => { const g2 = gcells.get(idx); if (g2) { const s2 = g2.el.querySelector('.ghead .st'); if (s2) s2.style.color = ''; } renderGridCell(idx); }, 4000); 
+            setTimeout(() => { const q = profiles.find((x) => x.accountIdx === idx);
+              if (q && cfgP && cfgP.accountIdx === idx) document.getElementById('cfg-info').innerHTML = cfgInfoHtml(q); }, 1500);
+            return; }
+
+          if (st.s === 'qr') {
+            if (cool('toPhone', 4000)) { say('切手机号登录…');
+              await evalT(wv, "(function(){var b=[].slice.call(document.querySelectorAll('button')).filter(function(e){return e.offsetParent&&/log in by phone/i.test(e.textContent||'')})[0];if(b){b.click();return 1}return 0})()"); }
+          } else if (st.s === 'phone') {
+            const cur = st.val || '';
+            if (cur.slice(-8) !== want.slice(-8)) {
+              if (cool('typePhone', 6000)) { say('填手机号…');
+                await evalT(wv, "(function(){var r=document.getElementById('auth-flow-root');var e=r.querySelectorAll('[contenteditable]')[1];if(!e)return 0;e.focus();var s=window.getSelection();var g=document.createRange();g.selectNodeContents(e);s.removeAllRanges();s.addRange(g);return 1})()");
+                for (let i = 0; i < 40; i++) { wv.sendInputEvent({ type: 'keyDown', keyCode: 'Backspace' }); wv.sendInputEvent({ type: 'keyUp', keyCode: 'Backspace' }); }
+                await sleep(300);
+                await typeInto(wv, phone, 45); }
+            } else if (cool('submitPhone', 8000)) { say('提交手机号…');
+              await evalT(wv, "(function(){var r=document.getElementById('auth-flow-root');var b=[].slice.call(r.querySelectorAll('button')).filter(function(e){return e.offsetParent&&/^next$/i.test((e.textContent||'').trim())})[0];if(b){b.click();return 1}return 0})()"); }
+          } else if (st.s === 'code') {
+            if (!code || st.err === 'code') {
+              if (cool('readCode', 9000)) { say('等验证码…');
+                const c = await readCodePage(idx);
+                if (c && c.dead) { say('接码卡已失效'); return; }
+                if (c && c.code && c.code !== baseCode && (!baseTime || c.time > baseTime)) { code = c.code; twofa = c.twofa || twofa; } }
+            }
+            if (code && cool('typeCode', 12000)) { say('填验证码 ' + code + '…');
+              await evalT(wv, "(function(){var r=document.getElementById('auth-flow-root');var ins=[].slice.call(r.querySelectorAll('input')).filter(function(e){return e.offsetParent&&!/stealthy/.test(e.className)});if(!ins[0])return 0;ins[0].focus();ins[0].value='';return 1})()");
+              await typeInto(wv, code, 150); }
+          } else if (st.s === '2fa') {
+            if (!twofa && cool('read2fa', 9000)) { const c2 = await readCodePage(idx); twofa = (c2 && c2.twofa) || ''; }
+            if (!twofa) { say('需要 2FA 但接码页没有密码'); return; }
+            if (cool('type2fa', 14000)) { say(st.err === 'pw' ? '2FA 重填…' : '填 2FA…');
+              // 诱饵框是 .stealthy;不清空会把上次内容拼上去(didididi),报 Incorrect password
+              await evalT(wv, "(function(){var r=document.getElementById('auth-flow-root');var e=[].slice.call(r.querySelectorAll('input.input-field-input')).filter(function(x){return !/stealthy/.test(x.className)})[0];if(!e)return 0;e.focus();e.select&&e.select();return 1})()");
+              for (let i = 0; i < 40; i++) { wv.sendInputEvent({ type: 'keyDown', keyCode: 'Backspace' }); wv.sendInputEvent({ type: 'keyUp', keyCode: 'Backspace' }); }
+              await sleep(300);
+              await typeInto(wv, twofa, 110);
+              await sleep(400);
+              // 输完立刻提交:2FA 页靠按钮,Enter 不一定触发
+              await evalT(wv, "(function(){var r=document.getElementById('auth-flow-root');var bs=[].slice.call(r.querySelectorAll('button')).filter(function(e){return e.offsetParent&&(e.textContent||'').trim()});var b=bs[bs.length-1];if(b){b.click();return 1}return 0})()"); }
+          } else if (st.s === 'loading' || st.s === 'unreadable') {
+            if (cool('nudge', 45000)) { say('页面没响应,重载这一格…'); try { wv.reload(); } catch (e) {} }
+          }
+          await sleep(2000);
+        }
+        say('超时(停在 ' + screen + ')');
+      } catch (e) { say('出错[' + screen + ']:' + String(e.message).slice(0, 40)); }
+      finally { loginBusy.delete(idx); }
+    }
+
+    document.addEventListener('click', (e) => {
+      const b = e.target.closest && e.target.closest('.cfg-login');
+      if (!b) return;
+      e.preventDefault(); e.stopPropagation();
+      const idx = Number(b.dataset.idx);
+      // 弹窗盖着格子,登录过程就看不见了 —— 点完立刻收起,进度看格子头部
+      try { closeCfgModal(); } catch (err) { try { cfgModal.hidden = true; } catch (e2) {} }
+      flash('#' + idx + ' 开始自动登录,进度看格子标题');
+      autoLogin(idx);
+    });
+
     function openCfgModal(p) {
       if (!p) return; cfgP = p; delArmed = false;
       document.getElementById('cfg-title').textContent = `${p.name} · #${p.accountIdx} 设置`;
