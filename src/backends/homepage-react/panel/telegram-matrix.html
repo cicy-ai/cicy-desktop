@@ -570,6 +570,23 @@
       if (pageNo > maxPage) pageNo = maxPage;
       return { list: all.slice(pageNo * n, pageNo * n + n), total: all.length, maxPage };
     }
+    // 自动登录要用这一格的 webview,可它可能不在当前页/不在当前 tab 上 —— 没挂载就是
+    // 没有 webview,流程会立刻空转退出。先把它翻到眼前,再开始。
+    function gotoIdx(idx) {
+      if (!gcells.has(idx)) return false;
+      if (csSet.has(idx)) { if (curTab !== 'cs') setTab('cs'); return true; }
+      const all = [...gcells.keys()].filter((i) => !csSet.has(i));
+      const pos = all.indexOf(idx); if (pos < 0) return false;
+      const want = Math.floor(pos / pageSize());
+      const need = (curTab !== 'other') || (pageNo !== want);
+      curTab = 'other'; pageNo = want;
+      try { localStorage.setItem(TAB_KEY, 'other'); } catch (e) {}
+      if (need) applyPage();
+      const g = gcells.get(idx);
+      if (g && g.el && g.el.scrollIntoView) { try { g.el.scrollIntoView({ block: 'nearest' }); } catch (e) {} }
+      return true;
+    }
+
     function applyPage() {
       const { list, total, maxPage } = pageIdxList();
       const onPage = new Set(list);
@@ -613,8 +630,11 @@
       if (g.ov) { try { g.ov.remove(); } catch (e) {} g.ov = null; g.ovKind = ''; }
       if (!want) return;
       const p = profiles.find((x) => x.accountIdx === idx);
-      const url = want === 'code' ? codeUrlOf(p) : (pingUrl.get(idx) || 'https://ping0.cc/');
+      let url = want === 'code' ? codeUrlOf(p) : (pingUrl.get(idx) || 'https://ping0.cc/');
       if (!url) { flash('#' + idx + ' 没有接码 URL'); codeOpen.delete(idx); updateCodeButtons(idx); return; }
+      // 接码页每次都要拿最新的:分区缓存里可能是上一轮的旧码,甚至旧的「设备已掉线」。
+      // 在 URL 上带时间戳,一次请求就是新鲜的,不用打开后再刷一遍(那会撞接码站的限流)。
+      if (want === 'code') url += (url.indexOf('?') < 0 ? '?' : '&') + '_ts=' + Date.now();
       const wv = document.createElement('webview');
       // 同 partition = 同代理出口,接码页看到的 IP 和这个号一致
       wv.setAttribute('partition', 'persist:sandbox-' + idx);
@@ -833,7 +853,12 @@
       g.el.classList.toggle('done', done);
       g.el.classList.toggle('failed', !!st.failed && !st.loading);
       g.el.querySelector('.dot').className = `dot ${dotClass(st)}`;
-      g.el.querySelector('.st').textContent = '';   // 格子头不显示状态文字
+      // 平时格子头不显示状态文字;但自动登录跑着的时候要一直看得见走到哪一步,
+      // 否则 webview 随便来个 did-stop-loading 就把进度冲掉,界面上看着像"卡死"。
+      const _st = g.el.querySelector('.st');
+      const _lg = loginSay.get(idx);
+      if (_lg) { _st.textContent = _lg; _st.style.color = '#f0a45a'; }
+      else { _st.textContent = ''; _st.style.color = ''; }
       renderStat(idx);                              // 浮层里的版本/限流跟着 state.title 走
       updateCodeButtons(idx);
       if (batchMode) { const n = [...batch].filter((i) => { const q = profiles.find((x) => x.accountIdx === i); return q && hasIdentity(q); }).length; gridCount.textContent = `${batch.size} 个会话 · ${n} 已登录`; }
@@ -1172,20 +1197,43 @@
         await sleep(gap || 45);
       }
     }
+    function phoneFieldJs(expr) {
+      return "(function(){var r=document.getElementById('auth-flow-root');if(!r)return null;var e=r.querySelectorAll('[contenteditable]')[1];if(!e)return null;" + expr + "})()";
+    }
+    // 号码框里国家码是跟着内容走的:清不干净,新号会直接拼在旧国家码后面
+    // (实测 +86 + 15155315482 = +8615155315482,后 8 位还一样,只比尾号根本看不出来)。
+    // 所以这里清完必须读回来确认是空的,清不掉就一直退格,而不是盲目往下走。
+    async function clearPhoneField(wv) {
+      for (let t = 0; t < 6; t++) {
+        await evalT(wv, phoneFieldJs("e.focus();var s=window.getSelection();var g=document.createRange();g.selectNodeContents(e);s.removeAllRanges();s.addRange(g);return 1"));
+        for (let i = 0; i < 25; i++) { wv.sendInputEvent({ type: 'keyDown', keyCode: 'Backspace' }); wv.sendInputEvent({ type: 'keyUp', keyCode: 'Backspace' }); }
+        await sleep(350);
+        const v = await evalT(wv, phoneFieldJs("return (e.textContent||'')"));
+        const left = String(v || '').replace(/\D/g, '');
+        if (!left) return String(v || '');
+      }
+      return null;
+    }
+
     // 打开接码浮层读一次三个字段,再关掉(叠着会盖住 Telegram)
     async function readCodePage(idx) {
       const g = gcells.get(idx); if (!g) return null;
-      const btn = g.el.querySelector('.code');
-      if (!codeOpen.has(idx)) { btn.click(); await sleep(5000); }
+      const btn = g.el.querySelector('.code'); if (!btn) return null;
+      // 刚打开的浮层本身就是一次全新请求,不用再刷一遍 —— 接码站大约一分钟只放一次,
+      // 「打开 + 强刷」等于连发两次,第二次必然是「请求过于频繁」,永远读不到码。
+      const wasOpen = codeOpen.has(idx);
+      if (!wasOpen) { btn.click(); await sleep(5000); }
       const cv = codeView(idx);
       let out = null;
       if (cv) {
         try {
-          // 每次强制刷新再读:分区会缓存接码页,缓存里可能是旧的「设备已掉线」,会被误判成死卡
-          try { await cv.executeJavaScript("(function(){var u=location.href.replace(/([?&])_ts=\\d+/,'$1_ts='+Date.now());if(u===location.href)u+=(u.indexOf('?')<0?'?':'&')+'_ts='+Date.now();location.replace(u);return 1})()"); } catch (e) {}
-          await sleep(2600);
+          // 只有浮层本来就开着(页面可能是分区缓存里的旧「设备已掉线」)才强制刷新
+          if (wasOpen) {
+            try { await cv.executeJavaScript("(function(){var u=location.href.replace(/([?&])_ts=\\d+/,'$1_ts='+Date.now());if(u===location.href)u+=(u.indexOf('?')<0?'?':'&')+'_ts='+Date.now();location.replace(u);return 1})()"); } catch (e) {}
+            await sleep(2600);
+          }
           // 限流页也是「错误」页,不能当成死卡直接放弃
-          const s = await cv.executeJavaScript("(function(){var v=[].slice.call(document.querySelectorAll('input,textarea')).map(function(e){return e.value||''});var t=document.body.innerText||'';var rate=/请求过于频繁|等待\\s*\\d+\\s*秒/.test(t);return JSON.stringify({code:v[0]||'',time:v[1]||'',twofa:v[2]||'',rate:rate,dead:!rate&&/接码设备已掉线|已冻结|已封禁|自助补号/.test(t)})})()");
+          const s = await cv.executeJavaScript("(function(){var v=[].slice.call(document.querySelectorAll('input,textarea')).map(function(e){return e.value||''});var t=document.body.innerText||'';var rate=/请求过于频繁|等待\\s*\\d+\\s*秒/.test(t);return JSON.stringify({code:v[0]||'',time:v[1]||'',twofa:v[2]||'',rate:rate,dead:!rate&&/接码设备已掉线|已冻结|已封禁|自助补号|账号不存在|卡密(错误|无效|不存在)|404 Not Found|410 Gone/.test(t)})})()");
           out = JSON.parse(s);
         } catch (e) {}
       }
@@ -1197,6 +1245,7 @@
     // 这里每一轮都重新判断,某个动作没生效下一轮自己重做;单次调用全部带超时;
     // 整体有总时限。结构上不存在卡死:要么成功,要么超时并说清停在哪一屏。
     const LOGIN_DEADLINE = 6 * 60 * 1000;
+    const loginSay = new Map();   // idx -> 当前这一步的文字(格子重绘时补回去)
 
     // 一次 executeJavaScript 也可能悬着不返回(页面卡住时),统一加超时兜底
     function evalT(wv, expr, ms) {
@@ -1215,7 +1264,7 @@
         "if(/Incorrect password/i.test(t))return JSON.stringify({s:'2fa',err:'pw'});" +
         "if(/Enter Your Password|additional password/i.test(t))return JSON.stringify({s:'2fa'});" +
         "if(/Invalid code|INVALID/i.test(t))return JSON.stringify({s:'code',err:'code'});" +
-        "if(/sent you a (message|code)|We have sent/i.test(t))return JSON.stringify({s:'code'});" +
+        "if(/sent you a (message|code)|We have sent/i.test(t))return JSON.stringify({s:'code',ph:((t.match(/\\+[\\d\\s\\-()]{6,}/)||[''])[0]).replace(/\\s+/g,' ').trim()});" +
         "var ce=r.querySelectorAll('[contenteditable]');" +
         "if(ce.length>1)return JSON.stringify({s:'phone',val:(ce[1].textContent||'').replace(/\\s+/g,'')});" +
         "if(/Log in by QR|Scan with Telegram/i.test(t))return JSON.stringify({s:'qr'});" +
@@ -1228,25 +1277,31 @@
       const phone = p && phoneOf(p);
       if (!phone) { flash('#' + idx + ' 没有手机号'); return; }
       loginBusy.add(idx);
-      // 兜底:不管从哪个入口进来,都先把叠加层清掉 —— 整个流程假定格子上是 Telegram 本体
-      try { closeMode(idx); } catch (e) {}
+      // 翻到这一格所在的页(它可能在别的分页/别的 tab 上,那样根本没有 webview)
+      try { gotoIdx(idx); } catch (e) {}
       // 每一步都写到格子头部的状态位,界面上能直接看到走到哪了(不用开设置弹窗)
       // 进度只写格子头部的状态位 —— 写进弹窗按钮会把「提交手机号…」这种长文字塞进小按钮,
       // 把整个弹窗撑歪;而且弹窗点完就关了,写了也看不见。
       const say = (t) => {
+        loginSay.set(idx, t);
         const g = gcells.get(idx);
         if (g) { const st = g.el.querySelector('.ghead .st'); if (st) { st.textContent = t; st.style.color = '#f0a45a'; } }
       };
       const want = phone.replace(/\s+/g, '');
+      const wantD = want.replace(/\D/g, '');
       const t0 = Date.now();
+      say('准备中…');
+      for (let i = 0; i < 40 && !tgView(idx); i++) await sleep(500);
+      if (!tgView(idx)) { say('格子打不开'); loginBusy.delete(idx); return; }
       let baseCode = '', baseTime = '', code = '', twofa = '';
-      let lastAct = {}, screen = '';
+      let lastAct = {}, screen = '', nextCodeAt = 0;
       // 同一个动作 N 秒内不重复做(点了按钮要给页面反应时间),但绝不无限等
       const cool = (k, ms) => { const now = Date.now(); if (now - (lastAct[k] || 0) < ms) return false; lastAct[k] = now; return true; };
       try {
         // 基线:只接受比它更新的码
         const base = await readCodePage(idx);
         if (base && base.dead) { say('接码卡已失效'); return; }
+        if (base && base.rate) { nextCodeAt = Date.now() + 40000; }
         baseCode = (base && base.code) || ''; baseTime = (base && base.time) || '';
 
         while (Date.now() - t0 < LOGIN_DEADLINE) {
@@ -1256,7 +1311,7 @@
           screen = st.s;
 
           if (st.s === 'done') { say('登录成功 id=' + st.id);
-            setTimeout(() => { const g2 = gcells.get(idx); if (g2) { const s2 = g2.el.querySelector('.ghead .st'); if (s2) s2.style.color = ''; } renderGridCell(idx); }, 4000); 
+            setTimeout(() => { loginSay.delete(idx); renderGridCell(idx); }, 4000); 
             setTimeout(() => { const q = profiles.find((x) => x.accountIdx === idx);
               if (q && cfgP && cfgP.accountIdx === idx) document.getElementById('cfg-info').innerHTML = cfgInfoHtml(q); }, 1500);
             return; }
@@ -1265,28 +1320,48 @@
             if (cool('toPhone', 4000)) { say('切手机号登录…');
               await evalT(wv, "(function(){var b=[].slice.call(document.querySelectorAll('button')).filter(function(e){return e.offsetParent&&/log in by phone/i.test(e.textContent||'')})[0];if(b){b.click();return 1}return 0})()"); }
           } else if (st.s === 'phone') {
-            const cur = st.val || '';
-            if (cur.slice(-8) !== want.slice(-8)) {
+            const cur = String(st.val || '').replace(/\D/g, '');
+            if (cur !== wantD) {
               if (cool('typePhone', 6000)) { say('填手机号…');
-                await evalT(wv, "(function(){var r=document.getElementById('auth-flow-root');var e=r.querySelectorAll('[contenteditable]')[1];if(!e)return 0;e.focus();var s=window.getSelection();var g=document.createRange();g.selectNodeContents(e);s.removeAllRanges();s.addRange(g);return 1})()");
-                for (let i = 0; i < 40; i++) { wv.sendInputEvent({ type: 'keyDown', keyCode: 'Backspace' }); wv.sendInputEvent({ type: 'keyUp', keyCode: 'Backspace' }); }
-                await sleep(300);
-                await typeInto(wv, phone, 45); }
+                const rest = await clearPhoneField(wv);
+                if (rest === null) { say('号码框清不掉,重载这一格…'); try { wv.reload(); } catch (e) {} await sleep(5000); continue; }
+                // 框里通常会留一个 "+",再打一个就成了 "++",所以留着 + 就只打数字
+                await typeInto(wv, rest.indexOf('+') >= 0 ? want.replace(/^\+/, '') : want, 45);
+                await sleep(400);
+                const after = String(await evalT(wv, phoneFieldJs("return (e.textContent||'')")) || '').replace(/\D/g, '');
+                if (after !== wantD) { say('号码填歪了(' + after + '),重填…'); continue; }
+              }
             } else if (cool('submitPhone', 8000)) { say('提交手机号…');
               await evalT(wv, "(function(){var r=document.getElementById('auth-flow-root');var b=[].slice.call(r.querySelectorAll('button')).filter(function(e){return e.offsetParent&&/^next$/i.test((e.textContent||'').trim())})[0];if(b){b.click();return 1}return 0})()"); }
           } else if (st.s === 'code') {
+            // 验证码屏会把刚才提交的号码显示出来 —— 对不上说明提交的是别人的号,
+            // 再等下去也等不到码,必须退回去重填,而不是一直"等验证码…"。
+            const shown = String(st.ph || '').replace(/\D/g, '');
+            if (shown && shown !== wantD) {
+              if (cool('backToPhone', 15000)) { say('提交的号不对(' + st.ph + '),退回重填…');
+                // 重载没用:Telegram 会把验证码那一屏恢复回来。改号入口是点验证码屏上的号码本身。
+                await evalT(wv, "(function(){var w=document.querySelector('[class*=phoneWrapper]');if(!w)return 0;(w.querySelector('span,i,svg,button')||w).click();return 1})()"); }
+              await sleep(4000); continue;
+            }
             if (!code || st.err === 'code') {
-              if (cool('readCode', 9000)) { say('等验证码…');
+              // 接码站大约每分钟只让读一次,读太勤只会一直拿到"请求过于频繁",
+              // 表现就是永远停在"等验证码"。撞到限流就退避,别把配额全浪费在重试上。
+              if (Date.now() >= nextCodeAt && cool('readCode', 12000)) { say('等验证码…');
                 const c = await readCodePage(idx);
-                if (c && c.dead) { say('接码卡已失效'); return; }
-                if (c && c.code && c.code !== baseCode && (!baseTime || c.time > baseTime)) { code = c.code; twofa = c.twofa || twofa; } }
+                if (c && c.rate) { nextCodeAt = Date.now() + 40000; say('接码限流,40 秒后再读…'); }
+                else if (c && c.dead) { say('接码卡已失效'); return; }
+                else if (c && c.code && c.code !== baseCode && (!baseTime || c.time > baseTime)) { code = c.code; twofa = c.twofa || twofa; }
+                else { nextCodeAt = Date.now() + 15000; } }
             }
             if (code && cool('typeCode', 12000)) { say('填验证码 ' + code + '…');
               await evalT(wv, "(function(){var r=document.getElementById('auth-flow-root');var ins=[].slice.call(r.querySelectorAll('input')).filter(function(e){return e.offsetParent&&!/stealthy/.test(e.className)});if(!ins[0])return 0;ins[0].focus();ins[0].value='';return 1})()");
               await typeInto(wv, code, 150); }
           } else if (st.s === '2fa') {
-            if (!twofa && cool('read2fa', 9000)) { const c2 = await readCodePage(idx); twofa = (c2 && c2.twofa) || ''; }
-            if (!twofa) { say('需要 2FA 但接码页没有密码'); return; }
+            if (!twofa && Date.now() >= nextCodeAt && cool('read2fa', 12000)) { say('读 2FA 密码…');
+              const c2 = await readCodePage(idx);
+              if (c2 && c2.rate) { nextCodeAt = Date.now() + 40000; say('接码限流,40 秒后再读…'); }
+              else twofa = (c2 && c2.twofa) || ''; }
+            if (!twofa) { if (Date.now() < nextCodeAt) { await sleep(2000); continue; } say('需要 2FA 但接码页没有密码'); return; }
             if (cool('type2fa', 14000)) { say(st.err === 'pw' ? '2FA 重填…' : '填 2FA…');
               // 诱饵框是 .stealthy;不清空会把上次内容拼上去(didididi),报 Incorrect password
               await evalT(wv, "(function(){var r=document.getElementById('auth-flow-root');var e=[].slice.call(r.querySelectorAll('input.input-field-input')).filter(function(x){return !/stealthy/.test(x.className)})[0];if(!e)return 0;e.focus();e.select&&e.select();return 1})()");
@@ -1303,7 +1378,7 @@
         }
         say('超时(停在 ' + screen + ')');
       } catch (e) { say('出错[' + screen + ']:' + String(e.message).slice(0, 40)); }
-      finally { loginBusy.delete(idx); try { closeMode(idx); } catch (e2) {} }
+      finally { loginBusy.delete(idx); }
     }
 
     document.addEventListener('click', (e) => {
