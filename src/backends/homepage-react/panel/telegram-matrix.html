@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="d5fc5ecc71b4">
+  <meta name="pv" content="b5a8a6960a86">
   <title>Telegram 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -144,11 +144,23 @@
     #drawer-close, #tglist, #drawer-scrim { display: none; }
     main.listmode #tglist { display: block; width: 100%; flex: 1 1 auto; min-height: 0; overflow: auto;
                             border: 1px solid var(--line); border-radius: 10px; background: var(--head); }
-    main.listmode #drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(900px, 66vw); z-index: 44;
-                            background: var(--bg); border-left: 1px solid var(--line);
-                            box-shadow: -18px 0 44px rgba(0,0,0,.5); padding: 8px 10px 10px;
-                            transform: translateX(101%); transition: transform .18s ease; }
-    main.listmode.drawer-open #drawer { transform: none; }
+    /* 列表模式 = 左右分栏,不是浮层:表格一直可用,右边常驻当前选中的那个会话。
+       宽度靠中间那条竖线拖,存在 localStorage,刷新后还是上次的宽度。 */
+    #split { display: flex; flex-direction: column; width: 100%; flex: 1 1 auto; min-height: 0; }
+    #splitter { display: none; }
+    main.listmode #split { flex-direction: row; align-items: stretch; gap: 0; }
+    main.listmode #tglist { order: 1; flex: 1 1 auto; min-width: 0; }
+    main.listmode #splitter { order: 2; display: block; flex: none; width: 9px; cursor: col-resize; position: relative; }
+    main.listmode #splitter::after { content: ''; position: absolute; left: 4px; top: 0; bottom: 0; width: 1px;
+                                     background: var(--line); }
+    main.listmode #splitter:hover::after { background: var(--accent); width: 2px; left: 3px; }
+    main.listmode #drawer { order: 3; flex: none; width: var(--splitw, 760px); min-width: 0;
+                            border: 1px solid var(--line); border-radius: 12px; background: var(--cell);
+                            overflow: hidden; }
+    main.listmode #drawer-close { display: none; }
+    main.listmode #drawer-scrim { display: none !important; }
+    /* 拖动时盖一层,否则指针一进 <webview> 事件就被它吃掉,拖到一半会断 */
+    #dragmask { position: fixed; inset: 0; z-index: 90; cursor: col-resize; }
     /* 抽屉里只有一格,让它把抽屉撑满 —— .gcell 平时是固定 360px × 50vh 的网格砖,
        直接拿进抽屉会缩在左上角一小块。 */
     main.listmode #grid { display: block !important; }
@@ -164,8 +176,8 @@
        行的分隔线和 hover 底色照样铺到窗口边缘,左边空一大块、右边贴边,看着像没排版。 */
     /* 滚动条会把内容区挤窄几个像素,卡片就和上面那排按钮差了 5px 对不齐。
        两边都预留出滚动条的位置,居中才是真的居中。 */
-    main.listmode #tglist { padding: 0 0 16px; scrollbar-gutter: stable both-edges; }
-    #tblcard { width: 100%; max-width: 1000px; margin: 0 auto; border: 1px solid var(--line);
+    main.listmode #tglist { padding: 0; }
+    #tblcard { width: 100%; max-width: none; margin: 0; border: 1px solid var(--line);
                border-radius: 12px; background: var(--cell); overflow: hidden; }
     #tglist table { width: 100%; border-collapse: collapse; font-size: 12px; }
     #tglist th { position: sticky; top: 0; z-index: 1; background: var(--head); color: var(--muted);
@@ -203,7 +215,7 @@
     #viewbar .ghost { display: inline-flex; align-items: center; padding: 0 10px; border-radius: 999px;
                       font-size: 11.5px; font-weight: 500; line-height: 1; }
     #viewbar .ghost.on { background: var(--accent); border-color: transparent; color: #fff; }
-    main.listmode #viewbar { max-width: 1000px; margin: 0 auto 8px; }
+    main.listmode #viewbar { max-width: none; margin: 0 0 8px; }
     /* 「自动开群」是个选择模式:点亮之后每个格子头上冒出一个勾选框,勾哪个开哪个。
        原来的「全部开/全部关」退化成这个模式里的全选/全不选。 */
     .ghead .autock { display: none; flex: none; width: 13px; height: 13px; margin: 0 1px 0 0;
@@ -331,10 +343,12 @@
       <div class="actions"><span class="tabs"><button id="tab-other">非客服 0</button><button id="tab-cs">客服 0</button></span><span class="pager" id="pager" title="一次只打开这么多个会话,翻页时其余的会被卸载释放内存"><button class="icon" id="page-prev" title="上一页">‹</button><span id="page-label"></span><button class="icon" id="page-next" title="下一页">›</button><i></i><input id="page-size" type="number" min="1" max="24" title="每页同时打开几个。一个 Telegram 会话能吃到 2.5GB,别开太多"></span><button class="ghost" id="open-tgsou" title="一键打开本机所有账号的搜群标签">🔍 打开搜群</button><button class="ghost" id="grid-reload" title="重新加载所有格子">全部重载</button></div>
     </div>
     <div id="viewbar"><span class="vleft"><button class="ghost" id="all-auto">自动开群</button><span class="pager is-off" id="autobar"><button class="ghost" id="auto-sel-all" title="选中/取消本页所有格子">全选</button><i></i><span id="auto-count">已选 0</span><i></i><button class="ghost" id="auto-do-on" title="给选中的账号打开随机开群">开群</button><button class="ghost" id="auto-do-off" title="给选中的账号关掉随机开群">关闭</button></span></span><span class="tabs" id="views"><button id="view-grid" title="网格:本页的会话平铺成格子">网格</button><button id="view-list" title="列表:一张表,点一行从右侧抽屉里打开那个会话">列表</button></span></div>
-    <div id="drawer">
-      <button class="icon" id="drawer-close" title="收起(Esc)"><svg viewBox="0 0 24 24"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg></button>
-      <div id="grid"></div>
-    </div>
+    <div id="split">
+      <div id="drawer">
+        <button class="icon" id="drawer-close" title="收起(Esc)"><svg viewBox="0 0 24 24"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg></button>
+        <div id="grid"></div>
+      </div>
+      <div id="splitter" title="拖动调整宽度"></div>
     <div id="tglist">
       <div id="tblcard">
         <table>
@@ -343,6 +357,7 @@
           <tbody id="tglist-body"></tbody>
         </table>
       </div>
+    </div>
     </div>
     <div id="drawer-scrim"></div>
     <div id="preview-title">
@@ -634,7 +649,17 @@
     // 客服不参与 —— 客服号要常驻收消息,只能是平铺。
     const VIEW_KEY = 'tgmx.view';
     let curView = (() => { try { return localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'grid'; } catch (e) { return 'grid'; } })();
-    let drawerIdx = null;                       // 列表模式下抽屉里开着哪一格
+    // 列表模式右栏当前显示哪一格。选中项和分栏宽度都存 localStorage,刷新后照旧。
+    const SEL_KEY = 'tgmx.sel', SPLIT_KEY = 'tgmx.splitw';
+    let drawerIdx = (() => { const v = Number(localStorage.getItem(SEL_KEY)); return Number.isInteger(v) && v > 0 ? v : null; })();
+    const splitW = () => {
+      const v = Number(localStorage.getItem(SPLIT_KEY)) || 760;
+      return Math.max(360, Math.min(Math.max(420, innerWidth - 480), v));
+    };
+    function applySplit() {
+      const el = document.getElementById('split');
+      if (el) el.style.setProperty('--splitw', splitW() + 'px');
+    }
     const listMode = () => curView === 'list' && curTab !== 'cs';
     const setView = (v) => {
       curView = v === 'list' ? 'list' : 'grid';
@@ -642,7 +667,12 @@
       if (curView !== 'list') drawerIdx = null;
       applyPage();
     };
-    function openDrawer(idx) { if (!gcells.has(idx) || csSet.has(idx)) return; drawerIdx = idx; applyPage(); }
+    function openDrawer(idx) {
+      if (!gcells.has(idx) || csSet.has(idx)) return;
+      drawerIdx = idx;
+      try { localStorage.setItem(SEL_KEY, String(idx)); } catch (e) {}
+      applyPage();
+    }
     function closeDrawer() { drawerIdx = null; applyPage(); }
     const setTab = (t) => { curTab = t; try { localStorage.setItem(TAB_KEY, t); } catch (e) {} applyPage(); };
     function pageSize() { const v = Number(localStorage.getItem(PAGE_KEY)) || 4; return Math.max(1, Math.min(24, v)); }
@@ -707,6 +737,12 @@
       const onPage = new Set(list);
       const lm = listMode();
       if (lm && drawerIdx != null && (!gcells.has(drawerIdx) || csSet.has(drawerIdx))) drawerIdx = null;
+      // 分栏右侧不留空:没有有效选中就落到第一行(记住的那个不在了也一样)
+      if (lm && drawerIdx == null) {
+        const first = [...gcells.keys()].find((i) => !csSet.has(i));
+        if (first != null) { drawerIdx = first; try { localStorage.setItem(SEL_KEY, String(first)); } catch (e) {} }
+      }
+      if (lm) applySplit();
       if (lm && cfgModal && !cfgModal.hidden) { try { closeCfgModal(); } catch (e) {} }
       mainEl.classList.toggle('listmode', lm);
       mainEl.classList.toggle('drawer-open', lm && drawerIdx != null);
@@ -1180,10 +1216,29 @@
     document.getElementById('tglist').addEventListener('click', (e) => {
       const tr = e.target.closest && e.target.closest('tr.row');
       if (!tr) return;
-      const idx = Number(tr.dataset.idx);
-      if (idx === drawerIdx) closeDrawer(); else openDrawer(idx);
+      openDrawer(Number(tr.dataset.idx));
     });
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && drawerIdx != null) closeDrawer(); });
+    // 拖分隔条调右栏宽度。指针一进 <webview> 事件就被它吃掉,所以拖动期间盖一层透明罩。
+    document.getElementById('splitter').addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      const x0 = e.clientX, w0 = splitW();
+      const mask = document.createElement('div'); mask.id = 'dragmask';
+      document.body.appendChild(mask);
+      const move = (ev) => {
+        const w = Math.max(360, Math.min(Math.max(420, innerWidth - 480), w0 + (x0 - ev.clientX)));
+        try { localStorage.setItem(SPLIT_KEY, String(Math.round(w))); } catch (er) {}
+        applySplit();
+      };
+      const up = () => {
+        document.removeEventListener('mousemove', move);
+        document.removeEventListener('mouseup', up);
+        try { mask.remove(); } catch (er) {}
+        syncPreview();
+      };
+      document.addEventListener('mousemove', move);
+      document.addEventListener('mouseup', up);
+    });
+    addEventListener('resize', () => { if (listMode()) applySplit(); });
     document.getElementById('tab-cs').onclick = () => setTab('cs');
     document.getElementById('tab-other').onclick = () => setTab('other');
     document.getElementById('page-prev').onclick = () => gotoPage(pageNo - 1);
@@ -1510,11 +1565,20 @@
     }
 
     // 打开接码浮层读一次三个字段,再关掉(叠着会盖住 Telegram)
+    // 收起接码叠加层(只在它确实开着时动)
+    async function closeCodeOverlay(idx) {
+      if (!codeOpen.has(idx)) return;
+      const g = gcells.get(idx); if (!g) return;
+      const btn = g.el.querySelector('.code'); if (!btn) return;
+      btn.click(); await new Promise((r) => setTimeout(r, 300));
+    }
     function say3(idx, t) {
       try { loginSay.set(idx, t); const g = gcells.get(idx);
         if (g) { const st = g.el.querySelector('.ghead .st'); if (st) { st.textContent = t; st.style.color = '#f0a45a'; } } } catch (e) {}
     }
-    async function readCodePage(idx) {
+    // keep=true:读完不关,叠加层留在格子上。等验证码期间就用这个 ——
+    // 每轮只在页面内部换 _ts 原地刷新,不再反复创建/销毁 webview。
+    async function readCodePage(idx, keep) {
       const g = gcells.get(idx); if (!g) return null;
       const btn = g.el.querySelector('.code'); if (!btn) return null;
       // 刚打开的浮层本身就是一次全新请求,不用再刷一遍 —— 接码站大约一分钟只放一次,
@@ -1538,7 +1602,7 @@
       // 接码卡失效时把页面留在格子上:那上面写着到底为什么失效(掉线/冻结/卡密错误),
       // 关掉就只剩标题里一句「接码卡已失效」,没法处理。其余情况读完照常收起来。
       if (out && out.dead) { say3(idx, '接码卡已失效,页面留着'); return out; }
-      if (codeOpen.has(idx)) { btn.click(); await sleep(1000); }
+      if (!keep && codeOpen.has(idx)) { btn.click(); await sleep(1000); }
       return out;
     }
     // 登录做成状态机:每 2 秒看一眼页面在哪一屏,就只做那一屏该做的一件事。
@@ -1596,7 +1660,7 @@
       for (let i = 0; i < 40 && !tgView(idx); i++) await sleep(500);
       if (!tgView(idx)) { say('格子打不开'); loginBusy.delete(idx); return; }
       let baseCode = '', baseTime = '', code = '', twofa = '', baseRead = false, submitAt = 0;
-      let lastAct = {}, screen = '', nextCodeAt = 0, gone = 0;
+      let lastAct = {}, screen = '', nextCodeAt = 0, gone = 0, deadSeen = false;
       // 同一个动作 N 秒内不重复做(点了按钮要给页面反应时间),但绝不无限等
       const cool = (k, ms) => { const now = Date.now(); if (now - (lastAct[k] || 0) < ms) return false; lastAct[k] = now; return true; };
       try {
@@ -1652,8 +1716,8 @@
               await sleep(5000);
               submitAt = Date.now();
               if (!baseRead) { baseRead = true; say('读接码基线…');
-                const base = await readCodePage(idx);
-                if (base && base.dead) { say('接码卡已失效'); return; }
+                const base = await readCodePage(idx, true);
+                if (base && base.dead) { deadSeen = true; say('接码卡已失效'); return; }
                 if (base && base.rate) { nextCodeAt = Date.now() + 40000; }
                 baseCode = (base && base.code) || ''; baseTime = (base && base.time) || ''; }
               continue; }
@@ -1679,13 +1743,13 @@
               // 接码站大约每分钟只让读一次,读太勤只会一直拿到"请求过于频繁",
               // 表现就是永远停在"等验证码"。撞到限流就退避,别把配额全浪费在重试上。
               if (submitAt && Date.now() >= nextCodeAt && cool('readCode', 12000)) { say('等验证码…');
-                const c = await readCodePage(idx);
+                const c = await readCodePage(idx, true);
                 // 第一次读到的就是基线:页面已经翻到验证码屏 = 「下一步」确实点成了,
                 // 此刻页面上那个码必定是上一轮的残码,之后只认比它新的。
                 if (!baseRead) { baseRead = true;
                   baseCode = (c && c.code) || ''; baseTime = (c && c.time) || ''; }
                 if (c && c.rate) { nextCodeAt = Date.now() + 40000; say('接码限流,40 秒后再读…'); }
-                else if (c && c.dead) { say('接码卡已失效'); return; }
+                else if (c && c.dead) { deadSeen = true; say('接码卡已失效'); return; }
                 else if (c && c.code && c.code !== baseCode && (!baseTime || c.time > baseTime)) { code = c.code; twofa = c.twofa || twofa; }
                 else if (baseCode && submitAt && Date.now() - submitAt > 75000) {
                   // 这个码是提交后第一次读到的,很可能就是刚到的那条,只是被当成了基线
@@ -1693,15 +1757,17 @@
                 else { nextCodeAt = Date.now() + 15000; } }
             }
             if (code && cool('typeCode', 12000)) { say('填验证码 ' + code + '…');
+              await closeCodeOverlay(idx);   // 码已到手,把接码页收起来,露出 Telegram
               await evalT(wv, "(function(){var r=document.getElementById('auth-flow-root');var ins=[].slice.call(r.querySelectorAll('input')).filter(function(e){return e.getClientRects().length&&!/stealthy/.test(e.className)});if(!ins[0])return 0;ins[0].focus();ins[0].value='';return 1})()");
               await typeInto(wv, code, 150); }
           } else if (st.s === '2fa') {
             if (!twofa && Date.now() >= nextCodeAt && cool('read2fa', 12000)) { say('读 2FA 密码…');
-              const c2 = await readCodePage(idx);
+              const c2 = await readCodePage(idx, true);
               if (c2 && c2.rate) { nextCodeAt = Date.now() + 40000; say('接码限流,40 秒后再读…'); }
               else twofa = (c2 && c2.twofa) || ''; }
             if (!twofa) { if (Date.now() < nextCodeAt) { await sleep(2000); continue; } say('需要 2FA 但接码页没有密码'); return; }
             if (cool('type2fa', 14000)) { say(st.err === 'pw' ? '2FA 重填…' : '填 2FA…');
+              await closeCodeOverlay(idx);
               // 诱饵框是 .stealthy;不清空会把上次内容拼上去(didididi),报 Incorrect password
               await evalT(wv, "(function(){var r=document.getElementById('auth-flow-root');var e=[].slice.call(r.querySelectorAll('input.input-field-input')).filter(function(x){return !/stealthy/.test(x.className)})[0];if(!e)return 0;e.focus();e.select&&e.select();return 1})()");
               for (let i = 0; i < 40; i++) { wv.sendInputEvent({ type: 'keyDown', keyCode: 'Backspace' }); wv.sendInputEvent({ type: 'keyUp', keyCode: 'Backspace' }); }
@@ -1717,7 +1783,9 @@
         }
         say('超时(停在 ' + screen + ')');
       } catch (e) { say('出错[' + screen + ']:' + String(e.message).slice(0, 40)); }
-      finally { loginBusy.delete(idx); }
+      finally { loginBusy.delete(idx);
+        // 收尾:接码卡失效时页面要留着给你看,其余情况一律收起
+        if (!deadSeen) { try { await closeCodeOverlay(idx); } catch (e3) {} } }
     }
 
     document.addEventListener('click', (e) => {
