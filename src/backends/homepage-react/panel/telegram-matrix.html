@@ -160,35 +160,38 @@
     #drawer-head .sub { color: var(--muted); font: 11px ui-monospace, monospace; }
     #drawer-head .grow { flex: 1 1 auto; }
 
-    /* 表格本身不铺满 1900px —— 那样「名称」和「手机号」之间会空出半屏,
-       看着像没排版。给一个上限再居中,列宽固定,操作列贴右。 */
-    #tglist table { width: 100%; max-width: 1180px; margin: 0 auto; border-collapse: separate; border-spacing: 0; font-size: 12px; }
+    /* 表是一张卡片:定宽居中、四边有界。之前只给 table 设了 max-width,
+       行的分隔线和 hover 底色照样铺到窗口边缘,左边空一大块、右边贴边,看着像没排版。 */
+    main.listmode #tglist { padding: 0 0 16px; }
+    #tblcard { width: 100%; max-width: 1060px; margin: 0 auto; border: 1px solid var(--line);
+               border-radius: 12px; background: var(--cell); overflow: hidden; }
+    #tglist table { width: 100%; border-collapse: collapse; font-size: 12px; }
     #tglist th { position: sticky; top: 0; z-index: 1; background: var(--head); color: var(--muted);
-                 font-weight: 500; text-align: left; padding: 9px 12px;
+                 font-weight: 500; text-align: left; padding: 0 12px; height: 34px;
                  border-bottom: 1px solid var(--line); white-space: nowrap; }
-    #tglist td { padding: 0 12px; height: 34px; border-bottom: 1px solid rgba(255,255,255,.05);
+    #tglist td { padding: 0 12px; height: 36px; border-top: 1px solid rgba(255, 255, 255, .05);
                  color: #c9c9d1; white-space: nowrap; vertical-align: middle; }
-    #tglist tr:last-child td { border-bottom: none; }
+    #tglist tbody tr:nth-child(even) td { background: rgba(255, 255, 255, .018); }
     #tglist tr.row { cursor: pointer; }
-    #tglist tr.row:hover td { background: rgba(255, 255, 255, .045); }
+    #tglist tr.row:hover td { background: rgba(255, 255, 255, .06); }
     #tglist tr.row.on td { background: rgba(240, 164, 90, .13); }
-    #tglist col.c-num { width: 58px; } #tglist col.c-nm { width: 190px; }
-    #tglist col.c-ph { width: 156px; }  #tglist col.c-px { width: 92px; }
-    #tglist col.c-op { width: 152px; }
+    #tglist col.c-num { width: 60px; } #tglist col.c-ph { width: 158px; }
+    #tglist col.c-px { width: 80px; }  #tglist col.c-stt { width: 208px; }
+    #tglist col.c-op { width: 138px; }
     #tglist td.num, #tglist td.ph, #tglist td.px { font: 11px ui-monospace, monospace; color: var(--muted); }
-    #tglist td.nm { color: var(--fg); overflow: hidden; text-overflow: ellipsis; }
-    #tglist td.stt { overflow: hidden; text-overflow: ellipsis; }
+    #tglist td.num { color: #8e8e98; }
+    #tglist td.info { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
     #tglist td.op { text-align: right; }
     #tglist .op .ghost { padding: 2px 8px; font-size: 11px; }
-    /* 状态做成一个药丸 + 一句灰色补充,一眼能分清「号登没登」和「页面开没开」 */
-    #tglist .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px;
-                    line-height: 17px; border: 1px solid transparent; }
+    /* 状态 = 药丸 + 紧跟着的 id,不留空白列 */
+    #tglist .pill { display: inline-block; min-width: 46px; text-align: center; padding: 1px 8px;
+                    border-radius: 999px; font-size: 11px; line-height: 17px; border: 1px solid transparent; }
     #tglist .pill.ok  { background: rgba(60, 200, 130, .14); color: #4ed197; border-color: rgba(60,200,130,.28); }
     #tglist .pill.off { background: rgba(255, 255, 255, .06); color: var(--muted); border-color: var(--line); }
     #tglist .pill.run { background: rgba(240, 164, 90, .16); color: #f0a45a; border-color: rgba(240,164,90,.34); }
     #tglist .pill.bad { background: rgba(240, 90, 90, .14); color: #f08a8a; border-color: rgba(240,90,90,.3); }
-    #tglist .sub { margin-left: 8px; color: var(--muted); font: 11px ui-monospace, monospace; }
-    #tglist .empty { padding: 18px; text-align: center; color: var(--muted); }
+    #tglist .uid { margin-left: 8px; color: #7f7f8a; font: 11px ui-monospace, monospace; }
+    #tglist .empty { padding: 20px; text-align: center; color: var(--muted); }
     /* [hidden] 对 .pager / .tabs 不起作用(它们自己写了 display:inline-flex),要显式关掉 */
     .is-off { display: none !important; }
 
@@ -310,11 +313,13 @@
       <div id="grid"></div>
     </div>
     <div id="tglist">
-      <table>
-        <colgroup><col class="c-num"><col class="c-nm"><col class="c-ph"><col class="c-px"><col><col class="c-op"></colgroup>
-        <thead><tr><th>#</th><th>名称</th><th>手机号</th><th>代理</th><th>状态</th><th></th></tr></thead>
-        <tbody id="tglist-body"></tbody>
-      </table>
+      <div id="tblcard">
+        <table>
+          <colgroup><col class="c-num"><col class="c-ph"><col class="c-px"><col class="c-stt"><col><col class="c-op"></colgroup>
+          <thead><tr><th>#</th><th>手机号</th><th>代理</th><th>状态</th><th>备注 / 实况</th><th></th></tr></thead>
+          <tbody id="tglist-body"></tbody>
+        </table>
+      </div>
     </div>
     <div id="drawer-scrim"></div>
     <div id="preview-title">
@@ -721,23 +726,32 @@
     // 列表模式下页面本来就一个都不开,拿挂载状态当状态,整张表只会写满「未加载」。
     // 登录身份是登录时落进 profile 的 logins[telegram],不开页面也读得到。
     function rowStatus(idx, p) {
-      const say = loginSay.get(idx);
-      if (say) return { cls: 'run', text: say, sub: '' };
-      const g = gcells.get(idx), st = stateOf(idx);
-      const live = !g || !g.wv ? '' : st.loading ? '加载中…'
-        : st.failed ? ('加载失败 ' + ((st.error && (st.error.desc || st.error.code)) || ''))
-        : (st.title || (st.url ? '已打开' : '空白'));
+      if (loginSay.get(idx)) return { cls: 'run', text: '登录中', uid: '' };
       const it = identityOf(p);
       if (it && (it.username || it.phone || it.displayName)) {
         const id = (String(it.displayName || '').match(/id=(\d+)/) || [, ''])[1];
-        return { cls: 'ok', text: '已登录', sub: [id ? 'id ' + id : '', live].filter(Boolean).join(' · ') };
+        return { cls: 'ok', text: '已登录', uid: id ? 'id ' + id : '' };
       }
-      if (!codeUrlOf(p)) return { cls: 'bad', text: '未登录', sub: [phoneOf(p) ? '无接码卡' : '未配号', live].filter(Boolean).join(' · ') };
-      return { cls: 'off', text: '未登录', sub: live };
+      if (!phoneOf(p)) return { cls: 'off', text: '空闲', uid: '未配号' };
+      if (!codeUrlOf(p)) return { cls: 'bad', text: '未登录', uid: '无接码卡' };
+      return { cls: 'off', text: '未登录', uid: '' };
     }
     const statusHtml = (idx, p) => { const r = rowStatus(idx, p);
       return '<span class="pill ' + r.cls + '">' + esc(r.text) + '</span>'
-           + (r.sub ? '<span class="sub">' + esc(r.sub) + '</span>' : ''); };
+           + (r.uid ? '<span class="uid">' + esc(r.uid) + '</span>' : ''); };
+    // 「备注 / 实况」:登录跑着就显示当前这一步,格子开着就显示页面实况,
+    // 都没有就显示 profile 备注 —— 这一列本来是空的,空着才显得像没做完。
+    function rowInfo(idx, p) {
+      const say = loginSay.get(idx);
+      if (say) return say;
+      const g = gcells.get(idx), st = stateOf(idx);
+      if (g && g.wv) {
+        if (st.loading) return '加载中…';
+        if (st.failed) return '加载失败 ' + ((st.error && (st.error.desc || st.error.code)) || '');
+        return st.title || (st.url ? '已打开' : '空白页');
+      }
+      return p.note || '';
+    }
     function renderList() {
       const tb = document.getElementById('tglist-body'); if (!tb) return;
       const rows = profiles.filter((p) => gcells.has(p.accountIdx) && !csSet.has(p.accountIdx));
@@ -745,12 +759,14 @@
       tb.innerHTML = rows.map((p) => {
         const i = p.accountIdx;
         const port = (String(p.proxy || '').match(/:(\d+)\s*$/) || [, ''])[1];
+        const info = rowInfo(i, p);
         return '<tr class="row' + (i === drawerIdx ? ' on' : '') + '" data-idx="' + i + '">'
           + '<td class="num">#' + i + '</td>'
-          + '<td class="nm" title="' + esc(p.note || '') + '">' + esc(p.name) + '</td>'
           + '<td class="ph">' + esc(phoneOf(p) || '—') + '</td>'
           + '<td class="px">' + esc(port || '—') + '</td>'
           + '<td class="stt">' + statusHtml(i, p) + '</td>'
+          + '<td class="info"' + (loginSay.get(i) ? ' style="color:#f0a45a"' : '') + ' title="' + esc(info) + '">'
+          + esc(info) + '</td>'
           + '<td class="op"><span class="acts2">'
           + '<button class="ghost cfg-login" data-idx="' + i + '" title="自动登录:填号、取码、填 2FA,进度写在这一行">登录</button>'
           + '<button class="ghost row-gear" data-idx="' + i + '" title="手机号 / 接码 URL / 代理设置">设置</button>'
@@ -760,9 +776,11 @@
     function refreshRow(idx) {
       const tb = document.getElementById('tglist-body'); if (!tb) return;
       const tr = tb.querySelector('tr.row[data-idx="' + idx + '"]'); if (!tr) return;
-      const td = tr.querySelector('td.stt'); if (!td) return;
       const p = profiles.find((x) => x.accountIdx === idx); if (!p) return;
-      td.innerHTML = statusHtml(idx, p);
+      const td = tr.querySelector('td.stt'), ti = tr.querySelector('td.info');
+      if (td) td.innerHTML = statusHtml(idx, p);
+      if (ti) { const info = rowInfo(idx, p); ti.textContent = info; ti.title = info;
+                ti.style.color = loginSay.get(idx) ? '#f0a45a' : ''; }
       tr.classList.toggle('on', idx === drawerIdx);
     }
     function syncDrawerHead() {
@@ -1505,14 +1523,11 @@
             } else if (cool('submitPhone', 8000)) { say('提交手机号…');
               submitAt = Date.now();
               await evalT(wv, "(function(){var r=document.getElementById('auth-flow-root');var b=[].slice.call(r.querySelectorAll('button')).filter(function(e){return e.offsetParent&&/^next$/i.test((e.textContent||'').trim())})[0];if(b){b.click();return 1}return 0})()"); }
-              // 接码 webview 只允许在这之后出现:点完「下一步」再等 5 秒,让页面真的翻到
-              // 验证码屏。不等的话,提交那一下还没生效就把接码开出来,看着就是"号填完就弹接码"。
+              // 手机号屏一律不碰接码。上一版在这里点完「下一步」等 5 秒就去开接码 ——
+              // 可那一下是不是真点上了没人验证,没点上时页面还停在手机号屏,接码照样弹出来,
+              // 看着就是"号填完、没点下一步就开了接码"。基线交给验证码屏的第一次读:
+              // 页面真翻到验证码屏,才说明「下一步」确实生效了。
               await sleep(5000);
-              if (!baseRead) { baseRead = true; say('读接码基线…');
-                const base = await readCodePage(idx);
-                if (base && base.dead) { say('接码卡已失效'); return; }
-                if (base && base.rate) { nextCodeAt = Date.now() + 40000; }
-                baseCode = (base && base.code) || ''; baseTime = (base && base.time) || ''; }
           } else if (st.s === 'code') {
             // 验证码屏会把刚才提交的号码显示出来 —— 对不上说明提交的是别人的号,
             // 再等下去也等不到码,必须退回去重填,而不是一直"等验证码…"。
@@ -1528,7 +1543,9 @@
               // 表现就是永远停在"等验证码"。撞到限流就退避,别把配额全浪费在重试上。
               if (Date.now() >= nextCodeAt && cool('readCode', 12000)) { say('等验证码…');
                 const c = await readCodePage(idx);
-                if (!baseRead) { baseRead = true;   // 没走过手机号屏:这一次读到的就当基线
+                // 第一次读到的就是基线:页面已经翻到验证码屏 = 「下一步」确实点成了,
+                // 此刻页面上那个码必定是上一轮的残码,之后只认比它新的。
+                if (!baseRead) { baseRead = true;
                   baseCode = (c && c.code) || ''; baseTime = (c && c.time) || ''; }
                 if (c && c.rate) { nextCodeAt = Date.now() + 40000; say('接码限流,40 秒后再读…'); }
                 else if (c && c.dead) { say('接码卡已失效'); return; }
