@@ -136,6 +136,62 @@
     main #preview-title, main #phone { display: none !important; }
     main #grid-title { display: flex !important; }
     main #grid { display: flex !important; }
+    /* ── 非客服的两种看法:网格 / 列表 ───────────────────────────────────
+       列表模式下整页是一张表,点一行把那个格子从右侧抽屉滑出来。
+       抽屉直接复用 #grid 本体,只改定位,**不搬 DOM** —— <webview> 一旦在文档里被
+       移动就会重新挂载:会话要重连、正在跑的登录进度会丢。 */
+    #drawer { display: flex; flex-direction: column; width: 100%; flex: 1 1 auto; min-height: 0; }
+    #drawer-head, #tglist, #drawer-scrim { display: none; }
+    main.listmode #tglist { display: block; width: 100%; flex: 1 1 auto; min-height: 0; overflow: auto;
+                            border: 1px solid var(--line); border-radius: 10px; background: var(--head); }
+    main.listmode #drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(900px, 66vw); z-index: 44;
+                            background: var(--bg); border-left: 1px solid var(--line);
+                            box-shadow: -18px 0 44px rgba(0,0,0,.5); padding: 8px 10px 10px;
+                            transform: translateX(101%); transition: transform .18s ease; }
+    main.listmode.drawer-open #drawer { transform: none; }
+    /* 抽屉里只有一格,让它把抽屉撑满 —— .gcell 平时是固定 360px × 50vh 的网格砖,
+       直接拿进抽屉会缩在左上角一小块。 */
+    main.listmode #grid { display: block !important; }
+    main.listmode #grid > .gcell { width: 100%; height: 100%; }
+    main.listmode #drawer-head { display: flex; align-items: center; gap: 8px; height: 30px; flex: 0 0 auto; }
+    main.listmode.drawer-open #drawer-scrim { display: block; position: fixed; inset: 0; z-index: 43;
+                                              background: rgba(0, 0, 0, .45); }
+    #drawer-head .t { font-size: 13px; color: var(--fg); font-weight: 600; }
+    #drawer-head .sub { color: var(--muted); font: 11px ui-monospace, monospace; }
+    #drawer-head .grow { flex: 1 1 auto; }
+
+    /* 表格本身不铺满 1900px —— 那样「名称」和「手机号」之间会空出半屏,
+       看着像没排版。给一个上限再居中,列宽固定,操作列贴右。 */
+    #tglist table { width: 100%; max-width: 1180px; margin: 0 auto; border-collapse: separate; border-spacing: 0; font-size: 12px; }
+    #tglist th { position: sticky; top: 0; z-index: 1; background: var(--head); color: var(--muted);
+                 font-weight: 500; text-align: left; padding: 9px 12px;
+                 border-bottom: 1px solid var(--line); white-space: nowrap; }
+    #tglist td { padding: 0 12px; height: 34px; border-bottom: 1px solid rgba(255,255,255,.05);
+                 color: #c9c9d1; white-space: nowrap; vertical-align: middle; }
+    #tglist tr:last-child td { border-bottom: none; }
+    #tglist tr.row { cursor: pointer; }
+    #tglist tr.row:hover td { background: rgba(255, 255, 255, .045); }
+    #tglist tr.row.on td { background: rgba(240, 164, 90, .13); }
+    #tglist col.c-num { width: 58px; } #tglist col.c-nm { width: 190px; }
+    #tglist col.c-ph { width: 156px; }  #tglist col.c-px { width: 92px; }
+    #tglist col.c-op { width: 152px; }
+    #tglist td.num, #tglist td.ph, #tglist td.px { font: 11px ui-monospace, monospace; color: var(--muted); }
+    #tglist td.nm { color: var(--fg); overflow: hidden; text-overflow: ellipsis; }
+    #tglist td.stt { overflow: hidden; text-overflow: ellipsis; }
+    #tglist td.op { text-align: right; }
+    #tglist .op .ghost { padding: 2px 8px; font-size: 11px; }
+    /* 状态做成一个药丸 + 一句灰色补充,一眼能分清「号登没登」和「页面开没开」 */
+    #tglist .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px;
+                    line-height: 17px; border: 1px solid transparent; }
+    #tglist .pill.ok  { background: rgba(60, 200, 130, .14); color: #4ed197; border-color: rgba(60,200,130,.28); }
+    #tglist .pill.off { background: rgba(255, 255, 255, .06); color: var(--muted); border-color: var(--line); }
+    #tglist .pill.run { background: rgba(240, 164, 90, .16); color: #f0a45a; border-color: rgba(240,164,90,.34); }
+    #tglist .pill.bad { background: rgba(240, 90, 90, .14); color: #f08a8a; border-color: rgba(240,90,90,.3); }
+    #tglist .sub { margin-left: 8px; color: var(--muted); font: 11px ui-monospace, monospace; }
+    #tglist .empty { padding: 18px; text-align: center; color: var(--muted); }
+    /* [hidden] 对 .pager / .tabs 不起作用(它们自己写了 display:inline-flex),要显式关掉 */
+    .is-off { display: none !important; }
+
     /* 单格最大化:全屏叠层显示当前 webview(其它 webview detach 保活,不受影响) */
     #maxview { position: fixed; inset: 0; z-index: 50; background: var(--bg); display: flex; flex-direction: column; }
     #maxview[hidden] { display: none; }
@@ -242,9 +298,25 @@
   <main>
     <div id="grid-title">
       <div class="left"><span id="mid-batch" class="mid" hidden></span><b>批量登录</b><span id="grid-count"></span></div>
-      <div class="actions"><span class="tabs"><button id="tab-other">非客服 0</button><button id="tab-cs">客服 0</button></span><span class="pager" id="pager" title="一次只打开这么多个会话,翻页时其余的会被卸载释放内存"><button class="icon" id="page-prev" title="上一页">‹</button><span id="page-label"></span><button class="icon" id="page-next" title="下一页">›</button><i></i><input id="page-size" type="number" min="1" max="24" title="每页同时打开几个。一个 Telegram 会话能吃到 2.5GB,别开太多"></span><button class="ghost" id="all-on" title="把本机所有账号的随机开群开关一次全开(写到 tgsou,按手机号存)">全部开</button><button class="ghost" id="all-off" title="把本机所有账号的随机开群开关一次全关">全部关</button><button class="ghost" id="open-tgsou" title="一键打开本机所有账号的搜群标签">🔍 打开搜群</button><button class="ghost" id="grid-reload" title="重新加载所有格子">全部重载</button></div>
+      <div class="actions"><span class="tabs"><button id="tab-other">非客服 0</button><button id="tab-cs">客服 0</button></span><span class="tabs" id="views"><button id="view-grid" title="网格:本页的会话平铺成格子">网格</button><button id="view-list" title="列表:一张表,点一行从右侧抽屉里打开那个会话">列表</button></span><span class="pager" id="pager" title="一次只打开这么多个会话,翻页时其余的会被卸载释放内存"><button class="icon" id="page-prev" title="上一页">‹</button><span id="page-label"></span><button class="icon" id="page-next" title="下一页">›</button><i></i><input id="page-size" type="number" min="1" max="24" title="每页同时打开几个。一个 Telegram 会话能吃到 2.5GB,别开太多"></span><button class="ghost" id="all-on" title="把本机所有账号的随机开群开关一次全开(写到 tgsou,按手机号存)">全部开</button><button class="ghost" id="all-off" title="把本机所有账号的随机开群开关一次全关">全部关</button><button class="ghost" id="open-tgsou" title="一键打开本机所有账号的搜群标签">🔍 打开搜群</button><button class="ghost" id="grid-reload" title="重新加载所有格子">全部重载</button></div>
     </div>
-    <div id="grid"></div>
+    <div id="drawer">
+      <div id="drawer-head">
+        <span class="t" id="drawer-title"></span><span class="sub" id="drawer-sub"></span>
+        <span class="grow"></span>
+        <button class="ghost cfg-login" id="drawer-login" data-idx="">自动登录</button>
+        <button class="icon" id="drawer-close" title="收起抽屉"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+      </div>
+      <div id="grid"></div>
+    </div>
+    <div id="tglist">
+      <table>
+        <colgroup><col class="c-num"><col class="c-nm"><col class="c-ph"><col class="c-px"><col><col class="c-op"></colgroup>
+        <thead><tr><th>#</th><th>名称</th><th>手机号</th><th>代理</th><th>状态</th><th></th></tr></thead>
+        <tbody id="tglist-body"></tbody>
+      </table>
+    </div>
+    <div id="drawer-scrim"></div>
     <div id="preview-title">
       <div class="left"><span class="dot" id="sel-dot"></span><span id="selected-name">未选择 Profile</span><span id="status"></span></div>
       <div class="actions"><button class="code" id="open-code" title="在格子上叠加/关闭接码 webview(同代理出口)">接码</button><button class="ghost" id="probe-ip" title="经该 Profile 的代理探测出口 IP / 地区">测 IP</button><button class="ghost" id="reload" title="重新加载 Telegram Web">重新加载</button></div>
@@ -530,6 +602,20 @@
       }
     };
     let curTab = (() => { try { return localStorage.getItem(TAB_KEY) || 'other'; } catch (e) { return 'other'; } })();
+    // 非客服有两种看法:grid = 现在的平铺格子;list = 一张表,点一行从抽屉里打开那一个。
+    // 客服不参与 —— 客服号要常驻收消息,只能是平铺。
+    const VIEW_KEY = 'tgmx.view';
+    let curView = (() => { try { return localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'grid'; } catch (e) { return 'grid'; } })();
+    let drawerIdx = null;                       // 列表模式下抽屉里开着哪一格
+    const listMode = () => curView === 'list' && curTab !== 'cs';
+    const setView = (v) => {
+      curView = v === 'list' ? 'list' : 'grid';
+      try { localStorage.setItem(VIEW_KEY, curView); } catch (e) {}
+      if (curView !== 'list') drawerIdx = null;
+      applyPage();
+    };
+    function openDrawer(idx) { if (!gcells.has(idx) || csSet.has(idx)) return; drawerIdx = idx; applyPage(); }
+    function closeDrawer() { drawerIdx = null; applyPage(); }
     const setTab = (t) => { curTab = t; try { localStorage.setItem(TAB_KEY, t); } catch (e) {} applyPage(); };
     function pageSize() { const v = Number(localStorage.getItem(PAGE_KEY)) || 4; return Math.max(1, Math.min(24, v)); }
 
@@ -575,6 +661,7 @@
     function gotoIdx(idx) {
       if (!gcells.has(idx)) return false;
       if (csSet.has(idx)) { if (curTab !== 'cs') setTab('cs'); return true; }
+      if (listMode()) { openDrawer(idx); return true; }
       const all = [...gcells.keys()].filter((i) => !csSet.has(i));
       const pos = all.indexOf(idx); if (pos < 0) return false;
       const want = Math.floor(pos / pageSize());
@@ -590,13 +677,19 @@
     function applyPage() {
       const { list, total, maxPage } = pageIdxList();
       const onPage = new Set(list);
+      const lm = listMode();
+      if (lm && drawerIdx != null && (!gcells.has(drawerIdx) || csSet.has(drawerIdx))) drawerIdx = null;
+      if (lm && cfgModal && !cfgModal.hidden) { try { closeCfgModal(); } catch (e) {} }
+      mainEl.classList.toggle('listmode', lm);
+      mainEl.classList.toggle('drawer-open', lm && drawerIdx != null);
       for (const idx of gcells.keys()) {
         const g = gcells.get(idx);
         const isCs = csSet.has(idx);
         // 挂载规则:客服一直挂着;非客服只有翻到它那一页才挂。
         // 显示规则:只显示当前 tab 的那一组 —— 两组的 webview 都还在,只是藏起来。
-        const mounted = isCs || onPage.has(idx);
-        const visible = mounted && (curTab === 'cs' ? isCs : !isCs);
+        // 列表模式:非客服只挂抽屉里打开的那一个,其余一律卸掉(表格里不需要活页面)
+        const mounted = isCs || (lm ? idx === drawerIdx : onPage.has(idx));
+        const visible = mounted && (curTab === 'cs' ? isCs : !isCs) && (!lm || idx === drawerIdx);
         if (mounted) mountCell(idx); else unmountCell(idx);
         g.el.hidden = !visible;
         const tag = g.el.querySelector('.cstag');
@@ -607,7 +700,14 @@
       if (tc) { tc.classList.toggle('on', curTab === 'cs'); tc.textContent = '客服 ' + csN; }
       if (to) { to.classList.toggle('on', curTab !== 'cs'); to.textContent = '非客服 ' + otherN; }
       const pager = document.getElementById('pager');
-      if (pager) pager.hidden = (curTab === 'cs');   // 客服常驻,没有分页可言
+      // 客服常驻、列表模式按需开单个 —— 两种情况都没有「本页开几个」这回事
+      if (pager) pager.classList.toggle('is-off', (curTab === 'cs') || lm);
+      const views = document.getElementById('views');
+      if (views) views.classList.toggle('is-off', curTab === 'cs');
+      const vg = document.getElementById('view-grid'), vl = document.getElementById('view-list');
+      if (vg) vg.classList.toggle('on', curView !== 'list');
+      if (vl) vl.classList.toggle('on', curView === 'list');
+      if (lm) { renderList(); syncDrawerHead(); }
       const lab = document.getElementById('page-label');
       if (lab) {
         lab.textContent = (total ? (pageNo + 1) : 0) + '/' + (maxPage + 1) + ' · ' + list.length + ' 开';
@@ -615,6 +715,65 @@
       }
       requestAnimationFrame(syncPreview);
     }
+    // 列表模式的表:一行一个非客服 profile。这里只画「不用开页面就能知道」的东西
+    // (配置 + 格子状态 + 登录进度),真正的会话要点开抽屉才挂载。
+    // 这一列要回答的是「这个号登没登录」,不是「webview 挂没挂载」——
+    // 列表模式下页面本来就一个都不开,拿挂载状态当状态,整张表只会写满「未加载」。
+    // 登录身份是登录时落进 profile 的 logins[telegram],不开页面也读得到。
+    function rowStatus(idx, p) {
+      const say = loginSay.get(idx);
+      if (say) return { cls: 'run', text: say, sub: '' };
+      const g = gcells.get(idx), st = stateOf(idx);
+      const live = !g || !g.wv ? '' : st.loading ? '加载中…'
+        : st.failed ? ('加载失败 ' + ((st.error && (st.error.desc || st.error.code)) || ''))
+        : (st.title || (st.url ? '已打开' : '空白'));
+      const it = identityOf(p);
+      if (it && (it.username || it.phone || it.displayName)) {
+        const id = (String(it.displayName || '').match(/id=(\d+)/) || [, ''])[1];
+        return { cls: 'ok', text: '已登录', sub: [id ? 'id ' + id : '', live].filter(Boolean).join(' · ') };
+      }
+      if (!codeUrlOf(p)) return { cls: 'bad', text: '未登录', sub: [phoneOf(p) ? '无接码卡' : '未配号', live].filter(Boolean).join(' · ') };
+      return { cls: 'off', text: '未登录', sub: live };
+    }
+    const statusHtml = (idx, p) => { const r = rowStatus(idx, p);
+      return '<span class="pill ' + r.cls + '">' + esc(r.text) + '</span>'
+           + (r.sub ? '<span class="sub">' + esc(r.sub) + '</span>' : ''); };
+    function renderList() {
+      const tb = document.getElementById('tglist-body'); if (!tb) return;
+      const rows = profiles.filter((p) => gcells.has(p.accountIdx) && !csSet.has(p.accountIdx));
+      if (!rows.length) { tb.innerHTML = '<tr><td class="empty" colspan="6">没有非客服 Profile</td></tr>'; return; }
+      tb.innerHTML = rows.map((p) => {
+        const i = p.accountIdx;
+        const port = (String(p.proxy || '').match(/:(\d+)\s*$/) || [, ''])[1];
+        return '<tr class="row' + (i === drawerIdx ? ' on' : '') + '" data-idx="' + i + '">'
+          + '<td class="num">#' + i + '</td>'
+          + '<td class="nm" title="' + esc(p.note || '') + '">' + esc(p.name) + '</td>'
+          + '<td class="ph">' + esc(phoneOf(p) || '—') + '</td>'
+          + '<td class="px">' + esc(port || '—') + '</td>'
+          + '<td class="stt">' + statusHtml(i, p) + '</td>'
+          + '<td class="op"><span class="acts2">'
+          + '<button class="ghost cfg-login" data-idx="' + i + '" title="自动登录:填号、取码、填 2FA,进度写在这一行">登录</button>'
+          + '<button class="ghost row-gear" data-idx="' + i + '" title="手机号 / 接码 URL / 代理设置">设置</button>'
+          + '</span></td></tr>';
+      }).join('');
+    }
+    function refreshRow(idx) {
+      const tb = document.getElementById('tglist-body'); if (!tb) return;
+      const tr = tb.querySelector('tr.row[data-idx="' + idx + '"]'); if (!tr) return;
+      const td = tr.querySelector('td.stt'); if (!td) return;
+      const p = profiles.find((x) => x.accountIdx === idx); if (!p) return;
+      td.innerHTML = statusHtml(idx, p);
+      tr.classList.toggle('on', idx === drawerIdx);
+    }
+    function syncDrawerHead() {
+      const t = document.getElementById('drawer-title'), sub = document.getElementById('drawer-sub');
+      const lg = document.getElementById('drawer-login');
+      const p = drawerIdx == null ? null : profiles.find((x) => x.accountIdx === drawerIdx);
+      if (t) t.textContent = p ? (p.name + ' · #' + p.accountIdx) : '';
+      if (sub) sub.textContent = p ? (phoneOf(p) || '未配手机号') : '';
+      if (lg) { lg.dataset.idx = p ? String(p.accountIdx) : ''; lg.hidden = !p; }
+    }
+
     function gotoPage(n) { const { maxPage } = pageIdxList(); pageNo = Math.max(0, Math.min(maxPage, n)); applyPage(); }
 
     // 同一格同一时刻只开一个叠加层(接码 / ping / 加群面板)。
@@ -861,6 +1020,7 @@
       else { _st.textContent = ''; _st.style.color = ''; }
       renderStat(idx);                              // 浮层里的版本/限流跟着 state.title 走
       updateCodeButtons(idx);
+      if (listMode()) refreshRow(idx);   // 列表模式下状态也要跟着走
       if (batchMode) { const n = [...batch].filter((i) => { const q = profiles.find((x) => x.accountIdx === i); return q && hasIdentity(q); }).length; gridCount.textContent = `${batch.size} 个会话 · ${n} 已登录`; }
     }
     function enterBatch() {
@@ -906,6 +1066,22 @@
       flash((on ? '已全部开启随机开群 ' : '已全部停止 ') + ok + '/' + list.length
             + (skipped ? ('(跳过 ' + skipped + ' 个没手机号的)') : ''));
     }
+    document.getElementById('view-grid').onclick = () => setView('grid');
+    document.getElementById('view-list').onclick = () => setView('list');
+    document.getElementById('drawer-close').onclick = () => closeDrawer();
+    document.getElementById('drawer-scrim').onclick = () => closeDrawer();
+    document.getElementById('tglist').addEventListener('click', (e) => {
+      const gear = e.target.closest && e.target.closest('.row-gear');
+      if (gear) { e.stopPropagation();
+        const p = profiles.find((x) => x.accountIdx === Number(gear.dataset.idx));
+        if (p) openCfgModal(p); return; }
+      if (e.target.closest && e.target.closest('.cfg-login')) return;   // 交给全局那个处理器
+      const tr = e.target.closest && e.target.closest('tr.row');
+      if (!tr) return;
+      const idx = Number(tr.dataset.idx);
+      if (idx === drawerIdx) closeDrawer(); else openDrawer(idx);
+    });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && drawerIdx != null) closeDrawer(); });
     document.getElementById('tab-cs').onclick = () => setTab('cs');
     document.getElementById('tab-other').onclick = () => setTab('other');
     document.getElementById('page-prev').onclick = () => gotoPage(pageNo - 1);
@@ -1284,6 +1460,7 @@
       // 把整个弹窗撑歪;而且弹窗点完就关了,写了也看不见。
       const say = (t) => {
         loginSay.set(idx, t);
+        if (listMode()) refreshRow(idx);
         const g = gcells.get(idx);
         if (g) { const st = g.el.querySelector('.ghead .st'); if (st) { st.textContent = t; st.style.color = '#f0a45a'; } }
       };
@@ -1305,7 +1482,7 @@
           screen = st.s;
 
           if (st.s === 'done') { say('登录成功 id=' + st.id);
-            setTimeout(() => { loginSay.delete(idx); renderGridCell(idx); }, 4000); 
+            setTimeout(() => { loginSay.delete(idx); renderGridCell(idx); if (listMode()) refreshRow(idx); }, 4000); 
             setTimeout(() => { const q = profiles.find((x) => x.accountIdx === idx);
               if (q && cfgP && cfgP.accountIdx === idx) document.getElementById('cfg-info').innerHTML = cfgInfoHtml(q); }, 1500);
             return; }
@@ -1328,8 +1505,9 @@
             } else if (cool('submitPhone', 8000)) { say('提交手机号…');
               submitAt = Date.now();
               await evalT(wv, "(function(){var r=document.getElementById('auth-flow-root');var b=[].slice.call(r.querySelectorAll('button')).filter(function(e){return e.offsetParent&&/^next$/i.test((e.textContent||'').trim())})[0];if(b){b.click();return 1}return 0})()"); }
-              // 基线只在提交之后读:接码 webview 从这一刻起才允许出现。提交完立刻读(不等冷却),
-              // 尽量赶在短信到达之前把"旧码"记下来,之后只认比它新的。
+              // 接码 webview 只允许在这之后出现:点完「下一步」再等 5 秒,让页面真的翻到
+              // 验证码屏。不等的话,提交那一下还没生效就把接码开出来,看着就是"号填完就弹接码"。
+              await sleep(5000);
               if (!baseRead) { baseRead = true; say('读接码基线…');
                 const base = await readCodePage(idx);
                 if (base && base.dead) { say('接码卡已失效'); return; }
