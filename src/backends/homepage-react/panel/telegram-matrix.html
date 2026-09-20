@@ -468,7 +468,7 @@
     function buildGridCell(p) {
       const el = document.createElement('div');
       el.className = 'gcell'; el.dataset.id = String(p.accountIdx);
-      el.innerHTML = `<div class="ghead"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="phone">${esc(phoneOf(p))}</span><span class="st"></span><span class="acts"><button class="icon pin" title="标记为客服:常驻不卸载,归到「客服」tab">🎧</button><button class="code" title="在格子上叠加/关闭接码 webview(同代理出口)">接码</button><button class="icon stat" title="加群面板:分配/已加入、脚本版本、限流,自动随机开群"><svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></button><button class="icon tgsou" title="单独打开这个账号的搜群"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button><button class="icon gear" title="手机号 / 接码 URL / 代理设置"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button><button class="icon ping" title="用本 Profile 代理打开 ping0.cc(验 IP/指纹)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></button><button class="icon max" title="最大化 / 还原"><svg viewBox="0 0 24 24"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></button><button class="icon reload" title="重新加载"><svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button><button class="icon xclose" title="关闭当前叠加层"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></span></div><div class="gstat" hidden></div><div class="gbody"></div>`;
+      el.innerHTML = `<div class="ghead"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="phone">${esc(phoneOf(p))}</span><span class="st"></span><span class="acts"><button class="icon pin" title="客服号:常驻不卸载,归到「客服」tab。归属在 agg 台账里改">🎧</button><button class="code" title="在格子上叠加/关闭接码 webview(同代理出口)">接码</button><button class="icon stat" title="加群面板:分配/已加入、脚本版本、限流,自动随机开群"><svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></button><button class="icon tgsou" title="单独打开这个账号的搜群"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button><button class="icon gear" title="手机号 / 接码 URL / 代理设置"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button><button class="icon ping" title="用本 Profile 代理打开 ping0.cc(验 IP/指纹)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></button><button class="icon max" title="最大化 / 还原"><svg viewBox="0 0 24 24"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></button><button class="icon reload" title="重新加载"><svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button><button class="icon xclose" title="关闭当前叠加层"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></span></div><div class="gstat" hidden></div><div class="gbody"></div>`;
       el.querySelector('.reload').onclick = () => (pingOpen.has(p.accountIdx) ? reloadPing(p.accountIdx) : reloadProfile(p.accountIdx));
       el.querySelector('.max').onclick = (e) => { e.stopPropagation(); toggleMax(p.accountIdx); };
       // ping / 接码 也走互斥:先关掉别的叠加层,再用它们原本的开关(各自管自己的集合)
@@ -499,10 +499,7 @@
       };
       el.querySelector('.pin').onclick = (e) => {
         e.stopPropagation();
-        const i = p.accountIdx;
-        if (csSet.has(i)) csSet.delete(i); else csSet.add(i);
-        saveCs(); applyPage();
-        flash('#' + i + (csSet.has(i) ? ' 标记为客服(常驻,不参与分页)' : ' 取消客服标记'));
+        flash('客服归属在 agg 台账里改(agg.fm558.com/#/tg 的「客服」列),面板只读');
       };
       el.querySelector('.gear').onclick = (e) => { e.stopPropagation(); if (cfgP && cfgP.accountIdx === p.accountIdx && !cfgModal.hidden) closeCfgModal(); else openCfgModal(p); };
       el.querySelector('.ghead').onclick = (e) => { if (!e.target.closest('button')) { selectProfile(p.accountIdx); } };
@@ -521,8 +518,15 @@
     let pageNo = 0;
     // 客服号:常驻,不参与分页。切 tab 只是把另一组藏起来(hidden),**webview 不卸载** ——
     // 客服要随时能收消息,卸了就掉线;非客服才按需开。
-    const csSet = new Set((() => { try { return JSON.parse(localStorage.getItem(CS_KEY) || '[]'); } catch (e) { return []; } })());
-    const saveCs = () => { try { localStorage.setItem(CS_KEY, JSON.stringify([...csSet])); } catch (e) {} };
+    // 客服名单来自 agg 台账(tg_accounts.is_cs),同步写进 profile:新版走 panelAPI 的 cs 字段,
+    // 旧版客户端没这个字段,回落到 note 里的 [客服] 前缀。面板不再自己存一份。
+    const csSet = new Set();
+    const refreshCs = () => {
+      csSet.clear();
+      for (const p of profiles) {
+        if (p.cs || /^\s*\[客服\]/.test(p.note || '')) csSet.add(p.accountIdx);
+      }
+    };
     let curTab = (() => { try { return localStorage.getItem(TAB_KEY) || 'other'; } catch (e) { return 'other'; } })();
     const setTab = (t) => { curTab = t; try { localStorage.setItem(TAB_KEY, t); } catch (e) {} applyPage(); };
     function pageSize() { const v = Number(localStorage.getItem(PAGE_KEY)) || 4; return Math.max(1, Math.min(24, v)); }
@@ -1012,6 +1016,7 @@
 
     async function loadProfiles(preferredId) {
       profiles = await window.panelAPI.profiles();
+      refreshCs();
       profiles.sort((a, b) => a.accountIdx - b.accountIdx);
       const remembered = Number(localStorage.getItem('telegram-matrix-profile'));
       const target = preferredId || (profiles.some((p) => p.accountIdx === remembered) ? remembered : 0) || (profiles[0] && profiles[0].accountIdx);

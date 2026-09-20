@@ -441,6 +441,9 @@ function installIpc(findTab) {
           proxy: p.proxy && p.proxy.enabled ? String(p.proxy.url || "") : "",
           note: String(p.note || ""),
           login: { phone: String((p.telegramLogin || {}).phone || ""), codeUrl: String((p.telegramLogin || {}).codeUrl || "") },
+          // 客服标记来自 agg 台账(tg_accounts.is_cs),由同步写进 profile;面板据此分组,
+          // 不在面板本地各存各的 —— 那样换台机器看就对不上了。
+          cs: !!((p.telegramLogin || {}).isCs),
           telegram: telegramIdentity.telegramIdentityFromProfile(p),
           facebook: facebookIdentity.facebookIdentityFromProfile(p),
           tiktok: tiktokIdentity.tiktokIdentityFromProfile(p),
