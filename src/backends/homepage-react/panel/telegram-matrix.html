@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="a0df1b5f8d1d">
+  <meta name="pv" content="d5fc5ecc71b4">
   <title>Telegram 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -1658,6 +1658,14 @@
                 baseCode = (base && base.code) || ''; baseTime = (base && base.time) || ''; }
               continue; }
           } else if (st.s === 'code') {
+            // 本次还没点过「下一步」(submitAt 为 0) = 一进来就停在验证码屏。
+            // 重置回手机号屏再从头走:重载没用,Telegram 会把这一屏恢复回来,
+            // 唯一的入口是点号码旁边那支笔(phoneWrapper)。这期间绝不碰接码。
+            if (!submitAt) {
+              if (cool('resetToPhone', 12000)) { say('重置到手机号输入屏…');
+                await evalT(wv, "(function(){var w=document.querySelector('[class*=phoneWrapper]');if(!w)return 0;(w.querySelector('span,i,svg,button')||w).click();return 1})()"); }
+              await sleep(3000); continue;
+            }
             // 验证码屏会把刚才提交的号码显示出来 —— 对不上说明提交的是别人的号,
             // 再等下去也等不到码,必须退回去重填,而不是一直"等验证码…"。
             const shown = String(st.ph || '').replace(/\D/g, '');
