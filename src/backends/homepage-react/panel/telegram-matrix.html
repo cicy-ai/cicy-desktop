@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="ef701cefe8ea">
+  <meta name="pv" content="a0df1b5f8d1d">
   <title>Telegram 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -1510,6 +1510,10 @@
     }
 
     // 打开接码浮层读一次三个字段,再关掉(叠着会盖住 Telegram)
+    function say3(idx, t) {
+      try { loginSay.set(idx, t); const g = gcells.get(idx);
+        if (g) { const st = g.el.querySelector('.ghead .st'); if (st) { st.textContent = t; st.style.color = '#f0a45a'; } } } catch (e) {}
+    }
     async function readCodePage(idx) {
       const g = gcells.get(idx); if (!g) return null;
       const btn = g.el.querySelector('.code'); if (!btn) return null;
@@ -1531,6 +1535,9 @@
           out = JSON.parse(s);
         } catch (e) {}
       }
+      // 接码卡失效时把页面留在格子上:那上面写着到底为什么失效(掉线/冻结/卡密错误),
+      // 关掉就只剩标题里一句「接码卡已失效」,没法处理。其余情况读完照常收起来。
+      if (out && out.dead) { say3(idx, '接码卡已失效,页面留着'); return out; }
       if (codeOpen.has(idx)) { btn.click(); await sleep(1000); }
       return out;
     }
