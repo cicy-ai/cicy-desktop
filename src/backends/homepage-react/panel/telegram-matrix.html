@@ -266,7 +266,7 @@
     const codeOpen = new Set(); const pingOpen = new Set(); const pingUrl = new Map();          // 已叠开接码 overlay 的 accountIdx(同 partition 的接码 webview 覆盖在格子上)
     const cellState = new Map();        // accountIdx -> { loading, failed, error, url, title }
     const rows = new Map();             // accountIdx -> row element
-    const BATCH_MAX = 10;               // 一次最多铺开多少个登录格
+    const BATCH_MAX = 24;               // 一次最多铺开多少个登录格(主进程 panel-cells 也是 24 上限)
     const mainEl = document.querySelector('main');
     const gridEl = document.getElementById('grid');
     const gridCount = document.getElementById('grid-count');
@@ -389,7 +389,14 @@
           if (profileId === maxedIdx) { visible = true; r = box(document.getElementById('maxbody').getBoundingClientRect()); }
         } else if (batchMode) {
           const g = gcells.get(profileId);
-          if (g && batch.has(profileId)) { visible = true; r = box(g.body.getBoundingClientRect()); }
+          if (g && batch.has(profileId)) {
+            r = box(g.body.getBoundingClientRect());
+            // 只画完整露出来的格子。BrowserView 不受页面 overflow 裁剪,滚动时半露的
+            // 那个会糊到网格外面(工具栏上、窗口外)。夹紧矩形会把页面压扁,更难看,
+            // 所以整格露出来才画 —— 滚到位自然出现。
+            const gr = gridEl.getBoundingClientRect();
+            visible = r.h > 0 && r.y >= gr.top - 1 && (r.y + r.h) <= gr.bottom + 1;
+          }
         } else if (selected && profileId === selected.accountIdx) { visible = true; r = box(rect); }
         if (__bg) visible = false;                    // 后台标签:不画,但会话留着
         if (visible && hitsCard(r)) visible = false;  // 被弹窗盖住 → 临时 detach
@@ -768,6 +775,13 @@
     function reloadPing(idx) { if (!pingOpen.has(idx)) return; const base = (pingUrl.get(idx) || 'https://ping0.cc/').split('?_r=')[0]; pingUrl.set(idx, base + (base.indexOf('?') >= 0 ? '&' : '?') + '_r=' + Date.now()); syncPreview(); }
     function closePing(idx) { pingOpen.delete(idx); pingUrl.delete(idx); const g = gcells.get(idx); if (g) g.el.classList.remove('pinging'); syncPreview(); }
     new ResizeObserver(() => requestAnimationFrame(syncPreview)).observe(gridEl);
+    // 滚动必须重新同步:格子坐标是主进程按视口算的,页面滚了它不会自己跟着动。
+    // rAF 合并同一帧内的多次滚动事件,不然快速滚动会打爆 IPC。
+    let __scrollRaf = 0;
+    gridEl.addEventListener('scroll', () => {
+      if (__scrollRaf) return;
+      __scrollRaf = requestAnimationFrame(() => { __scrollRaf = 0; syncPreview(); });
+    }, { passive: true });
 
     function buildRow(p) {
       const row = document.createElement('div');
