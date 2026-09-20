@@ -1616,24 +1616,16 @@
               }
             } else if (cool('submitPhone', 8000)) { say('提交手机号…');
               await evalT(wv, "(function(){var r=document.getElementById('auth-flow-root');var b=[].slice.call(r.querySelectorAll('button')).filter(function(e){return e.offsetParent&&/^next$/i.test((e.textContent||'').trim())})[0];if(b){b.click();return 1}return 0})()"); }
-              // submitAt 是「接码 webview 可以出现了」的唯一开关,所以它只能在
-              // **确认页面真的翻到验证码屏之后**才置位。原来在点击之前就赋值 ——
-              // 那一下点没点上根本没人验证,于是号刚填完就被当成已提交,接码立刻弹出来。
+              // 点完「下一步」等 5 秒,然后开接码读基线。接码 webview 只在这里出现。
               await sleep(5000);
-              let after2 = null;
-              try { after2 = await screenOf(wv); } catch (e2) {}
-              if (after2 && after2.s === 'code') { submitAt = Date.now(); }
-              else { say('下一步没生效,重试…'); }
+              submitAt = Date.now();
+              if (!baseRead) { baseRead = true; say('读接码基线…');
+                const base = await readCodePage(idx);
+                if (base && base.dead) { say('接码卡已失效'); return; }
+                if (base && base.rate) { nextCodeAt = Date.now() + 40000; }
+                baseCode = (base && base.code) || ''; baseTime = (base && base.time) || ''; }
               continue;
           } else if (st.s === 'code') {
-            // 本次流程还没点过「下一步」(submitAt 为 0),说明这是上一轮遗留的验证码屏。
-            // 这种情况下绝不能去读接码 —— 手机号都还没填,接码 webview 不该出现。
-            // 点验证码屏上的号码本身就能退回手机号屏(重载没用,Telegram 会把这屏恢复回来)。
-            if (!submitAt) {
-              if (cool('leftover', 15000)) { say('上一轮遗留的验证码屏,退回填手机号…');
-                await evalT(wv, "(function(){var w=document.querySelector('[class*=phoneWrapper]');if(!w)return 0;(w.querySelector('span,i,svg,button')||w).click();return 1})()"); }
-              await sleep(3000); continue;
-            }
             // 验证码屏会把刚才提交的号码显示出来 —— 对不上说明提交的是别人的号,
             // 再等下去也等不到码,必须退回去重填,而不是一直"等验证码…"。
             const shown = String(st.ph || '').replace(/\D/g, '');
@@ -1646,7 +1638,7 @@
             if (!code || st.err === 'code') {
               // 接码站大约每分钟只让读一次,读太勤只会一直拿到"请求过于频繁",
               // 表现就是永远停在"等验证码"。撞到限流就退避,别把配额全浪费在重试上。
-              if (Date.now() >= nextCodeAt && cool('readCode', 12000)) { say('等验证码…');
+              if (submitAt && Date.now() >= nextCodeAt && cool('readCode', 12000)) { say('等验证码…');
                 const c = await readCodePage(idx);
                 // 第一次读到的就是基线:页面已经翻到验证码屏 = 「下一步」确实点成了,
                 // 此刻页面上那个码必定是上一轮的残码,之后只认比它新的。
