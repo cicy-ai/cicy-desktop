@@ -160,10 +160,18 @@ function buildTabWebPreferences(accountIdx, partition, target, opts = {}) {
   // home is system-driven (openHomeWindow), never caller-URL-reachable, so it
   // keeps its privileges without a URL check.
   if (opts.home) { wp.preload = HOMEPAGE_PRELOAD; wp.webviewTag = true; wp.allowRunningInsecureContent = true; wp.sandbox = false; }
-  // split panel page: its cells are main-managed BrowserViews (panel-cells.js),
-  // driven over panelAPI IPC. No webviewTag needed (that path is the file://-dev
-  // fallback below). Sandbox stays ON — the preload only uses contextBridge/ipc.
-  else if (typeof target === "string" && (target.startsWith(PANEL_URL_BASE) || target.startsWith("cicyui://panel"))) { wp.preload = PANEL_PRELOAD; }
+  // split panel page: cells may be main-managed BrowserViews (panel-cells.js, over
+  // panelAPI IPC) OR in-page <webview>. BrowserViews are painted by the main process
+  // at viewport coordinates, so they do not scroll with the page and are not clipped
+  // by the grid's overflow — with more than a screenful of cells that is unusable.
+  // <webview> lives in the DOM and scrolls/clips for free, so the panel needs
+  // webviewTag on. sandbox must go off for the tag to be usable; the preload still
+  // only exposes contextBridge/ipcRenderer, and the panel page is our own origin.
+  else if (typeof target === "string" && (target.startsWith(PANEL_URL_BASE) || target.startsWith("cicyui://panel"))) {
+    wp.preload = PANEL_PRELOAD;
+    wp.webviewTag = true;
+    wp.sandbox = false;
+  }
   // Every other profile-0 tab carries the electronRPC bridge (WEBVIEW_PRELOAD),
   // but the bridge is INERT until the page's origin is authorized: the first
   // rpc:guarded call from a non-allowlisted origin pops a consent modal

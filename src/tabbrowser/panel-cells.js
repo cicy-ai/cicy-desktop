@@ -385,9 +385,23 @@ class PanelCells {
   }
 }
 
+// 面板页里的 <webview partition="persist:sandbox-N"> 用的是同一批 partition,但它不走
+// PanelCells,没人给它设代理 —— 不设就是直连,账号的真实出口 IP 直接暴露。
+// 面板一打开就把所有 electron profile 的 partition 代理都绑上,webview 和 BrowserView
+// 两种格子都覆盖到。ensureCellSessionProxy 自带去重,重复调用无副作用。
+function ensureAllProfileProxies() {
+  try {
+    const profileStore = require("../profiles/profile-store");
+    for (const p of profileStore.listProfiles("electron") || []) {
+      const idx = Number(p && p.accountIdx);
+      if (Number.isInteger(idx) && idx > 0) ensureCellSessionProxy(idx);
+    }
+  } catch (e) {}
+}
+
 function cellsForTab(manager, tab) {
   let pc = registry.get(tab.id);
-  if (!pc) { pc = new PanelCells(manager, tab); registry.set(tab.id, pc); }
+  if (!pc) { pc = new PanelCells(manager, tab); registry.set(tab.id, pc); ensureAllProfileProxies(); }
   return pc;
 }
 
@@ -414,6 +428,10 @@ function installIpc(findTab) {
   ipcMain.handle("panelcells:states", (e) => { const pc = ctx(e); return pc ? pc.states() : []; });
   ipcMain.handle("panelcells:profiles", (e) => {
     if (!ctx(e)) return [];
+    // 面板页开局必调这个接口。借它把所有 profile 的 partition 代理绑一遍 ——
+    // 页面里的 <webview partition="persist:sandbox-N"> 不走 PanelCells,没人给它设代理,
+    // 不设就是直连,账号真实出口 IP 直接暴露。ensureCellSessionProxy 自带去重。
+    ensureAllProfileProxies();
     try {
       return require("../profiles/profile-store").listProfiles("electron")
         .filter((p) => Number.isInteger(Number(p.accountIdx)) && Number(p.accountIdx) > 0 && Number(p.accountIdx) !== 9)

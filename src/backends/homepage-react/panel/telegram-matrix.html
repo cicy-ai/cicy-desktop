@@ -9,7 +9,10 @@
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
     * { box-sizing: border-box; }
     html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: var(--bg); color: var(--fg); }
-    body { display: grid; grid-template-columns: minmax(320px, 34%) 1fr; }
+    /* 行高必须锁死在视口:只写 grid-template-columns 时隐式行按内容撑高,
+       main 跟着长 → #grid 的 flex:1 永远不需要滚,内容直接被 body 的
+       overflow:hidden 裁掉(格子一多就看不见后面的,还以为是没渲染)。 */
+    body { display: grid; grid-template-columns: minmax(320px, 34%) 1fr; grid-template-rows: 100%; }
     aside { min-width: 0; border-right: 1px solid var(--line); background: var(--bg); display: flex; flex-direction: column; }
     header { flex: none; height: 56px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); }
     h1 { margin: 0; font-size: 15px; display: flex; align-items: baseline; gap: 8px; }
@@ -82,7 +85,7 @@
     #empty { display: none; padding: 40px 24px; color: var(--muted); text-align: center; line-height: 1.8; }
     #empty.on { display: block; }
     .hint { flex: none; padding: 8px 16px; color: var(--muted); font-size: 11px; border-top: 1px solid var(--line); }
-    main { min-width: 0; display: flex; flex-direction: column; align-items: center; padding: 14px 18px; background: var(--bg); }
+    main { min-width: 0; min-height: 0; display: flex; flex-direction: column; align-items: center; padding: 14px 18px; background: var(--bg); }
     #preview-title { width: min(410px, calc(100% - 20px)); margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #b4b4bb; font-size: 12px; }
     #preview-title .left { display: flex; align-items: center; gap: 8px; min-width: 0; }
     #selected-name { color: var(--fg); font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -384,31 +387,31 @@
       if (cfgModal && !cfgModal.hidden && cfgP) placeCfgOverCell(cfgP);
       const cells = []; const overlays = [];
       for (const profileId of openedProfiles) {
-        let visible = false, r = null;
+        let visible = false, r = null, ovVisible = false;
         if (maxedIdx != null) {
           if (profileId === maxedIdx) { visible = true; r = box(document.getElementById('maxbody').getBoundingClientRect()); }
         } else if (batchMode) {
+          // 网格里的 Telegram 本体已经是页面内的 <webview>,不再需要主进程贴 BrowserView。
+          // 这里只算矩形给叠加层(接码/ping)定位,格子自身 visible 恒为 false。
           const g = gcells.get(profileId);
           if (g && batch.has(profileId)) {
             r = box(g.body.getBoundingClientRect());
-            // 只画完整露出来的格子。BrowserView 不受页面 overflow 裁剪,滚动时半露的
-            // 那个会糊到网格外面(工具栏上、窗口外)。夹紧矩形会把页面压扁,更难看,
-            // 所以整格露出来才画 —— 滚到位自然出现。
             const gr = gridEl.getBoundingClientRect();
-            visible = r.h > 0 && r.y >= gr.top - 1 && (r.y + r.h) <= gr.bottom + 1;
+            ovVisible = r.h > 0 && r.y >= gr.top - 1 && (r.y + r.h) <= gr.bottom + 1;
           }
         } else if (selected && profileId === selected.accountIdx) { visible = true; r = box(rect); }
-        if (__bg) visible = false;                    // 后台标签:不画,但会话留着
-        if (visible && hitsCard(r)) visible = false;  // 被弹窗盖住 → 临时 detach
+        if (__bg) { visible = false; ovVisible = false; }   // 后台标签:不画,但会话留着
+        if (visible && hitsCard(r)) visible = false;       // 被弹窗盖住 → 临时 detach
+        if (ovVisible && hitsCard(r)) ovVisible = false;
         // 浮层不用手动缩矩形:.gcell 是 flex 列、.gbody 是 flex:1,插入 .gstat 后
         // .gbody 的 boundingRect 已经自动让出了那块高度。再减一次 = 黑色空隙(踩过)。
         cells.push({ id: cellId(profileId), url: (cellUrl.get(profileId) || TELEGRAM_URL), profile: profileId, visible, rect: r });
         // 接码叠加层:同 rect、同 profile(=同 partition/代理),排在 tg 格子之后 → attach 更晚 → 叠最上层
-        if (visible && codeOpen.has(profileId)) {
+        if ((visible || ovVisible) && codeOpen.has(profileId)) {
           const p = profiles.find((x) => x.accountIdx === profileId); const cu = p && codeUrlOf(p);
           if (cu) overlays.push({ id: 'code-' + profileId, url: cu, profile: profileId, visible: true, rect: r });
         }
-        if (visible && pingOpen.has(profileId)) overlays.push({ id: 'ping-' + profileId, url: (pingUrl.get(profileId) || 'https://ping0.cc/'), profile: profileId, visible: true, rect: r });
+        if ((visible || ovVisible) && pingOpen.has(profileId)) overlays.push({ id: 'ping-' + profileId, url: (pingUrl.get(profileId) || 'https://ping0.cc/'), profile: profileId, visible: true, rect: r });
       }
       try { window.panelAPI.sync(cells.concat(overlays)); } catch (e) {}
     }
@@ -477,7 +480,27 @@
       };
       el.querySelector('.gear').onclick = (e) => { e.stopPropagation(); if (cfgP && cfgP.accountIdx === p.accountIdx && !cfgModal.hidden) closeCfgModal(); else openCfgModal(p); };
       el.querySelector('.ghead').onclick = (e) => { if (!e.target.closest('button')) { selectProfile(p.accountIdx); } };
-      return { el, body: el.querySelector('.gbody'), stat: el.querySelector('.gstat') };
+      const body = el.querySelector('.gbody');
+      // 格子本体改成 <webview>:它在 DOM 里,跟着网格一起滚、被 overflow 裁剪。
+      // 原来是主进程按视口坐标贴的 BrowserView —— 页面一滚就错位,还会糊到网格外面。
+      // partition 和以前完全一样(persist:sandbox-N),所以登录态、代理都不受影响。
+      const wv = document.createElement('webview');
+      wv.setAttribute('partition', 'persist:sandbox-' + p.accountIdx);
+      wv.setAttribute('src', cellUrl.get(p.accountIdx) || TELEGRAM_URL);
+      wv.setAttribute('allowpopups', '');
+      wv.style.cssText = 'width:100%;height:100%;display:flex;background:#fff';
+      body.appendChild(wv);
+      // 状态一律转成主进程那套 state 形状,交给原来的 applyCellState —— 下游
+      // (标题解析、版本、限流、浮层计数)一行都不用改。
+      const push = (patch) => applyCellState(Object.assign({ id: cellId(p.accountIdx) }, patch));
+      wv.addEventListener('did-start-loading', () => push({ loading: true }));
+      wv.addEventListener('did-stop-loading', () => { let u = ''; try { u = wv.getURL(); } catch (e) {} push({ loading: false, url: u, title: wv.getTitle ? wv.getTitle() : '' }); });
+      wv.addEventListener('page-title-updated', (e) => { let u = ''; try { u = wv.getURL(); } catch (er) {} push({ loading: false, url: u, title: e.title || '' }); });
+      wv.addEventListener('did-navigate', (e) => push({ loading: false, url: e.url || '' }));
+      wv.addEventListener('did-navigate-in-page', (e) => push({ loading: false, url: e.url || '' }));
+      // -3 = ERR_ABORTED,换会话时必然出现,不是错误
+      wv.addEventListener('did-fail-load', (e) => { if (e.errorCode !== -3) push({ loading: false, failed: true, error: { code: e.errorCode, desc: e.errorDescription } }); });
+      return { el, body, stat: el.querySelector('.gstat'), wv };
     }
     // 同一格同一时刻只开一个叠加层(接码 / ping / 加群面板)。
     // 打开后 header 只留当前按钮和关闭键 —— 一排图标全亮着看不出状态,也容易误点。
@@ -805,7 +828,8 @@
       if (selected && selected.accountIdx === idx) renderPreviewState();
       syncPreview();
       // 首次打开:上面的 sync() 已经会建视图并加载 URL,再 reload 只是白加载一次。
-      if (!fresh) { try { window.panelAPI.reload(cellId(idx)); } catch (e) {} }
+      if (!fresh) { const g = gcells.get(idx); if (g && g.wv) { try { g.wv.reload(); } catch (e) {} }
+                    else { try { window.panelAPI.reload(cellId(idx)); } catch (e) {} } }
     }
 
     function render() {
