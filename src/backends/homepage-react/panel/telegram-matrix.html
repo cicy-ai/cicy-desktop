@@ -215,7 +215,7 @@
   <main>
     <div id="grid-title">
       <div class="left"><span id="mid-batch" class="mid" hidden></span><b>批量登录</b><span id="grid-count"></span></div>
-      <div class="actions"><button class="ghost" id="open-tgsou" title="一键打开本机所有账号的搜群标签">🔍 打开搜群</button><button class="ghost" id="grid-reload" title="重新加载所有格子">全部重载</button><button id="grid-add-profile" title="新建一个独立会话（persist:sandbox-N）">+ 添加 Profile</button></div>
+      <div class="actions"><button class="ghost" id="all-on" title="把本机所有账号的随机开群开关一次全开(写到 tgsou,按手机号存)">全部开</button><button class="ghost" id="all-off" title="把本机所有账号的随机开群开关一次全关">全部关</button><button class="ghost" id="open-tgsou" title="一键打开本机所有账号的搜群标签">🔍 打开搜群</button><button class="ghost" id="grid-reload" title="重新加载所有格子">全部重载</button></div>
     </div>
     <div id="grid"></div>
     <div id="preview-title">
@@ -739,8 +739,28 @@
       batch.clear(); gcells.clear(); gridEl.innerHTML = '';
       render(); renderPreviewState(); syncPreview();   // 会话留在后台,登录态不丢
     }
+    // 顶栏总开关:一次把本机所有账号的「随机开群」全开/全关。
+    // 开关在 tgsou 服务端按手机号存,所以这里只是批量写服务端 —— 格子里的脚本
+    // 下次轮询(≤5 秒)自己去取,不需要面板通知它们。
+    async function setAllAuto(on) {
+      const list = profiles.filter((p) => mobileOf(p));
+      const skipped = profiles.length - list.length;
+      if (!list.length) { flash('没有能识别手机号的账号'); return; }
+      const btn = document.getElementById(on ? 'all-on' : 'all-off');
+      if (btn) { btn.disabled = true; btn.textContent = on ? '开启中…' : '关闭中…'; }
+      let ok = 0;
+      for (const p of list) {
+        try { await setAuto(p.accountIdx, on ? { on: true, sec: autoSec() } : { on: false }); ok++; } catch (e) {}
+        if (on) autoOn.add(p.accountIdx); else autoOn.delete(p.accountIdx);
+        renderStat(p.accountIdx);
+      }
+      if (btn) { btn.disabled = false; btn.textContent = on ? '全部开' : '全部关'; }
+      flash((on ? '已全部开启随机开群 ' : '已全部停止 ') + ok + '/' + list.length
+            + (skipped ? ('(跳过 ' + skipped + ' 个没手机号的)') : ''));
+    }
+    document.getElementById('all-on').onclick = () => setAllAuto(true);
+    document.getElementById('all-off').onclick = () => setAllAuto(false);
     document.getElementById('grid-reload').onclick = () => { if (!batch.size) { enterBatch(); return; } for (const idx of batch) reloadProfile(idx); };
-    document.getElementById('grid-add-profile').onclick = () => document.getElementById('add-profile').click();
     // 一键打开本机所有账号的搜群标签:tgsou 后端用桌面控制 token 在本机开出 profile-0 的 tab(自带去重)。
     // tgsou 的 fleet token(低权限,只够开搜群 tab)。两个按钮共用,别各写各的。
     const TGSOU_TOKEN = '3e2733bc6f7da1d7ddbb5087';
