@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="147917135b6c">
+  <meta name="pv" content="ef701cefe8ea">
   <title>Telegram 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -194,11 +194,14 @@
     #tglist .empty { padding: 20px; text-align: center; color: var(--muted); }
     /* 视图切换放在内容区上方、和表格卡片左右对齐 —— 它只管下面这块内容,
        挤在顶栏那一排全局按钮里会被当成又一个全局动作。客服 tab 没有列表模式,整条不显示。 */
-    #viewbar { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    #viewbar { display: flex; align-items: center; justify-content: flex-end; gap: 8px;
                width: 100%; margin: 0 0 8px; flex: 0 0 auto; }
     #viewbar .vleft { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
-    /* 左半边(自动开群)在列表模式整个藏起来,视图切换仍然贴右,不要塌到左边去 */
-    #viewbar #views { margin-left: auto; }
+    /* 这一排里的东西尺寸要一致:.ghost 继承的是默认大按钮(13px / 圆角 8 / padding 7),
+       和「网格|列表」那颗 11.5px 胶囊差一大截。统一成同一个高度和同一套字号圆角。 */
+    #viewbar .tabs, #viewbar .pager, #viewbar .vleft > .ghost { height: 22px; box-sizing: border-box; }
+    #viewbar .ghost { display: inline-flex; align-items: center; padding: 0 10px; border-radius: 999px;
+                      font-size: 11.5px; font-weight: 500; line-height: 1; }
     #viewbar .ghost.on { background: var(--accent); border-color: transparent; color: #fff; }
     main.listmode #viewbar { max-width: 1000px; margin: 0 auto 8px; }
     /* 「自动开群」是个选择模式:点亮之后每个格子头上冒出一个勾选框,勾哪个开哪个。
@@ -210,8 +213,10 @@
     /* 绿框 = 这个号的随机开群本来就开着;橙框 = 这一轮被勾中了。两回事,不能用同一个记号 */
     body.autopick .gcell.autoon { outline-color: rgba(60, 200, 130, .55); }
     body.autopick .gcell.autosel { outline: 2px solid rgba(240, 164, 90, .7); }
-    #autobar #auto-count { min-width: 56px; text-align: center; color: #b4b4bb; font: 11px ui-monospace, monospace; }
-    #autobar .ghost { padding: 2px 8px; font-size: 11px; }
+    #autobar { padding: 0 3px; }
+    #autobar #auto-count { min-width: 52px; text-align: center; color: #b4b4bb; font: 11px ui-monospace, monospace; }
+    #autobar .ghost { height: 18px; padding: 0 8px; font-size: 11px; background: transparent; border: none; color: #b4b4bb; }
+    #autobar .ghost:hover { background: var(--hover); color: #fff; }
     #autobar .ghost.on { background: var(--line); color: var(--fg); }
     /* 顶栏的开关型按钮:亮起来 = 这台机器的随机开群是开着的 */
     /* [hidden] 对 .pager / .tabs 不起作用(它们自己写了 display:inline-flex),要显式关掉 */
@@ -1614,7 +1619,7 @@
 
           if (st.s === 'qr') {
             if (cool('toPhone', 4000)) { say('切手机号登录…');
-              await evalT(wv, "(function(){var b=[].slice.call(document.querySelectorAll('button')).filter(function(e){return e.offsetParent&&/log in by phone/i.test(e.textContent||'')})[0];if(b){b.click();return 1}return 0})()"); }
+              await evalT(wv, "(function(){var b=[].slice.call(document.querySelectorAll('button')).filter(function(e){return e.getClientRects().length&&/log in by phone/i.test(e.textContent||'')})[0];if(b){b.click();return 1}return 0})()"); }
           } else if (st.s === 'phone') {
             const cur = String(st.val || '').replace(/\D/g, '');
             if (cur !== wantD) {
@@ -1630,7 +1635,9 @@
             } else if (cool('submitPhone', 8000)) { say('提交手机号…');
               // 这一句返回 1 = 真的找到 Next 并点下去了,返回 0 = 根本没找到按钮。
               // 必须看这个返回值:点不到 Next 就绝不往下走,更不许开接码。
-              const clicked = await evalT(wv, "(function(){var r=document.getElementById('auth-flow-root');var b=[].slice.call(r.querySelectorAll('button')).filter(function(e){return e.offsetParent&&/^next$/i.test((e.textContent||'').trim())})[0];if(b){b.click();return 1}return 0})()");
+              // 判可见用 getClientRects().length,不用 offsetParent —— 登录页容器是
+              // position:fixed,那种情况下 offsetParent 恒为 null,看得见的按钮也会被筛掉。
+              const clicked = await evalT(wv, "(function(){var r=document.getElementById('auth-flow-root');var b=[].slice.call(r.querySelectorAll('button')).filter(function(e){return e.getClientRects().length&&/^next$/i.test((e.textContent||'').trim())})[0];if(b){b.click();return 1}return 0})()");
               if (Number(clicked) !== 1) { say('没找到「下一步」按钮,重试…'); await sleep(2000); continue; }
               // 点完「下一步」等 5 秒,再开接码读基线。这几行必须在**这个分支里面** ——
               // 上面那条 evalT 原本自带收尾的 "}",写在它后面就落到了「手机号屏」这一支上,
@@ -1671,7 +1678,7 @@
                 else { nextCodeAt = Date.now() + 15000; } }
             }
             if (code && cool('typeCode', 12000)) { say('填验证码 ' + code + '…');
-              await evalT(wv, "(function(){var r=document.getElementById('auth-flow-root');var ins=[].slice.call(r.querySelectorAll('input')).filter(function(e){return e.offsetParent&&!/stealthy/.test(e.className)});if(!ins[0])return 0;ins[0].focus();ins[0].value='';return 1})()");
+              await evalT(wv, "(function(){var r=document.getElementById('auth-flow-root');var ins=[].slice.call(r.querySelectorAll('input')).filter(function(e){return e.getClientRects().length&&!/stealthy/.test(e.className)});if(!ins[0])return 0;ins[0].focus();ins[0].value='';return 1})()");
               await typeInto(wv, code, 150); }
           } else if (st.s === '2fa') {
             if (!twofa && Date.now() >= nextCodeAt && cool('read2fa', 12000)) { say('读 2FA 密码…');
@@ -1687,7 +1694,7 @@
               await typeInto(wv, twofa, 110);
               await sleep(400);
               // 输完立刻提交:2FA 页靠按钮,Enter 不一定触发
-              await evalT(wv, "(function(){var r=document.getElementById('auth-flow-root');var bs=[].slice.call(r.querySelectorAll('button')).filter(function(e){return e.offsetParent&&(e.textContent||'').trim()});var b=bs[bs.length-1];if(b){b.click();return 1}return 0})()"); }
+              await evalT(wv, "(function(){var r=document.getElementById('auth-flow-root');var bs=[].slice.call(r.querySelectorAll('button')).filter(function(e){return e.getClientRects().length&&(e.textContent||'').trim()});var b=bs[bs.length-1];if(b){b.click();return 1}return 0})()"); }
           } else if (st.s === 'loading' || st.s === 'unreadable') {
             if (cool('nudge', 45000)) { say('页面没响应,重载这一格…'); try { wv.reload(); } catch (e) {} }
           }
