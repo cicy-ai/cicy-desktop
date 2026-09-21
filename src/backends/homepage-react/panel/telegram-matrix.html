@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="b5a8a6960a86">
+  <meta name="pv" content="26ae0067e989">
   <title>Telegram 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
@@ -144,6 +144,43 @@
     #drawer-close, #tglist, #drawer-scrim { display: none; }
     main.listmode #tglist { display: block; width: 100%; flex: 1 1 auto; min-height: 0; overflow: auto;
                             border: 1px solid var(--line); border-radius: 10px; background: var(--head); }
+    /* 保存放最底下,管的是整个弹窗(手机号/接码/代理/备注),不是只管它挨着的那一格 */
+    .modal-actions { justify-content: flex-end; margin: 12px 0 0; }
+    .modal-actions button { min-width: 88px; }
+    #cfg-note { width: 100%; resize: vertical; min-height: 54px; max-height: 220px; padding: 6px 8px;
+                border: 1px solid var(--line); border-radius: 8px; background: var(--head); color: var(--fg);
+                font: 12px/1.5 inherit; outline: none; }
+    #cfg-note:focus { border-color: var(--accent); }
+    .modal-label .lbl-hint { margin-left: 8px; color: var(--muted); font-size: 10.5px; font-weight: 400; }
+    .vsearch { display: inline-flex; align-items: center; gap: 6px; height: 22px; box-sizing: border-box;
+               padding: 0 8px; border-radius: 999px; background: var(--head); border: 1px solid var(--line); }
+    .vsearch svg { width: 12px; height: 12px; flex: none; fill: none; stroke: var(--muted); stroke-width: 2;
+                   stroke-linecap: round; }
+    .vsearch input { width: 210px; border: 0; background: transparent; color: var(--fg); font-size: 11.5px;
+                     outline: none; padding: 0; }
+    .vsearch input::placeholder { color: var(--muted); }
+    .vsearch input::-webkit-search-cancel-button { filter: grayscale(1) opacity(.6); cursor: pointer; }
+    .vsearch #tgsearch-n { color: var(--muted); font: 11px ui-monospace, monospace; }
+    .vsearch:focus-within { border-color: var(--accent); }
+    #tglist th[data-sort] { cursor: pointer; user-select: none; }
+    #tglist th[data-sort]:hover { color: var(--fg); }
+    #tglist th[data-sort]::after { content: ''; display: inline-block; width: 8px; margin-left: 4px;
+                                   color: var(--accent); font-size: 9px; vertical-align: 1px; }
+    #tglist th.sort-asc::after  { content: '▲'; }
+    #tglist th.sort-desc::after { content: '▼'; }
+    /* 浮层只有一种长相:半透明底 + 居中卡片,和设置弹窗同一套圆角/边框/标题栏/阴影。
+       接码、IP 核对、加群面板三个都走这套,页面自身不再画自己的外框。 */
+    .ovwrap { position: absolute; inset: 0; z-index: 3; display: flex; align-items: flex-start;
+              justify-content: center; padding: 20px 14px; background: rgba(0,0,0,.55); overflow: auto; }
+    .ovcard { width: 420px; max-width: 100%; background: var(--cell); border: 1px solid var(--line);
+              border-radius: 14px; box-shadow: 0 24px 70px rgba(0,0,0,.5); overflow: hidden;
+              display: flex; flex-direction: column; }
+    .ovhead { flex: none; display: flex; align-items: center; justify-content: space-between;
+              padding: 12px 10px 10px 16px; font-size: 15px; font-weight: 650; }
+    .ovhead .icon { font-size: 14px; }
+    .ovbody { flex: 1 1 auto; height: 520px; max-height: 68vh; display: flex; }
+    /* 接码是第三方页面,表单窄,给它固定一张卡片的宽度就够了 */
+    .ovwrap.ov-code .ovbody { height: 460px; }
     /* 列表模式 = 左右分栏,不是浮层:表格一直可用,右边常驻当前选中的那个会话。
        宽度靠中间那条竖线拖,存在 localStorage,刷新后还是上次的宽度。 */
     #split { display: flex; flex-direction: column; width: 100%; flex: 1 1 auto; min-height: 0; }
@@ -177,10 +214,17 @@
     /* 滚动条会把内容区挤窄几个像素,卡片就和上面那排按钮差了 5px 对不齐。
        两边都预留出滚动条的位置,居中才是真的居中。 */
     main.listmode #tglist { padding: 0; }
+    /* 滚动容器必须是卡片本身:放在外面的话 #tblcard 的 overflow:hidden 会自己变成一个
+       滚动上下文,sticky 表头就贴在它身上跟着一起滚走 —— 表现就是表头钉不住。 */
     #tblcard { width: 100%; max-width: none; margin: 0; border: 1px solid var(--line);
-               border-radius: 12px; background: var(--cell); overflow: hidden; }
-    #tglist table { width: 100%; border-collapse: collapse; font-size: 12px; }
-    #tglist th { position: sticky; top: 0; z-index: 1; background: var(--head); color: var(--muted);
+               border-radius: 12px; background: var(--cell); overflow: auto; }
+    main.listmode #tglist { display: flex; overflow: hidden; }
+    /* table-layout:fixed —— 列宽只认 <col> 上写死的值,不随内容长短重算。
+       auto 布局下左栏一拖、某一行文字一变长,整张表的列就会跟着跳。
+       最后一列是留白,用来吃掉剩余宽度,这样前面几列在任何面板宽度下都纹丝不动。 */
+    #tglist table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 12px; }
+    #tglist th, #tglist td { overflow: hidden; text-overflow: ellipsis; }
+    #tglist th { position: sticky; top: 0; z-index: 2; background: #17171a; color: var(--muted);
                  font-weight: 500; text-align: left; padding: 0 12px; height: 34px;
                  border-bottom: 1px solid var(--line); white-space: nowrap; }
     #tglist td { padding: 0 12px; height: 36px; border-top: 1px solid rgba(255, 255, 255, .05);
@@ -190,8 +234,12 @@
     #tglist tr.row:hover td { background: rgba(255, 255, 255, .06); }
     #tglist tr.row.on td { background: rgba(240, 164, 90, .13); }
     #tglist col.c-num { width: 60px; } #tglist col.c-ph { width: 158px; }
-    #tglist col.c-px { width: 80px; }  #tglist col.c-stt { width: 190px; }
-    #tglist td.num, #tglist td.ph, #tglist td.px { font: 11px ui-monospace, monospace; color: var(--muted); }
+    #tglist col.c-px { width: 80px; }  #tglist col.c-uid { width: 118px; }
+    #tglist col.c-stt { width: 200px; }
+    #tglist col.c-info { width: 240px; }   /* 写死;最后那列没写宽度,剩余空间全归它 */
+    #tglist td.num, #tglist td.ph, #tglist td.px, #tglist td.uid { font: 11px ui-monospace, monospace; color: var(--muted); }
+    /* 手机号/代理/实测号是要拿去复制的,双击能整段选中;鼠标也给 I 形提示 */
+    #tglist td.ph, #tglist td.px, #tglist td.uid { user-select: all; cursor: text; }
     #tglist td.num { color: #8e8e98; }
     #tglist td.info { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
     /* 状态 = 药丸 + 紧跟着的 id,不留空白列 */
@@ -202,6 +250,7 @@
     #tglist .pill.run { background: rgba(240, 164, 90, .16); color: #f0a45a; border-color: rgba(240,164,90,.34); }
     #tglist .pill.bad { background: rgba(240, 90, 90, .14); color: #f08a8a; border-color: rgba(240,90,90,.3); }
     #tglist .uid { margin-left: 8px; color: #7f7f8a; font: 11px ui-monospace, monospace; }
+    #tglist .pill.run + .uid { color: #f0a45a; }
     #tglist .warn { color: #f0a45a; }
     #tglist .empty { padding: 20px; text-align: center; color: var(--muted); }
     /* 视图切换放在内容区上方、和表格卡片左右对齐 —— 它只管下面这块内容,
@@ -342,7 +391,7 @@
       <div class="left"><span id="mid-batch" class="mid" hidden></span><b>批量登录</b><span id="grid-count"></span></div>
       <div class="actions"><span class="tabs"><button id="tab-other">非客服 0</button><button id="tab-cs">客服 0</button></span><span class="pager" id="pager" title="一次只打开这么多个会话,翻页时其余的会被卸载释放内存"><button class="icon" id="page-prev" title="上一页">‹</button><span id="page-label"></span><button class="icon" id="page-next" title="下一页">›</button><i></i><input id="page-size" type="number" min="1" max="24" title="每页同时打开几个。一个 Telegram 会话能吃到 2.5GB,别开太多"></span><button class="ghost" id="open-tgsou" title="一键打开本机所有账号的搜群标签">🔍 打开搜群</button><button class="ghost" id="grid-reload" title="重新加载所有格子">全部重载</button></div>
     </div>
-    <div id="viewbar"><span class="vleft"><button class="ghost" id="all-auto">自动开群</button><span class="pager is-off" id="autobar"><button class="ghost" id="auto-sel-all" title="选中/取消本页所有格子">全选</button><i></i><span id="auto-count">已选 0</span><i></i><button class="ghost" id="auto-do-on" title="给选中的账号打开随机开群">开群</button><button class="ghost" id="auto-do-off" title="给选中的账号关掉随机开群">关闭</button></span></span><span class="tabs" id="views"><button id="view-grid" title="网格:本页的会话平铺成格子">网格</button><button id="view-list" title="列表:一张表,点一行从右侧抽屉里打开那个会话">列表</button></span></div>
+    <div id="viewbar"><span class="vleft"><button class="ghost" id="all-auto">自动开群</button><span class="pager is-off" id="autobar"><button class="ghost" id="auto-sel-all" title="选中/取消本页所有格子">全选</button><i></i><span id="auto-count">已选 0</span><i></i><button class="ghost" id="auto-do-on" title="给选中的账号打开随机开群">开群</button><button class="ghost" id="auto-do-off" title="给选中的账号关掉随机开群">关闭</button></span></span><span class="vsearch is-off" id="vsearch"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input id="tgsearch" type="search" spellcheck="false" autocomplete="off" placeholder="搜 #号 / 手机号 / id / 昵称 / 备注"><span id="tgsearch-n"></span></span><span class="tabs" id="views"><button id="view-grid" title="网格:本页的会话平铺成格子">网格</button><button id="view-list" title="列表:一张表,点一行从右侧抽屉里打开那个会话">列表</button></span></div>
     <div id="split">
       <div id="drawer">
         <button class="icon" id="drawer-close" title="收起(Esc)"><svg viewBox="0 0 24 24"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg></button>
@@ -352,8 +401,8 @@
     <div id="tglist">
       <div id="tblcard">
         <table>
-          <colgroup><col class="c-num"><col class="c-ph"><col class="c-px"><col class="c-stt"><col></colgroup>
-          <thead><tr><th>#</th><th>手机号</th><th>代理</th><th>状态</th><th>账号 / 实况</th></tr></thead>
+          <colgroup><col class="c-num"><col class="c-ph"><col class="c-px"><col class="c-uid"><col class="c-stt"><col class="c-info"><col></colgroup>
+          <thead><tr><th data-sort="idx">#</th><th data-sort="phone">手机号</th><th data-sort="port">代理</th><th data-sort="real">实测号</th><th data-sort="state">状态</th><th data-sort="note">备注</th><th></th></tr></thead>
           <tbody id="tglist-body"></tbody>
         </table>
       </div>
@@ -387,10 +436,11 @@
       <label class="modal-label">接码 URL</label>
       <div class="modal-row"><input id="cfg-code" placeholder="https://…/getcode?id=…" spellcheck="false"><button class="ghost" id="cfg-code-open" title="在该 Profile 的 tab 里打开">打开</button></div>
       <label class="modal-label">代理地址</label>
-      <div class="modal-row"><input id="cfg-proxy" placeholder="留空 = 直连，例如 http://127.0.0.1:20001" spellcheck="false"><button id="cfg-save">保存</button></div>
-      <div class="modal-row"><button class="ghost" id="cfg-test">测 IP</button><span class="modal-ip" id="cfg-ip"></span></div>
+      <div class="modal-row"><input id="cfg-proxy" placeholder="留空 = 直连，例如 http://127.0.0.1:20001" spellcheck="false"></div>
+      <label class="modal-label">备注<span class="lbl-hint">保存后随巡检同步到 agg 台账</span></label>
+      <div class="modal-row"><textarea id="cfg-note" rows="3" spellcheck="false" placeholder="这个号的情况、要注意什么…"></textarea></div>
       <div class="modal-err" id="cfg-err"></div>
-      <div class="modal-danger"><button class="ghost del" id="cfg-del">删除此 Profile</button></div>
+      <div class="modal-row modal-actions"><button id="cfg-save">保存</button></div>
     </div>
   </div>
   <script>
@@ -472,7 +522,13 @@
       const row = rows.get(p.accountIdx); if (!row) return;
       const el = row.querySelector('.phone'); const ph = phoneOf(p);
       el.classList.toggle('none', !ph); el.textContent = ph; el.title = codeUrlOf(p) ? `接码：${codeUrlOf(p)}` : '';
-      const g = gcells.get(p.accountIdx); if (g) { g.el.querySelector('.phone').textContent = ph; g.el.querySelector('.code').disabled = !codeUrlOf(p); }
+      // 格子头上的「接码」按钮已经去掉了,这里不能再往它身上写(null.disabled 会抛错,
+      // 表现成保存时弹「Cannot set properties of null」)。手机号那一格也一样要防空。
+      const g = gcells.get(p.accountIdx);
+      if (g) {
+        const ph2 = g.el.querySelector('.phone'); if (ph2) ph2.textContent = ph;
+        const cb2 = g.el.querySelector('.code'); if (cb2) cb2.disabled = !codeUrlOf(p);
+      }
     }
     // 接码 = 在当前格子的 Telegram webview 上方叠一个同尺寸、同 partition(persist:sandbox-idx,
     // 走该 profile 的代理出口)、更高 z 层的接码 webview。再点一次关闭。与 tg-autologin 自动化里
@@ -590,12 +646,10 @@
     function buildGridCell(p) {
       const el = document.createElement('div');
       el.className = 'gcell'; el.dataset.id = String(p.accountIdx);
-      el.innerHTML = `<div class="ghead"><input type="checkbox" class="autock" title="随机开群:勾上这个号就开始自动换群"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="cstag" hidden title="客服号:常驻不卸载,归到「客服」tab。归属在 agg 台账(agg.fm558.com/#/tg)里改">客服</span><span class="phone">${esc(phoneOf(p))}</span><span class="st"></span><span class="acts"><button class="code" title="在格子上叠加/关闭接码 webview(同代理出口)">接码</button><button class="icon stat" title="加群面板:分配/已加入、脚本版本、限流,自动随机开群"><svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></button><button class="icon tgsou" title="单独打开这个账号的搜群"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button><button class="icon gear" title="手机号 / 接码 URL / 代理设置"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button><button class="icon ping" title="用本 Profile 代理打开 ping0.cc(验 IP/指纹)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></button><button class="icon max" title="最大化 / 还原"><svg viewBox="0 0 24 24"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></button><button class="icon xclose" title="关闭当前叠加层"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></span></div><div class="gstat" hidden></div><div class="gbody"></div>`;
+      el.innerHTML = `<div class="ghead"><input type="checkbox" class="autock" title="随机开群:勾上这个号就开始自动换群"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="cstag" hidden title="客服号:常驻不卸载,归到「客服」tab。归属在 agg 台账(agg.fm558.com/#/tg)里改">客服</span><span class="phone">${esc(phoneOf(p))}</span><span class="st"></span><span class="acts"><button class="icon stat" title="加群面板:分配/已加入、脚本版本、限流,自动随机开群"><svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></button><button class="icon tgsou" title="单独打开这个账号的搜群"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button><button class="icon gear" title="手机号 / 接码 URL / 代理设置"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button><button class="icon ping" title="用本 Profile 代理打开 ping0.cc(验 IP/指纹)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></button><button class="icon max" title="最大化 / 还原"><svg viewBox="0 0 24 24"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></button><button class="icon xclose" title="关闭当前叠加层"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></span></div><div class="gstat" hidden></div><div class="gbody"></div>`;
       el.querySelector('.max').onclick = (e) => { e.stopPropagation(); toggleMax(p.accountIdx); };
       // ping / 接码 也走互斥:先关掉别的叠加层,再用它们原本的开关(各自管自己的集合)
       el.querySelector('.ping').onclick = (e) => { e.stopPropagation(); closeOthers(p.accountIdx, 'ping'); togglePing(p.accountIdx); setTimeout(() => syncMode(p.accountIdx), 0); };
-      el.querySelector('.code').onclick = (e) => { e.stopPropagation(); closeOthers(p.accountIdx, 'code'); openCode(p); setTimeout(() => syncMode(p.accountIdx), 0); };
-      el.querySelector('.code').disabled = !codeUrlOf(p);
       // 加群面板:分配/已加入、注入脚本版本、限流剩余、随机开群开关。
       // 版本和限流不另外取 —— 注入脚本把它们写进了 document.title,主进程通过
       // state.title 推给面板,这是面板唯一能看到格子内部状态的通道。
@@ -672,6 +726,7 @@
       drawerIdx = idx;
       try { localStorage.setItem(SEL_KEY, String(idx)); } catch (e) {}
       applyPage();
+      setTimeout(() => probeAuth(idx, 3), 2500);   // 已挂着的格子不会再触发 did-stop-loading
     }
     function closeDrawer() { drawerIdx = null; applyPage(); }
     const setTab = (t) => { curTab = t; try { localStorage.setItem(TAB_KEY, t); } catch (e) {} applyPage(); };
@@ -687,7 +742,8 @@
       // 状态转成主进程那套 state 形状,交给原有的 applyCellState,下游一行不用改
       const push = (patch) => applyCellState(Object.assign({ id: cellId(idx) }, patch));
       wv.addEventListener('did-start-loading', () => push({ loading: true }));
-      wv.addEventListener('did-stop-loading', () => { let u = ''; try { u = wv.getURL(); } catch (e) {} push({ loading: false, url: u, title: wv.getTitle ? wv.getTitle() : '' }); });
+      wv.addEventListener('did-stop-loading', () => { let u = ''; try { u = wv.getURL(); } catch (e) {} push({ loading: false, url: u, title: wv.getTitle ? wv.getTitle() : '' });
+        setTimeout(() => probeAuth(idx, 3), 2500); });
       wv.addEventListener('page-title-updated', (e) => { let u = ''; try { u = wv.getURL(); } catch (er) {} push({ loading: false, url: u, title: e.title || '' }); });
       wv.addEventListener('did-navigate', (e) => push({ loading: false, url: e.url || '' }));
       wv.addEventListener('did-navigate-in-page', (e) => push({ loading: false, url: e.url || '' }));
@@ -709,7 +765,15 @@
       renderGridCell(idx);
     }
     function pageIdxList() {
-      const all = [...gcells.keys()].filter((i) => !csSet.has(i));
+      // 搜索在网格模式下过滤「参与分页的候选」—— 搜完直接翻到第一页就是结果,
+      // 不是把不匹配的藏起来留一堆空格子。
+      const q = String(searchQ || '').trim().toLowerCase();
+      const all = [...gcells.keys()].filter((i) => {
+        if (csSet.has(i)) return false;
+        if (!q) return true;
+        const p = profiles.find((x) => x.accountIdx === i);
+        return p && rowHaystack(p).includes(q);
+      });
       const n = pageSize(), maxPage = Math.max(0, Math.ceil(all.length / n) - 1);
       if (pageNo > maxPage) pageNo = maxPage;
       return { list: all.slice(pageNo * n, pageNo * n + n), total: all.length, maxPage };
@@ -739,7 +803,10 @@
       if (lm && drawerIdx != null && (!gcells.has(drawerIdx) || csSet.has(drawerIdx))) drawerIdx = null;
       // 分栏右侧不留空:没有有效选中就落到第一行(记住的那个不在了也一样)
       if (lm && drawerIdx == null) {
-        const first = [...gcells.keys()].find((i) => !csSet.has(i));
+        const first = [...gcells.keys()].find((i) => {
+          const q = profiles.find((x) => x.accountIdx === i);
+          return !csSet.has(i) && q && phoneOf(q);
+        });
         if (first != null) { drawerIdx = first; try { localStorage.setItem(SEL_KEY, String(first)); } catch (e) {} }
       }
       if (lm) applySplit();
@@ -771,6 +838,8 @@
       // 「自动开群」是对着一屏格子做的全局动作,列表模式下一个格子都没开,放着只会误导
       const vleft = document.querySelector('#viewbar .vleft');
       if (vleft) vleft.classList.toggle('is-off', lm);
+      const vs = document.getElementById('vsearch');
+      if (vs) vs.classList.toggle('is-off', curTab === 'cs');   // 客服常驻不分页,没有可搜的
       if (lm && autoPick) { autoPick = false; autoSel.clear(); syncAutoBtn(); }
       const vg = document.getElementById('view-grid'), vl = document.getElementById('view-list');
       if (vg) vg.classList.toggle('on', curView !== 'list');
@@ -779,6 +848,8 @@
       const lab = document.getElementById('page-label');
       if (lab) {
         lab.textContent = (total ? (pageNo + 1) : 0) + '/' + (maxPage + 1) + ' · ' + list.length + ' 开';
+        const nEl2 = document.getElementById('tgsearch-n');
+        if (nEl2 && !lm) nEl2.textContent = searchQ ? (total + ' 个') : '';
         lab.title = '第 ' + (pageNo + 1) + ' 页,共 ' + (maxPage + 1) + ' 页 · 本页 ' + list.length + ' 个';
       }
       requestAnimationFrame(syncPreview);
@@ -788,60 +859,155 @@
     // 这一列要回答的是「这个号登没登录」,不是「webview 挂没挂载」——
     // 列表模式下页面本来就一个都不开,拿挂载状态当状态,整张表只会写满「未加载」。
     // 登录身份是登录时落进 profile 的 logins[telegram],不开页面也读得到。
+    // 第三个来源、也是最硬的一个:格子挂载着的时候直接读页面 localStorage.user_auth。
+    // 落盘的身份记录要靠 app 的探测去写,探测没跑到(比如 #72)就一直是空的,
+    // 表里写「未登录」可右边格子明明登着 —— 这是最容易被当成 bug 的一种错。
+    // idx -> tg 用户 id(最近一次从活页面读到)。**落盘**:列表模式下同一时刻只有一个格子
+    // 挂载着,其它行没有活页面可读,只能靠记忆。不记的话刷新一次全变回「未登录」,
+    // 得挨个点开才认得出来 —— 这就是「为什么不能自动识别登录」的根源。
+    const AUTH_KEY = 'tgmx.auth';
+    const authSeen = new Map((() => {
+      try { return Object.entries(JSON.parse(localStorage.getItem(AUTH_KEY) || '{}')).map(([k, v]) => [Number(k), String(v)]); }
+      catch (e) { return []; }
+    })());
+    function saveAuthSeen() {
+      try { localStorage.setItem(AUTH_KEY, JSON.stringify(Object.fromEntries(authSeen))); } catch (e) {}
+    }
+    // 当前开着的格子每 15 秒自动认一次登录态。只认已经挂载的页面 ——
+    // 它们本来就活着,读一下 localStorage 是白捡的;绝不为了认状态去开别人的格子
+    // (那会把抽屉抢走,正在手工登录的人直接被打断)。
+    // 网格模式下本页十几个格子全在,翻一页就把那一页认完了。
+    setInterval(() => {
+      for (const idx of gcells.keys()) {
+        const g = gcells.get(idx);
+        if (!g || !g.wv || g.el.hidden) continue;
+        if (loginBusy.has(idx)) continue;          // 正在跑自动登录的别去打扰
+        probeAuth(idx, 0);
+      }
+    }, 15000);
+    async function probeAuth(idx, tries) {
+      const wv = tgView(idx); if (!wv) return;
+      try {
+        const r = await evalT(wv, "(function(){try{return String(JSON.parse(localStorage.getItem('user_auth')||'{}').id||'')}catch(e){return ''}})()", 6000);
+        const id = String(r || '');
+        const had = authSeen.get(idx);
+        // 页面刚起来时 user_auth 还没写进去,读到空不能当成"没登录",要再等等
+        if (id) authSeen.set(idx, id);
+        else if (Number(tries) > 0) { setTimeout(() => probeAuth(idx, Number(tries) - 1), 3000); return; }
+        else authSeen.delete(idx);
+        if (had !== id) { saveAuthSeen(); if (listMode()) refreshRow(idx); renderGridCell(idx); }
+      } catch (e) {}
+    }
     // 身份有两个来源:格子开着时探针实测到的(有昵称/真实手机号),和登录时落盘的
     // logins[telegram](只有 id,但不开页面也读得到)。两个都用上,实测优先。
-    const tgId = (p) => {
-      const lv = stateOf(p.accountIdx).identity;
-      if (lv && lv.id) return String(lv.id);
-      return (String(((p.telegram || {}).displayName) || '').match(/id=(\d+)/) || [, ''])[1] || '';
+    // 实测身份:app 的身份探测会把 {昵称, 真实手机号} 写进 profile 的 logins[telegram],
+    // 格子没挂载也读得到。比数字 id 有用 —— 台账写的号和实际登录的号对不对得上,一眼就看见。
+    const tgReal = (p) => {
+      const lv = stateOf(p.accountIdx).identity, sv = p.telegram || {};
+      const ph = String((lv && lv.phone) || sv.phone || '').replace(/\D/g, '');
+      if (ph) return { text: '+' + ph, bad: String(phoneOf(p)).replace(/\D/g, '') !== ph };
+      const id = (lv && lv.id) ? String(lv.id) : (authSeen.get(p.accountIdx) || '');
+      return { text: id ? 'id ' + id : '', bad: false };
     };
+    const tgId = (p) => tgReal(p).text;
     function rowStatus(idx, p) {
-      if (loginSay.get(idx)) return { cls: 'run', text: '登录中', uid: '' };
+      // 登录进度跟在「登录中」后面 —— 备注列只放备注,进度没地方放就看不见了
+      const say = loginSay.get(idx);
+      if (say && loginBusy.has(idx)) return { cls: 'run', text: '登录中', uid: say };
+      if (authSeen.get(idx)) return { cls: 'ok', text: '已登录', uid: '' };
       const id = tgId(p), sv = p.telegram, lv = stateOf(idx).identity;
       if (id || (lv && (lv.username || lv.phone)) || (sv && (sv.username || sv.phone))) {
         return { cls: 'ok', text: '已登录', uid: id ? 'id ' + id : '' };
       }
-      if (!phoneOf(p)) return { cls: 'off', text: '空闲', uid: '未配号' };
-      if (!codeUrlOf(p)) return { cls: 'bad', text: '未登录', uid: '无接码卡' };
+      if (!phoneOf(p)) return { cls: 'off', text: '空闲', uid: '' };
+      if (!codeUrlOf(p)) return { cls: 'bad', text: '需补卡', uid: '' };
       return { cls: 'off', text: '未登录', uid: '' };
     }
+    // 状态列只放药丸;跑登录时后面跟一句当前步骤。TG id 单独一列,不跟状态混在一起 ——
+    // 挤在一格里看着像跑到旁边那一列去了。
     const statusHtml = (idx, p) => { const r = rowStatus(idx, p);
       return '<span class="pill ' + r.cls + '">' + esc(r.text) + '</span>'
-           + (r.uid ? '<span class="uid">' + esc(r.uid) + '</span>' : ''); };
+           + (r.cls === 'run' && r.uid ? '<span class="uid">' + esc(r.uid) + '</span>' : ''); };
     // 「备注 / 实况」:登录跑着就显示当前这一步,格子开着就显示页面实况,
     // 都没有就显示 profile 备注 —— 这一列本来是空的,空着才显得像没做完。
     // 已经登录的行再摆一个「登录」按钮是噪音 —— 只有还没登、而且号和接码卡都齐的
     // 那几行才需要这个动作;正在跑的显示不可点的「登录中」。
+    // 这一列只放备注。备注是 profile 里的整段说明,直接塞进单元格会撑爆,
+    // 所以只取开头的方括号标记([弃用]/[空闲]…),没有标记就截断,全文放 title。
     function rowInfo(idx, p) {
-      const say = loginSay.get(idx);
-      if (say) return { text: say, warn: false, full: say };
-      const lv = stateOf(idx).identity, g = gcells.get(idx), st = stateOf(idx);
-      const bits = [];
-      if (lv && lv.displayName) bits.push(lv.displayName);
-      else if (lv && lv.username) bits.push('@' + lv.username);
-      // 台账写的号和实际登录的号对不上 —— #23/#24 就是这么被发现的,这里直接标出来
-      let warn = false;
-      if (lv && lv.phone) {
-        const a = String(lv.phone).replace(/\D/g, ''), b = String(phoneOf(p)).replace(/\D/g, '');
-        if (a && b && a !== b) { bits.push('⚠ 实际 +' + a); warn = true; }
+      const note = String(p.note || '');
+      if (!note) return { text: '', warn: false, full: '' };
+      const tag = (note.match(/^\s*(\[[^\]]{1,8}\])/) || [, ''])[1];
+      return { text: tag || (note.length > 22 ? note.slice(0, 22) + '…' : note), warn: false, full: note };
+    }
+    let searchQ = '', listSig = '';
+    // 表格排序:点表头切升/降,存 localStorage。状态列按「要不要管它」排序,不是按字面 ——
+    // 未登录/需补卡排前面才有用,已登录的沉底。
+    const SORT_KEY = 'tgmx.sort';
+    let sortBy = 'idx', sortDir = 1;
+    try { const v = JSON.parse(localStorage.getItem(SORT_KEY) || 'null');
+          if (v && v.by) { sortBy = v.by; sortDir = v.dir === -1 ? -1 : 1; } } catch (e) {}
+    const STATE_RANK = { bad: 0, off: 1, run: 2, ok: 3 };
+    function sortVal(p) {
+      const i = p.accountIdx;
+      switch (sortBy) {
+        case 'phone': return String(phoneOf(p)).replace(/\D/g, '') || '\uffff';
+        case 'port':  return Number((String(p.proxy || '').match(/:(\d+)\s*$/) || [, 0])[1]) || 0;
+        case 'real':  return String(tgReal(p).text).replace(/\D/g, '') || '\uffff';
+        case 'state': return STATE_RANK[rowStatus(i, p).cls] != null ? STATE_RANK[rowStatus(i, p).cls] : 9;
+        case 'note':  return String(p.note || '').toLowerCase() || '\uffff';
+        default:      return i;
       }
-      if (g && g.wv) {
-        if (st.loading) bits.push('加载中…');
-        else if (st.failed) bits.push('加载失败 ' + ((st.error && (st.error.desc || st.error.code)) || ''));
-        else if (st.title) bits.push(st.title);
+    }
+    function sortRows(rows) {
+      return rows.slice().sort((a, b) => {
+        const x = sortVal(a), y = sortVal(b);
+        if (x < y) return -sortDir;
+        if (x > y) return sortDir;
+        return a.accountIdx - b.accountIdx;   // 同值时按编号,顺序才稳定
+      });
+    }
+    function syncSortHead() {
+      for (const th of document.querySelectorAll('#tglist th[data-sort]')) {
+        th.classList.toggle('sort-asc', th.dataset.sort === sortBy && sortDir === 1);
+        th.classList.toggle('sort-desc', th.dataset.sort === sortBy && sortDir === -1);
       }
-      // 备注是 profile 里的整段说明(几十上百字),原样塞进单元格会把这一列撑爆。
-      // 只取开头的方括号标记([弃用]/[空闲]/[客服]…),没有就截断,全文放 title。
-      if (!bits.length && p.note) {
-        const tag = (String(p.note).match(/^\s*(\[[^\]]{1,8}\])/) || [, ''])[1];
-        bits.push(tag || (p.note.length > 22 ? p.note.slice(0, 22) + '…' : p.note));
-      }
-      return { text: bits.join(' · '), warn, full: p.note || '' };
+    }
+    function rowHaystack(p) {
+      const i = p.accountIdx, lv = stateOf(i).identity, sv = p.telegram || {};
+      return ['#' + i, p.name, phoneOf(p), p.proxy, p.note,
+              lv && lv.id, lv && lv.displayName, lv && lv.username, sv.displayName, sv.username]
+        .filter(Boolean).join(' ').toLowerCase();
     }
     function renderList() {
       const tb = document.getElementById('tglist-body'); if (!tb) return;
-      const rows = profiles.filter((p) => gcells.has(p.accountIdx) && !csSet.has(p.accountIdx));
-      if (!rows.length) { tb.innerHTML = '<tr><td class="empty" colspan="5">没有非客服 Profile</td></tr>'; return; }
+      // 没配手机号的是空槽位,表里列出来只是噪音(格子还在,网格模式照常能看到)
+      let rows = profiles.filter((p) => gcells.has(p.accountIdx) && !csSet.has(p.accountIdx) && phoneOf(p));
+      const all = rows.length;
+      // 搜索:#号 / 手机号 / TG id / 昵称 / 备注 / 代理端口,全都拼成一条字符串做包含匹配
+      const q = String(searchQ || '').trim().toLowerCase();
+      if (q) rows = rows.filter((p) => rowHaystack(p).includes(q));
+      const nEl = document.getElementById('tgsearch-n');
+      if (nEl) nEl.textContent = q ? (rows.length + '/' + all) : '';
+      rows = sortRows(rows);
+      syncSortHead();
+      // 只有「哪些行、什么顺序」变了才重建 tbody。以前每次点行都整表重画,
+      // 双击选中的文字当场被清掉,看着就是"选不了"。状态变化走 refreshRow 原地改。
+      const sig = rows.map((p) => p.accountIdx).join(',') + '|' + q + '|' + sortBy + sortDir;
+      if (sig === listSig && tb.querySelector('tr.row')) {
+        for (const tr of tb.querySelectorAll('tr.row')) tr.classList.toggle('on', Number(tr.dataset.idx) === drawerIdx);
+        return;
+      }
+      listSig = sig;
+      if (!rows.length) {
+        let msg = searchQ ? '没有匹配「' + esc(searchQ) + '」的账号' : '没有配了手机号的非客服 Profile';
+        // 这张表只列非客服。搜客服号会得到 0 结果却看不出原因,直接说破。
+        if (searchQ) {
+          const cs = profiles.find((p) => csSet.has(p.accountIdx) && rowHaystack(p).includes(q));
+          if (cs) msg = '「' + esc(searchQ) + '」是客服号 #' + cs.accountIdx + ',在「客服」tab 里';
+        }
+        tb.innerHTML = '<tr><td class="empty" colspan="7">' + msg + '</td></tr>'; return;
+      }
       tb.innerHTML = rows.map((p) => {
         const i = p.accountIdx;
         const port = (String(p.proxy || '').match(/:(\d+)\s*$/) || [, ''])[1];
@@ -850,18 +1016,23 @@
           + '<td class="num">#' + i + '</td>'
           + '<td class="ph">' + esc(phoneOf(p) || '—') + '</td>'
           + '<td class="px">' + esc(port || '—') + '</td>'
+          + (() => { const t = tgReal(p);
+              return '<td class="uid' + (t.bad ? ' warn' : '') + '"' + (t.bad ? ' title="和台账手机号对不上"' : '') + '>'
+                   + esc(t.text || '—') + '</td>'; })()
           + '<td class="stt">' + statusHtml(i, p) + '</td>'
           + '<td class="info' + (info.warn || loginSay.get(i) ? ' warn' : '') + '" title="' + esc(info.text) + '">'
           + esc(info.text) + '</td>'
-          + '</tr>';
+          + '<td></td></tr>';
       }).join('');
     }
     function refreshRow(idx) {
       const tb = document.getElementById('tglist-body'); if (!tb) return;
       const tr = tb.querySelector('tr.row[data-idx="' + idx + '"]'); if (!tr) return;
       const p = profiles.find((x) => x.accountIdx === idx); if (!p) return;
-      const td = tr.querySelector('td.stt'), ti = tr.querySelector('td.info');
+      const td = tr.querySelector('td.stt'), ti = tr.querySelector('td.info'), tu = tr.querySelector('td.uid');
       if (td) td.innerHTML = statusHtml(idx, p);
+      if (tu) { const t = tgReal(p); tu.textContent = t.text || '—'; tu.classList.toggle('warn', t.bad);
+                tu.title = t.bad ? '和台账手机号对不上' : ''; }
       if (ti) { const info = rowInfo(idx, p); ti.textContent = info.text; ti.title = info.full || info.text;
                 ti.classList.toggle('warn', !!info.warn || !!loginSay.get(idx)); }
       tr.classList.toggle('on', idx === drawerIdx);
@@ -887,15 +1058,25 @@
       // 接码页每次都要拿最新的:分区缓存里可能是上一轮的旧码,甚至旧的「设备已掉线」。
       // 在 URL 上带时间戳,一次请求就是新鲜的,不用打开后再刷一遍(那会撞接码站的限流)。
       if (want === 'code') url += (url.indexOf('?') < 0 ? '?' : '&') + '_ts=' + Date.now();
+      // 所有浮层长一个样:半透明底 + 居中卡片,和设置弹窗同一套圆角/边框/标题栏。
+      // 以前是整块铺满格子的裸页面,三个浮层三种观感。
+      const wrap = document.createElement('div');
+      wrap.className = 'ovwrap' + (want === 'code' ? ' ov-code' : '');
+      wrap.innerHTML = '<div class="ovcard"><div class="ovhead"><span>'
+        + (want === 'code' ? '接码 · #' + idx : 'IP 核对 · #' + idx)
+        + '</span><button class="icon ovclose" title="关闭">✕</button></div><div class="ovbody"></div></div>';
       const wv = document.createElement('webview');
       // 同 partition = 同代理出口,接码页看到的 IP 和这个号一致
       wv.setAttribute('partition', 'persist:sandbox-' + idx);
       wv.setAttribute('src', url);
       wv.setAttribute('allowpopups', '');
-      wv.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;display:flex;background:#fff;z-index:3';
+      wv.style.cssText = 'width:100%;height:100%;display:flex;background:' + (want === 'code' ? '#fff' : 'var(--cell)');
+      wrap.querySelector('.ovbody').appendChild(wv);
+      wrap.querySelector('.ovclose').onclick = (e) => { e.stopPropagation(); closeMode(idx); };
+      wrap.addEventListener('mousedown', (e) => { if (e.target === wrap) closeMode(idx); });
       g.body.style.position = 'relative';
-      g.body.appendChild(wv);
-      g.ov = wv; g.ovKind = want;
+      g.body.appendChild(wrap);
+      g.ov = wrap; g.ovKind = want;
     }
 
     function syncMode(idx) {
@@ -910,7 +1091,10 @@
     function closeMode(idx) { closeOthers(idx, null); }
     // 只关掉"除了 keep 之外"的叠加层。ping / 接码 有自己的开关函数(closePing / openCode),
     // 这里不碰它们的内部状态,只负责让同一格里同时最多开一个。
+    // 反向也要成立:打开任何一个格子浮层,先收起设置弹窗
+    function dropCfgModal() { try { if (cfgModal && !cfgModal.hidden) closeCfgModal(); } catch (e) {} }
     function closeOthers(idx, keep) {
+      dropCfgModal();
       if (keep !== 'code' && codeOpen.has(idx)) { codeOpen.delete(idx); updateCodeButtons(idx); }
       if (keep !== 'ping' && pingOpen.has(idx)) { try { closePing(idx); } catch (e) { pingOpen.delete(idx); } }
       if (keep !== 'stat' && statOpen.has(idx)) { statOpen.delete(idx); renderStat(idx); }
@@ -1209,13 +1393,30 @@
       syncAutoBtn();
       flash((on ? '已开启随机开群 ' : '已关闭 ') + ok + '/' + list.length);
     }
+    // 浏览器会跨刷新恢复 <input type=search> 的值,但 searchQ 是空的 —— 两边对不上,
+    // 表现就是"表里一行都没有、搜索框里却有字"。刷新后一律清空。
+    document.getElementById('tgsearch').value = '';
+    document.getElementById('tgsearch').addEventListener('input', (e) => {
+      searchQ = e.target.value;
+      if (listMode()) { renderList(); const n = document.getElementById('tgsearch-n'); }
+      else { pageNo = 0; applyPage(); }     // 网格:过滤后从第一页开始
+    });
     document.getElementById('view-grid').onclick = () => setView('grid');
     document.getElementById('view-list').onclick = () => setView('list');
     document.getElementById('drawer-close').onclick = () => closeDrawer();
     document.getElementById('drawer-scrim').onclick = () => closeDrawer();
     document.getElementById('tglist').addEventListener('click', (e) => {
+      const th = e.target.closest && e.target.closest('th[data-sort]');
+      if (th) {
+        const k = th.dataset.sort;
+        if (k === sortBy) sortDir = -sortDir; else { sortBy = k; sortDir = 1; }
+        try { localStorage.setItem(SORT_KEY, JSON.stringify({ by: sortBy, dir: sortDir })); } catch (er) {}
+        renderList(); return;
+      }
       const tr = e.target.closest && e.target.closest('tr.row');
       if (!tr) return;
+      // 在选文字(双击选中手机号之类)就不要顺手把行切走
+      try { if (String(getSelection() || '').trim()) return; } catch (er) {}
       openDrawer(Number(tr.dataset.idx));
     });
     // 拖分隔条调右栏宽度。指针一进 <webview> 事件就被它吃掉,所以拖动期间盖一层透明罩。
@@ -1418,6 +1619,10 @@
 
     async function loadProfiles(preferredId) {
       profiles = await window.panelAPI.profiles();
+      // 同一台机器上 FB 矩阵也有自己的 profile(#80 起,只绑 facebook 不绑手机号)。
+      // panelAPI.profiles() 返回的是全部 electron profile,不过滤的话那些 FB 槽位会
+      // 在这里冒充成「未配号的空会话」,还会被翻页挂载出一堆 Telegram 扫码页。
+      profiles = profiles.filter((p) => phoneOf(p) || !(p.facebook && p.facebook.id));
       refreshCs();
       profiles.sort((a, b) => a.accountIdx - b.accountIdx);
       const remembered = Number(localStorage.getItem('telegram-matrix-profile'));
@@ -1461,15 +1666,22 @@
     };
     // ── 设置弹窗(代理 / 测 IP / 删除) ──
     const cfgModal = document.getElementById('cfg-modal');
+    const cfgNote = document.getElementById('cfg-note');
     const cfgProxy = document.getElementById('cfg-proxy');
     const cfgErr = document.getElementById('cfg-err');
-    const cfgIp = document.getElementById('cfg-ip');
-    const cfgDel = document.getElementById('cfg-del');
-    let cfgP = null, delArmed = false;
+    let cfgP = null;
     const cfgPhone = document.getElementById('cfg-phone');
     const cfgCode = document.getElementById('cfg-code');
-    document.getElementById('cfg-code-open').onclick = () => { if (cfgP) openCode({ ...cfgP, login: { phone: cfgPhone.value, codeUrl: cfgCode.value.trim() } }); };
-    const cfgIpText = (p) => p && p.ipInfo && p.ipInfo.ip ? (p.ipInfo.area ? `${p.ipInfo.area} · ${p.ipInfo.ip}` : p.ipInfo.ip) : '未探测';
+    document.getElementById('cfg-code-open').onclick = () => {
+      if (!cfgP) return;
+      // 先把要用的东西抓下来:下面 closeOthers 会顺手收掉设置弹窗,而 closeCfgModal 把 cfgP 置空
+      const pr = cfgP, idx = pr.accountIdx, ph = cfgPhone.value, cu = cfgCode.value.trim();
+      // 和格子头上那颗「接码」走同一条路:openCode 只改状态,真正把浮层 webview 建出来的是
+      // syncMode。这里少了那一步,按下去只会"记下开了"、屏幕上什么都不发生。
+      closeOthers(idx, 'code');
+      openCode({ ...pr, login: { phone: ph, codeUrl: cu } });
+      setTimeout(() => syncMode(idx), 0);
+    };
     // 每个格子自己的信息块,和 Facebook 矩阵那边同一套结构(.cfg-info / .ci-row / .ci-b)。
     // Telegram 这边要显示的是本 Profile 分配到的 TG 身份和接码配置。
     const cfgInfoHtml = (p) => {
@@ -1535,8 +1747,16 @@
     }
     function codeView(idx) {
       const g = gcells.get(idx); if (!g) return null;
+      // 认叠加层本体,不要按 URL 去猜:接码页跳到恢复会话页(passkey.tgqqq.com)之后
+      // src 就不再含 jiema/getcode,按 URL 匹配会当场"找不到浮层"。
+      if (g.ovKind === 'code' && g.ov) {
+        if (g.ov.tagName === 'WEBVIEW') return g.ov;
+        const w = g.ov.querySelector && g.ov.querySelector('webview');
+        if (w) return w;
+      }
       for (const w of g.el.querySelectorAll('webview')) {
-        if (/jiema|getcode/.test(w.getAttribute('src') || '')) return w;
+        const src = w.getAttribute('src') || '';
+        if (/jiema|getcode|passkey/.test(src)) return w;
       }
       return null;
     }
@@ -1568,9 +1788,11 @@
     // 收起接码叠加层(只在它确实开着时动)
     async function closeCodeOverlay(idx) {
       if (!codeOpen.has(idx)) return;
-      const g = gcells.get(idx); if (!g) return;
-      const btn = g.el.querySelector('.code'); if (!btn) return;
-      btn.click(); await new Promise((r) => setTimeout(r, 300));
+      // 格子头上那颗 .code 按钮已经删了,再去 querySelector 只会拿到 null 然后静默返回,
+      // 浮层就永远关不掉。直接走开关函数。
+      const pr = profiles.find((x) => x.accountIdx === idx); if (!pr) return;
+      closeOthers(idx, 'code'); openCode(pr); syncMode(idx);
+      await new Promise((r) => setTimeout(r, 300));
     }
     function say3(idx, t) {
       try { loginSay.set(idx, t); const g = gcells.get(idx);
@@ -1580,11 +1802,13 @@
     // 每轮只在页面内部换 _ts 原地刷新,不再反复创建/销毁 webview。
     async function readCodePage(idx, keep) {
       const g = gcells.get(idx); if (!g) return null;
-      const btn = g.el.querySelector('.code'); if (!btn) return null;
+      const pr = profiles.find((x) => x.accountIdx === idx); if (!pr || !codeUrlOf(pr)) return null;
+      // 头上那颗「接码」按钮已经去掉(入口只剩设置弹窗里的「打开」),这里直接调开关函数
+      const toggleCode = () => { closeOthers(idx, 'code'); openCode(pr); syncMode(idx); };
       // 刚打开的浮层本身就是一次全新请求,不用再刷一遍 —— 接码站大约一分钟只放一次,
       // 「打开 + 强刷」等于连发两次,第二次必然是「请求过于频繁」,永远读不到码。
       const wasOpen = codeOpen.has(idx);
-      if (!wasOpen) { btn.click(); await sleep(5000); }
+      if (!wasOpen) { toggleCode(); await sleep(5000); }
       const cv = codeView(idx);
       let out = null;
       if (cv) {
@@ -1595,14 +1819,32 @@
             await sleep(2600);
           }
           // 限流页也是「错误」页,不能当成死卡直接放弃
-          const s = await cv.executeJavaScript("(function(){var v=[].slice.call(document.querySelectorAll('input,textarea')).map(function(e){return e.value||''});var t=document.body.innerText||'';var rate=/请求过于频繁|等待\\s*\\d+\\s*秒/.test(t);return JSON.stringify({code:v[0]||'',time:v[1]||'',twofa:v[2]||'',rate:rate,dead:!rate&&/接码设备已掉线|已冻结|已封禁|自助补号|账号不存在|卡密(错误|无效|不存在)|404 Not Found|410 Gone/.test(t)})})()");
+          const s = await cv.executeJavaScript("(function(){var v=[].slice.call(document.querySelectorAll('input,textarea')).map(function(e){return e.value||''});var t=document.body.innerText||'';var rate=/请求过于频繁|等待\\s*\\d+\\s*秒/.test(t);var em=(t.match(/错误信息[：:]\s*(.{0,60})/)||[,''])[1];var rc='';try{var a=[].slice.call(document.querySelectorAll('a')).filter(function(x){return /恢复会话/.test(x.innerText||'')})[0];if(a)rc=a.href||''}catch(e){}return JSON.stringify({code:v[0]||'',time:v[1]||'',twofa:v[2]||'',rate:rate,err:rate?'':em,recover:rc,dead:!rate&&/接码设备已掉线|已冻结|已封禁|自助补号|账号不存在|卡密(错误|无效|不存在)|404 Not Found|410 Gone/.test(t)})})()");
           out = JSON.parse(s);
         } catch (e) {}
       }
       // 接码卡失效时把页面留在格子上:那上面写着到底为什么失效(掉线/冻结/卡密错误),
       // 关掉就只剩标题里一句「接码卡已失效」,没法处理。其余情况读完照常收起来。
-      if (out && out.dead) { say3(idx, '接码卡已失效,页面留着'); return out; }
-      if (!keep && codeOpen.has(idx)) { btn.click(); await sleep(1000); }
+      // 接码页异常时把浮层留在格子上 —— 上面写着到底为什么(掉线/冻结/卡密错误/账号不存在),
+      // 关掉就只剩标题里一句干巴巴的结论,没法处理。三种算异常:
+      //   out 为 null  = 页面压根读不出来(没加载出来 / 被挡住)
+      //   out.dead     = 明确的死卡
+      //   out.err      = 页面上有「错误信息：…」且不是限流(限流是正常等待,不留)
+      const bad = !out || out.dead || (out.err && !out.rate);
+      if (bad) {
+        // 「接码设备已掉线 + 此号已登录过」这种,页面上会给一条「恢复会话」链接(带 prefill,
+        // 手机号和卡密都填好了)。这是这类号唯一的出路 —— 补号规则不适用,登录过就不能补。
+        // 直接把浮层带到那一页,省得手动去点。
+        if (out && out.recover) {
+          try { await cv.loadURL(out.recover); } catch (e) { try { cv.src = out.recover; } catch (e2) {} }
+          say3(idx, '接码设备掉线,已打开恢复会话页');
+          return out;
+        }
+        const why = !out ? '接码页读不出来' : out.dead ? '接码卡已失效' : ('接码页报错:' + String(out.err).slice(0, 24));
+        say3(idx, why + ',页面留着');
+        return out;
+      }
+      if (!keep) await closeCodeOverlay(idx);
       return out;
     }
     // 登录做成状态机:每 2 秒看一眼页面在哪一屏,就只做那一屏该做的一件事。
@@ -1708,7 +1950,11 @@
               // 必须看这个返回值:点不到 Next 就绝不往下走,更不许开接码。
               // 判可见用 getClientRects().length,不用 offsetParent —— 登录页容器是
               // position:fixed,那种情况下 offsetParent 恒为 null,看得见的按钮也会被筛掉。
-              const clicked = await evalT(wv, "(function(){var r=document.getElementById('auth-flow-root');var b=[].slice.call(r.querySelectorAll('button')).filter(function(e){return e.getClientRects().length&&/^next$/i.test((e.textContent||'').trim())})[0];if(b){b.click();return 1}return 0})()");
+              // 返回 2 = 按钮变成了「Please wait...」,说明这一次提交已经在路上了(Telegram
+              // 正在发码或在限流退避),这时候再点没有意义,等它出结果就行。以前只认 ^next$,
+              // 撞上这个状态就一直报「没找到下一步」空转。
+              const clicked = await evalT(wv, "(function(){var r=document.getElementById('auth-flow-root');var bs=[].slice.call(r.querySelectorAll('button')).filter(function(e){return e.getClientRects().length});var b=bs.filter(function(e){return /^next$/i.test((e.textContent||'').trim())})[0];if(b){b.click();return 1}if(bs.some(function(e){return /please\s*wait|请稍候/i.test(e.textContent||'')}))return 2;return 0})()");
+              if (Number(clicked) === 2) { say('已提交,等 Telegram 响应…'); await sleep(4000); continue; }
               if (Number(clicked) !== 1) { say('没找到「下一步」按钮,重试…'); await sleep(2000); continue; }
               // 点完「下一步」等 5 秒,再开接码读基线。这几行必须在**这个分支里面** ——
               // 上面那条 evalT 原本自带收尾的 "}",写在它后面就落到了「手机号屏」这一支上,
@@ -1783,9 +2029,17 @@
         }
         say('超时(停在 ' + screen + ')');
       } catch (e) { say('出错[' + screen + ']:' + String(e.message).slice(0, 40)); }
-      finally { loginBusy.delete(idx);
-        // 收尾:接码卡失效时页面要留着给你看,其余情况一律收起
-        if (!deadSeen) { try { await closeCodeOverlay(idx); } catch (e3) {} } }
+      finally {
+        loginBusy.delete(idx);
+        // 收尾:接码页异常时要留着给你看(deadSeen 或 readCodePage 自己留下的),其余情况收起
+        if (!deadSeen && !codeOpen.has(idx)) { try { await closeCodeOverlay(idx); } catch (e3) {} }
+        // 流程中止时**必须**把状态文字收掉 —— 不收的话这一行会一直写着「登录中」,
+        // 可它早就不跑了(loginBusy 已经空),实测 #69 就卡成这样。
+        if (listMode()) refreshRow(idx);
+        renderGridCell(idx);
+        setTimeout(() => { if (!loginBusy.has(idx)) { loginSay.delete(idx); if (listMode()) refreshRow(idx); renderGridCell(idx); } }, 10000);
+        probeAuth(idx, 3);
+      }
     }
 
     document.addEventListener('click', (e) => {
@@ -1804,12 +2058,16 @@
     });
 
     function openCfgModal(p) {
-      if (!p) return; cfgP = p; delArmed = false;
+      if (!p) return;
+      // 浮层同一时刻只留一个:开设置就把格子上的接码 / IP 核对 / 加群面板全收掉,
+      // 否则两张卡片叠在一起(设置压在 IP 核对上),分不清在看哪个。
+      for (const i of gcells.keys()) { try { closeMode(i); } catch (e) {} }
+      cfgP = p;
       document.getElementById('cfg-title').textContent = `${p.name} · #${p.accountIdx} 设置`;
-      cfgProxy.value = p.proxy || ''; cfgErr.textContent = ''; cfgIp.textContent = cfgIpText(p);
+      cfgProxy.value = p.proxy || ''; cfgErr.textContent = '';
       cfgPhone.value = phoneOf(p); cfgCode.value = codeUrlOf(p);
+      cfgNote.value = p.note || '';
       document.getElementById('cfg-info').innerHTML = cfgInfoHtml(p);
-      cfgDel.textContent = '删除此 Profile'; cfgDel.disabled = false;
       cfgModal.hidden = false;
       document.querySelectorAll('.gcell.cfging').forEach(function(el){ el.classList.remove('cfging'); });
       { var _g = gcells.get(p.accountIdx); if (_g) _g.el.classList.add('cfging'); }
@@ -1820,7 +2078,7 @@
     }
     function closeCfgModal() {
       cfgModal.hidden = true; cfgP = null; { var _mg = document.getElementById('max-gear'); if (_mg) _mg.classList.remove('on'); }
-      document.querySelectorAll('.gcell.cfging').forEach(function(el){ el.classList.remove('cfging'); }); delArmed = false;
+      document.querySelectorAll('.gcell.cfging').forEach(function(el){ el.classList.remove('cfging'); });
       syncPreview();
     }
     cfgModal.onclick = (e) => { if (e.target === cfgModal) closeCfgModal(); };
@@ -1831,25 +2089,21 @@
         cfgP.login = lg.login; renderPhone(cfgP);
         const u = await window.panelAPI.setProfileProxy(cfgP.accountIdx, cfgProxy.value.trim());
         cfgP.proxy = u.proxy; cfgP.ipInfo = null; renderIp(cfgP);
+        // 备注写进 profile;agg 那边由巡检把 profiles.note 带进台账的 remark 列,
+        // 所以面板不需要拿台账令牌(把主令牌塞进这个页面等于全台账可写)。
+        const nt = cfgNote.value.trim();
+        if (nt !== String(cfgP.note || '')) {
+          const r = await window.panelAPI.setProfileNote(cfgP.accountIdx, nt);
+          cfgP.note = (r && r.note !== undefined) ? r.note : nt;
+          refreshCs(); renderGridCell(cfgP.accountIdx);
+          if (listMode()) refreshRow(cfgP.accountIdx);
+        }
         if (openedProfiles.has(cfgP.accountIdx)) { reloadProfile(cfgP.accountIdx); flash(`#${cfgP.accountIdx} 代理已应用，重新加载中`); }
         else flash(`#${cfgP.accountIdx} 代理已保存，打开时生效`);
         closeCfgModal();
       } catch (e) { cfgErr.textContent = e.message || String(e); } finally { b.disabled = false; }
     };
     cfgProxy.onkeydown = (e) => { if (e.key === 'Enter') document.getElementById('cfg-save').onclick(); if (e.key === 'Escape') closeCfgModal(); };
-    document.getElementById('cfg-test').onclick = async () => {
-      if (!cfgP) return; const b = document.getElementById('cfg-test'); const o = b.textContent; b.disabled = true; b.textContent = '测 IP…'; cfgErr.textContent = '';
-      const r = await probeIp(cfgP);
-      b.disabled = false; b.textContent = o;
-      if (r.ok) cfgIp.textContent = cfgIpText(cfgP); else cfgErr.textContent = '探测失败：' + r.error;
-    };
-    cfgDel.onclick = async () => {
-      if (!cfgP) return;
-      if (!delArmed) { delArmed = true; cfgDel.textContent = '确认删除（不可恢复）'; setTimeout(() => { if (delArmed) { delArmed = false; cfgDel.textContent = '删除此 Profile'; } }, 4000); return; }
-      delArmed = false; cfgDel.disabled = true; cfgErr.textContent = '';
-      try { await removeProfile(cfgP); closeCfgModal(); }
-      catch (e) { cfgErr.textContent = e.message || String(e); cfgDel.disabled = false; cfgDel.textContent = '删除此 Profile'; }
-    };
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !cfgModal.hidden) closeCfgModal(); });
 
     new ResizeObserver(() => requestAnimationFrame(syncPreview)).observe(preview);

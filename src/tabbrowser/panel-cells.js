@@ -63,14 +63,17 @@ const appliedProxy = new Set(); // partitions whose proxy is already configured
 function ensureCellSessionProxy(idx) {
   const part = partitionFor(idx);
   if (appliedProxy.has(part)) return;
-  appliedProxy.add(part);
-  if (idx === 0) return; // profile 0 stays direct — managed by window-utils, don't touch
+  if (idx === 0) { appliedProxy.add(part); return; } // profile 0 stays direct — managed by window-utils
   try {
     const profileStore = require("../profiles/profile-store");
     let rules = "";
     try { const p = profileStore.getProfile("electron", idx); rules = profileStore.proxyRules(p && p.proxy) || ""; } catch (e) {}
     if (!rules) { try { rules = require("../config").config.proxy || ""; } catch (e) {} }
+    // 没拿到规则就**不要**记成「已应用」—— profile 的代理可能只是当时还没启用。
+    // 记了之后再启用代理,这里会被缓存挡住永远不再设置,分区就一直走直连
+    // (实测:新分配的 #75/#77 启用代理后出口仍是本机 IP)。
     if (!rules) return;
+    appliedProxy.add(part);
     session.fromPartition(part)
       .setProxy({ proxyRules: rules, proxyBypassRules: "127.0.0.1,localhost,[::1]" })
       .catch(() => {});

@@ -3,13 +3,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="pv" content="49b3f585ddbf">
   <title>Facebook 矩阵</title>
   <style>
     :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --head:#1a1a1c; --line:rgba(255,255,255,.08); --fg:#e6e6e9; --muted:#8b8b92; --accent:#3b82f6; --hover:rgba(255,255,255,.06); font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
     * { box-sizing: border-box; }
     html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: var(--bg); color: var(--fg); }
-    body { display: grid; grid-template-columns: minmax(320px, 34%) 1fr; }
+    /* 行高必须锁死在视口:只写 grid-template-columns 时隐式行按内容撑高,
+       main 跟着长 → #grid 的 flex:1 永远不需要滚,内容直接被 body 的
+       overflow:hidden 裁掉(格子一多就看不见后面的,还以为是没渲染)。 */
+    body { display: grid; grid-template-columns: minmax(320px, 34%) 1fr; grid-template-rows: 100%; }
     aside { min-width: 0; border-right: 1px solid var(--line); background: var(--bg); display: flex; flex-direction: column; }
     header { flex: none; height: 56px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); }
     h1 { margin: 0; font-size: 15px; display: flex; align-items: baseline; gap: 8px; }
@@ -45,27 +47,17 @@
     .line2 .ip.none { display: none; }
     .line2 .phone { flex: none; color: #b4b4bb; font: 11px ui-monospace, monospace; white-space: nowrap; }
     .line2 .phone.none { display: none; }
-    button.code { background: #1f6feb; padding: 3px 8px; font-size: 11px; }
-    button.code.on { background: #c0142e; }
     .ghead .phone { color: #b4b4bb; font: 11px ui-monospace, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
     /* 代理设置弹窗 */
     /* 不再是全屏 modal:设置盖在那一格的 webview 上,位置和尺寸跟格子走,
-       和接码 overlay 看到的效果一样。其余格子完全不受影响。 */
-    .modal { position: fixed; inset: 0; z-index: 60; display: block; background: transparent; pointer-events: none; }
-    .modal-card { position: absolute; overflow: auto; pointer-events: auto; }
+       和 IP 核对浮层一样贴着那一格,其余格子完全不受影响。 */
+    /* 设置浮层居中,和 IP 核对那种 .ovwrap 一个观感:半透明底 + 居中卡片。
+       原来是绝对定位贴在那一格的左上角(placeCfgOverCell),窗口一宽就缩在角落里。 */
+    .modal { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center;
+             justify-content: center; padding: 24px; background: rgba(0,0,0,.55); }
+    .modal-card { position: relative; overflow: auto; max-height: calc(100vh - 48px);
+                  display: flex; flex-direction: column; }
     .modal[hidden] { display: none; }
-    .modal-card { width: 380px; max-width: 92vw; background: var(--cell); border: 1px solid var(--line); border-radius: 14px; padding: 18px; box-shadow: 0 24px 70px rgba(0,0,0,.5); }
-    .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; font-size: 15px; font-weight: 650; }
-    .modal-head .icon { background: transparent; color: #b4b4bb; padding: 2px 6px; font-size: 14px; border-radius: 6px; }
-    .modal-head .icon:hover { background: var(--hover); color: #fff; }
-    .modal-label { display: block; font-size: 12px; color: var(--muted); margin: 4px 0 6px; }
-    .modal-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-    .modal-row input { flex: 1; min-width: 0; height: 32px; border: 1px solid var(--line); border-radius: 8px; padding: 0 10px; background: #111113; color: var(--fg); font: 12px ui-monospace, monospace; outline: 0; }
-    .modal-row input:focus { border-color: var(--accent); }
-    /* 账号资料每行的字段名,和信息块的 .ci-k 同宽同色,填了值也认得出是哪一项 */
-    .modal-row .fld-k { flex: none; width: 76px; color: var(--muted); font-size: 12px; }
-    .modal-ip { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: #b4b4bb; }
-    .modal-err { color: #ff8a8a; font-size: 12px; min-height: 16px; margin-bottom: 4px; word-break: break-all; }
     .cfg-info { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; background: #0f0f11; display: flex; flex-direction: column; gap: 4px; }
     .ci-row { display: flex; gap: 12px; font-size: 12px; line-height: 1.65; align-items: baseline; }
     .ci-row .ci-k { flex: none; width: 76px; color: var(--muted); }
@@ -77,16 +69,28 @@
     .ci-b.warn { background: rgba(240,180,41,.16); color: #f0c150; }
     .ci-b.mut { background: var(--line); color: var(--muted); }
     .cfg-info hr { border: 0; border-top: 1px solid var(--line); margin: 6px 0; }
-    .fblogin-btn { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 6px 14px; font-size: 12px; font-weight: 600; cursor: pointer; }
-    .fblogin-btn:hover { filter: brightness(1.08); }
+    .modal-card { width: 380px; max-width: 92vw; background: var(--cell); border: 1px solid var(--line); border-radius: 14px; padding: 18px; box-shadow: 0 24px 70px rgba(0,0,0,.5); }
+    .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; font-size: 15px; font-weight: 650; }
+    .modal-head .icon { background: transparent; color: #b4b4bb; padding: 2px 6px; font-size: 14px; border-radius: 6px; }
+    .modal-head .icon:hover { background: var(--hover); color: #fff; }
+    .modal-label { display: block; font-size: 12px; color: var(--muted); margin: 4px 0 6px; }
+    .modal-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+    .modal-row input { flex: 1; min-width: 0; height: 32px; border: 1px solid var(--line); border-radius: 8px; padding: 0 10px; background: #111113; color: var(--fg); font: 12px ui-monospace, monospace; outline: 0; }
+    .modal-row input:focus { border-color: var(--accent); }
+    .modal-ip { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: #b4b4bb; }
+    .modal-err { color: #ff8a8a; font-size: 12px; min-height: 16px; margin-bottom: 4px; word-break: break-all; }
     .modal-danger { margin-top: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+    /* 保存是这张卡片的最终动作,放最下面单独一行,不再挤在「代理地址」那一行的右边 */
+    .modal-foot { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line);
+                  display: flex; justify-content: flex-end; gap: 8px; }
+    .modal-foot button { min-width: 84px; }
     button.del { background: #b3261e; }
     .row-err { padding: 4px 0 0 16px; color: #ff8a8a; font-size: 11px; display: none; }
     .row-err.on { display: block; }
     #empty { display: none; padding: 40px 24px; color: var(--muted); text-align: center; line-height: 1.8; }
     #empty.on { display: block; }
     .hint { flex: none; padding: 8px 16px; color: var(--muted); font-size: 11px; border-top: 1px solid var(--line); }
-    main { min-width: 0; display: flex; flex-direction: column; align-items: center; padding: 14px 18px; background: var(--bg); }
+    main { min-width: 0; min-height: 0; display: flex; flex-direction: column; align-items: center; padding: 14px 18px; background: var(--bg); }
     #preview-title { width: min(410px, calc(100% - 20px)); margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #b4b4bb; font-size: 12px; }
     #preview-title .left { display: flex; align-items: center; gap: 8px; min-width: 0; }
     #selected-name { color: var(--fg); font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -110,6 +114,19 @@
     #grid-title .left { display: flex; align-items: center; gap: 10px; min-width: 0; }
     #grid-title .mid { margin-right: 0; }
     #grid-count { color: var(--muted); font-size: 12px; white-space: nowrap; }
+    /* 分页控件做成一个整体的胶囊,和 .chip / .icon 同一套语汇 —— 之前是三个
+       各自带边框的原生控件散在工具栏里,和面板其它地方完全不是一个风格。 */
+    .tabs { display: inline-flex; gap: 2px; padding: 1px; border-radius: 999px; background: var(--head); border: 1px solid var(--line); }
+    .tabs button { padding: 2px 10px; border: none; border-radius: 999px; background: transparent; color: #b4b4bb; font-size: 11.5px; cursor: pointer; }
+    .tabs button.on { background: var(--line); color: var(--fg); }
+    .pager { display: inline-flex; align-items: center; gap: 2px; padding: 1px 3px; border-radius: 999px;
+             background: var(--head); border: 1px solid var(--line); }
+    .pager .icon { padding: 1px 5px; font-size: 14px; line-height: 18px; border-radius: 999px; }
+    .pager #page-label { min-width: 96px; text-align: center; color: #b4b4bb; font: 11px ui-monospace, monospace; }
+    .pager i { width: 1px; height: 14px; background: var(--line); margin: 0 3px; }
+    .pager input { width: 34px; padding: 1px 2px; text-align: center; border: none; background: transparent;
+                   color: var(--fg); font: 11px ui-monospace, monospace; }
+    .pager input::-webkit-outer-spin-button, .pager input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
     #grid { display: none; width: 100%; flex: 1 1 auto; min-height: 0; gap: 8px; flex-direction: row; flex-wrap: wrap; align-content: flex-start; overflow-x: hidden; overflow-y: auto; }
     /* 批量模式 = 整页只有 webview:侧栏整个隐藏,顶部一条细工具栏,其余全是格子 */
     body.batch { grid-template-columns: 1fr; }
@@ -124,37 +141,153 @@
     main #preview-title, main #phone { display: none !important; }
     main #grid-title { display: flex !important; }
     main #grid { display: flex !important; }
+    /* ── 两种看法:网格 / 列表 ─────────────────────────────────────────
+       列表模式下整页是一张表,点一行把那个格子从右侧抽屉滑出来。
+       抽屉直接复用 #grid 本体,只改定位,**不搬 DOM** —— <webview> 一旦在文档里被
+       移动就会重新挂载:会话要重连、正在跑的登录进度会丢。 */
+    #drawer { display: flex; flex-direction: column; width: 100%; flex: 1 1 auto; min-height: 0; }
+    #drawer-close, #tglist, #drawer-scrim { display: none; }
+    main.listmode #tglist { display: block; width: 100%; flex: 1 1 auto; min-height: 0; overflow: auto;
+                            border: 1px solid var(--line); border-radius: 10px; background: var(--head); }
+    #cfg-note { width: 100%; resize: vertical; min-height: 54px; max-height: 220px; padding: 6px 8px;
+                border: 1px solid var(--line); border-radius: 8px; background: var(--head); color: var(--fg);
+                font: 12px/1.5 inherit; outline: none; }
+    #cfg-note:focus { border-color: var(--accent); }
+    .modal-label .lbl-hint { margin-left: 8px; color: var(--muted); font-size: 10.5px; font-weight: 400; }
+    .vsearch { display: inline-flex; align-items: center; gap: 6px; height: 22px; box-sizing: border-box;
+               padding: 0 8px; border-radius: 999px; background: var(--head); border: 1px solid var(--line); }
+    .vsearch svg { width: 12px; height: 12px; flex: none; fill: none; stroke: var(--muted); stroke-width: 2;
+                   stroke-linecap: round; }
+    .vsearch input { width: 210px; border: 0; background: transparent; color: var(--fg); font-size: 11.5px;
+                     outline: none; padding: 0; }
+    .vsearch input::placeholder { color: var(--muted); }
+    .vsearch input::-webkit-search-cancel-button { filter: grayscale(1) opacity(.6); cursor: pointer; }
+    .vsearch #tgsearch-n { color: var(--muted); font: 11px ui-monospace, monospace; }
+    .vsearch:focus-within { border-color: var(--accent); }
+    /* 浮层只有一种长相:半透明底 + 居中卡片,和设置弹窗同一套圆角/边框/标题栏/阴影。
+       IP 核对走这套,页面自身不再画自己的外框。 */
+    .ovwrap { position: absolute; inset: 0; z-index: 3; display: flex; align-items: flex-start;
+              justify-content: center; padding: 20px 14px; background: rgba(0,0,0,.55); overflow: auto; }
+    .ovcard { width: 420px; max-width: 100%; background: var(--cell); border: 1px solid var(--line);
+              border-radius: 14px; box-shadow: 0 24px 70px rgba(0,0,0,.5); overflow: hidden;
+              display: flex; flex-direction: column; }
+    .ovhead { flex: none; display: flex; align-items: center; justify-content: space-between;
+              padding: 12px 10px 10px 16px; font-size: 15px; font-weight: 650; }
+    .ovhead .icon { font-size: 14px; }
+    .ovbody { flex: 1 1 auto; height: 520px; max-height: 68vh; display: flex; }
+    .ovwrap.ov-code .ovbody { height: 460px; }
+    /* 列表模式 = 左右分栏,不是浮层:表格一直可用,右边常驻当前选中的那个会话。
+       宽度靠中间那条竖线拖,存在 localStorage,刷新后还是上次的宽度。 */
+    #split { display: flex; flex-direction: column; width: 100%; flex: 1 1 auto; min-height: 0; }
+    #splitter { display: none; }
+    main.listmode #split { flex-direction: row; align-items: stretch; gap: 0; }
+    main.listmode #tglist { order: 1; flex: 1 1 auto; min-width: 0; }
+    main.listmode #splitter { order: 2; display: block; flex: none; width: 9px; cursor: col-resize; position: relative; }
+    main.listmode #splitter::after { content: ''; position: absolute; left: 4px; top: 0; bottom: 0; width: 1px;
+                                     background: var(--line); }
+    main.listmode #splitter:hover::after { background: var(--accent); width: 2px; left: 3px; }
+    main.listmode #drawer { order: 3; flex: none; width: var(--splitw, 760px); min-width: 0;
+                            border: 1px solid var(--line); border-radius: 12px; background: var(--cell);
+                            overflow: hidden; }
+    main.listmode #drawer-close { display: none; }
+    main.listmode #drawer-scrim { display: none !important; }
+    /* 拖动时盖一层,否则指针一进 <webview> 事件就被它吃掉,拖到一半会断 */
+    #dragmask { position: fixed; inset: 0; z-index: 90; cursor: col-resize; }
+    /* 抽屉里只有一格,让它把抽屉撑满 —— .gcell 平时是固定 360px × 50vh 的网格砖,
+       直接拿进抽屉会缩在左上角一小块。 */
+    main.listmode #grid { display: block !important; }
+    main.listmode #grid > .gcell { width: 100%; height: 100%; }
+    main.listmode #drawer-close { display: flex; position: absolute; top: 14px; left: -15px; z-index: 2;
+                                  width: 30px; height: 30px; align-items: center; justify-content: center;
+                                  padding: 0; border-radius: 999px; background: var(--head);
+                                  border: 1px solid var(--line); box-shadow: 0 2px 10px rgba(0,0,0,.5); }
+    main.listmode.drawer-open #drawer-scrim { display: block; position: fixed; inset: 0; z-index: 43;
+                                              background: rgba(0, 0, 0, .45); }
+
+    /* 表是一张卡片:定宽居中、四边有界。之前只给 table 设了 max-width,
+       行的分隔线和 hover 底色照样铺到窗口边缘,左边空一大块、右边贴边,看着像没排版。 */
+    /* 滚动条会把内容区挤窄几个像素,卡片就和上面那排按钮差了 5px 对不齐。
+       两边都预留出滚动条的位置,居中才是真的居中。 */
+    main.listmode #tglist { padding: 0; }
+    /* 滚动容器必须是卡片本身:放在外面的话 #tblcard 的 overflow:hidden 会自己变成一个
+       滚动上下文,sticky 表头就贴在它身上跟着一起滚走 —— 表现就是表头钉不住。 */
+    #tblcard { width: 100%; max-width: none; margin: 0; border: 1px solid var(--line);
+               border-radius: 12px; background: var(--cell); overflow: auto; }
+    main.listmode #tglist { display: flex; overflow: hidden; }
+    /* table-layout:fixed —— 列宽只认 <col> 上写死的值,不随内容长短重算。
+       auto 布局下左栏一拖、某一行文字一变长,整张表的列就会跟着跳。
+       最后一列是留白,用来吃掉剩余宽度,这样前面几列在任何面板宽度下都纹丝不动。 */
+    #tglist table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 12px; }
+    #tglist th, #tglist td { overflow: hidden; text-overflow: ellipsis; }
+    #tglist th { position: sticky; top: 0; z-index: 2; background: #17171a; color: var(--muted);
+                 font-weight: 500; text-align: left; padding: 0 12px; height: 34px;
+                 border-bottom: 1px solid var(--line); white-space: nowrap; }
+    #tglist td { padding: 0 12px; height: 36px; border-top: 1px solid rgba(255, 255, 255, .05);
+                 color: #c9c9d1; white-space: nowrap; vertical-align: middle; }
+    #tglist tbody tr:nth-child(even) td { background: rgba(255, 255, 255, .018); }
+    #tglist tr.row { cursor: pointer; }
+    #tglist tr.row:hover td { background: rgba(255, 255, 255, .06); }
+    #tglist tr.row.on td { background: rgba(240, 164, 90, .13); }
+    #tglist col.c-num { width: 60px; } #tglist col.c-ph { width: 148px; }
+    #tglist col.c-px { width: 80px; }  #tglist col.c-uid { width: 118px; }
+    #tglist col.c-stt { width: 200px; }
+    #tglist col.c-info { width: 240px; }   /* 写死;最后那列没写宽度,剩余空间全归它 */
+    #tglist td.num, #tglist td.ph, #tglist td.px, #tglist td.uid { font: 11px ui-monospace, monospace; color: var(--muted); }
+    #tglist td.num { color: #8e8e98; }
+    #tglist td.info { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+    /* 状态 = 药丸 + 紧跟着的 id,不留空白列 */
+    #tglist .pill { display: inline-block; min-width: 46px; text-align: center; padding: 1px 8px;
+                    border-radius: 999px; font-size: 11px; line-height: 17px; border: 1px solid transparent; }
+    #tglist .pill.ok  { background: rgba(60, 200, 130, .14); color: #4ed197; border-color: rgba(60,200,130,.28); }
+    #tglist .pill.off { background: rgba(255, 255, 255, .06); color: var(--muted); border-color: var(--line); }
+    #tglist .pill.run { background: rgba(240, 164, 90, .16); color: #f0a45a; border-color: rgba(240,164,90,.34); }
+    #tglist .pill.bad { background: rgba(240, 90, 90, .14); color: #f08a8a; border-color: rgba(240,90,90,.3); }
+    #tglist .uid { margin-left: 8px; color: #7f7f8a; font: 11px ui-monospace, monospace; }
+    #tglist .pill.run + .uid { color: #f0a45a; }
+    #tglist .warn { color: #f0a45a; }
+    #tglist .empty { padding: 20px; text-align: center; color: var(--muted); }
+    /* 视图切换放在内容区上方、和表格卡片左右对齐 —— 它只管下面这块内容,
+       挤在顶栏那一排全局按钮里会被当成又一个全局动作。 */
+    #viewbar { display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+               width: 100%; margin: 0 0 8px; flex: 0 0 auto; }
+    #viewbar .vleft { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+    /* 这一排里的东西尺寸要一致:.ghost 继承的是默认大按钮(13px / 圆角 8 / padding 7),
+       和「网格|列表」那颗 11.5px 胶囊差一大截。统一成同一个高度和同一套字号圆角。 */
+    #viewbar .tabs, #viewbar .pager, #viewbar .vleft > .ghost { height: 22px; box-sizing: border-box; }
+    #viewbar .ghost { display: inline-flex; align-items: center; padding: 0 10px; border-radius: 999px;
+                      font-size: 11.5px; font-weight: 500; line-height: 1; }
+    #viewbar .ghost.on { background: var(--accent); border-color: transparent; color: #fff; }
+    main.listmode #viewbar { max-width: none; margin: 0 0 8px; }
+    /* 「自动开群」是个选择模式:点亮之后每个格子头上冒出一个勾选框,勾哪个开哪个。
+       原来的「全部开/全部关」退化成这个模式里的全选/全不选。 */
+    /* 绿框 = 这个号的随机开群本来就开着;橙框 = 这一轮被勾中了。两回事,不能用同一个记号 */
+    /* 顶栏的开关型按钮:亮起来 = 这台机器的随机开群是开着的 */
+    /* [hidden] 对 .pager / .tabs 不起作用(它们自己写了 display:inline-flex),要显式关掉 */
+    .is-off { display: none !important; }
+
     /* 单格最大化:全屏叠层显示当前 webview(其它 webview detach 保活,不受影响) */
-    #maxview { position: fixed; inset: 0; z-index: 50; background: var(--bg); display: flex; flex-direction: column; }
-    #maxview[hidden] { display: none; }
-    .maxhead { flex: none; height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--line); }
-    .maxhead .name { font-weight: 650; font-size: 13px; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .maxhead .chip { flex: none; padding: 1px 6px; border-radius: 999px; background: var(--head); color: #b4b4bb; font: 11px ui-monospace, monospace; }
-    .maxhead .minfo { flex: none; display: inline-flex; align-items: center; gap: 5px; max-width: 30vw; padding: 2px 8px; border-radius: 8px; background: var(--head); color: #c9c9d1; font: 11px ui-monospace, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .maxhead .minfo:empty { display: none; }
     /* 最大化后的 header 与未最大化的格子头保持一致:不显示名字,
-       也不显示手机号 / 接码 URL 那两块信息。这些在 ⚙ 里都能看。 */
-    .maxhead .name { display: none; }
-    .maxhead .minfo { display: none; }
-    .maxhead .minfo b { color: #8a8a93; font-weight: 500; user-select: none; }
-    .maxhead .minfo span { color: #e9e9ee; user-select: all; overflow: hidden; text-overflow: ellipsis; }
-    .maxhead .sp { flex: 1; }
-    .maxhead .acts { flex: none; display: inline-flex; align-items: center; gap: 6px; padding-left: 12px; border-left: 1px solid var(--line); }
-    #maxbody { flex: 1 1 auto; min-height: 0; }
+       账号资料在 ⚙ 里看。 */
     .gcell { display: flex; flex-direction: column; flex: none; width: 360px; height: 50vh; min-height: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--cell); overflow: hidden; }
+    .gbody .ph { display: flex; align-items: center; justify-content: center; height: 100%;
+      color: var(--muted); font-size: 12px; background: var(--head); }
+    /* .gcell 是 display:flex,会盖过 [hidden] 的 UA 默认 display:none ——
+       不加这条,藏起来的格子照样占位(实测:每页 4 个,却铺了 10 格占位)。 */
+    .gcell[hidden] { display: none !important; }
     .gcell.done { border-color: rgba(63,185,80,.6); }
     .gcell.failed { border-color: rgba(255,92,92,.6); }
     .ghead { flex: none; height: 32px; padding: 0 8px; display: flex; align-items: center; gap: 6px; font-size: 12px; border-bottom: 1px solid var(--line); background: var(--head); min-width: 0; }
     .ghead .name { font-size: 12px; }
     /* 格子头不显示 profile 名字(只是不显示,profile 本身不动) */
     .ghead .name { display: none; }
-    .ghead .st { margin-left: auto; }
+    /* 格子头不显示手机号 */
+    .ghead .phone { display: none; }
+    .ghead .st { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
     .ghead .acts { flex: none; display: inline-flex; align-items: center; gap: 6px; margin-left: auto; padding-left: 8px; }
     /* 格子头 / 最大化头部那一排图标:统一成 24×24 的盒子,里面 14px 的单色线条 SVG。
        之前 ⚙ ⤢ ⟳ 是文本符号、🌐 🔄 是彩色 emoji,两套字体画出来一大一小、一彩一灰。 */
     .ghead .icon, .maxhead .icon { width: 28px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; color: #b4b4bb; border-radius: 6px; line-height: 1; }
-    .ghead .icon svg, .maxhead .icon svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; display: block; }
-    .ghead button.code { height: 22px; padding: 0 9px; display: inline-flex; align-items: center; }
+    .ghead .icon svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; display: block; }
     /* 上面把 .icon 统一成 inline-flex,会盖掉原来 .pingctl{display:none} —— 🔄 ✕ 只在
        ping 叠加层开着时才出现,这里把优先级补回来。 */
     .ghead .st ~ .acts { margin-left: 8px; }
@@ -166,8 +299,6 @@
     #grid-empty { grid-column: 1 / -1; display: grid; place-items: center; color: var(--muted); }
     .spinner { width: 28px; height: 28px; border: 3px solid rgba(255,255,255,.12); border-top-color: var(--accent); border-radius: 50%; animation: spin .9s linear infinite; margin: 0 auto 12px; }
     @keyframes spin { to { transform: rotate(360deg); } }
-    /* Facebook 矩阵:接码/手机号是 Telegram 专属,这里隐藏 */
-    button.code, .line2 .phone, .ghead .phone, #cfg-login, #open-code { display: none !important; }
     /* 机器 id 徽章:机器多了一眼认出这是哪台。列表/批量两种模式都显示。 */
     .mid{display:inline-block;margin-right:8px;padding:2px 9px;border-radius:7px;font:700 13px ui-monospace,monospace;
          background:#1f6feb;color:#fff;letter-spacing:.5px;vertical-align:middle;box-shadow:0 1px 4px rgba(0,0,0,.4)}
@@ -178,680 +309,789 @@
   ::-webkit-scrollbar-thumb { background: #33363f; border-radius: 8px; border: 2px solid var(--bg); background-clip: padding-box; }
   ::-webkit-scrollbar-thumb:hover { background: #454a57; }
   ::-webkit-scrollbar-corner { background: transparent; }
-    .maxhead .icon.on, .ghead .icon.on { background: var(--accent); color: #fff; }
+  /* 某个叠加层打开时,header 收起其余按钮,只留「当前这个」和一个关闭 ——
+     一排图标全亮着看不出现在处于什么状态,也容易误点。 */
+  .gcell.modeon .ghead .acts > button { display: none; }
+  .gcell.modeon .ghead .acts > button.on,
+  .gcell.modeon .ghead .acts > button.xclose { display: inline-flex; }
+  .ghead .acts > button.xclose { display: none; margin-left: auto; }
+  /* 进入模式后按钮要靠右。不能用 width:100% —— .acts 还带着 margin-left:auto,
+     两者叠加会让容器比剩余空间还宽,右对齐的内容被推出可视区(实测:图标整个不见)。
+     改成吃掉剩余空间 + 右对齐。 */
+  .gcell.modeon .ghead .acts { flex: 1 1 auto; min-width: 0; justify-content: flex-end; }
+  .gcell.modeon .ghead .acts > button.xclose { margin-left: 6px; }
+
+  /* 格子上半的信息浮层。格子是盖在页面之上的 BrowserView,页面里的元素挡不住它 ——
+     所以打开浮层时把格子矩形缩到下半(syncPreview 里做),上半空出来给这个 div。 */
+  
+    /* 格子头上的账号名:TG 那版这里放手机号,FB 放名字/uid */
+    .ghead .who { flex: none; max-width: 42%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+                  color: #c9c9d1; font-size: 11.5px; }
+    /* 最大化:只改定位,不把 <webview> 搬去别的容器 —— 一搬就重新挂载,会话要重连 */
+    .gcell.maxed { position: fixed !important; inset: 0 !important; z-index: 50;
+                   width: auto !important; height: auto !important; border-radius: 0; }
+    body.hasmax #grid { overflow: hidden; }
   </style>
 </head>
 <body>
-  <aside>
-    <header>
-      <h1><span id="mid-list" class="mid" hidden></span>Facebook 矩阵 <small id="count"></small></h1>
-      <div class="actions"><button id="add-profile" title="新建一个独立会话（persist:sandbox-N）">+ 添加 Profile</button></div>
-    </header>
-    <div class="list">
-      <div id="rows"></div>
-      <div id="empty">还没有 Profile<br>点击右上角「添加 Profile」创建第一个 Facebook 会话</div>
-    </div>
-    <div class="hint">点击行切换预览；点 ⚙ 设置代理 / 测 IP / 删除。已打开过的会话会在后台保持登录。</div>
-  </aside>
   <main>
     <div id="grid-title">
-      <div class="left"><span id="mid-batch" class="mid" hidden></span><b>批量登录</b><span id="grid-count"></span></div>
-      <div class="actions"><button class="ghost" id="grid-reload" title="重新加载所有格子">全部重载</button></div>
+      <div class="left"><span id="mid-batch" class="mid" hidden></span><b>Facebook 矩阵</b><span id="grid-count"></span></div>
+      <div class="actions"><span class="pager" id="pager" title="一次只打开这么多个会话,翻页时其余的会被卸载释放内存"><button class="icon" id="page-prev" title="上一页">&lsaquo;</button><span id="page-label"></span><button class="icon" id="page-next" title="下一页">&rsaquo;</button><i></i><input id="page-size" type="number" min="1" max="24" title="每页同时打开几个"></span><button class="ghost" id="grid-reload" title="重新加载所有格子">全部重载</button></div>
     </div>
-    <div id="grid"></div>
-    <div id="preview-title">
-      <div class="left"><span class="dot" id="sel-dot"></span><span id="selected-name">未选择 Profile</span><span id="status"></span></div>
-      <div class="actions"><button class="code" id="open-code" title="在格子上叠加/关闭接码 webview(同代理出口)">接码</button><button class="ghost" id="probe-ip" title="经该 Profile 的代理探测出口 IP / 地区">测 IP</button><button class="ghost" id="reload" title="重新加载 Facebook">重新加载</button></div>
-    </div>
-    <div id="phone">
-      <div id="phone-preview"></div>
-      <div class="overlay on" id="ov-empty"><div>选择左侧一个 Profile 预览 Facebook</div></div>
-      <div class="overlay" id="ov-loading"><div><div class="spinner"></div><div>正在加载 Facebook…</div></div></div>
-      <div class="overlay" id="ov-error">
-        <div>
-          <h2>无法连接 Facebook</h2>
-          <p id="err-detail"></p>
-          <div class="btns"><button id="err-retry">重试</button><button class="ghost" id="err-cfg">代理设置</button></div>
+    <div id="viewbar"><span class="vleft"><button class="ghost" id="chk-all" title="逐页打开每个会话,看它跳到哪个页面来判定登录态">检测</button></span><span class="vsearch" id="vsearch"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input id="fbsearch" type="search" spellcheck="false" autocomplete="off" placeholder="搜 #号 / FB uid / 名字 / 邮箱 / 备注"><span id="fbsearch-n"></span></span><span class="tabs" id="views"><button id="view-grid" title="网格:本页的会话平铺成格子">网格</button><button id="view-list" title="列表:一张表,点一行在右侧打开那个会话">列表</button></span></div>
+    <div id="split">
+      <div id="drawer">
+        <button class="icon" id="drawer-close" title="收起(Esc)"><svg viewBox="0 0 24 24"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg></button>
+        <div id="grid"></div>
+      </div>
+      <div id="splitter" title="拖动调整宽度"></div>
+      <div id="tglist">
+        <div id="tblcard">
+          <table>
+            <colgroup><col class="c-num"><col class="c-ph"><col class="c-px"><col class="c-uid"><col class="c-stt"><col class="c-info"><col></colgroup>
+            <thead><tr><th>#</th><th>FB uid</th><th>代理</th><th>名字</th><th>状态</th><th>备注</th><th></th></tr></thead>
+            <tbody id="tglist-body"></tbody>
+          </table>
         </div>
       </div>
     </div>
   </main>
-  <div id="maxview" hidden><div class="maxhead"><span class="dot" id="max-dot"></span><span class="name" id="max-name"></span><span class="chip" id="max-chip"></span><span class="minfo" id="max-acct"></span><span class="sp"></span><span class="acts"><button class="icon" id="max-gear" title="Profile 信息 / 设置"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button><button class="icon" id="max-ping" title="ipcheck 出口 IP"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></button><button class="icon" id="max-reload" title="重新加载"><svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button><button class="ghost" id="max-restore">还原</button></span></div><div id="maxbody"></div></div>
-  <div id="cfg-modal" class="modal" hidden>
+    <div id="cfg-modal" class="modal" hidden>
     <div class="modal-card">
       <div class="modal-head"><span id="cfg-title">Profile 设置</span></div>
       <div class="cfg-info" id="cfg-info"></div>
-      <div id="cfg-login">
-      <label class="modal-label">手机号</label>
-      <div class="modal-row"><input id="cfg-phone" placeholder="+8801700000000" spellcheck="false"></div>
-      <label class="modal-label">接码 URL</label>
-      <div class="modal-row"><input id="cfg-code" placeholder="https://…/getcode?id=…" spellcheck="false"><button class="ghost" id="cfg-code-open" title="在该 Profile 的 tab 里打开">打开</button></div>
-      </div>
-      <label class="modal-label">账号资料</label>
-      <div class="modal-row"><span class="fld-k">FB 密码</span><input id="cred-pwd" spellcheck="false"></div>
-      <div class="modal-row"><span class="fld-k">2FA</span><input id="cred-twofa" spellcheck="false"></div>
-      <div class="modal-row"><span class="fld-k">邮箱</span><input id="cred-email" spellcheck="false"></div>
-      <div class="modal-row"><span class="fld-k">邮箱密码</span><input id="cred-mailpwd" spellcheck="false"></div>
-      <div class="modal-row"><span class="fld-k">备用邮箱</span><input id="cred-second" spellcheck="false"></div>
       <label class="modal-label">代理地址</label>
-      <div class="modal-row"><input id="cfg-proxy" placeholder="留空 = 直连，例如 http://127.0.0.1:20001" spellcheck="false"><button id="cfg-save">保存</button></div>
-      <div class="modal-row"><button class="ghost" id="cfg-test">测 IP</button><span class="modal-ip" id="cfg-ip"></span></div>
+      <div class="modal-row"><input id="cfg-proxy" placeholder="留空 = 直连，例如 socks5://127.0.0.1:20100" spellcheck="false"></div>
+      <label class="modal-label">备注<span class="lbl-hint">保存后随巡检同步到 agg 台账</span></label>
+      <div class="modal-row"><textarea id="cfg-note" rows="3" spellcheck="false" placeholder="这个号的情况、要注意什么…"></textarea></div>
       <div class="modal-err" id="cfg-err"></div>
-      <div class="modal-danger"><button class="ghost del" id="cfg-del">删除此 Profile</button></div>
+      <div class="modal-foot"><button class="ghost" id="cfg-login" hidden title="用上面的邮箱/密码/2FA 在这一格里自动登录">自动登录</button><span style="flex:1"></span><button class="ghost" id="cfg-cancel">取消</button><button id="cfg-save">保存</button></div>
     </div>
   </div>
   <script>
-    const SITE_URL = 'https://www.facebook.com/';
-    const rowsEl = document.getElementById('rows');
-    const empty = document.getElementById('empty');
-    const countEl = document.getElementById('count');
-    const addButton = document.getElementById('add-profile');
-    const preview = document.getElementById('phone-preview');
-    const selectedName = document.getElementById('selected-name');
-    const selDot = document.getElementById('sel-dot');
-    const statusEl = document.getElementById('status');
-    const ov = { empty: document.getElementById('ov-empty'), loading: document.getElementById('ov-loading'), error: document.getElementById('ov-error') };
-    const errDetail = document.getElementById('err-detail');
-    let profiles = [];
-    let selected = null;
-    const openedProfiles = new Set();   // 打开过的会话保留在后台(登录态不丢),只有选中的贴到预览区
-    const codeOpen = new Set(); const pingOpen = new Set(); const pingUrl = new Map();          // 已叠开接码 overlay 的 accountIdx(同 partition 的接码 webview 覆盖在格子上)
-    const cellState = new Map();        // accountIdx -> { loading, failed, error, url, title }
-    const rows = new Map();             // accountIdx -> row element
-    const BATCH_MAX = 10;               // 一次最多铺开多少个登录格
+    const FB_URL = 'https://www.facebook.com/';
+    const esc = (v) => String(v || '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const mainEl = document.querySelector('main');
     const gridEl = document.getElementById('grid');
     const gridCount = document.getElementById('grid-count');
-    let batchMode = false;
-    let maxedIdx = null;
-    const batch = new Set();            // 批量模式下铺开的 accountIdx
-    const gcells = new Map();           // accountIdx -> { el, body }
+    const cfgModal = document.getElementById('cfg-modal');
 
-    const esc = (value) => String(value || '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-    // 机器 id:app 打开面板时把本机 id 拼进 URL(?team=xs-3007)。两处徽章都填上。
-    (function(){ try {
+    let profiles = [];
+    const gcells = new Map();        // accountIdx -> { el, body, wv, ov, ovKind }
+    const cellState = new Map();     // accountIdx -> { loading, failed, url, title, error }
+    const cellUrl = new Map();       // 卸载前停在哪个页面,挂回来接着看
+    const openedProfiles = new Set();
+    const pingOpen = new Set(), pingUrl = new Map();
+    let maxedIdx = null;
+
+    (function () { try {
       const t = new URLSearchParams(location.search).get('team');
-      if (t) for (const id of ['mid-list','mid-batch']) {
-        const el = document.getElementById(id); if (el) { el.textContent = t; el.hidden = false; el.title = '本机: ' + t; }
-      }
-      if (t) document.title = t + ' · Facebook 矩阵';
+      if (t) { const el = document.getElementById('mid-batch'); if (el) { el.textContent = t; el.hidden = false; el.title = '本机: ' + t; } document.title = t + ' · Facebook 矩阵'; }
     } catch (e) {} })();
-    const cellId = (idx) => `facebook-preview-${idx}`;
-    const stateOf = (idx) => cellState.get(Number(idx)) || {};
+
+    const stateOf = (i) => cellState.get(Number(i)) || {};
     const dotClass = (st) => st.loading ? 'loading' : st.failed ? 'failed' : (st.url ? 'ok' : '');
-    const stateText = (st, opened) => st.loading ? '加载中…' : st.failed ? '连接失败' : st.url ? '已加载' : (opened ? '' : '未打开');
-    const fmtAgo = (iso) => { const t = Date.parse(iso || ''); if (!t) return ''; const m = Math.round((Date.now() - t) / 60000); return m < 1 ? '刚刚' : m < 60 ? `${m} 分钟前` : m < 1440 ? `${Math.round(m / 60)} 小时前` : `${Math.round(m / 1440)} 天前`; };
-    // 列表只显示一个简短地区(取最具体的一段:优先省/州,否则国家),完整信息在 tooltip。
-    const shortArea = (area) => { const seg = String(area || '').split('·').map((x) => x.trim()).filter(Boolean); return seg[1] || seg[0] || ''; };
-    function renderIp(p) {
-      const row = rows.get(p.accountIdx); if (!row) return;
-      const el = row.querySelector('.ip'); el.className = 'ip';
-      const info = p.ipInfo;
-      if (info && info.ip) {
-        const a = shortArea(info.area);
-        el.textContent = a || info.ip;
-        el.title = `出口 IP ${info.ip}${info.area ? '，' + info.area : ''}，${fmtAgo(info.probedAt) || '未知时间'}探测`;
-      } else { el.classList.add('none'); el.textContent = ''; el.title = ''; }
+    // 身份只有一个来源:profile 的 logins[facebook]。app 的身份探测登录后会把它刷新成
+    // {uid, 名字},格子没挂载也读得到 —— 列表不用开页面就能说清这个号登没登录。
+    const fbOf = (p) => p.facebook || null;
+    const uidOf = (p) => { const f = fbOf(p); return (f && f.id) ? String(f.id) : ''; };
+    // logins[facebook].note 按既有约定装的是 "<名字> · FB密码:… · 2FA:…"(fb-login.js 也这么解析)。
+    // 列表只显示第一段,凭据不摊在表里;要看完整的去 ⚙。
+    const nameOf = (p) => { const f = fbOf(p); return String((f && f.displayName) || '').split('·')[0].trim(); };
+    function credOf(p) {
+      const f = fbOf(p) || {};
+      const note = String(f.displayName || '');
+      const m = note.match(/FB密码[:：]\s*([^·]+)/);
+      return { email: String(f.email || '').trim(), pass: m ? m[1].trim() : '',
+               twofa: String(f.twofa || '').replace(/\s/g, '') };
     }
-    // 经该 Profile 的代理探测出口 IP;成功后更新它的列表地区。返回 {ok, info|error}。
-    async function probeIp(p) {
-      try {
-        const r = await window.panelAPI.probeIp(p.accountIdx);
-        if (r && r.ipInfo) { p.ipInfo = r.ipInfo; renderIp(p); return { ok: true, info: r.ipInfo }; }
-        return { ok: false, error: (r && r.error) || '探测失败' };
-      } catch (e) { return { ok: false, error: e.message || String(e) }; }
-    }
-    // 身份:优先用本次会话探到的(cellState.identity),否则用 profile 里存的(上次登录)。
-    const identityOf = (p) => stateOf(p.accountIdx).identity || p.facebook || null;
-    const phoneOf = (p) => (p.login && p.login.phone) || '';
-    const codeUrlOf = (p) => (p.login && p.login.codeUrl) || '';
-    function renderPhone(p) {
-      const row = rows.get(p.accountIdx); if (!row) return;
-      const el = row.querySelector('.phone'); const ph = phoneOf(p);
-      el.classList.toggle('none', !ph); el.textContent = ph; el.title = codeUrlOf(p) ? `接码：${codeUrlOf(p)}` : '';
-      const g = gcells.get(p.accountIdx); if (g) { g.el.querySelector('.phone').textContent = ph; g.el.querySelector('.code').disabled = !codeUrlOf(p); }
-    }
-    // 接码 = 在当前格子的 Telegram webview 上方叠一个同尺寸、同 partition(persist:sandbox-idx,
-    // 走该 profile 的代理出口)、更高 z 层的接码 webview。再点一次关闭。与 tg-autologin 自动化里
-    // 的 overlay 完全一致的呈现,只是重载/关闭放在格子 header(BrowserView 之上无法放页面按钮)。
-    function openCode(p) {
-      if (!codeUrlOf(p)) { flash(`#${p.accountIdx} 还没有接码 URL,点 ⚙ 填写`, 4000); return; }
-      if (!openedProfiles.has(p.accountIdx)) { openedProfiles.add(p.accountIdx); cellState.set(p.accountIdx, { loading: true }); }
-      if (codeOpen.has(p.accountIdx)) { codeOpen.delete(p.accountIdx); flash(`#${p.accountIdx} 已关闭接码`); }
-      else { codeOpen.add(p.accountIdx); flash(`#${p.accountIdx} 接码已叠加在格子上`); }
-      updateCodeButtons(p.accountIdx);
-      syncPreview();
-    }
-    function updateCodeButtons(idx) {
-      const on = codeOpen.has(idx);
-      const g = gcells.get(idx);
-      if (g) { const b = g.el.querySelector('.code'); if (b) { b.classList.toggle('on', on); b.textContent = on ? '关闭接码' : '接码'; } }
-      if (selected && selected.accountIdx === idx) { const b = document.getElementById('open-code'); if (b) { b.classList.toggle('on', on); b.textContent = on ? '关闭接码' : '接码'; } }
-    }
-    function renderIdentity(p) {
-      renderPhone(p);
-      const row = rows.get(p.accountIdx); if (!row) return;
-      const el = row.querySelector('.tg');
-      const it = identityOf(p);
-      if (it && (it.username || it.displayName || it.phone)) {
-        el.classList.remove('none');
-        el.innerHTML = (it.username ? `<b>@${esc(it.username)}</b>` : '') + (it.displayName ? `${it.username ? ' · ' : ''}${esc(it.displayName)}` : '') + (!it.username && !it.displayName && it.phone ? `+${esc(it.phone)}` : '');
-        el.title = [it.username && `@${it.username}`, it.displayName, it.phone && `+${it.phone}`].filter(Boolean).join('  ');
-      } else {
-        el.classList.add('none');
-        el.textContent = openedProfiles.has(p.accountIdx) && stateOf(p.accountIdx).url ? '未登录' : '—';
-        el.title = '';
-      }
-    }
+    const portOf = (p) => (String(p.proxy || '').match(/:(\d+)\s*$/) || [, ''])[1];
 
     function flash(text, ms = 2500) {
-      statusEl.textContent = text; statusEl.dataset.sticky = '1';
-      clearTimeout(flash.t);
-      flash.t = setTimeout(() => { delete statusEl.dataset.sticky; renderPreviewState(); }, ms);
+      const el = document.getElementById('grid-count');
+      el.textContent = text; clearTimeout(flash.t);
+      flash.t = setTimeout(() => { renderCount(); }, ms);
+    }
+    function renderCount() {
+      const n = profiles.length;
+      const on = profiles.filter((p) => uidOf(p)).length;
+      gridCount.textContent = n + ' 个账号 · ' + on + ' 已登录';
     }
 
-    function syncPreview() {
-      if (!window.panelAPI) return;
-      const rect = preview.getBoundingClientRect();
-      const mv = document.getElementById('maxview'); if (mv) mv.hidden = (maxedIdx == null);
-      const box = (r) => ({ x: r.x, y: r.y, w: r.width, h: r.height });
-      // 设置弹窗打开时:只让被"弹窗卡片"盖住的格子让位(detach),其余 webview 保持显示 —— 方便对照。
-      const cardEl = (cfgModal && !cfgModal.hidden) ? document.querySelector('.modal-card') : null;
-      const cardR = cardEl ? cardEl.getBoundingClientRect() : null;
-      const hitsCard = (r) => !!(cardR && r && !(r.x + r.w <= cardR.left || r.x >= cardR.right || r.y + r.h <= cardR.top || r.y >= cardR.bottom));
-      // 面板在后台标签里时,一格都不显示。
-      // 同一台机器可能开着多个矩阵面板,各自的格子坐标是一样的,后台那份会原样贴在
-      // 前台那份上面:前台开弹窗只让自己的格子让位,后台的照样盖住弹窗(实测 2026-09-11,
-      // xs-1001 上两组 6 格叠在同一批坐标上)。visible:false 只是不画,会话照常活着,保活不受影响。
-      const __bg = document.hidden;
-      if (cfgModal && !cfgModal.hidden && cfgP) placeCfgOverCell(cfgP);
-      const cells = []; const overlays = [];
-      for (const profileId of openedProfiles) {
-        let visible = false, r = null;
-        if (maxedIdx != null) {
-          if (profileId === maxedIdx) { visible = true; r = box(document.getElementById('maxbody').getBoundingClientRect()); }
-        } else if (batchMode) {
-          const g = gcells.get(profileId);
-          if (g && batch.has(profileId)) { visible = true; r = box(g.body.getBoundingClientRect()); }
-        } else if (selected && profileId === selected.accountIdx) { visible = true; r = box(rect); }
-        if (__bg) visible = false;                    // 后台标签:不画,但会话留着
-        if (visible && hitsCard(r)) visible = false;  // 被弹窗盖住 → 临时 detach
-        cells.push({ id: cellId(profileId), url: SITE_URL, profile: profileId, visible, rect: r });
-        // 接码叠加层:同 rect、同 profile(=同 partition/代理),排在 tg 格子之后 → attach 更晚 → 叠最上层
-        if (visible && codeOpen.has(profileId)) {
-          const p = profiles.find((x) => x.accountIdx === profileId); const cu = p && codeUrlOf(p);
-          if (cu) overlays.push({ id: 'code-' + profileId, url: cu, profile: profileId, visible: true, rect: r });
-        }
-        if (visible && pingOpen.has(profileId)) overlays.push({ id: 'ping-' + profileId, url: (pingUrl.get(profileId) || 'https://ping0.cc/'), profile: profileId, visible: true, rect: r });
-      }
-      try { window.panelAPI.sync(cells.concat(overlays)); } catch (e) {}
-    }
-
-    function describeError(p, st) {
-      const e = st.error || {};
-      const desc = e.description ? `<code>${esc(e.description)}</code>` : '';
-      if (p.proxy) return `代理 <code>${esc(p.proxy)}</code> 不可用或无法访问 Facebook。${desc}<br>点 ⚙ 检查或更换该 Profile 的代理，可用「测 IP」验证。`;
-      return `当前为直连，网络无法访问 Facebook。${desc}<br>点 ⚙ 为该 Profile 设置代理。`;
-    }
-
-    function renderPreviewState() {
-      const st = selected ? stateOf(selected.accountIdx) : {};
-      ov.empty.classList.toggle('on', !selected);
-      ov.loading.classList.toggle('on', !!selected && !!st.loading && !st.url);
-      ov.error.classList.toggle('on', !!selected && !st.loading && !!st.failed);
-      if (selected && st.failed) errDetail.innerHTML = describeError(selected, st);
-      selDot.className = `dot ${selected ? dotClass(st) : ''}`;
-      if (selected && !statusEl.dataset.sticky) statusEl.textContent = stateText(st, true);
-      if (selected) updateCodeButtons(selected.accountIdx);
-    }
-
-    function renderRowState(idx) {
-      const row = rows.get(idx); if (!row) return;
-      const st = stateOf(idx);
-      row.classList.toggle('failed', !!st.failed && !st.loading);
-      row.querySelector('.dot').className = `dot ${dotClass(st)}`;
-      row.querySelector('.st').textContent = stateText(st, openedProfiles.has(idx));
-      renderGridCell(idx);
-    }
-
-    // ── 批量登录:把未登录的 Profile 一次全部铺开 ──
-    const hasIdentity = (p) => { const it = identityOf(p); return !!(it && (it.username || it.displayName || it.phone)); };
-    const gridCols = (n) => n <= 1 ? 1 : n <= 4 ? 2 : n <= 6 ? 3 : n <= 8 ? 4 : 5;
+    // ── 格子 ──────────────────────────────────────────────────
     function buildGridCell(p) {
       const el = document.createElement('div');
       el.className = 'gcell'; el.dataset.id = String(p.accountIdx);
-      el.innerHTML = `<div class="ghead"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="phone">${esc(phoneOf(p))}</span><span class="st"></span><span class="acts"><button class="code" title="在格子上叠加/关闭接码 webview(同代理出口)">接码</button><button class="icon gear" title="Profile 信息 / 代理设置"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button><button class="icon ping" title="用本 Profile 代理打开 ping0.cc(验 IP/指纹)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></button><button class="icon max" title="最大化 / 还原"><svg viewBox="0 0 24 24"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></button><button class="icon reload" title="重新加载"><svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button></span></div><div class="gbody"></div>`;
-      el.querySelector('.gear').onclick = (e) => { e.stopPropagation(); if (cfgP && cfgP.accountIdx === p.accountIdx && !cfgModal.hidden) closeCfgModal(); else openCfgModal(p); };
-      el.querySelector('.reload').onclick = () => (pingOpen.has(p.accountIdx) ? reloadPing(p.accountIdx) : reloadProfile(p.accountIdx));
+      el.innerHTML = '<div class="ghead"><span class="dot"></span><span class="chip">#' + p.accountIdx + '</span>'
+        + '<span class="who"></span><span class="st"></span><span class="acts">'
+        + '<button class="icon gear" title="账号资料 / 代理 / 备注"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>'
+        + '<button class="icon ping" title="IP 核对:经本 Profile 代理看真实出口"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></button>'
+        + '<button class="icon max" title="最大化 / 还原"><svg viewBox="0 0 24 24"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></button>'
+        + '<button class="icon xclose" title="关闭当前叠加层"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>'
+        + '</span></div><div class="gbody"></div>';
       el.querySelector('.max').onclick = (e) => { e.stopPropagation(); toggleMax(p.accountIdx); };
-      el.querySelector('.ping').onclick = (e) => { e.stopPropagation(); togglePing(p.accountIdx); };
-      el.querySelector('.code').onclick = () => openCode(p);
-      el.querySelector('.code').disabled = !codeUrlOf(p);
-      el.querySelector('.ghead').onclick = (e) => { if (!e.target.closest('button')) { selectProfile(p.accountIdx); } };
-      return { el, body: el.querySelector('.gbody') };
+      el.querySelector('.ping').onclick = (e) => { e.stopPropagation(); closeOthers(p.accountIdx, 'ping'); togglePing(p.accountIdx); };
+      el.querySelector('.xclose').onclick = (e) => { e.stopPropagation(); closeOthers(p.accountIdx, null); };
+      el.querySelector('.gear').onclick = (e) => { e.stopPropagation(); if (cfgP && cfgP.accountIdx === p.accountIdx && !cfgModal.hidden) closeCfgModal(); else openCfgModal(p); };
+      const body = el.querySelector('.gbody');
+      body.innerHTML = '<div class="ph">未加载 · 翻到这一页自动打开</div>';
+      return { el, body, wv: null, ov: null, ovKind: '' };
     }
     function renderGridCell(idx) {
       const g = gcells.get(idx); if (!g) return;
-      const p = profiles.find((x) => x.accountIdx === idx); const st = stateOf(idx);
-      const done = !!p && hasIdentity(p);
-      g.el.classList.toggle('done', done);
+      const p = profiles.find((x) => x.accountIdx === idx); if (!p) return;
+      const st = stateOf(idx);
+      g.el.classList.toggle('done', !!uidOf(p));
       g.el.classList.toggle('failed', !!st.failed && !st.loading);
-      g.el.querySelector('.dot').className = `dot ${dotClass(st)}`;
-      g.el.querySelector('.st').textContent = '';   // 格子头不显示状态文字
-      updateCodeButtons(idx);
-      if (batchMode) { const n = [...batch].filter((i) => { const q = profiles.find((x) => x.accountIdx === i); return q && hasIdentity(q); }).length; gridCount.textContent = `${batch.size} 个会话 · ${n} 已登录`; }
+      g.el.querySelector('.dot').className = 'dot ' + dotClass(st);
+      const who = g.el.querySelector('.who');
+      if (who) { who.textContent = nameOf(p) || uidOf(p) || ''; who.title = [uidOf(p), fbOf(p) && fbOf(p).email].filter(Boolean).join('  '); }
+      const stEl = g.el.querySelector('.st');
+      if (stEl) stEl.textContent = st.loading ? '加载中…' : st.failed ? '连接失败' : st.url ? '' : '未加载';
     }
-    function enterBatch() {
-      // 默认网格 = 只平铺“配置了 FB 账号(有 facebook 绑定)”的 profile,未配置的隐藏。
-      const todo = profiles.filter((p) => p.facebook).slice(0, BATCH_MAX);
-      if (!todo.length) { flash('本机没有配置 FB 账号的 Profile'); return; }
-      batch.clear(); gridEl.innerHTML = ''; gcells.clear();
-      for (const p of todo) {
-        batch.add(p.accountIdx);
-        const g = buildGridCell(p); gcells.set(p.accountIdx, g); gridEl.appendChild(g.el);
-        if (!openedProfiles.has(p.accountIdx)) { openedProfiles.add(p.accountIdx); cellState.set(p.accountIdx, { loading: true }); }
-        renderRowState(p.accountIdx);
-      }
-      gridEl.style.gridTemplateColumns = `repeat(${gridCols(todo.length)}, minmax(0, 1fr))`;
-      batchMode = true; mainEl.classList.add('batch'); document.body.classList.add('batch');
-      render();
-      syncPreview();                       // 后台 tab 里 rAF 不会触发,先直接同步一次把格子建出来
-      requestAnimationFrame(syncPreview);
-      setTimeout(pullStates, 300);
+
+    function mountCell(idx) {
+      const g = gcells.get(idx); if (!g || g.wv) return;
+      const wv = document.createElement('webview');
+      wv.setAttribute('partition', 'persist:sandbox-' + idx);
+      wv.setAttribute('src', cellUrl.get(idx) || FB_URL);
+      wv.setAttribute('allowpopups', '');
+      wv.style.cssText = 'width:100%;height:100%;display:flex;background:#fff';
+      // 只把 PublicKeyCredential 拿掉 —— 这是站点探测「这个浏览器支不支持通行密钥」的标准入口,
+      // 没有它就走密码路径。**不要**再去改 navigator.credentials.get:让它 reject 会把 FB 的
+      // 两步验证页整个卡成空白(Comet 挂载了但渲染不出东西,实测 #96)。
+      const KILL_WEBAUTHN = "(function(){try{delete window.PublicKeyCredential;}catch(e){}})()";
+      wv.addEventListener('dom-ready', () => { try { wv.executeJavaScript(KILL_WEBAUTHN, true); } catch (e) {} });
+      const push = (patch) => { cellState.set(idx, Object.assign({}, stateOf(idx), patch)); renderGridCell(idx); refreshRow(idx); };
+      wv.addEventListener('did-start-loading', () => push({ loading: true }));
+      wv.addEventListener('did-stop-loading', () => { let u = ''; try { u = wv.getURL(); } catch (e) {} noteVerdict(idx, u); push({ loading: false, url: u }); });
+      wv.addEventListener('did-navigate', (e) => { noteVerdict(idx, e.url); push({ loading: false, url: e.url || '' }); });
+      wv.addEventListener('did-navigate-in-page', (e) => push({ loading: false, url: e.url || '' }));
+      wv.addEventListener('did-fail-load', (e) => { if (e.errorCode !== -3) push({ loading: false, failed: true, error: { code: e.errorCode, desc: e.errorDescription } }); });
+      g.body.innerHTML = '';
+      g.body.appendChild(wv);
+      g.wv = wv;
+      openedProfiles.add(idx);
     }
-    function exitBatch() {
-      if (!batchMode) return;
-      batchMode = false; mainEl.classList.remove('batch'); document.body.classList.remove('batch');
-      batch.clear(); gcells.clear(); gridEl.innerHTML = '';
-      render(); renderPreviewState(); syncPreview();   // 会话留在后台,登录态不丢
+    function unmountCell(idx) {
+      const g = gcells.get(idx); if (!g || !g.wv) return;
+      try { const u = g.wv.getURL(); if (u && /facebook\.com/.test(u)) cellUrl.set(idx, u); } catch (e) {}
+      try { g.wv.remove(); } catch (e) {}
+      g.wv = null;
+      if (g.ov) { try { g.ov.remove(); } catch (e) {} g.ov = null; g.ovKind = ''; }
+      pingOpen.delete(idx);
+      g.body.innerHTML = '<div class="ph">未加载 · 翻到这一页自动打开</div>';
+      cellState.set(idx, {});
+      renderGridCell(idx);
     }
-    document.getElementById('grid-reload').onclick = () => { if (!batch.size) { enterBatch(); return; } for (const idx of batch) reloadProfile(idx); };
-    function toggleMax(idx) {
-      maxedIdx = (maxedIdx === idx) ? null : idx;
-      renderMaxHead();
-      syncPreview();
+
+    // ── 叠加层:同一格同时只有一个,长相和设置弹窗一套 ─────────────
+    function syncOverlay(idx) {
+      const g = gcells.get(idx); if (!g) return;
+      const want = pingOpen.has(idx) ? 'ping' : '';
+      if (want === (g.ovKind || '')) return;
+      if (g.ov) { try { g.ov.remove(); } catch (e) {} g.ov = null; g.ovKind = ''; }
+      if (!want) return;
+      const url = pingUrl.get(idx) || 'https://ping0.cc/';
+      const wrap = document.createElement('div');
+      wrap.className = 'ovwrap';
+      wrap.innerHTML = '<div class="ovcard"><div class="ovhead"><span>IP 核对 · #' + idx
+        + '</span><button class="icon ovclose" title="关闭">✕</button></div><div class="ovbody"></div></div>';
+      const wv = document.createElement('webview');
+      wv.setAttribute('partition', 'persist:sandbox-' + idx);
+      wv.setAttribute('src', url);
+      wv.setAttribute('allowpopups', '');
+      wv.style.cssText = 'width:100%;height:100%;display:flex;background:var(--cell)';
+      wrap.querySelector('.ovbody').appendChild(wv);
+      wrap.querySelector('.ovclose').onclick = (e) => { e.stopPropagation(); closeOthers(idx, null); };
+      wrap.addEventListener('mousedown', (e) => { if (e.target === wrap) closeOthers(idx, null); });
+      g.body.style.position = 'relative';
+      g.body.appendChild(wrap);
+      g.ov = wrap; g.ovKind = want;
     }
-    // 最大化顶栏:恢复完整 action bar,并把当前绑定的 FB 账号直接摊在栏上(⚙ 看完整信息)。
-    function renderMaxHead() {
-      if (maxedIdx == null) return;
-      const p = profiles.find((x) => x.accountIdx === maxedIdx); if (!p) return;
-      document.getElementById('max-dot').className = `dot ${dotClass(stateOf(maxedIdx))}`;
-      document.getElementById('max-name').textContent = p.name;
-      document.getElementById('max-chip').textContent = '#' + p.accountIdx;
-      const acct = (p.facebook && p.facebook.id) || '';
-      const ael = document.getElementById('max-acct'); ael.innerHTML = acct ? `<b>FB</b><span>${esc(acct)}</span>` : ''; ael.title = acct || '';
+    function syncMode(idx) {
+      syncOverlay(idx);
+      const g = gcells.get(idx); if (!g) return;
+      const mode = pingOpen.has(idx) ? 'ping' : '';
+      g.el.classList.toggle('modeon', !!mode);
+      const b = g.el.querySelector('.ghead .acts .ping');
+      if (b) b.classList.toggle('on', mode === 'ping');
     }
-    document.getElementById('max-restore').onclick = () => { maxedIdx = null; syncPreview(); };
-    document.getElementById('max-gear').onclick = function () { if (maxedIdx == null) return; var p = profiles.find(function(x){ return x.accountIdx === maxedIdx; }); if (!p) return; if (cfgP && cfgP.accountIdx === p.accountIdx && !cfgModal.hidden) closeCfgModal(); else openCfgModal(p); this.classList.toggle('on', !cfgModal.hidden); };
-    document.getElementById('max-ping').onclick = function () { if (maxedIdx == null) return; togglePing(maxedIdx); this.classList.toggle('on', pingOpen.has(maxedIdx)); };
-    document.getElementById('max-reload').onclick = function () { if (maxedIdx == null) return; if (pingOpen.has(maxedIdx)) reloadPing(maxedIdx); else reloadProfile(maxedIdx); };
+    function closeOthers(idx, keep) {
+      try { if (cfgModal && !cfgModal.hidden) closeCfgModal(); } catch (e) {}
+      if (keep !== 'ping' && pingOpen.has(idx)) { pingOpen.delete(idx); pingUrl.delete(idx); }
+      syncMode(idx);
+    }
     async function togglePing(idx) {
-      if (pingOpen.has(idx)) { closePing(idx); return; }
+      if (pingOpen.has(idx)) { pingOpen.delete(idx); pingUrl.delete(idx); syncMode(idx); return; }
       const cp = profiles.find((x) => x.accountIdx === idx);
       const IPCHECK = location.href.split('/panel/')[0] + '/panel/ipcheck.html';
-      let ip = cp && cp.ipInfo && cp.ipInfo.ip;
-      // overlay 立刻打开(全程 UI 可见):ipcheck 页自己经本 Profile 代理读浏览器真实出口 IP + 查 ping0。
+      const ip = cp && cp.ipInfo && cp.ipInfo.ip;
       pingUrl.set(idx, IPCHECK + '?idx=' + idx + (ip ? '&proxyip=' + encodeURIComponent(ip) : ''));
       pingOpen.add(idx);
-      const g = gcells.get(idx); if (g) g.el.classList.add('pinging');
-      syncPreview();
-      // 缓存只作即时占位,随后无论有无缓存都现场重探一次:住宅代理 sticky 出口会轮换,
-      // 缓存过期会与浏览器真实出口不一致(误报“不一致”)。每次开 🌐 都刷新“代理探测出口”。
+      syncMode(idx);
+      // 缓存只作占位:住宅代理 sticky 出口会轮换,每次开都现场重探一次
       try {
         const r = await window.panelAPI.probeIp(idx);
-        if (r && r.ipInfo && r.ipInfo.ip && pingOpen.has(idx)) { if (cp) cp.ipInfo = r.ipInfo; pingUrl.set(idx, IPCHECK + '?idx=' + idx + '&proxyip=' + encodeURIComponent(r.ipInfo.ip)); syncPreview(); }
+        if (r && r.ipInfo && r.ipInfo.ip && pingOpen.has(idx)) {
+          if (cp) cp.ipInfo = r.ipInfo;
+          pingUrl.set(idx, IPCHECK + '?idx=' + idx + '&proxyip=' + encodeURIComponent(r.ipInfo.ip));
+          const g = gcells.get(idx); if (g && g.ov) { g.ovKind = ''; try { g.ov.remove(); } catch (e) {} g.ov = null; syncOverlay(idx); }
+        }
       } catch (e) {}
     }
-    function reloadPing(idx) { if (!pingOpen.has(idx)) return; const base = (pingUrl.get(idx) || 'https://ping0.cc/').split('?_r=')[0]; pingUrl.set(idx, base + (base.indexOf('?') >= 0 ? '&' : '?') + '_r=' + Date.now()); syncPreview(); }
-    function closePing(idx) { pingOpen.delete(idx); pingUrl.delete(idx); const g = gcells.get(idx); if (g) g.el.classList.remove('pinging'); syncPreview(); }
-    new ResizeObserver(() => requestAnimationFrame(syncPreview)).observe(gridEl);
-
-    function buildRow(p) {
-      const row = document.createElement('div');
-      row.className = 'row'; row.dataset.id = String(p.accountIdx); row.title = `persist:sandbox-${p.accountIdx}`;
-      row.innerHTML = `
-        <div class="line1"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="chip">#${p.accountIdx}</span><span class="st"></span><button class="icon gear" title="代理设置">⚙</button><button class="icon reload" title="重新加载">⟳</button></div>
-        <div class="line2"><span class="tg none">—</span><span class="phone none"></span><span class="ip none"></span></div>`;
-      // ⚙ 打开设置弹窗(代理 / 测 IP / 删除),不再 inline。
-      row.querySelector('.gear').onclick = (e) => { e.stopPropagation(); openCfgModal(p); };
-      row.onclick = () => { selectProfile(p.accountIdx); };
-      row.querySelector('.reload').onclick = (e) => { e.stopPropagation(); reloadProfile(p.accountIdx); };
-      return row;
-    }
-
-    function reloadProfile(idx) {
-      // 接码 overlay 开着时,重载指向接码 webview(用户看到的最上层就是它)
-      if (codeOpen.has(idx)) { try { window.panelAPI.reload('code-' + idx); } catch (e) {} return; }
-      const fresh = !openedProfiles.has(idx);
-      openedProfiles.add(idx);
-      cellState.set(idx, { loading: true }); renderRowState(idx);
-      if (selected && selected.accountIdx === idx) renderPreviewState();
-      syncPreview();
-      // 首次打开:上面的 sync() 已经会建视图并加载 URL,再 reload 只是白加载一次。
-      if (!fresh) { try { window.panelAPI.reload(cellId(idx)); } catch (e) {} }
-    }
-
-    function render() {
-      empty.classList.toggle('on', profiles.length === 0);
-      countEl.textContent = profiles.length ? `${profiles.length} 个会话` : '';
-      for (const p of profiles) {
-        if (!rows.has(p.accountIdx)) { const row = buildRow(p); rows.set(p.accountIdx, row); rowsEl.appendChild(row); }
-        rows.get(p.accountIdx).classList.toggle('active', !!selected && selected.accountIdx === p.accountIdx);
-        renderRowState(p.accountIdx);
-        renderIdentity(p);
-        renderIp(p);
+    // 最大化不搬 DOM:<webview> 一旦被移动就会重新挂载,会话要重连。只改定位。
+    function toggleMax(idx) {
+      const g = gcells.get(idx); if (!g) return;
+      if (maxedIdx === idx) { g.el.classList.remove('maxed'); maxedIdx = null; }
+      else {
+        if (maxedIdx != null) { const o = gcells.get(maxedIdx); if (o) o.el.classList.remove('maxed'); }
+        g.el.classList.add('maxed'); maxedIdx = idx;
       }
+      document.body.classList.toggle('hasmax', maxedIdx != null);
     }
 
-    function selectProfile(accountIdx) {
-      selected = profiles.find((p) => p.accountIdx === Number(accountIdx)) || null;
-      if (selected) { openedProfiles.add(selected.accountIdx); localStorage.setItem('facebook-matrix-profile', String(selected.accountIdx)); }
-      selectedName.textContent = selected ? `${selected.name} · #${selected.accountIdx}` : '未选择 Profile';
-      selectedName.title = selected ? `persist:sandbox-${selected.accountIdx}` : '';
-      delete statusEl.dataset.sticky;
-      render();
-      renderPreviewState();
-      syncPreview();
-      if (selected && !cellState.has(selected.accountIdx)) setTimeout(pullStates, 300);
+    // ── 分页 / 视图 / 分栏 ────────────────────────────────────
+    const PAGE_KEY = 'fbmx.pageSize', VIEW_KEY = 'fbmx.view', SEL_KEY = 'fbmx.sel', SPLIT_KEY = 'fbmx.splitw';
+    // 「这个号登没登着」只能靠真的去开一次页面看它跳到哪:
+    //   /checkpoint → 被风控锁了   /login → 会话掉了   还在站内 → 还活着
+    // profile 里那条 logins[facebook] 只说明「这个槽位配的是谁」,不代表现在还登着 ——
+    // 拿它当状态,整张表会永远写满「已登录」(#82/#85 明明是 checkpoint 也照写)。
+    const CHK_KEY = 'fbmx.checked';
+    const checked = (() => { try { return new Map(Object.entries(JSON.parse(localStorage.getItem(CHK_KEY) || '{}'))); } catch (e) { return new Map(); } })();
+    const saveChecked = () => { try { localStorage.setItem(CHK_KEY, JSON.stringify(Object.fromEntries(checked))); } catch (e) {} };
+    // 只看 URL 是不够的:**FB 未登录时并不跳转**,登录表单就挂在 https://www.facebook.com/
+    // 这个地址上 —— 只按 URL 判会把「还没登录的空分区」也算成已登录(实测 #95/#96/#97)。
+    // 真正的判据是 c_user 这个 cookie:它就是登录用户的 uid,而且不是 httpOnly,页面里读得到。
+    function verdictOf(url, cuser) {
+      const u = String(url || '');
+      if (!u || !/facebook\.com/.test(u)) return '';
+      if (/facebook\.com\/checkpoint/.test(u)) return 'checkpoint';
+      if (cuser === undefined) return '';          // 还没读到 cookie,先不下结论
+      if (!cuser) return 'logout';
+      return 'ok';
     }
-
-    function applyCellState(state) {
-      const m = /^facebook-preview-(\d+)$/.exec(state.id || '');
-      if (!m) return;
-      const idx = Number(m[1]);
-      const prev = stateOf(idx);
-      const failed = !!state.failed || /^chrome-error:/.test(state.url || '');
-      const next = { ...prev, loading: !!state.loading };
-      if (state.url !== undefined) { next.url = failed ? '' : state.url; next.title = state.title || ''; }
-      if (!state.loading) { next.failed = failed; next.error = state.error || (failed ? prev.error : null); }
-      if (state.identity) next.identity = state.identity;
-      cellState.set(idx, next);
-      renderRowState(idx);
-      { const p = profiles.find((x) => x.accountIdx === idx); if (p) renderIdentity(p); }
-      renderGridCell(idx);
-      if (selected && selected.accountIdx === idx) renderPreviewState();
-    }
-    async function pullStates({ adopt = false } = {}) {
-      let list = [];
-      try { list = await window.panelAPI.states(); } catch (e) { return; }
-      for (const st of list || []) {
-        // 面板页刷新后 openedProfiles 是空的,而主进程里那些会话视图还活着。
-        // 不先认领回来,第一次 syncPreview() 就会把它们当多余格子销毁,后台
-        // 登录着的会话全没(实测:刷新后 #1 的 webContents 被销毁)。
-        if (adopt) {
-          const m = /^facebook-preview-(\d+)$/.exec(st.id || '');
-          if (m) openedProfiles.add(Number(m[1]));
-        }
-        applyCellState(st);
-      }
-    }
-
-    async function loadProfiles(preferredId) {
-      profiles = await window.panelAPI.profiles();
-      profiles.sort((a, b) => a.accountIdx - b.accountIdx);
-      const remembered = Number(localStorage.getItem('facebook-matrix-profile'));
-      const target = preferredId || (profiles.some((p) => p.accountIdx === remembered) ? remembered : 0) || (profiles[0] && profiles[0].accountIdx);
-      selectProfile(target);
-    }
-
-    async function removeProfile(p) {
-      const idx = p.accountIdx;
-      await window.panelAPI.removeProfile(idx);
-      openedProfiles.delete(idx); cellState.delete(idx);
-      const row = rows.get(idx); if (row) row.remove(); rows.delete(idx);
-      profiles = profiles.filter((x) => x.accountIdx !== idx);
-      if (selected && selected.accountIdx === idx) {
-        const next = profiles[0] ? profiles[0].accountIdx : 0;
-        if (next) selectProfile(next); else { selected = null; localStorage.removeItem('facebook-matrix-profile'); selectedName.textContent = '未选择 Profile'; render(); renderPreviewState(); syncPreview(); }
-      } else render();
-      flash(`Profile #${idx} 已删除`);
-    }
-
-    addButton.onclick = async () => {
-      addButton.disabled = true; flash('正在创建…', 60000);
+    async function readCuser(wv) {
       try {
-        const profile = await window.panelAPI.addProfile();
-        await loadProfiles(profile.accountIdx);
-        flash(`Profile #${profile.accountIdx} 已创建`);
-        const row = rows.get(profile.accountIdx); if (row) row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      } catch (e) { flash(e.message || String(e), 6000); }
-      finally { addButton.disabled = false; }
-    };
-    document.getElementById('reload').onclick = () => { if (selected) reloadProfile(selected.accountIdx); };
-    document.getElementById('open-code').onclick = () => { if (selected) openCode(selected); };
-    document.getElementById('err-retry').onclick = () => { if (selected) reloadProfile(selected.accountIdx); };
-    document.getElementById('err-cfg').onclick = () => { if (selected) openCfgModal(selected); };
-    document.getElementById('probe-ip').onclick = async () => {
-      if (!selected) { flash('先选择一个 Profile'); return; }
-      const b = document.getElementById('probe-ip'); const o = b.textContent; b.disabled = true; b.textContent = '测 IP…';
-      const r = await probeIp(selected);
-      b.disabled = false; b.textContent = o;
-      flash(r.ok ? `#${selected.accountIdx} 出口：${shortArea(selected.ipInfo.area) || selected.ipInfo.ip}` : `IP 探测失败：${r.error}`, 6000);
-    };
-    // ── 设置弹窗(代理 / 测 IP / 删除) ──
-    const cfgModal = document.getElementById('cfg-modal');
-    const cfgProxy = document.getElementById('cfg-proxy');
-    const cfgErr = document.getElementById('cfg-err');
-    const cfgIp = document.getElementById('cfg-ip');
-    const cfgDel = document.getElementById('cfg-del');
-    let cfgP = null, delArmed = false;
-    const cfgPhone = document.getElementById('cfg-phone');
-    const cfgCode = document.getElementById('cfg-code');
-    document.getElementById('cfg-code-open').onclick = () => { if (cfgP) openCode({ ...cfgP, login: { phone: cfgPhone.value, codeUrl: cfgCode.value.trim() } }); };
-    // 账号资料(密码 / 2FA / 邮箱 / 邮箱密码 / 备用邮箱)存在浏览器本地,不写文件。
-    // 原来这些只能从 logins[].note 那个备注串里解析,而身份识别每次加载都会把 note
-    // 覆盖成抓到的真实昵称,于是一台台丢光(实测:全队 19 个 FB profile 只剩 2 个还留着)。
-    // localStorage 按「机器 + profile 编号」存,身份识别碰不到它。
-    const CRED_KEYS = ['pwd', 'twofa', 'email', 'mailpwd', 'second'];
-    const credKey = (idx) => 'fbcred:' + (new URLSearchParams(location.search).get('team') || 'local') + ':' + idx;
-    function readCred(idx) {
-      try { return JSON.parse(localStorage.getItem(credKey(idx)) || '{}') || {}; } catch (e) { return {}; }
+        const r = await Promise.race([
+          wv.executeJavaScript("(document.cookie.match(/(?:^|; )c_user=(\\d+)/)||[,''])[1]"),
+          new Promise((res) => setTimeout(() => res(undefined), 6000)),
+        ]);
+        return typeof r === 'string' ? r : undefined;
+      } catch (e) { return undefined; }
     }
-    // 台账才是源头:social-hub 的 fb_accounts 按 home_host + home_idx 下发到每一格,
-    // 密码 / 邮箱密码 / 2FA / 辅助邮箱都在那里。服务端按机器真实 IP 校验,只给它自己那份。
-    // 拉到就缓存进 localStorage,离线或接口不通时仍然看得到。
-    async function pullCred(idx) {
-      const team = new URLSearchParams(location.search).get('team') || '';
-      if (!team) return null;
-      try {
-        const r = await fetch(`/api/fbcred?team=${encodeURIComponent(team)}&idx=${idx}`, { cache: 'no-store' });
-        if (!r.ok) return null;
-        const a = await r.json();
-        if (!a || a.error || !Object.keys(a).length) return null;
-        const c = {
-          pwd: String(a.fb_password || ''), twofa: String(a.twofa || ''),
-          email: String(a.email || ''), mailpwd: String(a.email_password || ''),
-          second: String(a.recovery || ''),
-        };
-        writeCred(idx, c);
-        return c;
-      } catch (e) { return null; }
+    // 格子开着的时候顺手记一笔 —— 不用专门去检测,翻页看过的那些就自动更新了
+    async function noteVerdict(idx, url) {
+      if (!/facebook\.com/.test(String(url || ''))) return;
+      const g = gcells.get(idx);
+      const cu = (g && g.wv) ? await readCuser(g.wv) : undefined;
+      const v = verdictOf(url, cu); if (!v) return;
+      checked.set(String(idx), { v, at: Date.now(), uid: cu || '' });
+      saveChecked();
+      renderGridCell(idx); refreshRow(idx);
     }
-    function writeCred(idx, obj) {
-      try {
-        const cur = readCred(idx);
-        for (const k of CRED_KEYS) if (obj[k] !== undefined) cur[k] = String(obj[k] || '');
-        localStorage.setItem(credKey(idx), JSON.stringify(cur));
-        return true;
-      } catch (e) { return false; }
+    const fmtAgo = (t) => { const m = Math.round((Date.now() - t) / 60000);
+      return m < 1 ? '刚刚' : m < 60 ? m + ' 分钟前' : m < 1440 ? Math.round(m / 60) + ' 小时前' : Math.round(m / 1440) + ' 天前'; };
+    let pageNo = 0, searchQ = '';
+    const checking = new Set();
+    let chkRun = false;
+    const loginBusy = new Set(), loginSay = new Map();   // idx -> 当前这一步在做什么
+    let curView = (() => { try { return localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'grid'; } catch (e) { return 'grid'; } })();
+    let drawerIdx = (() => { const v = Number(localStorage.getItem(SEL_KEY)); return Number.isInteger(v) && v > 0 ? v : null; })();
+    const listMode = () => curView === 'list';
+    const pageSize = () => { const v = Number(localStorage.getItem(PAGE_KEY)) || 4; return Math.max(1, Math.min(24, v)); };
+    const splitW = () => { const v = Number(localStorage.getItem(SPLIT_KEY)) || 760; return Math.max(360, Math.min(Math.max(420, innerWidth - 480), v)); };
+    function applySplit() { const el = document.getElementById('split'); if (el) el.style.setProperty('--splitw', splitW() + 'px'); }
+    function setView(v) {
+      curView = v === 'list' ? 'list' : 'grid';
+      try { localStorage.setItem(VIEW_KEY, curView); } catch (e) {}
+      applyPage();
     }
-    const cfgIpText = (p) => p && p.ipInfo && p.ipInfo.ip ? (p.ipInfo.area ? `${p.ipInfo.area} · ${p.ipInfo.ip}` : p.ipInfo.ip) : '未探测';
-    // 当前 profile / 代理 / FB 账号身份的只读概览,放在设置弹窗顶部。
-    const cfgInfoHtml = (p) => {
-      // p.facebook = { id:邮箱, displayName:备注(格式: "<号ID> · FB密码:x · 2FA:y · 邮箱密码:z · 备用:w") }。
-      // 绑定 = p.facebook 存在;真实登录 = 本次会话实际探到的 identity(stateOf.identity)。
-      const fb = p.facebook || {};
-      const live = stateOf(p.accountIdx).identity;
-      const loggedIn = !!(live && (live.username || live.displayName || live.phone));
-      const bound = !!(fb.id || fb.username || fb.displayName);
-      // 解析备注(displayName)成键值,首段是号 ID。
-      const meta = {}; let acctId = '';
-      String(fb.displayName || '').split('·').forEach((seg, i) => {
-        seg = seg.trim(); if (!seg) return;
-        const m = seg.match(/^([^:：]+)[:：]([\s\S]*)$/);
-        if (m) meta[m[1].trim()] = m[2].trim(); else if (i === 0) acctId = seg;
+    function openDrawer(idx) {
+      if (!gcells.has(idx)) return;
+      drawerIdx = idx;
+      try { localStorage.setItem(SEL_KEY, String(idx)); } catch (e) {}
+      applyPage();
+    }
+    function rowHaystack(p) {
+      const f = fbOf(p) || {};
+      return ['#' + p.accountIdx, p.name, uidOf(p), f.displayName, f.email, f.secondEmail, p.proxy, p.note]
+        .filter(Boolean).join(' ').toLowerCase();
+    }
+    function pageIdxList() {
+      const q = String(searchQ || '').trim().toLowerCase();
+      const all = [...gcells.keys()].filter((i) => {
+        if (!q) return true;
+        const p = profiles.find((x) => x.accountIdx === i);
+        return p && rowHaystack(p).includes(q);
       });
-      const cr = readCred(p.accountIdx);
-      const mono = (v) => v ? `<span class="mono">${esc(v)}</span>` : '<span class="muted">—</span>';
-      const badge = loggedIn ? '<span class="ci-b ok">✓ 已登录</span>'
-        : (bound ? '<span class="ci-b warn">已绑定 · 未登录</span>' : '<span class="ci-b mut">未绑定</span>');
-      // 只列卡片里别处没有的。标题写了 Profile 名和编号;FB 密码 / 2FA / 邮箱 /
-      // 邮箱密码 / 备用邮箱下面就是对应的输入框;代理地址有输入框;出口 IP 在
-      // 「测 IP」那一行。这些不在这里重复第二遍。
-      const rows = [
-        ['状态', badge],
-        ['FB 账号', mono(fb.id || fb.username)],
-        ['分区', mono(`persist:sandbox-${p.accountIdx}`)],
-      ];
-      const html = rows.map(([k, v]) => k === '__hr__' ? '<hr>' : `<div class="ci-row"><span class="ci-k">${k}</span><span class="ci-v">${v}</span></div>`).join('');
-      const btn = (!loggedIn && bound) ? `<div class="ci-row" style="margin-top:10px"><span class="ci-k"></span><span class="ci-v"><button class="fblogin-btn" onclick="__fbLoginClick(${p.accountIdx})">登录（自动填账密 + 提交）</button></span></div>` : '';
-      return html + btn;
-    };
-    // 未登录时点"登录":经 panelAPI.reload 特殊 id 触发主进程 fbLogin(填账密→提交→两步自动 TOTP→reCAPTCHA 停)。
-    window.__fbLoginClick = (idx) => {
-      try { window.panelAPI.reload('fblogin-' + idx); } catch (e) {}
-      flash('#' + idx + ' 已触发登录：填账密 → 提交 → 两步自动 TOTP → 若 reCAPTCHA 需真人点', 7000);
-    };
-    // 把设置卡片摆到这一格 webview 的位置上(接码 overlay 也是用 .gbody 的矩形)。
-    // 格子不在网格里就退回屏幕居中。摆好之后 syncPreview 的重叠判定会正好把这一格让出来。
-    function placeCfgOverCell(p) {
-      const card = document.querySelector('.modal-card');
-      if (!card) return;
-      // 最大化时宿主是 #maxbody(整块),否则是这一格的 .gbody。
-      const mb = document.getElementById('maxbody');
-      const maxOn = typeof maxedIdx !== 'undefined' && maxedIdx != null && mb && !document.getElementById('maxview').hidden;
-      const g = p && gcells.get(p.accountIdx);
-      const host = maxOn ? mb : (g && g.body && g.body.isConnected ? g.body : null);
-      if (!host) {
-        card.style.left = ''; card.style.top = ''; card.style.width = ''; card.style.height = '';
-        card.style.maxHeight = ''; card.style.margin = 'auto'; card.style.inset = '0';
+      const n = pageSize(), maxPage = Math.max(0, Math.ceil(all.length / n) - 1);
+      if (pageNo > maxPage) pageNo = maxPage;
+      return { list: all.slice(pageNo * n, pageNo * n + n), total: all.length, maxPage };
+    }
+    function gotoPage(n) { const { maxPage } = pageIdxList(); pageNo = Math.max(0, Math.min(maxPage, n)); applyPage(); }
+    // 自动登录要用这一格的 webview,可它未必在当前页 —— 没挂载就是没有 webview,
+    // 流程会立刻空转退出。先把它翻到眼前再开始。
+    function gotoIdx(idx) {
+      if (!gcells.has(idx)) return false;
+      if (listMode()) { openDrawer(idx); return true; }
+      const all = [...gcells.keys()];
+      const pos = all.indexOf(idx); if (pos < 0) return false;
+      const want = Math.floor(pos / pageSize());
+      if (pageNo !== want) { pageNo = want; applyPage(); }
+      const g = gcells.get(idx);
+      try { g && g.el && g.el.scrollIntoView({ block: 'nearest' }); } catch (e) {}
+      return true;
+    }
+
+    function applyPage() {
+      const { list, total, maxPage } = pageIdxList();
+      const onPage = new Set(list);
+      const lm = listMode();
+      if (lm && drawerIdx != null && !gcells.has(drawerIdx)) drawerIdx = null;
+      if (lm && drawerIdx == null) {
+        const first = [...gcells.keys()][0];
+        if (first != null) { drawerIdx = first; try { localStorage.setItem(SEL_KEY, String(first)); } catch (e) {} }
+      }
+      if (lm) applySplit();
+      if (lm && cfgModal && !cfgModal.hidden) { try { closeCfgModal(); } catch (e) {} }
+      mainEl.classList.toggle('listmode', lm);
+      mainEl.classList.toggle('drawer-open', lm && drawerIdx != null);
+      for (const idx of gcells.keys()) {
+        const g = gcells.get(idx);
+        const mounted = lm ? idx === drawerIdx : onPage.has(idx);
+        if (mounted) mountCell(idx); else unmountCell(idx);
+        g.el.hidden = !mounted;
+      }
+      const pager = document.getElementById('pager');
+      if (pager) pager.classList.toggle('is-off', lm);
+      const vleft = document.querySelector('#viewbar .vleft');
+      if (vleft) vleft.classList.toggle('is-off', lm && !chkRun);
+      const vg = document.getElementById('view-grid'), vlb = document.getElementById('view-list');
+      if (vg) vg.classList.toggle('on', !lm);
+      if (vlb) vlb.classList.toggle('on', lm);
+      if (lm) renderList();
+      const lab = document.getElementById('page-label');
+      if (lab) {
+        lab.textContent = (total ? (pageNo + 1) : 0) + '/' + (maxPage + 1) + ' · ' + list.length + ' 开';
+        lab.title = '第 ' + (pageNo + 1) + ' 页,共 ' + (maxPage + 1) + ' 页 · 本页 ' + list.length + ' 个';
+      }
+      const nEl = document.getElementById('fbsearch-n');
+      if (nEl && !lm) nEl.textContent = searchQ ? (total + ' 个') : '';
+      renderCount();
+    }
+
+    // ── 列表 ──────────────────────────────────────────────────
+    const VTXT = { ok: ['ok', '已登录'], checkpoint: ['bad', '风控'], logout: ['bad', '掉线'] };
+    function rowStatus(idx, p) {
+      const st = stateOf(idx);
+      const say = loginSay.get(idx);
+      if (say) return { cls: 'run', text: '登录中', tip: say };
+      if (checking.has(idx)) return { cls: 'run', text: '检测中', tip: '' };
+      if (st.loading) return { cls: 'run', text: '加载中', tip: '' };
+      if (st.failed) return { cls: 'bad', text: '连接失败', tip: '代理不通或 FB 打不开' };
+      // 格子正开着:URL 只能判出 checkpoint,登没登录要靠 noteVerdict 读 c_user 后写进 checked
+      if (/facebook\.com\/checkpoint/.test(String(st.url || '')))
+        return { cls: 'bad', text: '风控', tip: '当前页面:' + st.url };
+      // 开过又卸了 → 用上次看到的,注明多久以前
+      const c0 = checked.get(String(idx));
+      if (c0 && VTXT[c0.v]) {
+        let [c, t] = VTXT[c0.v];
+        // 「掉线」和「从没登录过」是两回事:新建的槽位(profile 里没 uid)属于后者,
+        // 报成掉线会让人以为账号出事了,其实只是还没登。
+        if (c0.v === 'logout' && !uidOf(p)) { c = 'off'; t = '待登录'; }
+        return { cls: c, text: t, tip: fmtAgo(c0.at) + '检测' };
+      }
+      if (!uidOf(p)) return { cls: 'off', text: '待登录', tip: '这个槽位配好了账号资料和代理,但还没登录过' };
+      // 没有任何观测。profile 里有 FB 记录只说明这个槽位配的是谁,不等于现在登着。
+      return { cls: 'off', text: '未检', tip: '还没打开过这个会话,点「检测」或翻到它那一页' };
+    }
+    const statusHtml = (idx, p) => { const r = rowStatus(idx, p);
+      const say = loginSay.get(idx);
+      return '<span class="pill ' + r.cls + '"' + (r.tip ? ' title="' + esc(r.tip) + '"' : '') + '>'
+           + esc(r.text) + '</span>' + (say ? '<span class="uid">' + esc(say) + '</span>' : ''); };
+    function rowInfo(idx, p) {
+      const note = String(p.note || '');
+      if (!note) return { text: '', full: '' };
+      const tag = (note.match(/^\s*(\[[^\]]{1,10}\])/) || [, ''])[1];
+      return { text: tag || (note.length > 22 ? note.slice(0, 22) + '…' : note), full: note };
+    }
+    function renderList() {
+      const tb = document.getElementById('tglist-body'); if (!tb) return;
+      let rws = profiles.filter((p) => gcells.has(p.accountIdx));
+      const all = rws.length;
+      const q = String(searchQ || '').trim().toLowerCase();
+      if (q) rws = rws.filter((p) => rowHaystack(p).includes(q));
+      const nEl = document.getElementById('fbsearch-n');
+      if (nEl) nEl.textContent = q ? (rws.length + '/' + all) : '';
+      if (!rws.length) {
+        tb.innerHTML = '<tr><td class="empty" colspan="7">'
+          + (searchQ ? '没有匹配「' + esc(searchQ) + '」的账号' : '这台机器上还没有 Facebook 账号') + '</td></tr>';
         return;
       }
-      // 在宿主区域里居中,保持卡片自然尺寸 —— 拉伸撑满会把内容顶出去、上下被切掉。
-      const r = host.getBoundingClientRect();
-      const w = Math.min(380, Math.max(240, r.width - 12));
-      const maxH = Math.max(160, r.height - 12);
-      card.style.inset = 'auto'; card.style.margin = '0';
-      card.style.width = w + 'px';
-      card.style.height = 'auto';
-      card.style.maxHeight = maxH + 'px';
-      card.style.left = Math.round(r.left + (r.width - w) / 2) + 'px';
-      const h = Math.min(card.offsetHeight || maxH, maxH);
-      card.style.top = Math.round(r.top + (r.height - h) / 2) + 'px';
+      tb.innerHTML = rws.map((p) => {
+        const i = p.accountIdx, info = rowInfo(i, p);
+        return '<tr class="row' + (i === drawerIdx ? ' on' : '') + '" data-idx="' + i + '">'
+          + '<td class="num">#' + i + '</td>'
+          + '<td class="ph">' + esc(uidOf(p) || '—') + '</td>'
+          + '<td class="px">' + esc(portOf(p) || '—') + '</td>'
+          + '<td class="uid">' + esc(nameOf(p) || '—') + '</td>'
+          + '<td class="stt">' + statusHtml(i, p) + '</td>'
+          + '<td class="info" title="' + esc(info.full || info.text) + '">' + esc(info.text) + '</td>'
+          + '<td></td></tr>';
+      }).join('');
     }
-    function openCfgModal(p) {
-      if (!p) return; cfgP = p; delArmed = false;
-      document.getElementById('cfg-title').textContent = `${p.name} · #${p.accountIdx} 设置`;
-      document.getElementById('cfg-info').innerHTML = cfgInfoHtml(p);
-      pullCred(p.accountIdx).then((c) => {
-        if (!c || !cfgP || cfgP.accountIdx !== p.accountIdx) return;
-        document.getElementById('cfg-info').innerHTML = cfgInfoHtml(p);
-        const set = (id, v) => { const e = document.getElementById(id); if (e && !e.value) e.value = v || ''; };
-        set('cred-pwd', c.pwd); set('cred-twofa', c.twofa); set('cred-email', c.email);
-        set('cred-mailpwd', c.mailpwd); set('cred-second', c.second);
-      });
-      { const c = readCred(p.accountIdx);
-        document.getElementById('cred-pwd').value = c.pwd || '';
-        document.getElementById('cred-twofa').value = c.twofa || (p.facebook && p.facebook.twofa) || '';
-        document.getElementById('cred-email').value = c.email || (p.facebook && p.facebook.email) || '';
-        document.getElementById('cred-mailpwd').value = c.mailpwd || '';
-        document.getElementById('cred-second').value = c.second || (p.facebook && p.facebook.secondEmail) || ''; }
-      cfgProxy.value = p.proxy || ''; cfgErr.textContent = ''; cfgIp.textContent = cfgIpText(p);
-      cfgPhone.value = phoneOf(p); cfgCode.value = codeUrlOf(p);
-      cfgDel.textContent = '删除此 Profile'; cfgDel.disabled = false;
-      cfgModal.hidden = false;
-      document.querySelectorAll('.gcell.cfging').forEach(function(el){ el.classList.remove('cfging'); });
-      { var _g = gcells.get(p.accountIdx); if (_g) _g.el.classList.add('cfging'); }
-      placeCfgOverCell(p);
-      cfgProxy.focus();
-      // 只让被弹窗卡片盖住的格子让位(syncPreview 里按重叠判定 detach),其余 webview 保持不动。
-      syncPreview();
+    function refreshRow(idx) {
+      const tb = document.getElementById('tglist-body'); if (!tb) return;
+      const tr = tb.querySelector('tr.row[data-idx="' + idx + '"]'); if (!tr) return;
+      const p = profiles.find((x) => x.accountIdx === idx); if (!p) return;
+      const td = tr.querySelector('td.stt'); if (td) td.innerHTML = statusHtml(idx, p);
+      tr.classList.toggle('on', idx === drawerIdx);
     }
-    function closeCfgModal() {
-      cfgModal.hidden = true; cfgP = null; { var _mg = document.getElementById('max-gear'); if (_mg) _mg.classList.remove('on'); }
-      document.querySelectorAll('.gcell.cfging').forEach(function(el){ el.classList.remove('cfging'); }); delArmed = false;
-      syncPreview();
-    }
-    cfgModal.onclick = (e) => { if (e.target === cfgModal) closeCfgModal(); };
-    document.getElementById('cfg-save').onclick = async () => {
-      if (!cfgP) return; const b = document.getElementById('cfg-save'); b.disabled = true; cfgErr.textContent = '';
-      try {
-        writeCred(cfgP.accountIdx, {
-          pwd: document.getElementById('cred-pwd').value.trim(),
-          twofa: document.getElementById('cred-twofa').value.trim(),
-          email: document.getElementById('cred-email').value.trim(),
-          mailpwd: document.getElementById('cred-mailpwd').value.trim(),
-          second: document.getElementById('cred-second').value.trim(),
-        });
-        document.getElementById('cfg-info').innerHTML = cfgInfoHtml(cfgP);
-        const lg = await window.panelAPI.setProfileLogin(cfgP.accountIdx, cfgPhone.value.trim(), cfgCode.value.trim());
-        cfgP.login = lg.login; renderPhone(cfgP);
-        const u = await window.panelAPI.setProfileProxy(cfgP.accountIdx, cfgProxy.value.trim());
-        cfgP.proxy = u.proxy; cfgP.ipInfo = null; renderIp(cfgP);
-        if (openedProfiles.has(cfgP.accountIdx)) { reloadProfile(cfgP.accountIdx); flash(`#${cfgP.accountIdx} 代理已应用，重新加载中`); }
-        else flash(`#${cfgP.accountIdx} 代理已保存，打开时生效`);
-        closeCfgModal();
-      } catch (e) { cfgErr.textContent = e.message || String(e); } finally { b.disabled = false; }
-    };
-    cfgProxy.onkeydown = (e) => { if (e.key === 'Enter') document.getElementById('cfg-save').onclick(); if (e.key === 'Escape') closeCfgModal(); };
-    document.getElementById('cfg-test').onclick = async () => {
-      if (!cfgP) return; const b = document.getElementById('cfg-test'); const o = b.textContent; b.disabled = true; b.textContent = '测 IP…'; cfgErr.textContent = '';
-      const r = await probeIp(cfgP);
-      b.disabled = false; b.textContent = o;
-      if (r.ok) cfgIp.textContent = cfgIpText(cfgP); else cfgErr.textContent = '探测失败：' + r.error;
-    };
-    cfgDel.onclick = async () => {
-      if (!cfgP) return;
-      if (!delArmed) { delArmed = true; cfgDel.textContent = '确认删除（不可恢复）'; setTimeout(() => { if (delArmed) { delArmed = false; cfgDel.textContent = '删除此 Profile'; } }, 4000); return; }
-      delArmed = false; cfgDel.disabled = true; cfgErr.textContent = '';
-      try { await removeProfile(cfgP); closeCfgModal(); }
-      catch (e) { cfgErr.textContent = e.message || String(e); cfgDel.disabled = false; cfgDel.textContent = '删除此 Profile'; }
-    };
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !cfgModal.hidden) closeCfgModal(); });
 
-    new ResizeObserver(() => requestAnimationFrame(syncPreview)).observe(preview);
-    window.addEventListener('resize', syncPreview);
-    document.addEventListener('visibilitychange', () => { if (document.hidden) { syncPreview(); return; } if (!document.hidden) { syncPreview(); setTimeout(syncPreview, 500); setTimeout(pullStates, 800); } });
-    try { window.panelAPI.onCellState(applyCellState); } catch (e) {}
-    pullStates({ adopt: true })
-      .catch(() => {})
-      .then(() => loadProfiles())
-      // 打开面板即默认进批量网格:把所有 profile 的 webview 平铺出来。
-      // 崩溃循环保护:若上次开机自动批量后没在几秒内清除标记(说明渲染进程崩溃重载了),
-      // 这次跳过自动批量、停在列表,避免弱机反复「崩溃→自动批量→再崩」的刷新循环。
-      .then(() => {
-        try {
-          const K = 'fb-matrix-autobatch-pending';
-          let prev = null; try { prev = localStorage.getItem(K); } catch (e) {}
-          if (prev && (Date.now() - Number(prev)) < 20000) {
-            try { localStorage.removeItem(K); } catch (e) {}
-            flash('上次疑似导致崩溃,已跳过自动平铺。点「全部重载」可手动平铺。', 6000);
+    // ── 检测:这个号现在到底登没登着 ────────────────────────────
+    // 只能真去开一次页面看它跳到哪。走的是现成的分页挂载,不另开隐藏窗口 ——
+    // TG 那边用隐藏窗口在同一 partition 上探活,把正在用的会话踢掉过。
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    async function waitCell(idx, ms) {
+      const t0 = Date.now();
+      while (Date.now() - t0 < ms) {
+        const st = stateOf(idx);
+        if (st.failed) return '';
+        if (!st.loading && st.url) return st.url;
+        await sleep(400);
+      }
+      return stateOf(idx).url || '';
+    }
+    async function checkAll() {
+      if (chkRun) { chkRun = false; return; }          // 再点一次 = 停
+      chkRun = true;
+      const btn = document.getElementById('chk-all');
+      const keepView = curView, keepPage = pageNo;
+      if (curView !== 'grid') setView('grid');
+      let done = 0, total = pageIdxList().total;
+      try {
+        for (let n = 0; chkRun; n++) {
+          pageNo = n; applyPage();
+          const { list, maxPage } = pageIdxList();
+          if (!list.length) break;
+          for (const i of list) checking.add(i);
+          if (listMode()) renderList(); else list.forEach(renderGridCell);
+          for (const i of list) {
+            if (!chkRun) break;
+            const u = await waitCell(i, 28000);
+            await sleep(1200);                 // 给页面把 c_user 写进 document.cookie 的时间
+            await noteVerdict(i, u);
+            checking.delete(i);
+            done++;
+            btn.textContent = '检测中 ' + done + '/' + total;
+            renderGridCell(i); refreshRow(i);
+          }
+          for (const i of list) checking.delete(i);
+          if (n >= maxPage) break;
+        }
+      } finally {
+        checking.clear(); chkRun = false;
+        btn.textContent = '检测';
+        pageNo = keepPage; if (keepView !== curView) setView(keepView); else applyPage();
+        const bad = [...checked.entries()].filter(([, v]) => v.v !== 'ok').length;
+        flash('检测完成 · ' + done + ' 个,异常 ' + bad + ' 个', 5000);
+      }
+    }
+
+
+    // ── 自动登录 ──────────────────────────────────────────────
+    // 邮箱 + 密码 + TOTP。和 TG 那套一样是个状态机:每一轮只认当前这一屏、只做一个动作,
+    // 每步都有冷却,总共 4 分钟封顶 —— 不做「填完就 sleep 几秒接着填下一个」的线性流程,
+    // 那种一旦页面慢半拍或多出一屏就整个跑飞(TG 那边踩了一下午)。
+    const LOGIN_DEADLINE = 4 * 60 * 1000;
+    function evalT(wv, expr, ms) {
+      return Promise.race([
+        wv.executeJavaScript(expr, true).catch(() => null),
+        new Promise((r) => setTimeout(() => r(null), ms || 6000)),
+      ]);
+    }
+    // TOTP 在面板里算,不把 2FA 密钥送进页面
+    async function totp(secret) {
+      const b32 = String(secret || '').toUpperCase().replace(/[^A-Z2-7]/g, '');
+      if (!b32) return '';
+      const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+      let bits = '';
+      for (const c of b32) bits += A.indexOf(c).toString(2).padStart(5, '0');
+      const bytes = [];
+      for (let i = 0; i + 8 <= bits.length; i += 8) bytes.push(parseInt(bits.slice(i, i + 8), 2));
+      const msg = new Uint8Array(8);
+      let c = Math.floor(Date.now() / 30000);
+      for (let i = 7; i >= 0; i--) { msg[i] = c & 0xff; c = Math.floor(c / 256); }
+      const key = await crypto.subtle.importKey('raw', new Uint8Array(bytes), { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']);
+      const sig = new Uint8Array(await crypto.subtle.sign('HMAC', key, msg));
+      const off = sig[19] & 0xf;
+      const n = ((sig[off] & 0x7f) << 24) | ((sig[off + 1] & 0xff) << 16) | ((sig[off + 2] & 0xff) << 8) | (sig[off + 3] & 0xff);
+      return String(n % 1000000).padStart(6, '0');
+    }
+    // 往输入框里填字:直接改 .value 会被 React 的受控组件还原,要走原生 setter 再派发事件
+    const FILL = (sel, val) => "(function(){var e=document.querySelector(" + JSON.stringify(sel) + ");"
+      + "if(!e)return 0;var s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;"
+      + "s.call(e," + JSON.stringify(val) + ");"
+      + "e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));"
+      + "return 1})()";
+    const CLICK = (sel) => "(function(){var e=document.querySelector(" + JSON.stringify(sel) + ");"
+      + "if(!e)return 0;e.click();return 1})()";
+    // FB 的提交键不是 <button> —— 登录页那颗是个 role=button 的 DIV,文字「登录」。
+    // 按选择器永远点不到(实测 #96:邮箱密码都填进去了,就是没人点提交,页面在原地打转)。
+    // 改成按文字找可见的按钮元素,找不到再退回 input[type=submit] / form.submit()。
+    const CLICK_TEXT = (words) => "(function(){var ws=" + JSON.stringify(words) + ";"
+      + "var cs=[].slice.call(document.querySelectorAll('[role=button],button,input[type=submit]'));"
+      + "for(var i=0;i<ws.length;i++){for(var j=0;j<cs.length;j++){var b=cs[j];"
+      + "if(!b.getClientRects().length)continue;var t=((b.innerText||b.value||'')+'').trim();"
+      + "if(t===ws[i]||t.indexOf(ws[i])===0){b.click();return 'click:'+t;}}}"
+      + "var s=document.querySelector('input[type=submit]');if(s){s.click();return 'submit';}"
+      + "var f=document.querySelector('form');if(f){f.submit();return 'form';}return '';})()";
+    // 当前是哪一屏。只认确定的信号,认不出就报 unknown,让状态机等下一轮而不是乱点。
+    const SCREEN_JS = "(function(){"
+      + "var u=location.href;"
+      + "if(/\\/checkpoint/.test(u))return JSON.stringify({s:'checkpoint'});"
+      + "var cu=(document.cookie.match(/(?:^|; )c_user=(\\d+)/)||[,''])[1];"
+      + "if(cu)return JSON.stringify({s:'done',uid:cu});"
+      + "if(document.querySelector('input[name=approvals_code],#approvals_code'))return JSON.stringify({s:'2fa'});"
+      + "var t=(document.body&&document.body.innerText||'').slice(0,3000);"
+      + "if(/two-factor|双重验证|输入登录码|login code/i.test(t)&&document.querySelector('input[type=text]'))"
+      + "  return JSON.stringify({s:'2fa'});"
+      + "if(document.querySelector('input[name=email],#email')&&document.querySelector('input[name=pass],#pass'))"
+      + "  return JSON.stringify({s:'login',e:(document.querySelector('input[name=email],#email')||{}).value||''});"
+      + "if(/保存登录信息|Save your login info|记住浏览器|Remember browser|以后再说|Not now|继续|Continue/i.test(t))"
+      + "  return JSON.stringify({s:'confirm'});"
+      + "return JSON.stringify({s:'unknown'});})()";
+    // 「继续 / 以后再说 / 记住浏览器」这类确认屏:按钮文字找,别按位置猜
+    const CONFIRM_JS = "(function(){var ws=['以后再说','Not now','稍后','继续','Continue','确定','OK','Save','保存'];"
+      + "var bs=[].slice.call(document.querySelectorAll('button,[role=button],a[role=button]'));"
+      + "for(var i=0;i<ws.length;i++){for(var j=0;j<bs.length;j++){"
+      + "var b=bs[j];if(!b.getClientRects().length)continue;"
+      + "if((b.innerText||'').trim().indexOf(ws[i])>=0){b.click();return ws[i];}}}"
+      + "return '';})()";
+
+    function say(idx, t) {
+      if (t) loginSay.set(idx, t); else loginSay.delete(idx);
+      renderGridCell(idx); refreshRow(idx);
+    }
+    async function fbLogin(idx) {
+      if (loginBusy.has(idx)) { flash('#' + idx + ' 正在登录中'); return; }
+      const p = profiles.find((x) => x.accountIdx === idx);
+      const c = p ? credOf(p) : null;
+      if (!c || !c.email || !c.pass) {
+        flash('#' + idx + ' 缺邮箱或密码(⚙ 备注里要有 FB密码:…)', 5000); return;
+      }
+      loginBusy.add(idx);
+      try {
+        closeOthers(idx, null);
+        say(idx, '准备中…');
+        // 格子可能不在当前页/不在抽屉里 —— 没挂载就没有 webview,流程会空转退出。
+        // 先把它翻到眼前再开始(TG 那边 #37 就是栽在这)。
+        if (listMode()) openDrawer(idx); else { gotoIdx(idx); }
+        let wv = null;
+        for (let t = 0; t < 60 && !wv; t++) { const g = gcells.get(idx); wv = g && g.wv; if (!wv) await sleep(500); }
+        if (!wv) { say(idx, ''); flash('#' + idx + ' 格子没能挂载'); return; }
+        const cool = {};
+        const once = (k, ms) => { const n = Date.now(); if (cool[k] && n - cool[k] < ms) return false; cool[k] = n; return true; };
+        const dl = Date.now() + LOGIN_DEADLINE;
+        let lastScreen = '';
+        while (Date.now() < dl) {
+          const raw = await evalT(wv, SCREEN_JS, 8000);
+          let sc = null; try { sc = JSON.parse(raw); } catch (e) {}
+          if (!sc) { await sleep(1500); continue; }
+          if (sc.s !== lastScreen) { lastScreen = sc.s; }
+          if (sc.s === 'done') {
+            say(idx, '');
+            checked.set(String(idx), { v: 'ok', at: Date.now(), uid: sc.uid || '' });
+            saveChecked();
+            // uid 落回 profile,列表不开页面也知道这个槽位登的是谁
+            try { await window.panelAPI.setProfileNote(idx, (p.note || '')); } catch (e) {}
+            flash('#' + idx + ' 登录成功 uid=' + sc.uid, 6000);
+            renderGridCell(idx); refreshRow(idx);
             return;
           }
-          try { localStorage.setItem(K, String(Date.now())); } catch (e) {}
-          enterBatch();
-          setTimeout(() => { try { localStorage.removeItem(K); } catch (e) {} }, 8000);
-        } catch (e) {}
-      })
-      .catch((e) => { flash(e.message || String(e), 8000); render(); });
+          if (sc.s === 'checkpoint') {
+            say(idx, '');
+            checked.set(String(idx), { v: 'checkpoint', at: Date.now() }); saveChecked();
+            flash('#' + idx + ' 被风控拦下(checkpoint),需要人工处理', 8000);
+            renderGridCell(idx); refreshRow(idx);
+            return;
+          }
+          if (sc.s === 'login') {
+            if (once('login', 12000)) {
+              say(idx, '填邮箱密码…');
+              await evalT(wv, FILL('input[name=email],#email', c.email), 6000);
+              await sleep(300);
+              await evalT(wv, FILL('input[name=pass],#pass', c.pass), 6000);
+              await sleep(400);
+              say(idx, '提交…');
+              const r1 = await evalT(wv, CLICK_TEXT(['登录', 'Log In', 'Log in', 'Login', '登入']), 6000);
+              if (!r1) say(idx, '找不到登录按钮');
+            }
+            await sleep(2500); continue;
+          }
+          if (sc.s === '2fa') {
+            if (once('2fa', 20000)) {
+              const code = await totp(c.twofa);
+              if (!code) { say(idx, ''); flash('#' + idx + ' 需要 2FA 但没有密钥', 6000); return; }
+              say(idx, '填 2FA ' + code + '…');
+              await evalT(wv, FILL('input[name=approvals_code],#approvals_code,input[type=text]', code), 6000);
+              await sleep(400);
+              await evalT(wv, CLICK_TEXT(['继续', 'Continue', '提交', 'Submit', '下一步', 'Next', '确定']), 6000);
+            }
+            await sleep(3000); continue;
+          }
+          if (sc.s === 'confirm') {
+            if (once('confirm', 8000)) {
+              say(idx, '确认弹窗…');
+              await evalT(wv, CONFIRM_JS, 6000);
+            }
+            await sleep(2500); continue;
+          }
+          say(idx, '等页面…');
+          await sleep(2000);
+        }
+        say(idx, '');
+        flash('#' + idx + ' 登录超时(4 分钟),看格子里停在哪一屏', 8000);
+      } finally {
+        loginBusy.delete(idx);
+        loginSay.delete(idx);
+        renderGridCell(idx); refreshRow(idx);
+      }
+    }
 
-    // 自动更新:构建时给本页打了内容版本号(<meta name="pv">)。每 60s 拉一次自身
-    // (同源 cicyui://panel,无跨域;cicyui handler 每次都从远端取最新),版本变了就 reload。
-    // 这样服务端一部署,所有开着的面板自己就切到新版,不用手动逐台重载。DEV 态不轮询。
-    (function autoUpdate() {
-      const meta = document.querySelector('meta[name="pv"]');
-      const PV = meta ? meta.content : '';
-      if (!PV || PV === 'DEV') return;
-      setInterval(async () => {
-        try {
-          const r = await fetch(location.href, { cache: 'no-store' });
-          if (!r.ok) return;
-          const t = await r.text();
-          const mm = t.match(/<meta name="pv" content="([^"]*)">/);
-          if (mm && mm[1] && mm[1] !== PV) location.reload();
-        } catch (e) {}
-      }, 60000);
+    // ── 设置弹窗 ──────────────────────────────────────────────
+    let cfgP = null;
+    const cfgProxy = document.getElementById('cfg-proxy');
+    const cfgNote = document.getElementById('cfg-note');
+    const cfgErr = document.getElementById('cfg-err');
+    const cfgInfo = document.getElementById('cfg-info');
+    const cfgSave = document.getElementById('cfg-save');
+    const kv = (k, v, mono) => '<div class="ci-row"><span class="ci-k">' + esc(k) + '</span><span class="ci-v">'
+      + (v ? (mono ? '<span class="mono">' + esc(v) + '</span>' : esc(v)) : '<span class="muted">—</span>') + '</span></div>';
+    // 居中由 CSS(.modal 的 flex)负责,这里不再算坐标
+    function openCfgModal(p) {
+      if (!p) return;
+      for (const i of gcells.keys()) if (pingOpen.has(i)) { pingOpen.delete(i); pingUrl.delete(i); syncMode(i); }
+      cfgP = p; cfgErr.textContent = '';
+      document.getElementById('cfg-title').textContent = 'Profile 设置 · #' + p.accountIdx;
+      const f = fbOf(p) || {};
+      const ip = p.ipInfo && p.ipInfo.ip ? (p.ipInfo.ip + (p.ipInfo.area ? ' · ' + p.ipInfo.area : '')) : '';
+      cfgInfo.innerHTML = kv('FB uid', f.id, true) + kv('名字', f.displayName) + kv('邮箱', f.email, true)
+        + kv('2FA 密钥', f.twofa, true) + kv('备用邮箱', f.secondEmail, true)
+        + '<hr>' + kv('出口 IP', ip, true);
+      cfgProxy.value = p.proxy || '';
+      cfgNote.value = p.note || '';
+      // 已经登着的号不给这个按钮 —— 再点一次只会把当前会话顶掉
+      const cred = credOf(p);
+      const st = checked.get(String(p.accountIdx));
+      const logged = !!(st && st.v === 'ok');
+      const lb = document.getElementById('cfg-login');
+      lb.hidden = logged;
+      lb.disabled = !(cred.email && cred.pass) || loginBusy.has(p.accountIdx);
+      lb.title = lb.disabled
+        ? '缺邮箱或密码:备注里要有「FB密码:xxx」'
+        : '用上面的邮箱/密码/2FA 在这一格里自动登录';
+      cfgModal.hidden = false;
+      document.querySelectorAll('.gcell.cfging').forEach((el) => el.classList.remove('cfging'));
+      const g = gcells.get(p.accountIdx); if (g) g.el.classList.add('cfging');
+    }
+    function closeCfgModal() {
+      cfgModal.hidden = true; cfgP = null;
+      document.querySelectorAll('.gcell.cfging').forEach((el) => el.classList.remove('cfging'));
+    }
+    document.getElementById('cfg-login').onclick = () => {
+      const p = cfgP; if (!p) return;
+      closeCfgModal();                       // 弹窗会盖住格子,点完就收起,进度看格子标题/列表状态列
+      flash('#' + p.accountIdx + ' 开始自动登录,进度看状态列');
+      fbLogin(p.accountIdx);
+    };
+    document.getElementById('cfg-cancel').onclick = () => closeCfgModal();
+    cfgModal.addEventListener('mousedown', (e) => { if (e.target === cfgModal) closeCfgModal(); });
+    cfgSave.onclick = async () => {
+      if (!cfgP) return;
+      const idx = cfgP.accountIdx;
+      cfgSave.disabled = true; cfgErr.textContent = '';
+      try {
+        const proxy = cfgProxy.value.trim(), note = cfgNote.value;
+        if (proxy !== (cfgP.proxy || '')) { await window.panelAPI.setProfileProxy(idx, proxy); cfgP.proxy = proxy; }
+        if (note !== (cfgP.note || '')) { await window.panelAPI.setProfileNote(idx, note); cfgP.note = note; }
+        flash('#' + idx + ' 已保存');
+        closeCfgModal(); renderGridCell(idx); if (listMode()) renderList();
+      } catch (e) { cfgErr.textContent = String(e.message || e); }
+      finally { cfgSave.disabled = false; }
+    };
+
+    // ── 事件 ──────────────────────────────────────────────────
+    document.getElementById('chk-all').onclick = () => checkAll();
+    document.getElementById('view-grid').onclick = () => setView('grid');
+    document.getElementById('view-list').onclick = () => setView('list');
+    document.getElementById('page-prev').onclick = () => gotoPage(pageNo - 1);
+    document.getElementById('page-next').onclick = () => gotoPage(pageNo + 1);
+    const psInput = document.getElementById('page-size');
+    psInput.value = String(pageSize());
+    psInput.onchange = () => {
+      const v = Math.max(1, Math.min(24, Number(psInput.value) || 4));
+      psInput.value = String(v);
+      try { localStorage.setItem(PAGE_KEY, String(v)); } catch (e) {}
+      pageNo = 0; applyPage();
+    };
+    document.getElementById('grid-reload').onclick = () => {
+      for (const [idx, g] of gcells) if (g.wv) { try { g.wv.reload(); } catch (e) {} }
+      flash('已重载本页所有格子');
+    };
+    document.getElementById('drawer-close').onclick = () => { drawerIdx = null; applyPage(); };
+    const searchEl = document.getElementById('fbsearch');
+    searchEl.value = '';
+    searchEl.addEventListener('input', () => { searchQ = searchEl.value; pageNo = 0; applyPage(); });
+    document.getElementById('tglist-body').addEventListener('click', (e) => {
+      const tr = e.target.closest && e.target.closest('tr.row'); if (!tr) return;
+      openDrawer(Number(tr.dataset.idx));
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      if (maxedIdx != null) { toggleMax(maxedIdx); return; }
+      if (cfgModal && !cfgModal.hidden) { closeCfgModal(); return; }
+      for (const i of gcells.keys()) if (pingOpen.has(i)) { closeOthers(i, null); return; }
+    });
+    // 拖宽度:指针一进 <webview> 事件就被它吃掉,拖到一半会断 —— 拖动时盖一层
+    (function () {
+      const sp = document.getElementById('splitter'); if (!sp) return;
+      sp.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        const startX = e.clientX, startW = splitW();
+        const mask = document.createElement('div'); mask.id = 'dragmask'; document.body.appendChild(mask);
+        const mv = (ev) => {
+          const w = Math.max(360, Math.min(Math.max(420, innerWidth - 480), startW + (startX - ev.clientX)));
+          document.getElementById('split').style.setProperty('--splitw', w + 'px');
+          try { localStorage.setItem(SPLIT_KEY, String(Math.round(w))); } catch (er) {}
+        };
+        const up = () => { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); try { mask.remove(); } catch (er) {} };
+        document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);
+      });
     })();
+    addEventListener('resize', () => { if (listMode()) applySplit(); });
+
+    // ── 启动 ──────────────────────────────────────────────────
+    async function loadProfiles() {
+      const all = await window.panelAPI.profiles();
+      // 只要这台机器上绑了 FB 的 profile。TG 矩阵那 79 个槽位跟这里没关系,
+      // 混进来就是一堆打不开的空格子(TG 面板反过来也过滤掉了 FB 的槽位)。
+      // 只要挂了 facebook 记录的槽位都算数 —— 不能要求有 uid:
+      // 还没登录过的号(等待重新登录)uid 是空的,按 uid 过滤会让它们整个从面板消失,
+      // 反而是最需要被看见、被点登录的那几个。
+      profiles = all.filter((p) => !!p.facebook).sort((a, b) => a.accountIdx - b.accountIdx);
+      gridEl.innerHTML = ''; gcells.clear();
+      for (const p of profiles) { const g = buildGridCell(p); gcells.set(p.accountIdx, g); gridEl.appendChild(g.el); }
+      for (const p of profiles) renderGridCell(p.accountIdx);
+      applyPage();
+    }
+    // 这一页的格子都是页内 <webview>,不用主进程贴 BrowserView。
+    // 旧版面板留下的 BrowserView 会一直盖在页面上,开局先清一次。
+    try { window.panelAPI.sync([]); } catch (e) {}
+    loadProfiles().catch((e) => { gridCount.textContent = '加载失败:' + (e.message || e); });
+
   </script>
 </body>
 </html>

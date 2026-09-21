@@ -84,6 +84,12 @@ electronApp.commandLine.appendSwitch("ignore-certificate-errors");
 // remotely (HMR-fallback when CSS / a renderer-side change needs a hard refresh).
 // Without this Electron rejects CDP WS handshakes with HTTP 403.
 electronApp.commandLine.appendSwitch("remote-allow-origins", "*");
+// 关掉 WebAuthn / 通行密钥。矩阵里的账号登录一律走密码 + TOTP:
+// accounts.meta.com 这类站点一进登录页就调 navigator.credentials.get(),Windows 弹出
+// 「使用密钥登录 · 请将安全密钥插入 USB 端口」这个系统模态框 —— 机器上根本没有安全密钥,
+// 框又是系统级的、页面脚本关不掉,自动登录就卡死在那儿(实测 2026-09-21,FB #96)。
+// 关掉这个特性后 navigator.credentials / PublicKeyCredential 直接不存在,站点自动回落到密码。
+electronApp.commandLine.appendSwitch("disable-features", "WebAuthentication,WebAuthenticationRemoteDesktopSupport");
 if (process.platform === "linux") {
   process.env["ELECTRON_DISABLE_SECURITY_WARNINGS"] = "true";
   // electronApp.commandLine.appendSwitch("disable-setuid-sandbox");

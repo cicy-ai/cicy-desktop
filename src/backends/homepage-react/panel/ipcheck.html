@@ -5,45 +5,57 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>IP 核对</title>
 <style>
-  :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --line:rgba(255,255,255,.10); --fg:#e6e6e9; --muted:#8b8b92; --ok:#3fb950; --warn:#f0b429; --bad:#ff5c5c; --accent:#4aa3ff; font-family: Inter,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }
+  /* 和面板「设置」弹窗同一套语汇:居中卡片、同样的圆角边框、同样的 标签/值 两栏排版。
+     所有 overlay(接码 / IP 核对 / 加群面板)看起来要像同一个东西,不是三张不同的网页。 */
+  :root { color-scheme: dark; --bg:#0A0A0A; --cell:#141416; --line:rgba(255,255,255,.10); --fg:#e6e6e9;
+          --muted:#8b8b92; --ok:#3fb950; --warn:#f0b429; --bad:#ff5c5c; --accent:#4aa3ff;
+          font-family: Inter,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }
   * { box-sizing:border-box; }
-  html,body { margin:0; width:100%; height:100%; background:var(--bg); color:var(--fg); overflow:auto; }
-  .wrap { padding:10px 12px; display:flex; flex-direction:column; gap:12px; }
-  .card { border:1px solid var(--line); border-radius:10px; background:var(--cell); padding:10px 12px; }
-  .card h3 { margin:0 0 8px; font-size:12px; color:var(--muted); font-weight:600; letter-spacing:.02em; }
-  .r { display:flex; align-items:center; gap:8px; font-size:12.5px; line-height:2; }
-  .r .k { flex:none; width:104px; color:var(--muted); }
-  .r .v { flex:1; min-width:0; font-family:ui-monospace,monospace; word-break:break-all; }
-  .r .v b { color:var(--fg); }
-  .mut { color:var(--muted); }
+  html,body { margin:0; width:100%; height:100%; background:var(--bg); color:var(--fg); }
+  /* 外层浮层已经是一张卡片(带标题栏),这里只铺内容,别再套一层框 */
+  body { overflow:auto; padding:0 16px 16px; }
+  .card { width:100%; background:transparent; border:0; padding:0; }
+  .head { display:none; }
+  .lbl { display:block; font-size:12px; color:var(--muted); margin:14px 0 6px; }
+  .lbl:first-of-type { margin-top:0; }
+  .box { border:1px solid var(--line); border-radius:10px; padding:12px 14px; background:#0f0f11;
+         display:flex; flex-direction:column; gap:4px; }
+  .r { display:flex; gap:12px; font-size:12px; line-height:1.65; align-items:baseline; }
+  .r .k { flex:none; width:92px; color:var(--muted); }
+  .r .v { flex:1; min-width:0; color:var(--fg); word-break:break-all; font-family:ui-monospace,monospace; user-select:all; }
+  .r .v b { font-weight:600; }
+  .mut { color:var(--muted); font-family:inherit; }
   .ok { color:var(--ok); } .warn { color:var(--warn); } .bad { color:var(--bad); }
-  .badge { display:inline-block; padding:1px 8px; border-radius:999px; font-size:11px; font-weight:600; }
-  .badge.dc { background:rgba(255,92,92,.15); color:#ff9e9e; border:1px solid rgba(255,92,92,.4); }
-  .badge.res { background:rgba(63,185,80,.15); color:#7ee787; border:1px solid rgba(63,185,80,.4); }
+  .badge { display:inline-block; padding:1px 9px; border-radius:999px; font-size:11px; font-weight:600;
+           font-family:inherit; }
+  .badge.dc { background:rgba(255,92,92,.16); color:#ff9e9e; }
+  .badge.res { background:rgba(63,185,80,.16); color:#7ee787; }
   .badge.unk { background:var(--line); color:var(--muted); }
   a { color:var(--accent); text-decoration:none; } a:hover { text-decoration:underline; }
   .links { display:flex; flex-wrap:wrap; gap:6px 14px; font-size:12px; }
 </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="card">
-      <h3>出口 IP</h3>
+  <div class="card">
+    <div class="head"><span>IP 核对</span></div>
+
+    <label class="lbl">出口 IP</label>
+    <div class="box">
       <div class="r"><span class="k">代理探测出口</span><span class="v" id="proxyip"><span class="mut">—</span></span></div>
       <div class="r"><span class="k">浏览器真实出口</span><span class="v" id="realip"><span class="mut">读取中…</span></span></div>
       <div class="r"><span class="k">一致性</span><span class="v" id="match"><span class="mut">—</span></span></div>
     </div>
-    <div class="card">
-      <h3>IP 情报</h3>
+
+    <label class="lbl">IP 情报</label>
+    <div class="box">
       <div class="r"><span class="k">归属地</span><span class="v" id="geo"><span class="mut">—</span></span></div>
       <div class="r"><span class="k">ASN / 运营商</span><span class="v" id="asn"><span class="mut">—</span></span></div>
       <div class="r"><span class="k">类型</span><span class="v" id="type"><span class="mut">—</span></span></div>
       <div class="r"><span class="k">数据源</span><span class="v" id="src"><span class="mut">—</span></span></div>
     </div>
-    <div class="card">
-      <h3>完整风控 / 详情（新窗口）</h3>
-      <div class="links" id="links"><span class="mut">拿到真实出口 IP 后生成…</span></div>
-    </div>
+
+    <label class="lbl">完整风控 / 详情（新窗口）</label>
+    <div class="box"><div class="links" id="links"><span class="mut">拿到真实出口 IP 后生成…</span></div></div>
   </div>
 <script>
   const qs = new URLSearchParams(location.search);
