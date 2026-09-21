@@ -24,6 +24,24 @@ const appUpdater = require("./app-updater");
 // and guests fell back to the OS-native menu; this unifies them and adds 重新加载
 // + 切换开发者工具 + 检查元素 everywhere (see utils/context-menu-options.js).
 const { attachContextMenu } = require("./utils/context-menu-options");
+// 每个 session 一建出来就挂上 no-passkey:document-start 运行,先于页面脚本,
+// 这样站点探测通行密钥时拿到的就是「没有验证器」,Windows 那个系统模态框不会弹。
+// 放在 session-created 而不是逐个分区手动注册 —— 矩阵有上百个 persist:sandbox-N,
+// 而且新建 profile 随时会多出来,手动注册必然漏。
+const NO_PASSKEY = require("path").join(__dirname, "inject", "no-passkey.js");
+function armNoPasskey(ses) {
+  try {
+    const has = (ses.getPreloadScripts ? ses.getPreloadScripts() : [])
+      .some((x) => String((x && x.filePath) || "").endsWith("no-passkey.js"));
+    if (!has) ses.registerPreloadScript({ type: "frame", filePath: NO_PASSKEY });
+  } catch (_) {}
+}
+electronApp.on("session-created", armNoPasskey);
+// 默认会话可能在上面这个监听器挂上之前就已经建好了(main.js 里别处也踩过同一个坑,
+// 见启动时那段「默认会话强制直连」的保险),所以 ready 之后再补一次。幂等。
+electronApp.whenReady().then(() => {
+  try { armNoPasskey(require("electron").session.defaultSession); } catch (_) {}
+});
 electronApp.on("web-contents-created", (_e, wc) => {
   attachContextMenu(wc);
   // Security backstop for window.open. createWindow (setupWindowHandlers) and the
@@ -101,7 +119,9 @@ electronApp.commandLine.appendSwitch("remote-allow-origins", "*");
 // 「使用密钥登录 · 请将安全密钥插入 USB 端口」这个系统模态框 —— 机器上根本没有安全密钥,
 // 框又是系统级的、页面脚本关不掉,自动登录就卡死在那儿(实测 2026-09-21,FB #96)。
 // 关掉这个特性后 navigator.credentials / PublicKeyCredential 直接不存在,站点自动回落到密码。
-electronApp.commandLine.appendSwitch("disable-features", "WebAuthentication,WebAuthenticationRemoteDesktopSupport");
+// 注:这里**不要**再写 disable-features=WebAuthentication —— 那个 feature 名在现在的
+// Chromium 里已经没有了,开关传得进去但毫无作用(2.1.362 实测)。真正起作用的是下面
+// session-created 里注册的 no-passkey 注入脚本。
 if (process.platform === "linux") {
   process.env["ELECTRON_DISABLE_SECURITY_WARNINGS"] = "true";
   // electronApp.commandLine.appendSwitch("disable-setuid-sandbox");

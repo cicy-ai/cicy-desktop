@@ -860,6 +860,9 @@
       + "  return JSON.stringify({s:'2fa'});"
       + "if(document.querySelector('input[name=email],#email')&&document.querySelector('input[name=pass],#pass'))"
       + "  return JSON.stringify({s:'login',e:(document.querySelector('input[name=email],#email')||{}).value||''});"
+      + "if(/请检查你的邮箱|邮箱收到的验证码|check your email|输入验证码/i.test(t)){"
+      + "  var to=(t.match(/([A-Za-z0-9*._-]+@[A-Za-z0-9*._-]+)/)||[,''])[1];"
+      + "  return JSON.stringify({s:'emailcode',to:to});}"
       + "if(/保存登录信息|Save your login info|记住浏览器|Remember browser|以后再说|Not now|继续|Continue/i.test(t))"
       + "  return JSON.stringify({s:'confirm'});"
       + "return JSON.stringify({s:'unknown'});})()";
@@ -942,6 +945,15 @@
             }
             await sleep(3000); continue;
           }
+          if (sc.s === 'emailcode') {
+            // 密码 + TOTP 之后 FB 还要一个发到账号邮箱的验证码。这个码我们拿不到
+            // (台账里的邮箱密码是网页登录密码,Gmail 的 IMAP 不收),所以停在这里等人送码。
+            // **不能**落到下面 confirm 那个分支:那会对着空的码输入框一直点「继续」,
+            // 还会把旁边「获取新验证码」点爆。
+            say(idx, '等邮箱验证码 ' + (sc.to || ''));
+            flash('#' + idx + ' 需要邮箱验证码(' + (sc.to || '') + ')。拿到后跑 fbCode(' + idx + ', "123456")', 15000);
+            return;
+          }
           if (sc.s === 'confirm') {
             if (once('confirm', 8000)) {
               say(idx, '确认弹窗…');
@@ -960,6 +972,20 @@
         renderGridCell(idx); refreshRow(idx);
       }
     }
+
+    // 人工把邮箱验证码送进来:填完接着跑状态机,后面「记住浏览器」之类的屏照样自动点完。
+    window.fbCode = async function (idx, code) {
+      const g = gcells.get(idx), wv = g && g.wv;
+      if (!wv) { flash('#' + idx + ' 格子没挂载'); return; }
+      code = String(code || '').replace(/\D/g, '');
+      if (code.length < 4) { flash('码不对'); return; }
+      say(idx, '填邮箱码 ' + code + '…');
+      await evalT(wv, FILL('input[type=text],input[name=email],input[name=code]', code), 6000);
+      await sleep(400);
+      await evalT(wv, CLICK_TEXT(['继续', 'Continue', '提交', 'Submit', '确认']), 6000);
+      await sleep(2500);
+      fbLogin(idx);
+    };
 
     // ── 设置弹窗 ──────────────────────────────────────────────
     let cfgP = null;
