@@ -57,8 +57,21 @@ function accountIdxOfWebContents(wc) {
 // sandbox profile 1; an opener already in a sandbox profile N opens the link in
 // its OWN profile N. This mirrors the tab-browser policy (profile 0 link →
 // openTab(1); else same profile) — no dialog, no leak into profile 0.
+// 只有这些协议才允许在应用里导航/开窗。其余(bitbrowser:// tg:// whatsapp:// …)
+// 交给 Chromium 就等于交给系统:Windows 弹「获取打开此链接的应用」那个模态框,
+// 机器上没装对应软件也关不掉,自动化直接卡住(实测 2026-09-21,群消息里的
+// bitbrowser:// 推广链接)。这里直接拒掉,并把来源打进日志,便于回溯是谁发起的。
+const WEB_SCHEME = /^(https?|about|blob|data|file|cicyui|devtools|chrome-extension):/i;
+function isWebUrl(u) { return WEB_SCHEME.test(String(u || "")); }
+
 function windowOpenDecision(url, { wc } = {}) {
   log.info(`[WindowOpen] Intercepted: ${url}`);
+  if (url && !isWebUrl(url)) {
+    let from = "";
+    try { from = wc ? wc.getURL() : ""; } catch (e) {}
+    log.warn(`[WindowOpen] 外部协议已拦截: ${String(url).slice(0, 120)}  来自: ${String(from).slice(0, 120)}`);
+    return { action: "deny" };
+  }
   if (!url || url === "about:blank" || isTrustedUrl(url)) {
     return {
       action: "allow",
@@ -567,6 +580,7 @@ if (app) {
 }
 
 module.exports = {
+  isWebUrl,
   createWindow,
   setupWindowHandlers,
   windowOpenDecision,

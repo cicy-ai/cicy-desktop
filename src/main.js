@@ -35,8 +35,20 @@ electronApp.on("web-contents-created", (_e, wc) => {
   // an external popup there is an RCE/creds-leak surface. External links go to the
   // system browser instead; trusted/local/about:blank popups are still allowed.
   try {
-    const { windowOpenDecision } = require("./utils/window-utils");
+    const { windowOpenDecision, isWebUrl } = require("./utils/window-utils");
     wc.setWindowOpenHandler(({ url }) => windowOpenDecision(url, { wc }));
+    // 同一件事的另一条入口:直接导航(点链接 / location=)到未知协议。
+    // 开窗那条被拦了,这条不拦照样会把 bitbrowser:// 这类交给系统去弹框。
+    wc.on("will-navigate", (e, url) => {
+      if (isWebUrl(url)) return;
+      e.preventDefault();
+      let from = "";
+      try { from = wc.getURL(); } catch (_) {}
+      try {
+        require("electron-log").warn(
+          `[Navigate] 外部协议已拦截: ${String(url).slice(0, 120)}  来自: ${String(from).slice(0, 120)}`);
+      } catch (_) {}
+    });
   } catch (_) {}
   // Ctrl/Cmd+C inside a <webview> guest: on Windows the application menu's
   // role:"copy" accelerator doesn't reach the focused guest, so a selection
