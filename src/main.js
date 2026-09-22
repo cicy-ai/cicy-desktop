@@ -54,14 +54,34 @@ const NPK_SRC = "(function(){try{"
   + "navigator.credentials.get=function(o){return (o&&o.publicKey)?"
   + "Promise.reject(new DOMException('The operation either timed out or was not allowed.','NotAllowedError')):g(o)};}"
   + "}catch(e){}})();";
+// 通行密钥的 get() 可能从**跨域 iframe**(如 accounts.meta.com,独立进程 OOPIF)或**弹窗**里发起,
+// 只在主目标上 addScript 覆盖不到它们(实测:弹窗写着 accounts.meta.com 的通行密钥,框照弹)。
+// 用 Target.setAutoAttach(flatten) 抓下每一个子目标(子框架/弹窗),对每个子会话也 addScript,
+// 并让它继续向下 auto-attach —— 这样无论哪个 origin、哪层 iframe、哪个弹窗都被覆盖。
+async function armSession(dbg, sessionId) {
+  // sendCommand(method, params, sessionId?) —— 根会话 sessionId 传 undefined
+  const sid = sessionId || undefined;
+  try { await dbg.sendCommand("Page.enable", {}, sid); } catch (_) {}
+  try { await dbg.sendCommand("Page.addScriptToEvaluateOnNewDocument", { source: NPK_SRC }, sid); } catch (_) {}
+  try { await dbg.sendCommand("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }, sid); } catch (_) {}
+}
 async function armWebviewNoPasskey(wc) {
   try {
     if (!wc || wc.isDestroyed() || wc.getType() !== "webview" || wc.__npkArmed) return;
     wc.__npkArmed = true;
-    if (!wc.debugger.isAttached()) wc.debugger.attach("1.3");
-    await wc.debugger.sendCommand("Page.enable");
-    await wc.debugger.sendCommand("Page.addScriptToEvaluateOnNewDocument", { source: NPK_SRC });
-    try { await wc.executeJavaScript(NPK_SRC, true); } catch (_) {}  // 当前已加载的文档也补一发
+    const dbg = wc.debugger;
+    if (!dbg.isAttached()) dbg.attach("1.3");
+    dbg.on("message", async (_e, method, params, sessionId) => {
+      try {
+        if (method === "Target.attachedToTarget") {
+          const sid = params.sessionId;
+          await armSession(dbg, sid);                                  // 子目标(iframe/弹窗)也注入并继续向下
+          try { await dbg.sendCommand("Runtime.runIfWaitingForDebugger", {}, sid); } catch (_) {}
+        }
+      } catch (_) {}
+    });
+    await armSession(dbg, null);                                       // 主目标
+    try { await wc.executeJavaScript(NPK_SRC, true); } catch (_) {}    // 当前已加载文档补一发
   } catch (_) { try { wc.__npkArmed = false; } catch (e) {} }
 }
 electronApp.on("web-contents-created", (_e, wc) => {
