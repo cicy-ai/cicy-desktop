@@ -41,16 +41,31 @@ electronApp.on("session-created", armNoPasskey);
 // 得在客机 attach 时把 no-passkey 设成它自己的 preload,否则矩阵格子(全是 webview)里
 // 的 FB 页照样能调 navigator.credentials.get → Windows 弹安全密钥框(实测 2.1.364)。
 // preload 内部用「插 <script> 改主世界」,所以不用动客机的 contextIsolation。
-electronApp.on("web-contents-created", (_e, wc) => {
+// 实测:will-attach-webview 里设 preload、以及 <webview> 元素 preload 属性,在这个
+// Electron + 面板 BrowserView 组合下都被忽略(preload 根本不加载)。唯一可靠的、能在
+// 文档创建前于主世界执行、赢过 FB 页首帧 credentials.get 的办法是 CDP 的
+// Page.addScriptToEvaluateOnNewDocument。给每个 <webview> 客机挂上。
+const NPK_SRC = "(function(){try{"
+  + "if(window.PublicKeyCredential){"
+  + "PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable=function(){return Promise.resolve(false)};"
+  + "PublicKeyCredential.isConditionalMediationAvailable=function(){return Promise.resolve(false)};}"
+  + "if(navigator.credentials&&navigator.credentials.get){"
+  + "var g=navigator.credentials.get.bind(navigator.credentials);"
+  + "navigator.credentials.get=function(o){return (o&&o.publicKey)?"
+  + "Promise.reject(new DOMException('The operation either timed out or was not allowed.','NotAllowedError')):g(o)};}"
+  + "}catch(e){}})();";
+async function armWebviewNoPasskey(wc) {
   try {
-    wc.on("will-attach-webview", (_ev, webPreferences) => {
-      try {
-        const cur = webPreferences.preload;
-        // 客机原本没有 preload 才设;真有的话不覆盖别人的,改到 preloadScripts 里追加
-        if (!cur) webPreferences.preload = NO_PASSKEY;
-      } catch (_) {}
-    });
-  } catch (_) {}
+    if (!wc || wc.isDestroyed() || wc.getType() !== "webview" || wc.__npkArmed) return;
+    wc.__npkArmed = true;
+    if (!wc.debugger.isAttached()) wc.debugger.attach("1.3");
+    await wc.debugger.sendCommand("Page.enable");
+    await wc.debugger.sendCommand("Page.addScriptToEvaluateOnNewDocument", { source: NPK_SRC });
+    try { await wc.executeJavaScript(NPK_SRC, true); } catch (_) {}  // 当前已加载的文档也补一发
+  } catch (_) { try { wc.__npkArmed = false; } catch (e) {} }
+}
+electronApp.on("web-contents-created", (_e, wc) => {
+  try { if (wc.getType() === "webview") armWebviewNoPasskey(wc); } catch (_) {}
 });
 // 默认会话可能在上面这个监听器挂上之前就已经建好了(main.js 里别处也踩过同一个坑,
 // 见启动时那段「默认会话强制直连」的保险),所以 ready 之后再补一次。幂等。
