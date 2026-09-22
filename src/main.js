@@ -37,6 +37,21 @@ function armNoPasskey(ses) {
   } catch (_) {}
 }
 electronApp.on("session-created", armNoPasskey);
+// <webview> 客机不吃 session 级预加载(Electron 机制:那只对普通窗口/BrowserView 生效),
+// 得在客机 attach 时把 no-passkey 设成它自己的 preload,否则矩阵格子(全是 webview)里
+// 的 FB 页照样能调 navigator.credentials.get → Windows 弹安全密钥框(实测 2.1.364)。
+// preload 内部用「插 <script> 改主世界」,所以不用动客机的 contextIsolation。
+electronApp.on("web-contents-created", (_e, wc) => {
+  try {
+    wc.on("will-attach-webview", (_ev, webPreferences) => {
+      try {
+        const cur = webPreferences.preload;
+        // 客机原本没有 preload 才设;真有的话不覆盖别人的,改到 preloadScripts 里追加
+        if (!cur) webPreferences.preload = NO_PASSKEY;
+      } catch (_) {}
+    });
+  } catch (_) {}
+});
 // 默认会话可能在上面这个监听器挂上之前就已经建好了(main.js 里别处也踩过同一个坑,
 // 见启动时那段「默认会话强制直连」的保险),所以 ready 之后再补一次。幂等。
 electronApp.whenReady().then(() => {
