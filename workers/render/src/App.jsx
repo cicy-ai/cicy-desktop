@@ -3456,6 +3456,42 @@ const dbDir = path.join(home, "cicy-ai", "db"), logDir = path.join(home, "cicy-a
 for (const d of [dbDir, logDir]) { try { fs.mkdirSync(d, { recursive: true }); } catch {} }
 const logFile = path.join(logDir, "dsh.log"), errFile = path.join(logDir, "dsh.err.log"), pidFile = path.join(dbDir, "dsh.pid"), rootCache = path.join(dbDir, "dsh-npm-root.txt");
 const lockFile = path.join(dbDir, "dsh-install.lock"), okMarker = path.join(dbDir, "dsh-ok-" + VER + ".txt");
+// dsh@0.1.2-rc.1 是 developer preview:安装器只钉 dsh 版本,传递依赖(cordis 栈)浮动一升级就崩
+// ("user patch-layer watching requires the Cordis HMR service")。运行时 cordis 栈从 dsh 包自己的
+// nested node_modules 解析(~/.dsh/profiles 自举目录是空的),所以装完把这 8 个钉回已知良好版本。
+const KNOWN_GOOD = { "@deepseek-ai/cordis": "4.0.2", "@deepseek-ai/cordis-plugin-hmr": "1.0.17", "@deepseek-ai/cordis-plugin-loader": "1.0.3", "@deepseek-ai/cordis-plugin-include": "1.0.7", "@deepseek-ai/cordis-plugin-timer": "1.1.4", "@deepseek-ai/cordis-plugin-group": "1.0.2", "@deepseek-ai/cosmokit": "1.8.3", "@deepseek-ai/schemastery": "3.18.2" };
+const KG_HASH = require("crypto").createHash("sha1").update(JSON.stringify(Object.keys(KNOWN_GOOD).sort().map((k) => [k, KNOWN_GOOD[k]]))).digest("hex").slice(0, 8);
+const pinMarker = path.join(dbDir, "dsh-pins-" + VER + "-" + KG_HASH + ".txt");
+// 读版本要去 BOM:JSON.parse 遇 BOM 会抛
+function nestedVer(dir, name) { try { return JSON.parse(fs.readFileSync(path.join(dir, "node_modules", ...name.split("/"), "package.json"), "utf8").replace(/^\uFEFF/, "")).version; } catch { return null; } }
+function depsOk(dir) { for (const n of Object.keys(KNOWN_GOOD)) if (nestedVer(dir, n) !== KNOWN_GOOD[n]) return false; return true; }
+// 钉法:不能在 dsh 包目录直接 npm i —— npm 会解析整棵 dsh 依赖树,里面的
+// @deepseek-ai/dsh-experimental-agent-team@^0.1.2-rc.1 在 registry 上不存在,直接 ETARGET 退出。
+// 改在临时 scratch 目录 npm i 这 8 个钉死版本,再把 8 个包目录整目录覆盖进 dsh/node_modules/@deepseek-ai
+// (旧目录改名 .bak,失败则还原)。必须 8 个一起(只钉 7 个、hmr 留新版会 hmr.registerConfig is not a function)。
+function pinDeps(dir, reg) {
+  if (fs.existsSync(pinMarker) && depsOk(dir)) return { ok: true, skipped: true };
+  if (depsOk(dir)) { try { fs.writeFileSync(pinMarker, String(Date.now())); } catch {} return { ok: true, skipped: true }; }
+  const scratch = path.join(os.tmpdir(), "dsh-pin-scratch");
+  try { fs.rmSync(scratch, { recursive: true, force: true }); fs.mkdirSync(scratch, { recursive: true }); fs.writeFileSync(path.join(scratch, "package.json"), JSON.stringify({ name: "dsh-pin-scratch", version: "0.0.0", private: true })); } catch (e) { return { ok: false, error: "pin_scratch_failed", tail: String(e.message).slice(-200) }; }
+  const pins = Object.keys(KNOWN_GOOD).map((n) => n + "@" + KNOWN_GOOD[n]).join(" ");
+  try { run(q(NPM) + " i --no-audit --no-fund --no-progress --loglevel=error --registry=" + reg + " " + pins, { cwd: scratch, timeout: 8 * 60 * 1000 }); }
+  catch (e) { try { fs.rmSync(scratch, { recursive: true, force: true }); } catch {} return { ok: false, error: "pin_install_failed", tail: String((e.stderr || "") + (e.stdout || "") + (e.message || "")).trim().slice(-300) }; }
+  const dstScope = path.join(dir, "node_modules", "@deepseek-ai"), srcScope = path.join(scratch, "node_modules", "@deepseek-ai");
+  const failed = [];
+  for (const n of Object.keys(KNOWN_GOOD)) {
+    const short = n.slice("@deepseek-ai/".length), src = path.join(srcScope, short), dst = path.join(dstScope, short);
+    if (!fs.existsSync(src)) { failed.push(short + ":no-src"); continue; }
+    try { if (fs.existsSync(dst)) { try { fs.rmSync(dst + ".bak", { recursive: true, force: true }); } catch {} fs.renameSync(dst, dst + ".bak"); } fs.cpSync(src, dst, { recursive: true }); }
+    catch (e) { failed.push(short + ":" + String(e.message).slice(0, 40)); try { if (!fs.existsSync(dst) && fs.existsSync(dst + ".bak")) fs.renameSync(dst + ".bak", dst); } catch {} }
+  }
+  try { fs.rmSync(scratch, { recursive: true, force: true }); } catch {}
+  if (failed.length) return { ok: false, error: "pin_copy_failed", tail: failed.join("; ") };
+  if (!depsOk(dir)) return { ok: false, error: "pin_mismatch", tail: JSON.stringify(Object.fromEntries(Object.keys(KNOWN_GOOD).map((n) => [n, nestedVer(dir, n)]))).slice(0, 300) };
+  for (const n of Object.keys(KNOWN_GOOD)) { try { fs.rmSync(path.join(dstScope, n.slice("@deepseek-ai/".length) + ".bak"), { recursive: true, force: true }); } catch {} }
+  try { fs.writeFileSync(pinMarker, String(Date.now())); } catch {}
+  return { ok: true };
+}
 // 车队级启动环境(hub 下发,DshCard 写的 dsh-env.json):并进 dsh 子进程 env。启动环境在 dsh 里优先级最高且只读。
 const envFile = path.join(dbDir, "dsh-env.json"), envApplied = path.join(dbDir, "dsh-env.applied");
 function fleetEnv() { try { const j = JSON.parse(fs.readFileSync(envFile, "utf8")); const src = (j && j.env) || {}; const out = {}; for (const [k, v] of Object.entries(src)) { if (/^[A-Z][A-Z0-9_]*$/.test(k) && typeof v === "string" && v) out[k] = v; } return out; } catch { return {}; } }
@@ -3546,7 +3582,9 @@ function installing() { return pidAlive(readPidFile(lockFile)); }
 async function status() {
   const p = pkgInfo(); const pid = readPidFile(pidFile); const pr = await probe();
   const eh = envHash(), ea = appliedHash(), wm = wsMissing();
-  return { ok: true, installed: !!p && !p.broken, broken: !!(p && p.broken), version: p ? p.version : null, installing: installing(), running: pr.dsh, occupied: pr.up && !pr.dsh, pid, pidAlive: pidAlive(pid), hasToken: !!lastToken(), node: process.version, logFile, envKeys: Object.keys(fleetEnv()), envHash: eh, envStale: pr.dsh && ea !== eh, wsMissing: wm, wsStale: pr.dsh && wm.length > 0 };
+  // 装好但传递依赖没钉/浮动了 → 报出来让卡片显示,别无声"启动中"(2026-09-25:rc.1 cordis 栈浮动崩)
+  const depBad = (p && !p.broken && !fs.existsSync(pinMarker) && !depsOk(p.dir)) ? "cordis-stack-mismatch" : null;
+  return { ok: true, installed: !!p && !p.broken, broken: !!(p && p.broken), depError: depBad, version: p ? p.version : null, installing: installing(), running: pr.dsh, occupied: pr.up && !pr.dsh, pid, pidAlive: pidAlive(pid), hasToken: !!lastToken(), node: process.version, logFile, envKeys: Object.keys(fleetEnv()), envHash: eh, envStale: pr.dsh && ea !== eh, wsMissing: wm, wsStale: pr.dsh && wm.length > 0 };
 }
 async function install() {
   // 安装锁:首页刷新/多开会再次触发安装,两个 npm -g 同时写全局目录会把包写坏。有锁就等它完。
@@ -3573,7 +3611,9 @@ async function install() {
     try { fs.writeFileSync(rootCache, root); } catch {}
     const p = pkgAt(root);
     if (!p || p.broken) return { ok: false, error: "install_incomplete", tail: (outp || "").slice(-300) };
-    return { ok: true, version: p.version, registry: used, speed: regs.speed, secs: Math.round((Date.now() - t0) / 1000) };
+    const pin = pinDeps(p.dir, savedRegistry() || used || "https://registry.npmjs.org");
+    if (!pin.ok) return { ok: false, error: pin.error, tail: pin.tail };
+    return { ok: true, version: p.version, registry: used, speed: regs.speed, secs: Math.round((Date.now() - t0) / 1000), pinned: !pin.skipped };
   } finally { try { fs.unlinkSync(lockFile); } catch {} }
 }
 async function start() {
@@ -3917,6 +3957,7 @@ function DshCard() {
   const stateText = !st ? ""
     : st.error ? tr("dsh.stateNoNode", "未就绪:{{why}}", { why: st.error === "no_node" ? tr("dsh.noNodeShort", "没有 Node.js(点「安装」自动装便携版)") : st.error })
     : st.installing ? tr("dsh.stateInstalling", "另一个安装进程进行中…")
+    : st.depError ? tr("dsh.stateDepBad", "依赖损坏(cordis 栈),点「安装」修复")
     : running ? tr("dsh.stateRunning", "运行中")
     : st.broken ? tr("dsh.stateBroken", "安装不完整(点「安装」修复)")
     : installed ? tr("dsh.stateStopped", "已安装,未运行")
