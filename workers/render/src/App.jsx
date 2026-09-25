@@ -1511,7 +1511,11 @@ function useFleetSocket() {
       try { out.auto = await capped(window.cicy?.app?.getAutoUpdate?.(), null); } catch {}
       // Only cache a complete identity; a partial one (some step timed out) is
       // re-read on the next connect so the hello self-corrects once main is idle.
-      if (out.host && out.v) ident = out;
+      // A token-less identity is never cached either: a fresh install hellos before the
+      // user logs in to the hub, and caching that would keep every later hello token-less
+      // → the hub never marks the machine authed → no dsh config / self-rpc for it
+      // (seen on a new machine 2026-09-25). Re-read until the token shows up.
+      if (out.host && out.v && out.tok) ident = out;
       return out;
     };
 
