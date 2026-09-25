@@ -1178,7 +1178,7 @@ export default function App() {
   const hubCount = hub.instances ? hub.instances.length : 0;
   // 「全部」只放真能打开的 dsh;DSH tab 里才把未就绪的一并列出来看状态。
   const dshReady = (dshFleet.list || []).filter((m) => m.ready);
-  const showDshAll = tab === "all" || tab === "dsh";
+  const showDshAll = (tab === "all" || tab === "dsh") && !!hub.loggedIn; // 未登录不展示车队机器
   // 首次打开:本地或云端团队任一还没拉到(为 null)→ grid 显示 skeleton 占位卡,直到两边都
   // resolve(出错也 resolve 成 []),再显示真实内容 —— 避免一个先回来另一个还空的露馅。
   const firstLoading = localTeams === null || teams === null;
@@ -3263,7 +3263,13 @@ function useDshFleet() {
   const refresh = useCallback(async () => {
     setBusy(true);
     try {
-      const r = await fetch(DSH_FLEET_API, { cache: "no-store" });
+      // 车队清单是登录用户名下的资产:必须带本机 hubAuth token,hub 侧按 token 校验。
+      // 没登录(全新安装)就没有 token → 什么都不列,别把车队里别的机器摆到陌生人首页上。
+      let tok = "";
+      try { tok = String(await mainEval(READ_TOKEN)).trim(); } catch {}
+      if (!tok) { setList([]); return; }
+      const r = await fetch(DSH_FLEET_API, { cache: "no-store", headers: { Authorization: "Bearer " + tok } });
+      if (!r.ok) { setList([]); return; }
       const j = await r.json();
       setList(Array.isArray(j && j.machines) ? j.machines : []);
     } catch { setList([]); }
