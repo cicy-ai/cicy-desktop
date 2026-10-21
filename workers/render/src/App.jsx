@@ -3147,7 +3147,7 @@ function DockerInstallDrawerHost() {
   const isOpen = st.kind === "open"; // 打开失败报告:无安装 stepper、标题/失败标签用「打开」
   const phaseIdx = DOCKER_PHASES.findIndex(([k]) => k === st.phase);
   const dlBars = isOpen ? [] : ["install-docker", "image"].filter((k) => st.bars?.[k]);
-  const drawerTitle = st.title || (isOpen ? tr("docker.openTitle", "打开 Docker 团队") : tr("docker.setupTitle", "安装 Docker cicy-code"));
+  const drawerTitle = st.title || (isOpen ? `打开${LOCAL_TEAM_NAME}` : `安装${LOCAL_TEAM_NAME}`);
   const drawerSub = st.sub || `127.0.0.1:${dockerAppPort}`;
   // Minimized → a floating restore chip (op keeps running in the background).
   if (st.minimized) {
@@ -4036,7 +4036,11 @@ function DshCard() {
 // in Docker on :8008, alongside the native local daemon (:8008). If Docker
 // Desktop is missing, the install flow downloads its installer to the user's
 // Desktop and runs it, streaming progress through the drawer above.
-// QEMU 机器(Docker 团队在 :8009,跑在 Debian 虚拟机里)的虚拟机操作:跑 desktop(2.1.368+)写好的
+// 本机 cicy-code(WSL 或 QEMU 里的 Docker 容器)的团队名:2026-10-21 起统一叫「本机团队」。
+const LOCAL_TEAM_NAME = "本机团队";
+const isDefaultLocalTeamTitle = (t) => !t || /^\s*docker\s*(团队|team)?\s*(:\s*\d+)?\s*$/i.test(String(t));
+
+// QEMU 机器(本机团队在 :8009,跑在 Debian 虚拟机里)的虚拟机操作:跑 desktop(2.1.368+)写好的
 // ~/cicy-ai/db/qemu-vm-ctl.js(源码 src/sidecar/qemu-vm.cjs),node 用 dsh 同款找法。只打一行 JSON。
 async function vmCtl(op) {
   const env = await dshEnv();
@@ -4061,8 +4065,9 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   // 标题 = 云端 team 的 title(和其它团队同一套;refreshCloudTeams 周期刷新 → 自动跟随
-   // 云端改名)。还没建好云端 team 时回退 "Docker 团队"。
-  const displayName = cloudTitle || "Docker 团队";
+  // 云端改名)。没建好云端 team、或标题还是系统默认名(老的「Docker 团队」/ 云端缺省「Docker :<port>」)
+  // 时显示「本机团队」;用户自己改过的名字原样显示。
+  const displayName = isDefaultLocalTeamTitle(cloudTitle) ? LOCAL_TEAM_NAME : cloudTitle;
   const startEdit = (e) => { e?.stopPropagation?.(); setDraft(displayName); setEditing(true); };
   const commitName = async () => {
     setEditing(false);
@@ -4245,7 +4250,7 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
         // update() 返回时 :8008 已健康(waitUntil probeHealth)。立刻:① reload 已打开的
         // docker tab(reloadIgnoringCache,拿新版 SPA)② 强制重探,卡片版本马上更新(不等
         // 60s reconcile / 缓存)。
-        try { window.cicy?.tabs?.reloadIfOpen?.(dockerAppUrl(), tr("docker.teamTab", "Docker 团队")); } catch {}
+        try { window.cicy?.tabs?.reloadIfOpen?.(dockerAppUrl(), LOCAL_TEAM_NAME); } catch {}
         try { const s = await window.cicy?.docker?.appRedetect?.(); if (s) setStatus(s); } catch {}
       }
     } catch (e) {
@@ -4455,13 +4460,13 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
                 </button>
                 {/* 常用 */}
                 <button type="button" data-id="DockerCard-reload" className="bcard__menu-item"
-                  onClick={(e) => { e.stopPropagation(); setMenuOpen(false); window.cicy?.tabs?.reloadIfOpen?.(dockerAppUrl(), "Docker 团队"); }}>
+                  onClick={(e) => { e.stopPropagation(); setMenuOpen(false); window.cicy?.tabs?.reloadIfOpen?.(dockerAppUrl(), LOCAL_TEAM_NAME); }}>
                   {tr("docker.reloadWindow", "刷新窗口")}
                 </button>
                 {/* QEMU 机器:没有宿主共享目录(WSL/项目目录打不开),换成虚拟机的终端 + 硬件加速 */}
                 {isQemu ? (<>
                   <button type="button" data-id="DockerCard-vm-terminal" className="bcard__menu-item"
-                    title={tr("docker.vmTermHint", "Docker 团队所在的 Debian 虚拟机的命令行(用户 cicy,sudo 免密;sudo docker ps 可看到容器)")}
+                    title={tr("docker.vmTermHint", "本机团队所在的 Debian 虚拟机的命令行(用户 cicy,sudo 免密;sudo docker ps 可看到容器)")}
                     onClick={(e) => { e.stopPropagation(); openVmTerminal(); }}>
                     {tr("docker.vmTerm", "打开终端")}
                   </button>

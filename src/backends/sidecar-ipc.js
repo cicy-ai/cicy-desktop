@@ -116,7 +116,7 @@ async function ensureDockerTeam() {
     return null;
   };
   try {
-    const r = await cc.registerDockerTeam({ port: APP_PORT });
+    const r = await cc.registerDockerTeam({ port: APP_PORT, title: "本机团队" });
     if (r && r.ok && r.apiKey) {
       dockerTeamReg = { teamId: r.teamId, title: r.title || `Docker :${APP_PORT}`, apiKey: r.apiKey };
       try { const store = readDockerTeams(); store[APP_VOLUME] = { ...(store[APP_VOLUME] || {}), teamId: r.teamId, title: dockerTeamReg.title, apiKey: r.apiKey }; writeDockerTeams(store); } catch {}
@@ -552,7 +552,9 @@ function register({ sidecarLogPath } = {}) {
   const registerAppTeam = async () => {
     const lt = require("./local-teams");
     await ensureDockerTeam(); // 确保独立云端 team 存在 + 拿到 teamId/title
-    const title = (dockerTeamReg && dockerTeamReg.title) || "Docker 团队";
+    // 默认名「本机团队」(2026-10-21);云端还是系统缺省名(老的 Docker 团队 / Docker :<port>)时也换成它。
+    const t0 = dockerTeamReg && dockerTeamReg.title;
+    const title = (!t0 || /^\s*docker\s*(团队|team)?\s*(:\s*\d+)?\s*$/i.test(t0)) ? "本机团队" : t0;
     // is_docker + cloud_team_id are passed INTO addTeam so they land in the SAME
     // writeNodes as the node — before addTeam's fire-and-forget syncNameToCloud
     // runs. That's what stops the freshly-created :8008 node from device-registering
