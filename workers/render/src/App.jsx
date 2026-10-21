@@ -4068,6 +4068,18 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
   // 云端改名)。没建好云端 team、或标题还是系统默认名(老的「Docker 团队」/ 云端缺省「Docker :<port>」)
   // 时显示「本机团队」;用户自己改过的名字原样显示。
   const displayName = isDefaultLocalTeamTitle(cloudTitle) ? LOCAL_TEAM_NAME : cloudTitle;
+  // 本地团队节点(teams.json)里的名字还是默认名 → 一次性改成「本机团队」。tab 标题取的是这个名字;
+  // localTeams.update 会同时刷新已打开的 tab 标题并把名字同步到云端。addTeam 再次注册时保留已有
+  // 名字,所以改一次就稳定。用户自己起的名字不碰。
+  const renamedRef = useRef(false);
+  useEffect(() => {
+    if (renamedRef.current || !dockerTeam?.id || !isDefaultLocalTeamTitle(dockerTeam.name)) return;
+    if (!isDefaultLocalTeamTitle(cloudTitle)) return;   // 云端已有用户起的名字 → 以它为准,不覆盖
+    renamedRef.current = true;
+    Promise.resolve(window.cicy?.localTeams?.update?.(dockerTeam.id, { name: LOCAL_TEAM_NAME }))
+      .then((r) => { if (r?.ok) onRefresh?.(); })
+      .catch((e) => console.warn("[DockerCard] rename to 本机团队", e));
+  }, [dockerTeam?.id, dockerTeam?.name, cloudTitle, onRefresh]);
   const startEdit = (e) => { e?.stopPropagation?.(); setDraft(displayName); setEditing(true); };
   const commitName = async () => {
     setEditing(false);
