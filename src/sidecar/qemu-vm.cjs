@@ -1,6 +1,6 @@
-// Debian 虚拟机控制脚本 —— 首页「Debian」卡片和 desktop 的 QEMU 版 Docker cicy-code 共用这一份。
-//   首页:?raw 打进 bundle,写到 ~/cicy-ai/db/debian-ctl.js,用本机 node(dsh 同款找法 / 便携版)跑;
-//   desktop:src/sidecar/qemu-docker.js 把它写到 ~/cicy-ai/db/qemu-vm-ctl.js 再跑。
+// Debian 虚拟机控制脚本 —— desktop 的 QEMU 版 Docker cicy-code 用(src/sidecar/qemu-docker.js 把它写到
+// ~/cicy-ai/db/qemu-vm-ctl.js 再跑)。首页的「Debian 13」卡片曾经也用它(写成 debian-ctl.js),
+// 2026-10-21 卡片已下线(和「Docker 团队」是同一台虚拟机,重复了);老首页写过的 debian-ctl.js 可能还在。
 //   node <ctl> <status|install|start|stop|open|accel|fwd <port>...>
 // 两边版本可能不同步,所以只认同一套磁盘约定(vmDir 下的文件 + 端口),谁先开机谁当 runner。
 // 只打一行 JSON 到 stdout。不靠 WSL:QEMU 便携版 + Debian 官方云镜像,
