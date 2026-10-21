@@ -4036,6 +4036,17 @@ function DshCard() {
 // in Docker on :8008, alongside the native local daemon (:8008). If Docker
 // Desktop is missing, the install flow downloads its installer to the user's
 // Desktop and runs it, streaming progress through the drawer above.
+// QEMU 机器(Docker 团队在 :8009,跑在 Debian 虚拟机里)的虚拟机操作:跑 desktop(2.1.368+)写好的
+// ~/cicy-ai/db/qemu-vm-ctl.js(源码 src/sidecar/qemu-vm.cjs),node 用 dsh 同款找法。只打一行 JSON。
+async function vmCtl(op) {
+  const env = await dshEnv();
+  if (!env.node || !env.home) return { ok: false, error: "no_node" };
+  const r = await dshShell(`"${env.node}" "${env.home}\\cicy-ai\\db\\qemu-vm-ctl.js" ${op}`);
+  const m = String(r.stdout || "").trim().match(/\{[\s\S]*\}$/);
+  if (m) { try { return JSON.parse(m[0]); } catch {} }
+  return { ok: false, error: "ctl_no_output", detail: (r.stderr || r.stdout || "").trim().slice(-300) };
+}
+
 function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRefresh }) {
   const [status, setStatus] = useState(null);
   const [busy, setBusy] = useState("");   // "" | bootstrap | restart | stop | upgrade | probe
@@ -4246,6 +4257,27 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
   }, [checkStatus, onRefresh]);
 
   // Restart / stop: quick lifecycle ops with a toast (no full drawer needed).
+  // QEMU 机器:菜单打开时顺手查一下虚拟机(加速方式),决定要不要显示「开启硬件加速」。
+  const isQemu = Number(status?.port) === 8009;
+  const [vmSt, setVmSt] = useState(null);
+  useEffect(() => { if (menuOpen && isQemu) vmCtl("status").then(setVmSt).catch(() => {}); }, [menuOpen, isQemu]);
+  const openVmTerminal = async () => {
+    setMenuOpen(false);
+    const r = await vmCtl("open");
+    if (!r.ok) { toast.show({ id: "docker-op", status: "error", ttl: 6000, message: tr("docker.vmTermNotReady", "虚拟机终端还没就绪,稍等再试") }); return; }
+    await window.cicy?.tabs?.open?.(r.url, tr("docker.vmTermTab", "Debian 终端"), "", true);
+  };
+  const enableAccel = async () => {
+    setMenuOpen(false);
+    if (!window.confirm(tr("docker.accelConfirm", "开启「Windows 虚拟机监控程序平台」(WHPX)需要管理员权限,开启后要重启电脑才生效。继续?"))) return;
+    setBusy("accel");
+    try {
+      const r = await vmCtl("accel");
+      toast.show({ id: "docker-op", status: r.ok ? "done" : "error", ttl: r.ok ? 10000 : 6000,
+        message: r.ok ? tr("docker.accelDone", "已开启,重启电脑后虚拟机自动用硬件加速") : (r.error || tr("docker.opFailed", "操作失败")) });
+    } finally { setBusy(""); }
+  };
+
   const runOp = useCallback(async (op, fn, okMsg) => {
     setMenuOpen(false); setBusy(op);
     toast.show({ id: "docker-op", message: tr(`docker.${op}ing`, op === "restart" ? "重启中…" : op === "reload" ? "刷新中…" : "停止中…"), status: "running" });
@@ -4426,14 +4458,30 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
                   onClick={(e) => { e.stopPropagation(); setMenuOpen(false); window.cicy?.tabs?.reloadIfOpen?.(dockerAppUrl(), "Docker 团队"); }}>
                   {tr("docker.reloadWindow", "刷新窗口")}
                 </button>
-                <button type="button" data-id="DockerCard-open-dir" className="bcard__menu-item"
-                  onClick={(e) => { e.stopPropagation(); setMenuOpen(false); window.cicy?.docker?.openDir?.(); }}>
-                  {tr("docker.openWslDir", "打开 WSL 目录")}
-                </button>
-                <button type="button" data-id="DockerCard-open-projects" className="bcard__menu-item"
-                  onClick={(e) => { e.stopPropagation(); setMenuOpen(false); window.cicy?.docker?.openDir?.("projects"); }}>
-                  {tr("docker.openProjectsDir", "打开项目目录")}
-                </button>
+                {/* QEMU 机器:没有宿主共享目录(WSL/项目目录打不开),换成虚拟机的终端 + 硬件加速 */}
+                {isQemu ? (<>
+                  <button type="button" data-id="DockerCard-vm-terminal" className="bcard__menu-item"
+                    title={tr("docker.vmTermHint", "Docker 团队所在的 Debian 虚拟机的命令行(用户 cicy,sudo 免密;sudo docker ps 可看到容器)")}
+                    onClick={(e) => { e.stopPropagation(); openVmTerminal(); }}>
+                    {tr("docker.vmTerm", "打开终端")}
+                  </button>
+                  {!(vmSt && vmSt.accel === "whpx") && (
+                    <button type="button" data-id="DockerCard-vm-accel" className="bcard__menu-item"
+                      title={tr("docker.accelHint", "开启 Windows 虚拟机监控程序平台(要管理员 + 重启)")}
+                      onClick={(e) => { e.stopPropagation(); enableAccel(); }}>
+                      {tr("docker.accel", "开启硬件加速")}
+                    </button>
+                  )}
+                </>) : (<>
+                  <button type="button" data-id="DockerCard-open-dir" className="bcard__menu-item"
+                    onClick={(e) => { e.stopPropagation(); setMenuOpen(false); window.cicy?.docker?.openDir?.(); }}>
+                    {tr("docker.openWslDir", "打开 WSL 目录")}
+                  </button>
+                  <button type="button" data-id="DockerCard-open-projects" className="bcard__menu-item"
+                    onClick={(e) => { e.stopPropagation(); setMenuOpen(false); window.cicy?.docker?.openDir?.("projects"); }}>
+                    {tr("docker.openProjectsDir", "打开项目目录")}
+                  </button>
+                </>)}
                 <button type="button" data-id="DockerCard-dood" className="bcard__menu-item"
                   title={tr("dood.hint", "把宿主 Docker + docker 客户端挂进容器,容器内 agent 能直接跑 docker(切换会重建容器,秒生效、无需下载)")}
                   onClick={(e) => { e.stopPropagation(); setMenuOpen(false); setDoodOpen(true); }}>
