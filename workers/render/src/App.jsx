@@ -3637,11 +3637,17 @@ async function start() {
     const cmd = "$p = Start-Process -FilePath " + q(process.execPath)
       + " -ArgumentList @(" + [p.bin, "web", "--no-open", "--port", String(PORT)].map(q).join(",") + ")"
       + " -WindowStyle Hidden -RedirectStandardOutput " + q(logFile) + " -RedirectStandardError " + q(errFile)
-      + " -WorkingDirectory " + q(home) + " -PassThru; $p.Id";
+      + " -WorkingDirectory " + q(home) + " -PassThru";
+    // PID / 报错走文件,powershell 的 stdio 全给 ignore:Start-Process 带重定向时用继承句柄的
+    // CreateProcess,dsh 会顺手继承 powershell 的 stdout —— 若那是管道,spawnSync 要等 dsh
+    // 退出才 EOF,于是每次「启动」都卡满 60s 超时才返回(实测假进程:管道 25.3s vs 文件 0.25s)。
+    const spawnPid = path.join(dbDir, "dsh-spawn.pid"), spawnErr = path.join(dbDir, "dsh-spawn.err");
+    for (const f of [spawnPid, spawnErr]) { try { fs.unlinkSync(f); } catch {} }
+    const ps = "try { " + cmd + "; Set-Content -Path " + q(spawnPid) + " -Value $p.Id } catch { Set-Content -Path " + q(spawnErr) + " -Value ($_ | Out-String) }";
     try { fs.writeFileSync(logFile, ""); fs.writeFileSync(errFile, ""); } catch {}
-    const r = cp.spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", cmd], { encoding: "utf8", timeout: 60000, windowsHide: true, env });
-    pid = Number(String((r && r.stdout) || "").match(/\d+/) || 0);
-    if (!pid) return { ok: false, error: "start_failed", tail: String((r && r.stderr) || "").slice(-800) };
+    cp.spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", ps], { stdio: "ignore", timeout: 60000, windowsHide: true, env });
+    pid = readPidFile(spawnPid);
+    if (!pid) { let err = ""; try { err = fs.readFileSync(spawnErr, "utf8"); } catch {} return { ok: false, error: "start_failed", tail: err.slice(-800) }; }
   } else {
     const fd = fs.openSync(logFile, "w");
     const child = cp.spawn(process.execPath, [p.bin, "web", "--no-open", "--port", String(PORT)], { detached: true, windowsHide: true, stdio: ["ignore", fd, fd], cwd: home, env });
