@@ -318,7 +318,7 @@ async function openTeam(id, opts = {}) {
   let token = (opts && opts.token) || "";
   if (!token) {
     if (isWinDockerTeam) {
-      try { token = String(await require("../sidecar/wsl-docker").readContainerToken(localPort) || "").trim(); } catch (e) { log.warn(`[local-teams] open ${id}: container token read failed: ${e.message}`); }
+      try { token = String(await require("../sidecar/app-docker").readContainerToken(localPort) || "").trim(); } catch (e) { log.warn(`[local-teams] open ${id}: container token read failed: ${e.message}`); }
       if (!token) return { ok: false, error: "container_token_unavailable", hint: "cicy-code 容器还没就绪(读不到容器内的 token)。稍等几秒或用卡片菜单「重启」。" };
     } else if (isLocalUrl) {
       token = readGlobal()?.api_token || node.api_token || "";

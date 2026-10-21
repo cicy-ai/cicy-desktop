@@ -6,6 +6,9 @@ const { default: contextMenu } = require("electron-context-menu");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+// 必须最先:决定 Windows 上 Docker-版 cicy-code 走 WSL(老机器)还是 QEMU(新机器 :8009),
+// 并在任何模块读 CICY_DOCKER_APP_PORT 之前把端口定下来。见 sidecar/linux-backend.js。
+require("./sidecar/linux-backend").init();
 const cicyCodeSidecar = require("./sidecar/cicy-code");
 const backendsIPC = require("./backends/ipc");
 const { openHomepage } = require("./backends/homepage-window");

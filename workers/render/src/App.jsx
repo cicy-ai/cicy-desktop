@@ -7,7 +7,7 @@ import "./App.css";
 import { TERMS_VERSION, termsForDisplay } from "./termsText";
 import { mdToHtml } from "./mdLite";
 import { buildCustomTeamEditPatch } from "./custom-team-edit";
-import DEB_CTL_SCRIPT from "./debian-ctl.cjs?raw";
+import DEB_CTL_SCRIPT from "../../../src/sidecar/qemu-vm.cjs?raw";  // 和 desktop 的 QEMU 版 Docker 共用同一份
 
 // i18n bridge exposed by homepage-preload (window.cicyI18n.t, locale from
 // app.getLocale()). Returns the localized string, or `fallback` when the key
@@ -3150,7 +3150,7 @@ function DockerInstallDrawerHost() {
   const phaseIdx = DOCKER_PHASES.findIndex(([k]) => k === st.phase);
   const dlBars = isOpen ? [] : ["install-docker", "image"].filter((k) => st.bars?.[k]);
   const drawerTitle = st.title || (isOpen ? tr("docker.openTitle", "打开 Docker 团队") : tr("docker.setupTitle", "安装 Docker cicy-code"));
-  const drawerSub = st.sub || "127.0.0.1:8008";
+  const drawerSub = st.sub || `127.0.0.1:${dockerAppPort}`;
   // Minimized → a floating restore chip (op keeps running in the background).
   if (st.minimized) {
     const pcts = dlBars.map((k) => st.bars[k]?.progress).filter(Number.isFinite);
@@ -4180,6 +4180,12 @@ function DebianCard() {
   };
   const startSilent = () => runOp("start", () => debCtl("start"));
   const openUi = () => runOp("open", async () => { await openTerm(); });
+  // 新机器(QEMU 后端)上 Docker 版 cicy-code 也跑在这台虚拟机里:关机/重启会把它一起停,先问一句。
+  const confirmVmDown = async () => {
+    let s = null; try { s = await window.cicy?.docker?.appStatus?.(); } catch {}
+    if (!(s && s.running && Number(s.port) === 8009)) return true;
+    return window.confirm(tr("debian.vmDownConfirm", "Docker 版 cicy-code(:8009)也跑在这台 Debian 虚拟机里,关机/重启会让它一起停(重启后自动恢复)。继续?"));
+  };
   const enableAccel = () => {
     if (!window.confirm(tr("debian.accelConfirm", "开启「Windows 虚拟机监控程序平台」(WHPX)需要管理员权限,开启后要重启电脑才生效。继续?"))) return;
     runOp("accel", async () => {
@@ -4267,13 +4273,13 @@ function DebianCard() {
                 onClick={(e) => e.stopPropagation()}>
                 {running && (
                   <button type="button" data-id="DebianCard-restart" className="bcard__menu-item is-accent"
-                    onClick={() => runOp("start", async () => { await debCtl("stop"); return debCtl("start"); }, tr("debian.restarted", "已重启,稍等终端起来"))}>
+                    onClick={async () => { if (await confirmVmDown()) runOp("start", async () => { await debCtl("stop"); return debCtl("start"); }, tr("debian.restarted", "已重启,稍等终端起来")); }}>
                     {tr("debian.restart", "重启虚拟机")}
                   </button>
                 )}
                 {running && (
                   <button type="button" data-id="DebianCard-stop" className="bcard__menu-item is-danger"
-                    onClick={() => runOp("stop", () => debCtl("stop"), tr("debian.stopped", "已关机"))}>
+                    onClick={async () => { if (await confirmVmDown()) runOp("stop", () => debCtl("stop"), tr("debian.stopped", "已关机")); }}>
                     {tr("debian.stop", "关机")}
                   </button>
                 )}
@@ -4348,6 +4354,7 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
   const checkStatus = useCallback(async () => {
     try {
       const s = await window.cicy?.docker?.appStatus?.();
+      if (s && Number(s.port)) dockerAppPort = Number(s.port);
       setStatus(s);
       // 自愈卡死的设置抽屉:容器已健康(running)说明 setup 实际已完成,但抽屉可能还停在
       // 「进行中」—— 网络失败重试后,follower 跟随的 bootstrap promise 迟迟不 resolve、又收
@@ -4389,7 +4396,7 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
     for (const raw of portList) {
       const s = String(raw).trim(); if (!s) continue;
       const p = Number(s);
-      if (!Number.isInteger(p) || p < 1 || p > 65535 || p === 8008 || seen.has(p)) { setPortsErr(tr("docker.ports.invalid", "有端口无效(1-65535,不能是 8008,不能重复)")); return; }
+      if (!Number.isInteger(p) || p < 1 || p > 65535 || p === 8008 || p === dockerAppPort || seen.has(p)) { setPortsErr(tr("docker.ports.invalid", "有端口无效(1-65535,不能是 {{p}},不能重复)", { p: dockerAppPort })); return; }
       seen.add(p); out.push(p);
     }
     setPortsErr(""); setPortsBusy(true); setPortsOpen(false);
@@ -4513,7 +4520,7 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
         // update() 返回时 :8008 已健康(waitUntil probeHealth)。立刻:① reload 已打开的
         // docker tab(reloadIgnoringCache,拿新版 SPA)② 强制重探,卡片版本马上更新(不等
         // 60s reconcile / 缓存)。
-        try { window.cicy?.tabs?.reloadIfOpen?.("http://127.0.0.1:8008", tr("docker.teamTab", "Docker 团队")); } catch {}
+        try { window.cicy?.tabs?.reloadIfOpen?.(dockerAppUrl(), tr("docker.teamTab", "Docker 团队")); } catch {}
         try { const s = await window.cicy?.docker?.appRedetect?.(); if (s) setStatus(s); } catch {}
       }
     } catch (e) {
@@ -4623,7 +4630,7 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
       // 打开很慢 → 先探这个 :8008 tab 开过没。开过(openedWc 里有它的
       // webContentsId)就**直接 active 秒切**,不再拿 token / 注册 team(那是慢的根)。
       try {
-        const r = await window.cicy?.tabs?.activateIfOpen?.("http://127.0.0.1:8008");
+        const r = await window.cicy?.tabs?.activateIfOpen?.(dockerAppUrl());
         if (r?.active) return;
       } catch {}
       // 没开过 → 走慢路径(读容器 token 最多 ~50s)。进行中只显示 CTA 的「打开中…」spinner
@@ -4702,7 +4709,7 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
                 </button>
                 {/* 常用 */}
                 <button type="button" data-id="DockerCard-reload" className="bcard__menu-item"
-                  onClick={(e) => { e.stopPropagation(); setMenuOpen(false); window.cicy?.tabs?.reloadIfOpen?.("http://127.0.0.1:8008", "Docker 团队"); }}>
+                  onClick={(e) => { e.stopPropagation(); setMenuOpen(false); window.cicy?.tabs?.reloadIfOpen?.(dockerAppUrl(), "Docker 团队"); }}>
                   {tr("docker.reloadWindow", "刷新窗口")}
                 </button>
                 <button type="button" data-id="DockerCard-open-dir" className="bcard__menu-item"
@@ -4825,7 +4832,7 @@ function DockerCard({ dockerTeam, cloudTitle, cloudCode, onOpen, onRename, onRef
             <h3 style={{ margin: "0 0 6px", fontSize: 16, color: "#e6edf3" }}>{tr("docker.ports.title", "端口设置")}</h3>
             <p style={{ margin: "0 0 14px", fontSize: 12.5, lineHeight: 1.6, color: "#9aa4b2" }}>{tr("docker.ports.sub", "除 :8008 外,额外发布、可从 Windows 直达容器内服务的端口")}</p>
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", marginBottom: 10, borderRadius: 8, background: "#0d1117", border: "1px solid #21262d", color: "#7d8590", fontSize: 13 }}>
-              🔒 {tr("docker.ports.mainFixed", ":8008 · cicy-code(固定)")}
+              🔒 {tr("docker.ports.mainFixed", ":{{p}} · cicy-code(固定)", { p: dockerAppPort })}
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 220, overflowY: "auto" }}>
               {portList.length === 0 && (
@@ -5373,12 +5380,16 @@ function isLocalSidecar(baseUrl) {
 
 // The Docker-版 cicy-code instance — localhost:8008, **只在 Windows**。Owned by
 // <DockerCard>, so it's filtered out of the generic node lists.
+// Docker-版 cicy-code 的本机端口:老机器(WSL)8008,新机器(QEMU,不靠 WSL)8009。一台机器只会有其一;
+// 真实值以 desktop 报上来的 docker:app-status.port 为准(DockerCard 拿到后写进 dockerAppPort)。
+let dockerAppPort = 8008;
+const dockerAppUrl = () => `http://127.0.0.1:${dockerAppPort}`;
 function isDockerApp(baseUrl) {
   try {
     if (window.cicy?.platform !== "win32") return false; // docker-版只在 Windows
     const p = new URL(baseUrl);
     const local = p.hostname === "127.0.0.1" || p.hostname === "localhost" || p.hostname === "::1";
-    return local && p.port === "8008";
+    return local && (p.port === "8008" || p.port === "8009");
   } catch { return false; }
 }
 

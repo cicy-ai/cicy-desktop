@@ -111,7 +111,8 @@
       "createDesktopShortcut": "always",
       "createStartMenuShortcut": true
     },
-    "electronVersion": "41.0.3"
+    "electronVersion": "41.0.3",
+    "npmRebuild": false
   },
   "keywords": [
     "cicy",
@@ -137,6 +138,7 @@
     "js-beautify": "^1.15.4",
     "js-yaml": "^4.1.1",
     "serve-index": "^1.9.2",
+    "ssh2": "^1.17.0",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
     "zod": "3.25"

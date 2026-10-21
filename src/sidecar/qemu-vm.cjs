@@ -1,6 +1,8 @@
-// Debian 虚拟机控制脚本(首页「Debian」卡片)。首页把这个文件原样写到
-// ~/cicy-ai/db/debian-ctl.js,再用本机 node(dsh 同款找法 / 便携版)跑:
-//   node debian-ctl.js <status|install|start|stop|open|accel>
+// Debian 虚拟机控制脚本 —— 首页「Debian」卡片和 desktop 的 QEMU 版 Docker cicy-code 共用这一份。
+//   首页:?raw 打进 bundle,写到 ~/cicy-ai/db/debian-ctl.js,用本机 node(dsh 同款找法 / 便携版)跑;
+//   desktop:src/sidecar/qemu-docker.js 把它写到 ~/cicy-ai/db/qemu-vm-ctl.js 再跑。
+//   node <ctl> <status|install|start|stop|open|accel|fwd <port>...>
+// 两边版本可能不同步,所以只认同一套磁盘约定(vmDir 下的文件 + 端口),谁先开机谁当 runner。
 // 只打一行 JSON 到 stdout。不靠 WSL:QEMU 便携版 + Debian 官方云镜像,
 // 有 WHPX(Windows 虚拟机监控程序平台)就用硬件加速,没有就退回纯软件模拟(TCG),
 // 所以不要管理员也能开箱用;「开启加速」才需要一次管理员 + 重启。
@@ -23,6 +25,9 @@ const QEMU_SRCS = [R2 + "/qemu/" + QEMU_ZIP];
 const DEB_SRCS = [[R2 + "/debian/" + DEB_IMG + ".p0", R2 + "/debian/" + DEB_IMG + ".p1"], "https://cloud.debian.org/images/cloud/trixie/" + DEB_SERIAL + "/" + DEB_IMG];
 // 宿主侧端口全部只绑 127.0.0.1(hostfwd 写死),外网/局域网碰不到。
 const TTY_PORT = 17681, QMP_PORT = 17682, SEED_PORT = 17683, SSH_PORT = 17622;
+// cloud-init 的 instance-id:改 user-data 内容时 +1,已装好的虚拟机下次开机会按新配置重跑一遍
+// (users/write_files/runcmd 都是幂等的,数据不动)。2 = 注入 desktop 用的 SSH 公钥。
+const PROVISION = 2;
 const DISK_SIZE = "40G";
 
 const home = os.homedir();
@@ -37,6 +42,7 @@ const F = {
   base: path.join(vmDir, DEB_IMG), disk: path.join(vmDir, "disk.qcow2"), state: path.join(vmDir, "state.json"),
   console: path.join(logDir, "debian-console.log"), qemuLog: path.join(logDir, "debian-qemu.log"), runLog: path.join(logDir, "debian-run.log"),
   install: path.join(vmDir, "install.json"), runPid: path.join(vmDir, "run.pid"), qemuPid: path.join(vmDir, "qemu.pid"),
+  key: path.join(vmDir, "id_rsa"), pub: path.join(vmDir, "id_rsa.pub"),
   zip: path.join(dlDir, QEMU_ZIP), img: path.join(dlDir, DEB_IMG),
 };
 const qemuExe = path.join(qemuDir, "qemu-system-x86_64.exe"), qemuImg = path.join(qemuDir, "qemu-img.exe"), ttydBin = path.join(qemuDir, "guest", "ttyd.x86_64");
@@ -54,8 +60,22 @@ function log(msg) { try { fs.appendFileSync(F.runLog, new Date().toISOString() +
 function state() {
   let s = readJson(F.state);
   if (!s || !s.token) { s = { token: crypto.randomBytes(16).toString("hex"), created: Date.now() }; writeJson(F.state, s); }
+  ensureKey();
   return s;
 }
+// desktop 进虚拟机跑 docker 用的 SSH 密钥(RSA PKCS1 PEM:ssh2 和 OpenSSH 都认)。
+// 公钥按 OpenSSH 线格式手拼:string "ssh-rsa" + mpint e + mpint n。
+function sshString(b) { const l = Buffer.alloc(4); l.writeUInt32BE(b.length); return Buffer.concat([l, b]); }
+function sshMpint(b) { if (b[0] & 0x80) b = Buffer.concat([Buffer.from([0]), b]); return sshString(b); }
+function ensureKey() {
+  if (fs.existsSync(F.key) && fs.existsSync(F.pub)) return;
+  const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", { modulusLength: 3072 });
+  const jwk = publicKey.export({ format: "jwk" });
+  const blob = Buffer.concat([sshString(Buffer.from("ssh-rsa")), sshMpint(Buffer.from(jwk.e, "base64url")), sshMpint(Buffer.from(jwk.n, "base64url"))]);
+  fs.writeFileSync(F.key, privateKey.export({ type: "pkcs1", format: "pem" }), { mode: 0o600 });
+  fs.writeFileSync(F.pub, "ssh-rsa " + blob.toString("base64") + " cicy-desktop\n");
+}
+function pubKey() { try { return fs.readFileSync(F.pub, "utf8").trim(); } catch { return ""; } }
 function installed() { return fs.existsSync(qemuExe) && fs.existsSync(qemuImg) && fs.existsSync(F.base) && fs.existsSync(F.disk); }
 
 // 后台起一个隐藏的 node 跑本脚本的某个 op(见文件头:为什么必须 Start-Process Hidden)。
@@ -185,6 +205,9 @@ function userData(tok) {
     "    groups: [sudo]",
     "    sudo: ALL=(ALL) NOPASSWD:ALL",
     "    lock_passwd: true",
+    "    ssh_authorized_keys:",
+    "      - " + pubKey(),
+    "ssh_pwauth: false",
     "write_files:",
     "  - path: /etc/systemd/system/cicy-ttyd.service",
     "    content: |",
@@ -212,7 +235,7 @@ function seedServer(tok) {
   const srv = http.createServer((req, res) => {
     const u = String(req.url || "").split("?")[0];
     log("seed " + req.method + " " + u);
-    if (u === "/meta-data") { res.end("instance-id: cicy-debian-1\nlocal-hostname: cicy-debian\n"); return; }
+    if (u === "/meta-data") { res.end("instance-id: cicy-debian-" + PROVISION + "\nlocal-hostname: cicy-debian\n"); return; }
     if (u === "/user-data") { res.end(userData(tok)); return; }
     if (u === "/vendor-data" || u === "/network-config") { res.end(""); return; }
     if (u === "/ttyd") { res.setHeader("content-type", "application/octet-stream"); fs.createReadStream(ttydBin).pipe(res); return; }
@@ -232,6 +255,7 @@ function vmSize() {
 function run() {
   const s = state(), { mem, smp } = vmSize();
   fs.writeFileSync(F.runPid, String(process.pid));
+  writeJson(F.state, Object.assign(readJson(F.state) || s, { bootProvision: PROVISION }));
   const srv = seedServer(s.token);
   const args = [
     "-name", "cicy-debian",
@@ -301,7 +325,8 @@ async function status() {
     phase: inst && inst.phase, bytes, total: inst && inst.total, src: inst && inst.src,
     installError: inst && !installing && inst.error ? [inst.error, inst.detail].filter(Boolean).join(" · ") : "",
     running, ready, accel: running ? accelOf() : "", whpxFeature: whpxFeature(),
-    boot: running && !ready ? bootLine() : "", ...vmSize(), sshPort: SSH_PORT,
+    boot: running && !ready ? bootLine() : "", ...vmSize(), sshPort: SSH_PORT, qmpPort: QMP_PORT,
+    provision: running ? (readJson(F.state) || {}).bootProvision || 0 : 0, key: F.key,
   };
 }
 async function install() {
@@ -339,6 +364,15 @@ async function open() {
   if (!s || !s.token || !(await httpOk(TTY_PORT, "/" + s.token + "/"))) return { ok: false, error: "not_ready" };
   return { ok: true, url: "http://127.0.0.1:" + TTY_PORT + "/" + s.token + "/" };
 }
+// 运行时加端口转发(宿主 127.0.0.1:P → 虚拟机 :P),走 QMP 的 HMP hostfwd_add。
+// 开机才有效、关机即失;重复添加 qemu 会报错,当作已存在。只绑 127.0.0.1。
+async function fwd(ports) {
+  const want = ports.map(Number).filter((p) => Number.isInteger(p) && p > 0 && p < 65536);
+  if (!pidAlive(readPid(F.qemuPid))) return { ok: false, error: "not_running" };
+  const r = await qmp(want.map((p) => ({ execute: "human-monitor-command", arguments: { "command-line": "hostfwd_add n0 tcp:127.0.0.1:" + p + "-:" + p } })), 8000);
+  if (!r) return { ok: false, error: "qmp_unreachable" };
+  return { ok: true, ports: want, replies: r.map((x) => String((x && x.return) || (x && x.error && x.error.desc) || "").trim()) };
+}
 // 开启 WHPX:弹 UAC,管理员 PowerShell 打开「Windows 虚拟机监控程序平台」,之后要重启电脑。
 function accel() {
   if (!WIN) return { ok: false, error: "windows_only" };
@@ -354,6 +388,6 @@ function accel() {
   try {
     if (OP === "install-run") return await installRun();
     if (OP === "run") return run();
-    out(OP === "install" ? await install() : OP === "start" ? await start() : OP === "stop" ? await stop() : OP === "open" ? await open() : OP === "accel" ? accel() : await status());
+    out(OP === "install" ? await install() : OP === "start" ? await start() : OP === "stop" ? await stop() : OP === "open" ? await open() : OP === "accel" ? accel() : OP === "fwd" ? await fwd(process.argv.slice(3)) : await status());
   } catch (e) { out({ ok: false, error: "exception", detail: String(e && e.message || e).slice(0, 300) }); }
 })();

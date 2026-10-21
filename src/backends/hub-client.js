@@ -143,7 +143,7 @@ async function sidecarToken() {
   if (!tok && process.platform === "win32") {
     try {
       tok = String(
-        (await require("../sidecar/wsl-docker").readContainerToken(SIDECAR_PORT)) || ""
+        (await require("../sidecar/app-docker").readContainerToken(SIDECAR_PORT)) || ""
       ).trim();
     } catch (e) {
       log.warn(`[hub] sidecar token: ${e.message}`);

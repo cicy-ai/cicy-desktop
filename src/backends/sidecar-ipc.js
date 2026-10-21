@@ -34,7 +34,8 @@ const hostMihomo = require("../sidecar/host-mihomo"); // 宿主侧 mihomo ——
 // 按平台分发 Docker-版 cicy-code 的运行层:darwin → Colima,win32 → WSL2。两者同接口
 // (bootstrap/status/restart/stop/dockerRestart/recreate/update/upgrade/runContainer/
 // readContainerToken),所以下面的 handler 共用一份逻辑,只换底层模块。
-const appDocker = process.platform === "darwin" ? colimaDocker : wslDocker;
+// win32 上再分:老机器 WSL2,新机器 QEMU(不靠 WSL,:8009)—— 见 sidecar/linux-backend.js。
+const appDocker = require("../sidecar/app-docker");
 // Docker-版 cicy-code 只剩 Windows(WSL2)。(2026-06 回调): macOS 改回 native cicy-code
 // (:8008,colima 在 16G mac 上压垮内存被 jetsam 杀)→ darwin 不再走 docker,这里不放行,
 // 所有 docker:app-* handler / reconcile / chrome-proxy 在 mac 上全部 no-op,DockerCard 不显示。
@@ -582,6 +583,9 @@ function register({ sidecarLogPath } = {}) {
   // 否则 → WSL 卷 \\wsl$\<distro>\…\volumes\<vol>\_data(= 容器 /home/cicy)。
   ipcMain.handle("docker:open-dir", async (_e, which) => {
     if (!APP_DOCKER_SUPPORTED) return { ok: false, error: "unsupported" };
+    // QEMU 后端没有宿主共享目录(Windows 上的 QEMU 不支持 virtio-9p/virtiofs):C:\projects 没挂进容器,
+    // 卷在虚拟机磁盘里,资源管理器打不开。如实说,别打开一个和容器无关的目录。
+    if (appDocker.backend === "qemu") return { ok: false, error: "qemu_no_host_share", hint: "QEMU 版容器的文件在虚拟机里,请在 cicy-code 里或首页 Debian 终端里访问" };
     try {
       const { shell } = require("electron");
       let p;
