@@ -6,7 +6,7 @@ name: Build QEMU Package
 #       qemu-img + 它们真正依赖的 DLL(objdump 走导入表闭包)+ x86 固件,~44MB;
 #       另附 guest/ttyd.x86_64(静态 Linux 二进制)—— 首启时宿主经 slirp 喂给虚拟机,
 #       虚拟机不用连外网 apt 就有网页终端。
-#   releases/debian/debian-13-genericcloud-amd64-<serial>.qcow2
+#   releases/debian/debian-13-genericcloud-amd64-<serial>.qcow2.p0 / .p1(超 wrangler 300MiB 上限,切两片)
 #       Debian 官方云镜像原样转存(官方 SHA512 校验后才上传),给 CN 网络一个快源。
 # 每个对象旁边放一个 .sha256,客户端下载后校验。
 
@@ -71,7 +71,9 @@ jobs:
           curl -fsSL -o "$F" "https://cloud.debian.org/images/cloud/trixie/$S/$F"
           curl -fsSL "https://cloud.debian.org/images/cloud/trixie/$S/SHA512SUMS" | grep " $F\$" | sha512sum -c -
           sha256sum "$F" | awk '{print $1}' > "$F.sha256"
-          ls -lh "$F"
+          # wrangler 单文件上限 300MiB → 切 200MB 两片(.p0/.p1),客户端按序拼回再验官方 SHA512
+          split -b 200000000 -d -a 1 "$F" "$F.p"
+          ls -lh "$F" "$F".p*
 
       - name: Upload to Cloudflare R2
         env:
@@ -82,6 +84,6 @@ jobs:
           Z="cicy-qemu-${{ inputs.qemu_version }}-win-x64.zip"; D="debian-13-genericcloud-amd64-${{ inputs.debian_serial }}.qcow2"
           node scripts/r2.mjs put "releases/qemu/$Z" "$Z"
           node scripts/r2.mjs put "releases/qemu/$Z.sha256" "$Z.sha256"
-          node scripts/r2.mjs put "releases/debian/$D" "$D"
+          for p in "$D".p*; do node scripts/r2.mjs put "releases/debian/$p" "$p"; done
           node scripts/r2.mjs put "releases/debian/$D.sha256" "$D.sha256"
           echo "zip sha256: $(cat $Z.sha256)"; echo "qcow2 sha256: $(cat $D.sha256)"
