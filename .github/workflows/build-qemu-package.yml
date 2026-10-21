@@ -1,0 +1,87 @@
+name: Build QEMU Package
+
+# 首页「Debian」卡片(不靠 WSL 的开箱 Linux)要的两样东西,放到 R2:
+#   releases/qemu/cicy-qemu-<ver>-win-x64.zip
+#       Stefan Weil 的 QEMU Windows 安装包(NSIS)解出来,只留 qemu-system-x86_64(w) +
+#       qemu-img + 它们真正依赖的 DLL(objdump 走导入表闭包)+ x86 固件,~44MB;
+#       另附 guest/ttyd.x86_64(静态 Linux 二进制)—— 首启时宿主经 slirp 喂给虚拟机,
+#       虚拟机不用连外网 apt 就有网页终端。
+#   releases/debian/debian-13-genericcloud-amd64-<serial>.qcow2
+#       Debian 官方云镜像原样转存(官方 SHA512 校验后才上传),给 CN 网络一个快源。
+# 每个对象旁边放一个 .sha256,客户端下载后校验。
+
+on:
+  workflow_dispatch:
+    inputs:
+      qemu_setup:
+        description: qemu.weilnetz.de/w64 installer file name
+        default: qemu-w64-setup-20260811.exe
+      qemu_version:
+        description: QEMU version inside that installer (zip name)
+        default: 11.1.0
+      debian_serial:
+        description: cloud.debian.org trixie image serial
+        default: 20261017-2634
+
+env:
+  SEVENZIP_URL: https://github.com/ip7z/7zip/releases/download/26.04/7z2604-linux-x64.tar.xz
+  TTYD_URL: https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64
+  TTYD_SHA256: 8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build trimmed QEMU zip
+        run: |
+          set -euo pipefail
+          SETUP="${{ inputs.qemu_setup }}"; VER="${{ inputs.qemu_version }}"
+          mkdir -p work && cd work
+          curl -fsSL -o 7z.tar.xz "$SEVENZIP_URL" && tar xf 7z.tar.xz 7zz
+          curl -fsSL -o setup.exe "https://qemu.weilnetz.de/w64/$SETUP"
+          want=$(curl -fsSL "https://qemu.weilnetz.de/w64/${SETUP%.exe}.sha512" | awk '{print $1}')
+          echo "$want  setup.exe" | sha512sum -c -
+          ./7zz x -y -ox setup.exe >/dev/null
+          test "$(cat x/VERSION)" = "$VER"
+          # DLL closure of the two binaries we ship (case-insensitive match against x/)
+          declare -A seen; q=(qemu-system-x86_64.exe qemu-system-x86_64w.exe qemu-img.exe)
+          while [ ${#q[@]} -gt 0 ]; do f=${q[0]}; q=("${q[@]:1}"); [ -n "${seen[$f]:-}" ] && continue; seen[$f]=1
+            for d in $(objdump -p "x/$f" | awk '/DLL Name/{print $3}'); do
+              m=$(ls x | grep -ix "$d" | head -1 || true); [ -n "$m" ] && [ -z "${seen[$m]:-}" ] && q+=("$m"); done; done
+          out=pkg/cicy-qemu; mkdir -p "$out/share" "$out/guest"
+          for f in "${!seen[@]}"; do cp "x/$f" "$out/"; done
+          cp x/COPYING x/COPYING.LIB x/VERSION "$out/"
+          for f in bios-256k.bin bios.bin kvmvapic.bin linuxboot_dma.bin linuxboot.bin multiboot_dma.bin multiboot.bin pvh.bin efi-virtio.rom pxe-virtio.rom vgabios.bin vgabios-stdvga.bin vgabios-virtio.bin edk2-x86_64-code.fd edk2-i386-vars.fd; do
+            [ -f "x/share/$f" ] && cp "x/share/$f" "$out/share/"; done
+          cp -r x/share/keymaps "$out/share/"
+          curl -fsSL -o "$out/guest/ttyd.x86_64" "$TTYD_URL"
+          echo "$TTYD_SHA256  $out/guest/ttyd.x86_64" | sha256sum -c -
+          printf 'QEMU %s for Windows x64, from %s (Stefan Weil), trimmed by cicy-desktop to\nqemu-system-x86_64 + qemu-img and their DLLs. QEMU is GPLv2 (COPYING);\nsource: https://www.qemu.org/download/\nguest/ttyd.x86_64: ttyd 1.7.7 (MIT), https://github.com/tsl0922/ttyd\n' "$VER" "$SETUP" > "$out/README-cicy.txt"
+          (cd pkg && ../7zz a -tzip -mx=9 "../../cicy-qemu-$VER-win-x64.zip" cicy-qemu >/dev/null)
+          cd .. && ls -lh "cicy-qemu-$VER-win-x64.zip"
+          sha256sum "cicy-qemu-$VER-win-x64.zip" | awk '{print $1}' > "cicy-qemu-$VER-win-x64.zip.sha256"
+
+      - name: Fetch + verify Debian cloud image
+        run: |
+          set -euo pipefail
+          S="${{ inputs.debian_serial }}"; F="debian-13-genericcloud-amd64-$S.qcow2"
+          curl -fsSL -o "$F" "https://cloud.debian.org/images/cloud/trixie/$S/$F"
+          curl -fsSL "https://cloud.debian.org/images/cloud/trixie/$S/SHA512SUMS" | grep " $F\$" | sha512sum -c -
+          sha256sum "$F" | awk '{print $1}' > "$F.sha256"
+          ls -lh "$F"
+
+      - name: Upload to Cloudflare R2
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_API_TOKEN:  ${{ secrets.R2_API_TOKEN }}
+        run: |
+          set -e
+          Z="cicy-qemu-${{ inputs.qemu_version }}-win-x64.zip"; D="debian-13-genericcloud-amd64-${{ inputs.debian_serial }}.qcow2"
+          node scripts/r2.mjs put "releases/qemu/$Z" "$Z"
+          node scripts/r2.mjs put "releases/qemu/$Z.sha256" "$Z.sha256"
+          node scripts/r2.mjs put "releases/debian/$D" "$D"
+          node scripts/r2.mjs put "releases/debian/$D.sha256" "$D.sha256"
+          echo "zip sha256: $(cat $Z.sha256)"; echo "qcow2 sha256: $(cat $D.sha256)"
