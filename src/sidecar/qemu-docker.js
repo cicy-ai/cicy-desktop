@@ -157,7 +157,7 @@ async function ensureVm({ emit } = {}) {
     const up = await docker.waitUntil(sshOk, { totalMs: 15 * 60 * 1000, everyMs: 5000, onTick: () => e({ phase: "install-docker", status: "running", message: `等虚拟机开机…(${Math.round((Date.now() - t0) / 1000)}s)` }) });
     if (up) {
       s = await vmStatus();
-      if (s.accel === "tcg") e({ phase: "install-docker", status: "running", message: "⚠️ 这台机器没开 WHPX,虚拟机在软件模拟下运行,Docker 版 cicy-code 会很慢。首页 Debian 卡片菜单里可「开启硬件加速」(需管理员 + 重启)。" });
+      if (s.accel === "tcg") e({ phase: "install-docker", status: "running", message: "⚠️ 这台机器没开 WHPX,虚拟机在软件模拟下运行,Docker 版 cicy-code 会很慢。首页「本机团队」卡片 ⋯ 菜单里可「开启硬件加速」(需管理员 + 重启)。" });
       return { ok: true, accel: s.accel };
     }
     // SSH 一直不通:多半是这台虚拟机是首页早先开的(老 provision,没 desktop 公钥)→ 重开机一次。

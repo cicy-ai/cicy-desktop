@@ -20,9 +20,12 @@ const DEB_IMG = "debian-13-genericcloud-amd64-" + DEB_SERIAL + ".qcow2";
 // 官方 SHA512SUMS 里的值(CI 转存前也按它校验过)—— 不管从哪个源下,落盘后都按它验。
 const DEB_SHA512 = "ec584ccabfef7120b4c4f7482adf0e615894d9292cedec446b64194b951ebe5dd97c336b5dcbae458333764b0edd516334506017f33c4f2020ef8d38b569ffe3";
 const R2 = "https://r2.deepfetch.de5.net/releases";
-const QEMU_SRCS = [R2 + "/qemu/" + QEMU_ZIP];
+// 国内网络到 R2 公开域名(*.de5.net)被重置;dl.cicy-ai.com 是同一个桶经 Cloudflare Worker 的只读镜像
+// (仓库 ~/projects/cicy-dl-mirror),国内实测 1~3 MB/s。R2 在前,连不上(--connect-timeout)就换镜像。
+const MIRROR = "https://dl.cicy-ai.com/releases";
+const QEMU_SRCS = [R2 + "/qemu/" + QEMU_ZIP, MIRROR + "/qemu/" + QEMU_ZIP];
 // R2 上是两片(wrangler 单文件上限 300MiB):数组 = 分片,按序下完拼回;字符串 = 整个文件。
-const DEB_SRCS = [[R2 + "/debian/" + DEB_IMG + ".p0", R2 + "/debian/" + DEB_IMG + ".p1"], "https://cloud.debian.org/images/cloud/trixie/" + DEB_SERIAL + "/" + DEB_IMG];
+const DEB_SRCS = [[R2 + "/debian/" + DEB_IMG + ".p0", R2 + "/debian/" + DEB_IMG + ".p1"], [MIRROR + "/debian/" + DEB_IMG + ".p0", MIRROR + "/debian/" + DEB_IMG + ".p1"], "https://cloud.debian.org/images/cloud/trixie/" + DEB_SERIAL + "/" + DEB_IMG];
 // 宿主侧端口全部只绑 127.0.0.1(hostfwd 写死),外网/局域网碰不到。
 const TTY_PORT = 17681, QMP_PORT = 17682, SEED_PORT = 17683, SSH_PORT = 17622;
 // cloud-init 的 instance-id:改 user-data 内容时 +1,已装好的虚拟机下次开机会按新配置重跑一遍
@@ -106,12 +109,12 @@ function hashFile(f, algo) {
   });
 }
 function curlText(url) {
-  const r = cp.spawnSync(CURL, ["-fsSL", "--max-time", "30", url], { encoding: "utf8", windowsHide: true, timeout: 40000 });
+  const r = cp.spawnSync(CURL, ["-fsSL", "--connect-timeout", "10", "--max-time", "30", url], { encoding: "utf8", windowsHide: true, timeout: 40000 });
   return r.status === 0 ? String(r.stdout || "").trim() : "";
 }
 function curlTo(u, dest) {
   log("download " + u);
-  const r = cp.spawnSync(CURL, ["-L", "-s", "-S", "-f", "-C", "-", "-o", dest + ".part", "--speed-limit", "100000", "--speed-time", "30", "--retry", "2", u], { encoding: "utf8", windowsHide: true, timeout: 3 * 3600 * 1000 });
+  const r = cp.spawnSync(CURL, ["-L", "-s", "-S", "-f", "-C", "-", "-o", dest + ".part", "--connect-timeout", "15", "--speed-limit", "100000", "--speed-time", "30", "--retry", "2", u], { encoding: "utf8", windowsHide: true, timeout: 3 * 3600 * 1000 });
   log("curl exit=" + r.status + " bytes=" + size(dest + ".part") + " " + String(r.stderr || "").trim().slice(-200));
   if (r.status === 0) { try { fs.renameSync(dest + ".part", dest); } catch { try { fs.copyFileSync(dest + ".part", dest); fs.unlinkSync(dest + ".part"); } catch {} } return fs.existsSync(dest); }
   // 33 = 服务器不支持续传 / 416 已下完但不认:清掉,下一个源从头来
@@ -157,7 +160,8 @@ async function installRun() {
   try {
     if (!(fs.existsSync(qemuExe) && fs.existsSync(qemuImg) && fs.existsSync(ttydBin))) {
       prog({ phase: "qemu", file: F.zip, total: 44400000 });
-      const want = curlText(QEMU_SRCS[0] + ".sha256").split(/\s+/)[0];
+      let want = "";
+      for (const u of QEMU_SRCS) { want = curlText(u + ".sha256").split(/\s+/)[0]; if (/^[0-9a-f]{64}$/.test(want)) break; want = ""; }
       if (!(fs.existsSync(F.zip) && want && (await hashFile(F.zip, "sha256")) === want)) {
         try { fs.unlinkSync(F.zip); } catch {}
         if (!download(QEMU_SRCS, F.zip, prog)) return prog({ error: "qemu_download" });

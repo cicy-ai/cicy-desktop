@@ -219,7 +219,16 @@ function headETag(url, hops = 5) {
 function imageEtagPath() { return path.join(downloadsDir(), "cicy-code-latest.etag"); }
 function readLoadedImageEtag() { try { return fs.readFileSync(imageEtagPath(), "utf8").trim(); } catch { return ""; } }
 function writeLoadedImageEtag(v) { try { fs.writeFileSync(imageEtagPath(), String(v || "")); } catch {} }
-async function remoteImageEtag() { return headETag(R2_TARBALL); }
+// 国内网络到 R2 公开域名(*.de5.net)会被重置;dl.cicy-ai.com 是同一个桶经 Cloudflare Worker 的只读镜像
+// (仓库 ~/projects/cicy-dl-mirror,ETag/Range 原样透传)。R2 HEAD 不通时一律改走它。
+const R2_MIRROR_TARBALL = process.env.CICY_DOCKER_MIRROR_URL || "https://dl.cicy-ai.com/images/cicy-code-latest.tar.gz";
+async function remoteImageEtag() { return (await headETag(R2_TARBALL)) || headETag(R2_MIRROR_TARBALL); }
+// 先 HEAD 一下 R2(15s 超时),通就用 R2,不通直接换镜像 —— 别让 curl 在被重置的 R2 上重试 8 轮(每轮几十秒)。
+async function pickTarballSource() {
+  if ((await headSize(R2_TARBALL)) > 0) return { url: R2_TARBALL, alt: R2_MIRROR_TARBALL };
+  if ((await headSize(R2_MIRROR_TARBALL)) > 0) return { url: R2_MIRROR_TARBALL, alt: null };
+  return { url: R2_TARBALL, alt: R2_MIRROR_TARBALL };
+}
 // Drop the cached tarball so a stale copy on disk can't be reused (downloadImageTarball
 // skips a complete file by size, which a same-size new image would wrongly satisfy).
 function clearImageTarball() { try { fs.unlinkSync(imageTarballPath()); } catch {} }
@@ -403,22 +412,23 @@ function curlDownload(url, dest, { emit, phase = "image", label = "下载镜像"
 // (much faster here); falls back to the node downloader if curl is unavailable.
 async function downloadImageTarball({ emit } = {}) {
   const dest = imageTarballPath();
+  const src = await pickTarballSource();   // R2 不通(国内)→ dl.cicy-ai.com 镜像
   // REUSE a complete tarball already on disk (staged into ~/Downloads, or a prior
   // run) BEFORE curlDownload touches it — curlDownload doesn't skip a complete file
   // (and a failed curl truncates it). headSize uses node http so it works even when
   // curl can't resolve the host. Skips the ~500MB re-download per new user.
   try {
-    const expected = await headSize(R2_TARBALL);
+    const expected = await headSize(src.url);
     const have = fs.statSync(dest).size;
     if (expected > 0 && have === expected) {
       emit && emit({ phase: "image", status: "skip", message: "镜像:已有完整包,跳过下载", progress: 100, received: have, total: expected });
       return dest;
     }
   } catch {}
-  try { await curlDownload(R2_TARBALL, dest, { emit, phase: "image", label: "下载镜像" }); }
+  try { await curlDownload(src.url, dest, { emit, phase: "image", label: "下载镜像" }); }
   catch (e) {
     emit && emit({ phase: "image", status: "running", message: `curl 下载失败(${e.message}),改用内置下载…` });
-    await ensureDownloaded(R2_TARBALL, dest, null, { emit, phase: "image", label: "下载镜像" });
+    await ensureDownloaded(src.url, dest, src.alt, { emit, phase: "image", label: "下载镜像" });
   }
   return dest;
 }

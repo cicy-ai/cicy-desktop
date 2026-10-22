@@ -31,8 +31,17 @@ test("new Windows machine (no WSL install) → qemu on :8009, and the choice is 
   } finally { restore(); }
 });
 
-test("old machine with a WSL docker status on :8008 stays on wsl and keeps :8008", () => {
-  const { lb, restore } = fresh({ files: { "cicy-ai/db/docker-status.json": JSON.stringify({ installed: true, port: 8008 }) } });
+test("a fresh decision is qemu even when the machine has a WSL install (2026-10-22: all machines QEMU)", () => {
+  const { lb, home, restore } = fresh({ files: { "cicy-ai/db/docker-status.json": JSON.stringify({ installed: true, port: 8008 }) } });
+  try {
+    assert.strictEqual(lb.init(), "qemu");
+    assert.strictEqual(process.env.CICY_DOCKER_APP_PORT, "8009");
+    assert.strictEqual(JSON.parse(fs.readFileSync(path.join(home, "cicy-ai", "db", "linux-backend.json"), "utf8")).hadWsl, true);
+  } finally { restore(); }
+});
+
+test("an already-persisted wsl decision is kept (old machines are migrated by hand, not on upgrade)", () => {
+  const { lb, restore } = fresh({ files: { "cicy-ai/db/linux-backend.json": JSON.stringify({ backend: "wsl" }) } });
   try {
     assert.strictEqual(lb.init(), "wsl");
     assert.strictEqual(process.env.CICY_DOCKER_APP_PORT, undefined);
