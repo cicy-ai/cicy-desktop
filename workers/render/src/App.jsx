@@ -551,7 +551,7 @@ export default function App() {
   // early return(termsOk / !token 等),把 hook 放到它们后面会让登录前后 hook 数量不一致,
   // React 直接抛 #310 "Rendered more hooks than during the previous render",整页白屏。
   // 2026-09-13 我就是这么把全车队首页打崩的。
-  const dshFleet = useDshFleet();
+  // (2026-10-22 dsh 全车队下线:useDshFleet / DSH tab / DshCard 都已拿掉,别再加回来。)
   // CiCy Hub: email sign-in → every cicy-code instance of that account (no local
   // cicy-code needed). State + cards live in useHub / HubInstanceCard below.
   const hub = useHub();
@@ -1176,9 +1176,6 @@ export default function App() {
   const showCloud = false; // 首页只用 CiCy Hub 账号,云端团队不再展示
   const showHub = tab === "all" || tab === "hub";
   const hubCount = hub.instances ? hub.instances.length : 0;
-  // 「全部」只放真能打开的 dsh;DSH tab 里才把未就绪的一并列出来看状态。
-  const dshReady = (dshFleet.list || []).filter((m) => m.ready);
-  const showDshAll = (tab === "all" || tab === "dsh") && !!hub.loggedIn; // 未登录不展示车队机器
   // 首次打开:本地或云端团队任一还没拉到(为 null)→ grid 显示 skeleton 占位卡,直到两边都
   // resolve(出错也 resolve 成 []),再显示真实内容 —— 避免一个先回来另一个还空的露馅。
   const firstLoading = localTeams === null || teams === null;
@@ -1196,11 +1193,10 @@ export default function App() {
         <div className="app__tabsrow">
           <div className="app__tabs">
             {[
-              { k: "all",    label: tr("teamFilter.all", "全部"),   n: localCount + customCount + hubCount + dshReady.length },
+              { k: "all",    label: tr("teamFilter.all", "全部"),   n: localCount + customCount + hubCount },
               { k: "local",  label: tr("teamFilter.local", "本地"),   n: localCount },
               { k: "hub",    label: tr("teamFilter.hub", "CiCy Hub"), n: hubCount },
               { k: "custom", label: tr("teamFilter.custom", "自定义"), n: customCount },
-              { k: "dsh",    label: tr("teamFilter.dsh", "DSH"), n: dshReady.length },
             ].map(({ k, label, n }) => (
               <button
                 key={k}
@@ -1213,15 +1209,6 @@ export default function App() {
               </button>
             ))}
           </div>
-          {/* DSH tab 的手动刷新:token 会随 dsh 重启而变,但不值得轮询 —— 要新的自己点。 */}
-          {tab === "dsh" && (
-            <button type="button" className="btn-ghost" data-id="DshFleetRefresh" disabled={dshFleet.busy}
-              title={tr("dshFleet.refresh", "刷新 dsh 中继状态")}
-              style={{ marginLeft: 8, width: 28, height: 28, padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
-              onClick={() => dshFleet.refresh()}>
-              {dshFleet.busy ? <Spinner /> : <RefreshIcon />}
-            </button>
-          )}
           {/* DesktopIdBadge 已移入用户头像下拉菜单(受信任站点上面)。此处仅留占位撑开右侧布局。 */}
           <span style={{ marginLeft: "auto" }} aria-hidden />
           {/* 行尾:新加团队 → 直接去云端团队中心添加(私有云)。自定义入口已删。 */}
@@ -1304,12 +1291,6 @@ export default function App() {
           {!firstLoading && showHub && hub.loggedIn && (hub.instances || []).filter((it) => it.reachable || it.online).map((it) => (
             <HubInstanceCard key={"hub:" + it.id} inst={it} onOpen={(next, title) => hub.open(it, next, title)} />
           ))}
-          {showDshAll && (tab === "dsh" ? (dshFleet.list || []) : dshReady).map((m) => <DshFleetCard key={"dsh:" + m.name} m={m} />)}
-          {tab === "dsh" && dshFleet.list !== null && dshFleet.list.length === 0 && !dshFleet.busy && (
-            <div className="empty" data-id="DshFleetEmpty" style={{ gridColumn: "1 / -1" }}>
-              {tr("dshFleet.empty", "还没有机器的 dsh 中继连上来。")}
-            </div>
-          )}
           {!firstLoading && showLocal && localList.map((t) => (
             <LocalTeamCard key={"local:" + t.id} team={t} cloudCode={cloudCodeFor(t.cloud_team_id)} onOpen={() => openLocalTeam(t.id)} onRename={renameLocalTeam} onRefresh={fetchLocalTeams} />
           ))}
@@ -1334,7 +1315,6 @@ export default function App() {
             />
           )}
           {/* 首页第二块:DeepSeek Harness(开源 Agent 框架),homepage 自装自启,和 cicy-code 卡并列 */}
-          {!firstLoading && showLocal && <DshCard />}
           {!firstLoading && showCustom && customList.map((t) => (
             <LocalTeamCard key={"custom:" + t.id} team={t} cloudCode={cloudCodeFor(t.cloud_team_id)} onOpen={() => openLocalTeam(t.id)} onRename={renameLocalTeam} onRefresh={fetchLocalTeams} />
           ))}
