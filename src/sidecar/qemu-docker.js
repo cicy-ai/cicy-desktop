@@ -161,6 +161,14 @@ async function ensureVm({ emit } = {}) {
   let restarted = false;
   for (let round = 0; round < 2; round++) {
     s = await vmStatus();
+    // 来宾内核崩了(Oops / RCU stall …):QEMU 进程还在,但里面什么都不会再响应 —— 直接重开,别等 SSH 超时。
+    // (2026-10-23:10 台里 5 台在 IDE 光驱 PIO 上 Oops,已用 -nodefaults 根治,这里兜底任何别的崩溃。)
+    if (s.running && s.crashed) {
+      log.warn(`[qemu-docker] guest kernel crashed (${s.crashed}) → restarting VM`);
+      e({ phase: "install-docker", status: "running", message: "虚拟机内核崩溃,正在重启虚拟机…" });
+      await ctl("stop", [], 150000);
+      s = await vmStatus();
+    }
     if (!s.running) {
       e({ phase: "install-docker", status: "running", message: "启动 Debian 虚拟机…" });
       const r = await ctl("start");
@@ -350,6 +358,50 @@ async function insideHealthy(container, port) {
   catch { return false; }
 }
 
+// ---- 本机团队自动登录 hub ------------------------------------------------
+// 容器里的 cicy-code 只有拿到 hub 凭据(~/cicy-ai/db/cloud-device.json)才会出现在首页「CiCy Hub」里;
+// 新容器(新装机 / 从 WSL 迁过来时从空开始)没有。desktop 自己登录了 hub 的话,就用它当担保
+// (hub-client.enroll → /api/enroll)给容器签一个,名字用车队里的机器名(global.json desktopTeam,如 xs-1003)。
+// 已经有凭据就什么都不做。失败不影响本机团队本身,10 分钟后再试。
+const CRED_PATH = "/home/cicy/cicy-ai/db/cloud-device.json";
+let _enrollAt = 0, _enrollBusy = false;
+function fleetName() {
+  try {
+    const c = JSON.parse(fs.readFileSync(path.join(os.homedir(), "cicy-ai", "global.json"), "utf8"));
+    const n = String((c && c.desktopTeam) || "").replace(/^desktop-/, "").trim();
+    if (n) return n;
+  } catch {}
+  return (os.hostname() || "desktop").split(".")[0];
+}
+async function containerHasHubCred(container) {
+  try { await vmRun(`docker exec ${container} sh -c ${shQuote(`test -s ${CRED_PATH} && grep -q '"token"' ${CRED_PATH}`)}`, { timeout: 20000 }); return true; }
+  catch { return false; }
+}
+async function ensureHubEnrollment({ container, force = false } = {}) {
+  if (_enrollBusy || (!force && Date.now() - _enrollAt < 10 * 60 * 1000)) return { ok: false, skipped: "throttled" };
+  _enrollBusy = true; _enrollAt = Date.now();
+  try {
+    container = container || `cicy-code-docker-${process.env.CICY_DOCKER_APP_PORT || 8009}`;
+    if (await containerHasHubCred(container)) return { ok: true, already: true };
+    let hub; try { hub = require("../backends/hub-client"); } catch (e) { return { ok: false, error: "no_hub_client" }; }
+    const name = fleetName();
+    const instanceId = "code-" + require("crypto").randomBytes(16).toString("hex");
+    const r = await hub.enroll({ instanceId, name, platform: "linux/docker" });
+    if (!r.ok) { log.info(`[qemu-docker] hub enroll skipped: ${r.error}`); return r; }
+    const cred = { email: r.owner, instance_id: r.instanceId, team_id: name, token: r.token, cloud_origin: r.origin, mode: "hub", updated_at: new Date().toISOString() };
+    const { Readable } = require("stream");
+    // 凭据走 stdin,不进命令行;写完 sync —— 虚拟机万一紧接着崩,文件也已落盘(xs-3008 吃过空文件的亏)。
+    await vmRun(`docker exec -i -u cicy ${container} sh -c ${shQuote(`umask 077; cat > ${CRED_PATH}.new && mv ${CRED_PATH}.new ${CRED_PATH}`)} && sync`,
+      { stdin: Readable.from([Buffer.from(JSON.stringify(cred, null, 2) + "\n")]), timeout: 30000 });
+    try { await vmRun(`docker exec ${container} supervisorctl -c /etc/supervisor/supervisord.conf restart cicy-code`, { timeout: 60000 }); } catch {}
+    log.info(`[qemu-docker] 本机团队 enrolled into hub as "${name}" (owner ${r.owner})`);
+    return { ok: true, enrolled: true, name };
+  } catch (e) {
+    log.warn(`[qemu-docker] hub enroll failed: ${e.message}`);
+    return { ok: false, error: e.message };
+  } finally { _enrollBusy = false; }
+}
+
 // ---- 状态 / bootstrap ----------------------------------------------------
 
 // 与 wsl status 同形:wsl → 虚拟机已装(QEMU+镜像在),distro → 同,engineUp → 虚拟机里 dockerd 在。
@@ -360,6 +412,7 @@ async function status(port) {
   if (!s.ok) return { wsl: false, distro: false, engineUp: false, running: healthy, healthy, unknown: !healthy };
   const installed = vmInstalled(s);
   const engineUp = !!(s.running && installed && (await dockerEngineUp()));
+  if (healthy && engineUp) ensureHubEnrollment({}).catch(() => {});   // 不等它,10 分钟节流在里面
   return { wsl: installed, distro: installed, engineUp, running: healthy, healthy, accel: s.accel || "", vmRunning: !!s.running };
 }
 
@@ -410,6 +463,7 @@ async function _bootstrap({ onProgress, port, container, volume, env = {}, extra
   const healthy = await docker.waitUntil(() => probeHealth(port), { totalMs: (v.accel === "tcg" ? 600 : 180) * 1000, everyMs: 3000 });
   if (!healthy) return fail("health_timeout", `服务起来了但 127.0.0.1:${port} 还没响应——稍等或点「重试」`);
   log.info(`[qemu-docker] bootstrap DONE ${((Date.now() - T0) / 1000).toFixed(1)}s accel=${v.accel}`);
+  ensureHubEnrollment({ container, force: true }).catch(() => {});
   emit({ phase: "done", status: "done", message: "Docker cicy-code 已就绪 🎉" });
   return { ok: true, container };
 }
@@ -530,5 +584,5 @@ module.exports = {
   bootstrap, status, restart, stop, dockerRestart, recreate, update, upgrade, runContainer, readContainerToken,
   insideHealthy, probeHealth, ensureAutostart, startExisting, containerState, hasGatewayKey,
   readMihomoConfig, readMihomoSelections, parseMihomoSelections,
-  vmRun, ensureVm, ensureForwards, vmStatus, dockerEngineUp, imagePresent, loadImage,
+  vmRun, ensureVm, ensureForwards, vmStatus, dockerEngineUp, imagePresent, loadImage, ensureHubEnrollment, fleetName,
 };

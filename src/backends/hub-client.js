@@ -506,7 +506,18 @@ async function logout() {
   return { ok: true };
 }
 
+// 担保登录:本机 desktop 已登录 hub 时,用它自己的会话给同一账号下的另一个实例(本机团队容器里的
+// cicy-code)签发 hub 凭据,不走邮件验证码。hub 侧 /api/enroll 只允许扩自己账号、不能碰别人的实例。
+async function enroll({ instanceId, name, platform } = {}) {
+  const a = readAuth();
+  if (!a) return { ok: false, error: "not_signed_in" };
+  const res = await hubFetch("/api/enroll", { method: "POST", token: a.token, body: { instanceId, name, platform } });
+  if (!res.ok || !res.json || !res.json.token) return { ok: false, status: res.status, error: errorOf(res, "enroll_failed") };
+  return { ok: true, token: res.json.token, owner: res.json.owner || a.owner || "", instanceId: res.json.instanceId || instanceId, origin: hubOrigin() };
+}
+
 module.exports = {
+  enroll,
   status,
   loginStart,
   loginCode,

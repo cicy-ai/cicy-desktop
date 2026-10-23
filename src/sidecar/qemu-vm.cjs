@@ -317,6 +317,14 @@ function accelOf() {
   return /falling back to tcg|failed to initialize whpx/i.test(t) ? "tcg" : "whpx";
 }
 function whpxFeature() { return WIN && fs.existsSync(path.join(process.env.SystemRoot || "C:\\Windows", "System32", "WinHvPlatform.dll")); }
+// 来宾内核崩了没有:控制台日志每次开机都清空(start 里 writeFileSync ""),所以里面出现的崩溃都属于本次开机。
+// 崩了的虚拟机 QEMU 进程还活着、端口也还开着,外面只看到「连不上」—— 不看这里就会干等 15 分钟。
+const CRASH_RE = /\] (Oops:|Kernel panic|BUG: |general protection fault|rcu: INFO: rcu_\w+ detected stalls|INFO: task .* blocked for more than)/;
+function crashLine() {
+  const t = tailOf(F.console, 256 * 1024).replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
+  const m = t.match(new RegExp("[^\\n]*" + CRASH_RE.source + "[^\\n]*"));
+  return m ? m[0].trim().slice(0, 160) : "";
+}
 // 串口日志最后一行可读的话 = 开机进度(给卡片「启动中」下面那一行小字)
 function bootLine() {
   const t = tailOf(F.console, 8 * 1024).replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").split(/\r?\n/).map((l) => l.trim()).filter((l) => l && /[A-Za-z]/.test(l));
@@ -335,7 +343,7 @@ async function status() {
     phase: inst && inst.phase, bytes, total: inst && inst.total, src: inst && inst.src,
     installError: inst && !installing && inst.error ? [inst.error, inst.detail].filter(Boolean).join(" · ") : "",
     running, ready, accel: running ? accelOf() : "", whpxFeature: whpxFeature(),
-    boot: running && !ready ? bootLine() : "", ...vmSize(), sshPort: SSH_PORT, qmpPort: QMP_PORT,
+    boot: running && !ready ? bootLine() : "", crashed: running ? crashLine() : "", ...vmSize(), sshPort: SSH_PORT, qmpPort: QMP_PORT,
     provision: running ? (readJson(F.state) || {}).bootProvision || 0 : 0, key: F.key,
   };
 }
