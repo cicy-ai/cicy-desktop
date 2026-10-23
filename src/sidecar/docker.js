@@ -380,7 +380,9 @@ function curlDownload(url, dest, { emit, phase = "image", label = "下载镜像"
     // --retry-connrefused (curl 7.52+) covers a not-yet-ready net. On curl 7.71+
     // also add --retry-all-errors so a transient DNS blip (exit 6, common right
     // after app start) retries on the fast curl path instead of the slow node one.
-    const args = ["-sL", "-A", DL_UA, "-C", "-", "--retry", "8", "--retry-delay", "3", "--retry-connrefused"];
+    // --connect-timeout + --speed-limit/--speed-time:被墙的源几秒就放弃,传着传着卡死(<10KB/s 持续 2 分钟)
+    // 也会退出 —— 否则 curl 永远挂着,bootstrap 和守护循环一起卡住(国内链路上真会发生)。
+    const args = ["-sL", "-A", DL_UA, "-C", "-", "--connect-timeout", "20", "--speed-limit", "10240", "--speed-time", "120", "--retry", "8", "--retry-delay", "3", "--retry-connrefused"];
     if (curlSupportsRetryAllErrors(bin)) args.push("--retry-all-errors");
     args.push("-o", dest, url);
     let child;

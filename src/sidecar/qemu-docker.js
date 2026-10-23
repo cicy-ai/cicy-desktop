@@ -88,13 +88,25 @@ function sshConnect() {
 }
 // 等价于 wslRun:成功 resolve {stdout, stderr};非零退出 reject(err.stdout/err.stderr/err.code)。
 // opts.stdin:可读流,灌进命令的 stdin(docker load 用)。opts.onLine:逐行回调(流式进度)。
+// ⚠️ 超时必须从调用开始就算(含建连、开通道):虚拟机慢启动时 sshd 可能接了 TCP 却迟迟不开 exec 通道,
+// 以前计时器只在 exec 回调里才挂上 → 回调永不来 → 这个 promise 永不结束 → status()/守护循环整条卡死
+// (xs-2002 2026-10-22 起卡了一夜,docker-status 一直停在旧时间)。
 async function vmRun(cmd, { timeout = 60000, stdin, onLine } = {}) {
-  const c = await sshConnect();
+  const t0 = Date.now();
+  const c = await Promise.race([sshConnect(), new Promise((_, rej) => setTimeout(() => rej(new Error("ssh connect timeout")), Math.min(timeout, 30000)))]);
   return new Promise((resolve, reject) => {
-    c.exec(`sudo -n sh -c ${shQuote(cmd)}`, (err, stream) => {
-      if (err) { _conn = null; try { c.end(); } catch {} return reject(err); }
-      let out = "", errOut = "", buf = "";
-      const timer = setTimeout(() => { try { stream.close(); } catch {} reject(Object.assign(new Error(`vmRun timeout after ${timeout}ms: ${cmd.slice(0, 120)}`), { stdout: out, stderr: errOut })); }, timeout);
+    let stream = null, done = false;
+    let out = "", errOut = "", buf = "";
+    const timer = setTimeout(() => {
+      if (done) return; done = true;
+      try { stream && stream.close(); } catch {}
+      if (!stream) { _conn = null; try { c.end(); } catch {} }   // 通道都没开出来:这条连接已不可信,丢掉重连
+      reject(Object.assign(new Error(`vmRun timeout after ${timeout}ms: ${cmd.slice(0, 120)}`), { stdout: out, stderr: errOut }));
+    }, Math.max(1000, timeout - (Date.now() - t0)));
+    c.exec(`sudo -n sh -c ${shQuote(cmd)}`, (err, st) => {
+      if (done) { try { st && st.close(); } catch {} return; }
+      if (err) { done = true; clearTimeout(timer); _conn = null; try { c.end(); } catch {} return reject(err); }
+      stream = st;
       const line = (chunk) => {
         if (!onLine) return;
         buf += chunk;
@@ -104,6 +116,7 @@ async function vmRun(cmd, { timeout = 60000, stdin, onLine } = {}) {
       stream.stderr.on("data", (d) => { const s = d.toString("utf8"); errOut += s; line(s); });
       stream.on("close", (code) => {
         clearTimeout(timer);
+        if (done) return; done = true;
         if (code === 0) resolve({ stdout: out, stderr: errOut });
         else reject(Object.assign(new Error(`exit ${code}: ${(errOut || out).trim().slice(-300)}`), { code, stdout: out, stderr: errOut }));
       });
