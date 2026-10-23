@@ -307,8 +307,10 @@ function httpOk(port, p) {
 function accelOf() {
   const t = tailOf(F.qemuLog, 32 * 1024);
   if (!t && !pidAlive(readPid(F.qemuPid))) return "";
-  // qemu 依次试 -accel:whpx 起不来会打一行 WHPX 报错再退到 tcg
-  return /whpx/i.test(t) && /(fail|error|no accelerator|not supported|unavailable)/i.test(t) ? "tcg" : "whpx";
+  // qemu 依次试 -accel:whpx 起不来会打「failed to initialize whpx: …」再「falling back to tcg」。
+  // 只认这两句 —— WHPX 正常时也会打无害的 warning(如「WHPX: Failed to get performance monitoring
+  // features」),以前按「whpx + fail」判,把 9 台跑在 WHPX 上的机器误报成软件模拟(2026-10-23)。
+  return /falling back to tcg|failed to initialize whpx/i.test(t) ? "tcg" : "whpx";
 }
 function whpxFeature() { return WIN && fs.existsSync(path.join(process.env.SystemRoot || "C:\\Windows", "System32", "WinHvPlatform.dll")); }
 // 串口日志最后一行可读的话 = 开机进度(给卡片「启动中」下面那一行小字)
