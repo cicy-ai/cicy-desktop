@@ -262,6 +262,10 @@ function run() {
   writeJson(F.state, Object.assign(readJson(F.state) || s, { bootProvision: PROVISION }));
   const srv = seedServer(s.token);
   const args = [
+    // -nodefaults:不要 QEMU 默认附带的设备(尤其是空 IDE 光驱)。2026-10-23 xs-1003 的虚拟机跑了 27 小时后
+    // 在 libata 的 IDE PIO 传输里 Oops(Bad pagetable)整机卡死 —— WHPX 下模拟老式端口串操作不稳。
+    // 我们需要的设备下面都显式给了(virtio 盘 / virtio 网卡 / 串口日志 / QMP / 无显示),不依赖默认设备。
+    "-nodefaults",
     "-name", "cicy-debian",
     "-accel", "whpx,kernel-irqchip=off", "-accel", "tcg,thread=multi",
     "-m", String(mem), "-smp", String(smp),
