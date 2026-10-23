@@ -1175,7 +1175,10 @@ export default function App() {
   const showCustom = tab === "all" || tab === "custom";
   const showCloud = false; // 首页只用 CiCy Hub 账号,云端团队不再展示
   const showHub = tab === "all" || tab === "hub";
-  const hubCount = hub.instances ? hub.instances.length : 0;
+  // 只数能打开的(在线/可达)—— 和下面渲染卡片的过滤同一口径。以前数全部实例,离线的旧记录
+  // (WSL 时代的、换机前的)也算进去,标签显示 33 下面却只有十几张卡。
+  const hubLive = (hub.instances || []).filter((it) => it.reachable || it.online);
+  const hubCount = hubLive.length;
   // 首次打开:本地或云端团队任一还没拉到(为 null)→ grid 显示 skeleton 占位卡,直到两边都
   // resolve(出错也 resolve 成 []),再显示真实内容 —— 避免一个先回来另一个还空的露馅。
   const firstLoading = localTeams === null || teams === null;
@@ -1288,7 +1291,7 @@ export default function App() {
                 : (hub.error ? hubErrText(hub.error) : tr("cicyHub.empty", "这个账号下还没有 cicy-code 实例。在 cicy-code 的「CiCy 账号」里用同一个邮箱登录 Hub 即可出现。"))}
             </div>
           )}
-          {!firstLoading && showHub && hub.loggedIn && (hub.instances || []).filter((it) => it.reachable || it.online).map((it) => (
+          {!firstLoading && showHub && hub.loggedIn && hubLive.map((it) => (
             <HubInstanceCard key={"hub:" + it.id} inst={it} onOpen={(next, title) => hub.open(it, next, title)} />
           ))}
           {!firstLoading && showLocal && localList.map((t) => (
