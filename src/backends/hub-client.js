@@ -298,16 +298,31 @@ function cancel() {
   return { ok: true };
 }
 
-function clearAuth() {
+// A 401 only counts when the hub itself says so ({"error":"unauthorized"}) —
+// a proxy / captive portal / gateway 401 must not sign the desktop out.
+function hubRejected(res) {
+  return !!res && res.status === 401 && !!res.json && res.json.error === "unauthorized";
+}
+
+// `token`: only clear when global.json still holds the token that was rejected,
+// so a request racing a fresh login can't wipe the new credential.
+function clearAuth(reason = "", token = "") {
+  let cleared = true;
   try {
     updateGlobalConfig(GLOBAL_JSON, (c) => {
+      if (token && c.hubAuth && c.hubAuth.token !== token) {
+        cleared = false;
+        return c;
+      }
       delete c.hubAuth;
       return c;
     });
   } catch {}
+  if (!cleared) return;
   try {
     hubTrust.clearOwnerHubHost();
   } catch {}
+  if (reason) log.warn(`[hub] signed out: ${reason}`);
 }
 
 async function instances() {
@@ -327,8 +342,8 @@ async function instances() {
       return { ok: false, error: `${e.message}; sidecar: ${e2.message}`, instances: [] };
     }
   }
-  if (res.status === 401 && !viaSidecar) {
-    clearAuth();
+  if (!viaSidecar && hubRejected(res)) {
+    clearAuth("hub rejected the token (GET /api/instances 401)", a.token);
     return { ok: false, error: "unauthorized", instances: [] };
   }
   if (!res.ok || !res.json)
@@ -482,7 +497,7 @@ async function grantUrl({ id, port = 0, next = "/" } = {}) {
     return { url: res.json.url, host: res.json.host };
   }
   if (res.status === 401) {
-    clearAuth();
+    if (hubRejected(res)) clearAuth("hub rejected the token (grant 401)", a.token);
     throw new Error("unauthorized");
   }
   if (!res.ok || !res.json || !res.json.url) throw new Error(errorOf(res, "grant_failed"));

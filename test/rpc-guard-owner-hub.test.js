@@ -76,7 +76,7 @@ test("hub-client records the owner hub host on a grant and clears it on logout",
   assert.match(src, /hubTrust\.recordOwnerHubHost\(res\.json\.host\)/);
   const clearAuth = src.slice(
     src.indexOf("function clearAuth"),
-    src.indexOf("function clearAuth") + 260
+    src.indexOf("function clearAuth") + 600
   );
   assert.match(clearAuth, /hubTrust\.clearOwnerHubHost\(\)/);
   // instances() trusts every returned node host (each is the owner's own tenant).
