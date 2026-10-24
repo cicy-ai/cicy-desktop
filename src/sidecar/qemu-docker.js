@@ -210,11 +210,15 @@ async function dockerInstalled() { try { await vmRun("command -v docker >/dev/nu
 async function dockerEngineUp() { try { await vmRun("docker info >/dev/null 2>&1", { timeout: 20000 }); return true; } catch { return false; } }
 
 // apt 装 docker.io(Debian 自带包)。deb.debian.org 在 CN 很慢 → 5 秒探不通就换 TUNA。
+// apt 源:多镜像按实测速度排序、全部写进 mirror+file 列表,apt 遇到失败/超时自动换下一个。
+// 为什么不是「挑一个」:国内同一台机器上,deb.debian.org 小文件 250 kB/s 但大包会卡在 0(xs-1001 2026-10-24),
+// TUNA 在虚拟机里直接连不上(xs-1001/xs-3008 实测 0),阿里云/中科大/华为云各有快慢 —— 单选哪个都会在某些机器上挂。
+// Debian 云镜像的 debian.sources 本就指向 /etc/apt/mirrors/*.list;若是直写 URI 的也改成指向列表。
+const APT_MIRRORS_SH = "# apt \u591a\u6e90\u56de\u9000:\u6d4b\u5404\u955c\u50cf\u901f\u5ea6,\u4e22\u6389\u4e0d\u901a\u7684,\u6309\u5feb\u6162\u5168\u90e8\u5199\u8fdb mirror+file \u5217\u8868(apt \u9047\u5230\u5931\u8d25/\u8d85\u65f6\u81ea\u52a8\u6362\u4e0b\u4e00\u4e2a)\npick(){ suffix=$1; out=\"\"; for m in https://deb.debian.org https://mirrors.aliyun.com https://mirrors.ustc.edu.cn https://mirrors.huaweicloud.com https://mirrors.tuna.tsinghua.edu.cn; do\n  s=$(curl -fsS -m 8 -o /dev/null -w '%{speed_download}' \"$m/$suffix/dists/trixie$2/InRelease\" 2>/dev/null | cut -d. -f1); s=${s:-0}\n  [ \"$s\" -gt 0 ] && out=\"$out$s $m/$suffix\n\"; done; printf '%s' \"$out\" | sort -rn | awk '{print $2}'; }\nL=$(pick debian \"\"); [ -n \"$L\" ] || L=https://deb.debian.org/debian\nSL=$(pick debian-security \"-security\"); [ -n \"$SL\" ] || SL=https://deb.debian.org/debian-security\nmkdir -p /etc/apt/mirrors; printf '%s\\n' \"$L\" > /etc/apt/mirrors/debian.list; printf '%s\\n' \"$SL\" > /etc/apt/mirrors/debian-security.list\nsed -i 's#^URIs: https\\?://[^ ]*/debian-security$#URIs: mirror+file:///etc/apt/mirrors/debian-security.list#; s#^URIs: https\\?://[^ ]*/debian$#URIs: mirror+file:///etc/apt/mirrors/debian.list#' /etc/apt/sources.list.d/debian.sources 2>/dev/null\necho \"debian mirrors: $(echo $L)\"; echo \"security mirrors: $(echo $SL)\"";
+const APT_OPTS = "-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3";
 async function installDockerEngine({ emit } = {}) {
   emit && emit({ phase: "install-docker", status: "running", message: "在虚拟机里安装 Docker 引擎(apt install docker.io)…" });
-  const mirror = "if ! curl -fsS -m 5 -o /dev/null https://deb.debian.org/debian/dists/trixie/Release; then " +
-    "sed -i 's#http[s]*://deb.debian.org#https://mirrors.tuna.tsinghua.edu.cn#g' /etc/apt/sources.list.d/debian.sources 2>/dev/null; fi";
-  await vmRunStream(`${mirror}; export DEBIAN_FRONTEND=noninteractive; apt-get update -q && apt-get install -y -q docker.io && systemctl enable --now docker && usermod -aG docker cicy`, { emit, phase: "install-docker", timeout: 1800000 });
+  await vmRunStream(`${APT_MIRRORS_SH}\nexport DEBIAN_FRONTEND=noninteractive; apt-get ${APT_OPTS} update -q && apt-get ${APT_OPTS} install -y -q docker.io && systemctl enable --now docker && usermod -aG docker cicy`, { emit, phase: "install-docker", timeout: 1800000 });
 }
 
 // ---- 镜像 ----------------------------------------------------------------
@@ -584,5 +588,5 @@ module.exports = {
   bootstrap, status, restart, stop, dockerRestart, recreate, update, upgrade, runContainer, readContainerToken,
   insideHealthy, probeHealth, ensureAutostart, startExisting, containerState, hasGatewayKey,
   readMihomoConfig, readMihomoSelections, parseMihomoSelections,
-  vmRun, ensureVm, ensureForwards, vmStatus, dockerEngineUp, imagePresent, loadImage, ensureHubEnrollment, fleetName,
+  vmRun, ensureVm, ensureForwards, vmStatus, dockerEngineUp, imagePresent, loadImage, ensureHubEnrollment, fleetName, APT_MIRRORS_SH,
 };
